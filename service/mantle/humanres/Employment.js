@@ -27,6 +27,7 @@
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const positions = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Positions.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -55,7 +56,8 @@ const kindTexts = {
     EckLeave: "Leave of absence",
     EckReturn: "Return from leave",
     EckSeparation: "Separation",
-    EckReorganization: "Reorganization"
+    EckReorganization: "Reorganization",
+    EckSchedule: "Working schedule"
 }
 const statusTexts = {
     EchRequested: "Waiting for approval",
@@ -65,10 +67,28 @@ const statusTexts = {
     EchWithdrawn: "Withdrawn"
 }
 // the kinds of applied change HR may withdraw while their date is still to come (P7, F131): not a hire; a separation set for a
-// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation)
-const withdrawableKinds = ["EckTransfer", "EckManager", "EckLeave", "EckReturn", "EckReorganization", "EckSeparation"]
+// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation); P9: a working schedule set for a later date
+const withdrawableKinds = [
+    "EckTransfer",
+    "EckManager",
+    "EckLeave",
+    "EckReturn",
+    "EckReorganization",
+    "EckSeparation",
+    "EckSchedule"
+]
 const stateTexts = {EasActive: "Working", EasLeave: "On leave of absence"}
-const termFields = ["departmentPartyId", "emplPositionId", "managerPartyId", "facilityId"]
+// P9: the working schedule and its holiday calendar are terms too, so every change carries them to the next assignment; a transfer
+// or a manager change never asks for them (assign#Schedule changes them alone)
+const termFields = [
+    "departmentPartyId",
+    "emplPositionId",
+    "managerPartyId",
+    "facilityId",
+    "workingScheduleId",
+    "holidayCategoryId"
+]
+const scheduleFields = ["workingScheduleId", "holidayCategoryId"]
 // the most people a match search answers, and the shortest name it searches by
 const matchLimit = 10
 const matchMinLength = 2
@@ -170,7 +190,7 @@ function enumNames(enumIds) {
         ])
     )
 }
-// Terms as display text: the department, position, manager and work location names.
+// Terms as display text: the department, position, manager and work location names, and the working schedule's (P9).
 function termTexts(terms) {
     const organizations = people.organizationNames([terms.departmentPartyId].filter(Boolean))
     const persons = people.personNames([terms.managerPartyId].filter(Boolean))
@@ -178,7 +198,10 @@ function termTexts(terms) {
         departmentName: terms.departmentPartyId ? organizations[terms.departmentPartyId] || terms.departmentPartyId : "",
         positionName: terms.emplPositionId ? positionNames([terms.emplPositionId])[terms.emplPositionId] || "" : "",
         managerName: terms.managerPartyId ? persons[terms.managerPartyId] || terms.managerPartyId : "",
-        facilityName: terms.facilityId ? facilityNames([terms.facilityId])[terms.facilityId] || "" : ""
+        facilityName: terms.facilityId ? facilityNames([terms.facilityId])[terms.facilityId] || "" : "",
+        scheduleName: terms.workingScheduleId
+            ? schedules().scheduleNames([terms.workingScheduleId])[terms.workingScheduleId] || ""
+            : ""
     }
 }
 
@@ -858,7 +881,7 @@ function withdrawEmploymentChange(p) {
     if (change.statusId !== "EchApplied" || !withdrawableKinds.includes(change.changeKindEnumId) || change.causedByChangeId)
         denied(
             "NOT_WITHDRAWABLE",
-            "Only a transfer, manager change, leave, return or separation set for a later date is withdrawn"
+            "Only a transfer, manager change, leave, return, separation or working schedule set for a later date is withdrawn"
         )
     if (text(p.expectedRevision) && text(p.expectedRevision) !== people.employmentRevision(employment.partyRelationshipId))
         denied("REVISION_CHANGED", "This employment changed since you read it; open it again")
@@ -962,6 +985,19 @@ function applyChange(change) {
                 reason: "Return from leave",
                 employmentChangeId: change.employmentChangeId
             })
+    } else if (kind === "EckSchedule") {
+        // P9: the working schedule alone changes; the other terms continue as they are, in the state they are in
+        refuseErrors(findings)
+        const terms = Object.assign(termsOfRow(before), {
+            workingScheduleId: change.workingScheduleId || null,
+            holidayCategoryId: change.holidayCategoryId || null
+        })
+        assignmentId = startAssignment(employment, terms, at, null, {
+            before,
+            reason,
+            employmentChangeId: change.employmentChangeId,
+            stateEnumId: before.stateEnumId || "EasActive"
+        })
     } else {
         const terms = checkTerms(employment, termsOfRow(change), at, findings)
         refuseErrors(findings)
@@ -2191,6 +2227,7 @@ function assignmentHistory(employmentIds) {
     const seats = positionNames(found.map(row => row.emplPositionId))
     const managers = people.personNames(unique(found.map(row => row.managerPartyId).filter(Boolean)))
     const facilities = facilityNames(found.map(row => row.facilityId))
+    const scheduleNames = schedules().scheduleNames(found.map(row => row.workingScheduleId))
     const changeIds = unique(found.map(row => row.employmentChangeId).filter(Boolean))
     const changes = changeIds.length
         ? Object.fromEntries(
@@ -2212,10 +2249,61 @@ function assignmentHistory(employmentIds) {
             positionName: seats[row.emplPositionId] || "",
             managerName: managers[row.managerPartyId] || "",
             facilityName: facilities[row.facilityId] || "",
+            scheduleName: scheduleNames[row.workingScheduleId] || "",
             changeText: change ? kindTexts[change.changeKindEnumId] || "" : "",
             reason: change?.reason || row.comments || ""
         }
     })
+}
+
+// ===== a working schedule (P9; ScheduleServices assign#Schedule) =====
+// The employment follows the schedule (and the holiday calendar in place of the schedule's) from the date: an HR editor of the
+// employer's; applied at once, a change of its own (EckSchedule) that ends the assignment in effect and starts the next with the
+// other terms as they were (an employment written before People's assignments gets its first). The schedule is one of the
+// employer's in effect on the date (Schedules.js checkAssignable), the calendar the employer's or a shared one; an empty schedule
+// ends the following of one. expectedRevision, when given, is the employment's (REVISION_CHANGED); an operation key a retry
+// answers with. Refuses: DATE_OUTSIDE, ASSIGNMENT_SCHEDULED (a later change is set; choose a later date), SCHEDULE_REQUIRED (a
+// calendar with no schedule), NOTHING_CHANGES and the schedule's and calendar's refusals.
+function assignSchedule(p) {
+    const userScope = editorScope("Assigning a working schedule")
+    const operationKey = text(p.operationKey) || null
+    if (operationKey) {
+        const first = rows(CHANGE, {operationKey, requestedByUserId: ec.user.userId}).find(
+            row => row.changeKindEnumId === "EckSchedule" && row.partyRelationshipId === text(p.partyRelationshipId)
+        )
+        if (first) return Object.assign(changeAnswer(first), {repeated: true})
+    }
+    const employment = employmentIn(userScope, p.partyRelationshipId)
+    const revision = people.employmentRevision(employment.partyRelationshipId)
+    if (text(p.expectedRevision) && text(p.expectedRevision) !== revision)
+        denied("REVISION_CHANGED", "This employment changed since you read it; open it again (revision " + revision + ")")
+    const at = effective(p.fromDate)
+    const findings = []
+    checkDate(employment, at, findings)
+    const before = termsAt(employment, at)
+    const asked = {workingScheduleId: text(p.workingScheduleId) || null, holidayCategoryId: text(p.holidayCategoryId) || null}
+    if (asked.holidayCategoryId && !asked.workingScheduleId)
+        findings.push({code: "SCHEDULE_REQUIRED", severity: "error", message: "A holiday calendar goes with a schedule"})
+    if (asked.workingScheduleId)
+        attempt(findings, () => schedules().checkAssignable(asked.workingScheduleId, employment.organizationPartyId, at))
+    if (asked.holidayCategoryId)
+        attempt(findings, () => schedules().checkCalendar(asked.holidayCategoryId, employment.organizationPartyId))
+    if (scheduleFields.every(field => (asked[field] || null) === (before[field] || null)))
+        findings.push({code: "NOTHING_CHANGES", severity: "error", message: "Nothing changes from that date"})
+    refuseErrors(findings)
+    const employmentChangeId = createChange(
+        employment,
+        "EckSchedule",
+        Object.assign(termsOfRow(before), asked, {
+            statusId: "EchRequested",
+            effectiveDate: stamp(at),
+            reason: text(p.reason) || null,
+            employmentRevision: revision,
+            operationKey
+        })
+    )
+    applyChange(changeOf(employmentChangeId))
+    return Object.assign(changeAnswer(changeOf(employmentChangeId)), {repeated: false})
 }
 
 const operations = {
@@ -2232,7 +2320,8 @@ const operations = {
     deleteEmploymentDraft,
     applyDueAssignments,
     withdrawEmploymentChange,
-    noteAccessRequestFailure
+    noteAccessRequestFailure,
+    assignSchedule
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employment operation " + op)

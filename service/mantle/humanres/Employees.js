@@ -882,8 +882,8 @@ function workLocationsOf(employments, asOf) {
 // ===== get#Team (P8; design §3 MyTeam) =====
 // The caller's current reports (PEOPLE_TEAM_VIEW): the people of their live reporting lines, each employment at the employers a
 // line is at (People.js linesOf: never a report's employment at another employer), as the public work identity with the
-// department, work location and whether they work or are on a leave of absence now. No supplied manager or party is read (the
-// service takes none). The schedule, who is out and missing time join with their phases (P9, P12, P10).
+// department, work location and whether they work or are on a leave of absence now, and the working schedule they follow now (P9).
+// No supplied manager or party is read (the service takes none). Who is out and missing time join with their phases (P12, P10).
 function team(p) {
     const userScope = people.scopeOf()
     if (!userScope.capabilities.team) denied("PERMISSION_DENIED", "Your team is not available")
@@ -907,11 +907,14 @@ function team(p) {
     const contacts = contactsOf(reportIds, workPurposes)
     const locations = workLocationsOf(found, asOf)
     const assigned = people.assignmentsAt(reportIds, asOf)
+    const schedules = ec.resource
+        .script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+        .scheduleNames(Object.values(assigned).map(row => row.workingScheduleId))
     const rows = found.map((row, index) => {
         const person = persons.get(row.partyId) || {}
-        const assignment = assigned[row.organizationPartyId + "/" + row.partyId]
-        const onLeave =
-            !!assignment && assignment.partyRelationshipId === row.partyRelationshipId && assignment.stateEnumId === "EasLeave"
+        const inEffect = assigned[row.organizationPartyId + "/" + row.partyId]
+        const assignment = inEffect && inEffect.partyRelationshipId === row.partyRelationshipId ? inEffect : null
+        const onLeave = !!assignment && assignment.stateEnumId === "EasLeave"
         const out = Object.assign({}, shown[index], {
             partyId: row.partyId,
             personName: nameOf(person) || row.partyId,
@@ -920,7 +923,8 @@ function team(p) {
             workPhone: contacts[row.partyId]?.workPhone || "",
             workLocation: locations[row.partyRelationshipId] || "",
             availability: onLeave ? "leave" : "working",
-            availabilityText: onLeave ? "On leave" : "Working"
+            availabilityText: onLeave ? "On leave" : "Working",
+            scheduleName: assignment?.workingScheduleId ? schedules[assignment.workingScheduleId] || "" : ""
         })
         // a team reader gets the work identity, not the employment's id (an HR host's)
         delete out.partyRelationshipId

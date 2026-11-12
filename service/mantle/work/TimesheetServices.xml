@@ -248,8 +248,8 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="WeekDays">
         <description>The days of a week with what a person should work on each: with partyId the person's capacity
-            (mantle.work.ResourceServices.get#PartyCapacity: their working hours, else the policy's, less holidays and leave;
-            impl-projects.md P7), else the policy's working days at its day hours less the holidays of the policy's organization
+            (mantle.work.ResourceServices.get#PartyCapacity: their People working schedule first, impl-people P9, else their working
+            hours, else the policy's, less holidays and leave; impl-projects.md P7), else the policy's working days at its day hours less the holidays of the policy's organization
             (WorkEffort purpose WepHoliday, allDayStart the day, owned by the organization); each {day, isoDay, isWorkday,
             expected, holiday (its name or null), leave (hours)}; and expectedTotal. A capacity that does not read is logged and
             the policy's days apply.</description>
