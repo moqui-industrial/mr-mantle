@@ -94,6 +94,14 @@ function scope() {
         organizationPartyIds: own ? (all ? null : own.organizationPartyIds) : []
     }
 }
+// The organizations a requester reports for and follows reports of (impl-maintenance P4, F78): their own, as ownOrganizations
+// reads them, for a holder of MAINTENANCE_REQUEST or MAINTENANCE_REQUEST_VIEW_OWN, whose own-request view is not a read of
+// Maintenance (scope() gives them none); none for anyone else.
+function requesterOrganizations() {
+    const caps = capabilities()
+    if (!ec.user.userId || !(caps.request || caps.requestViewOwn)) return []
+    return ownOrganizations().organizationPartyIds
+}
 // Whether the scope covers an organization.
 function covers(userScope, partyId) {
     return !!partyId && (userScope.organizationPartyIds == null || userScope.organizationPartyIds.includes(partyId))
@@ -207,6 +215,42 @@ function workHidden(workEffortId, partyId) {
         return true
     }
 }
+// Whether a reported maintenance problem is hidden from the caller outside Maintenance (impl-maintenance P4 review; design §3
+// Requests "States": a reporter sees their own request, not other reports; §1.1 own-request view is its own permission; the record
+// check of get#RecordLinkInfo and search#Universal, in every app): a Request of type RqtMaintenance that Maintenance's intake made
+// (a report or a mail; no AssetMaintenance of Manufacturing's is linked to it) is reached by its filer, a current party of it in
+// person (its Reporter, Assignee or a Watcher), a maintenance planner, supervisor or reader of its organization, or one Maintenance
+// admits to its work order (workHidden); its organization's other members do not reach it through its OrgInternal party or its
+// facility. Manufacturing's production request (an AssetMaintenance linked, ProductionDowntime.js requestMaintenance) keeps its
+// owner's rule, and any other request, or a missing one, answers false (their own rules apply).
+function requestHidden(request, partyId) {
+    if (!request || request.requestTypeEnumId !== "RqtMaintenance") return false
+    if (partyId && request.filedByPartyId === partyId) return false
+    const requestId = request.requestId
+    const now = ec.user.nowTimestamp
+    if (
+        find("mantle.request.RequestRecord", {requestId, recordEntityName: "mantle.product.maintenance.AssetMaintenance"}).count() >
+        0
+    )
+        return false
+    if (partyId && find("mantle.request.RequestParty", {requestId, partyId}).conditionDate("fromDate", "thruDate", now).count() > 0)
+        return false
+    const userScope = scope()
+    const caps = userScope.capabilities
+    if (caps.plan || caps.supervise || caps.view) {
+        const organizations = Array.from(
+            find("mantle.request.RequestParty", {requestId, roleTypeId: "OrgInternal"}).conditionDate("fromDate", "thruDate", now).list()
+        ).map(row => row.partyId)
+        if (organizations.some(organizationPartyId => covers(userScope, organizationPartyId))) return false
+    }
+    const workIds = Array.from(find("mantle.request.RequestWorkEffort", {requestId}).list()).map(row => row.workEffortId)
+    const managed = workIds.length
+        ? Array.from(find("mantle.work.maintenance.MaintenanceWorkOrder").condition("workEffortId", "in", workIds).list()).map(
+              row => row.workEffortId
+          )
+        : []
+    return !managed.some(workEffortId => !workHidden(workEffortId, partyId))
+}
 const ids = list => Array.from(new Set(list.filter(Boolean)))
 
 ;({
@@ -214,6 +258,7 @@ const ids = list => Array.from(new Set(list.filter(Boolean)))
     reads,
     capabilities,
     scope,
+    requesterOrganizations,
     covers,
     requireCapability,
     requireOrganization,
@@ -226,6 +271,7 @@ const ids = list => Array.from(new Set(list.filter(Boolean)))
     requireAsset,
     requireWork,
     workHidden,
+    requestHidden,
     denied,
     reasonCode: lib.reasonCode
 })

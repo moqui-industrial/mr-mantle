@@ -140,7 +140,11 @@ function offlineOf(ctx, center, fromMs, thruMs) {
     const resourceConditions = [factory.makeCondition("facilityId", "equals", center.facilityId)]
     if (assetIds.length) resourceConditions.push(factory.makeCondition("assetId", "in", assetIds))
     for (const outage of Array.from(
-        overlapping(find(OUTAGE)).condition(factory.makeCondition(resourceConditions, "or")).list()
+        // the outages in force: a corrected row is history (impl-maintenance P5)
+        overlapping(find(OUTAGE))
+            .condition(factory.makeCondition(resourceConditions, "or"))
+            .condition("supersededByUnavailabilityId", "is-null", null)
+            .list()
     )) {
         // a stop's outage is the stop's interval already when it is the same; an outage still open runs to the range's end
         const open = outage.thruDate == null

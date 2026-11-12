@@ -34,6 +34,8 @@ const DECISION = "mantle.humanres.approval.PeopleApprovalDecision"
 const RELATIONSHIP = "mantle.party.PartyRelationship"
 const POSITION = "mantle.humanres.position.EmplPosition"
 const CHANGE = "mantle.humanres.employment.EmploymentChange"
+const LEAVE_REQUEST = "mantle.humanres.leave.LeaveRequest"
+const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -112,6 +114,72 @@ const kinds = {
                     subjectText: separation ? "an employment's end" : "the " + kindText + " of " + personName,
                     organizationName,
                     departmentName: change.departmentPartyId ? names[change.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P12: a leave request, or the cancellation of approved leave the person asked for (LeaveServices.submit#Request and
+    // decide#Request). The request is bound to the leave request's last change, so a withdrawal supersedes it. What the notice says:
+    // the person, the days and what they charge, the employer and department; never the leave type or the person's reason.
+    PakLeave: {
+        topic: "PeopleLeaveApproval",
+        sourceEntityName: LEAVE_REQUEST,
+        sourceField: "leaveRequestId",
+        describe(sourceId) {
+            const request = one(LEAVE_REQUEST, {leaveRequestId: sourceId})
+            if (!request) return {label: "leave " + sourceId}
+            const personName = people.personNames([request.partyId])[request.partyId] || request.partyId
+            const names = people.organizationNames([request.organizationPartyId, request.departmentPartyId].filter(Boolean))
+            const fromDay = lib.calendarDateText(request.fromDay)
+            const thruDay = lib.calendarDateText(request.thruDay)
+            const datesText = fromDay === thruDay ? fromDay : fromDay + " to " + thruDay
+            const unitText = String(enumTexts([request.unitEnumId])[request.unitEnumId] || "").toLowerCase()
+            const amount = Math.round(Number(String(request.chargedAmount ?? 0)) * 100) / 100
+            const cancellation = request.statusEnumId === "LrsCancelRequested"
+            const subjectText =
+                (cancellation ? "the cancellation of leave for " : "leave for ") + personName + " (" + datesText + ")"
+            return {
+                label: (cancellation ? "cancellation of leave of " : "leave of ") + personName + ", " + datesText,
+                message: {
+                    leaveRequestId: sourceId,
+                    partyId: request.partyId,
+                    personName,
+                    datesText,
+                    chargedText: amount + " " + unitText,
+                    subjectText,
+                    organizationName: names[request.organizationPartyId] || request.organizationPartyId || "",
+                    departmentName: request.departmentPartyId ? names[request.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P13: a correction of a day's attendance (AttendanceServices.request#Correction and decide#Correction). The request is bound to
+    // the correction's last change, so a withdrawal supersedes it. What the notice says: the person, the day and the corrected
+    // hours, the employer and department; never the reason.
+    PakAttendance: {
+        topic: "PeopleAttendanceApproval",
+        sourceEntityName: ATTENDANCE_CORRECTION,
+        sourceField: "attendanceCorrectionId",
+        describe(sourceId) {
+            const correction = one(ATTENDANCE_CORRECTION, {attendanceCorrectionId: sourceId})
+            if (!correction) return {label: "attendance correction " + sourceId}
+            const personName = people.personNames([correction.partyId])[correction.partyId] || correction.partyId
+            const names = people.organizationNames([correction.organizationPartyId, correction.departmentPartyId].filter(Boolean))
+            const dayText = lib.calendarDateText(correction.attendanceDate)
+            const minutes = Number(correction.workedMinutes || 0)
+            const workedText = Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0")
+            return {
+                label: "attendance of " + personName + ", " + dayText,
+                message: {
+                    attendanceCorrectionId: sourceId,
+                    attendanceDayId: correction.attendanceDayId,
+                    partyId: correction.partyId,
+                    personName,
+                    dayText,
+                    workedText,
+                    subjectText: "the attendance of " + personName + " on " + dayText + " (" + workedText + " h)",
+                    organizationName: names[correction.organizationPartyId] || correction.organizationPartyId || "",
+                    departmentName: correction.departmentPartyId ? names[correction.departmentPartyId] || "" : ""
                 }
             }
         }
@@ -1415,5 +1483,11 @@ function run(op, p) {
     reroute,
     // P8: the decisions waiting on the caller (find#DueWork, the Today source, MyTeam) and their own open requests (get#SelfService)
     waitingFor,
-    openRequestCount
+    openRequestCount,
+    // P12: the route a request of a kind would take now, as a preview shows it (Leave.js preview#Request: no approver is a block)
+    previewRoute(request) {
+        kindOf(request.approvalKindEnumId)
+        const steps = explain(resolve(request, nowMs()), request)
+        return {steps, unresolved: !steps.length || steps.some(step => step.unresolved)}
+    }
 })

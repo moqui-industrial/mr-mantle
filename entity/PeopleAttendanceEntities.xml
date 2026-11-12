@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's attendance (IronStone People design §6 Attendance and TimeImport, PE-05, PE-19; impl-people P13): evidence of presence,
+    apart from work allocation (Projects' time entries) and payable time. A punch (AttendancePunch) is a raw event of an employment,
+    in or out at an instant, with its source (the person's own clock in self-service, a device file imported, later the kiosk), the
+    source's own identity (sourceSystem, externalKey) and a unique source key, so an event is recorded once; it is never changed or
+    deleted. A day (AttendanceDay) is the employment's day the punches count on, in the zone of its working schedule (else the
+    recorder's): an out-punch counts on the day of the in-punch it closes, so an overnight shift is its start day's; it keeps what
+    the punches say (first in, last out, the minutes between pairs, missing, unpaired and repeated punches) and, once a correction is
+    approved, the corrected minutes. A correction (AttendanceCorrection, with its intervals) asks for a day's worked intervals with a
+    reason and waits for a People approval of kind PakAttendance; approved, it is the day's attendance, and the raw punches stay as
+    they were. A device file is read into an import (AttendanceImport) whose rows (AttendanceImportRow) are previewed, then
+    recorded each in its own transaction, known source keys skipped and bad rows named. Written only by
+    mantle.humanres.AttendanceServices (Attendance.js), which checks the People scope first. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="AttendancePunch" package="mantle.humanres.attendance" cache="never">
+        <description>A raw attendance event of an employment: in or out at an instant (punchDate), the zone it was read in and its
+            local time as the source gave it, its source (AttendanceSource: the person's own clock, a device file, the kiosk), the
+            source system and its own key for the event, the import it came in and the user who recorded it. sourceKey is unique, so
+            an event recorded again is ignored. Never changed or deleted: a correction is a record of its own.</description>
+        <field name="attendancePunchId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="attendanceDayId" type="id"><description>The day it counts on: its own day, or for an out-punch the day of the
+            in-punch it closes</description></field>
+        <field name="directionEnumId" type="id"><description>AttendanceDirection: in or out</description></field>
+        <field name="punchDate" type="date-time"/>
+        <field name="timeZone" type="text-short"><description>The IANA zone the time was read in</description></field>
+        <field name="localTimeText" type="text-short"><description>The local time as the source gave it</description></field>
+        <field name="sourceEnumId" type="id"><description>AttendanceSource</description></field>
+        <field name="sourceSystem" type="text-medium"><description>The device or system that recorded it (a file's source)</description></field>
+        <field name="externalKey" type="text-medium"><description>The source's own identity of the event, when it has one</description></field>
+        <field name="sourceKey" type="text-medium"><description>Unique: the source, the employer, the source system and the
+            event's key (or, for a file without one, the worker, instant and direction); a self-service punch's operation</description></field>
+        <field name="attendanceImportId" type="id"/>
+        <field name="facilityId" type="id"><description>The work location of the employment's assignment, when it has one</description></field>
+        <field name="recordedByUserId" type="id"/>
+        <field name="recordedDate" type="date-time"/>
+        <relationship type="one-nofk" related="mantle.humanres.attendance.AttendanceDay" short-alias="day"/>
+        <relationship type="one" title="AttendanceDirection" related="moqui.basic.Enumeration" short-alias="direction">
+            <key-map field-name="directionEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="AttendanceSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <index name="ATT_PUNCH_SOURCE" unique="true"><index-field name="sourceKey"/></index>
+        <index name="ATT_PUNCH_EMPL"><index-field name="partyRelationshipId"/><index-field name="punchDate"/></index>
+        <index name="ATT_PUNCH_DAY"><index-field name="attendanceDayId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Attendance Direction" enumTypeId="AttendanceDirection"/>
+            <moqui.basic.Enumeration enumId="AtdIn" description="In" sequenceNum="1" enumTypeId="AttendanceDirection"/>
+            <moqui.basic.Enumeration enumId="AtdOut" description="Out" sequenceNum="2" enumTypeId="AttendanceDirection"/>
+            <moqui.basic.EnumerationType description="Attendance Source" enumTypeId="AttendanceSource"/>
+            <moqui.basic.Enumeration enumId="AtsSelf" description="Self-service clock" sequenceNum="1" enumTypeId="AttendanceSource"/>
+            <moqui.basic.Enumeration enumId="AtsImport" description="Imported file" sequenceNum="2" enumTypeId="AttendanceSource"/>
+            <moqui.basic.Enumeration enumId="AtsKiosk" description="Clocking kiosk" sequenceNum="3" enumTypeId="AttendanceSource"/>
+            <!-- an employer's clocking default (impl-people §4, Nov 12): Y, its employees clock in and out unless their employment
+                says N (Employment.clockingEnabled); N or none, only those whose employment says Y. People's Settings sets it
+                (P29); Attendance.js isClockingOn reads it. -->
+            <mantle.party.PartySettingType partySettingTypeId="PeopleClocking" description="People - Employees clock in and out"
+                    validRegexp="^[YN]$" defaultValue="N"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+        </seed-data>
+    </entity>
+    <entity entity-name="AttendanceDay" package="mantle.humanres.attendance" cache="never">
+        <description>An employment's day of attendance, one a day (attendanceDate in the zone of the employment's working schedule,
+            else the recorder's, timeZone): what its punches say, refreshed as they come (the first in, the last out, how many, the
+            minutes between paired punches, and the flags MISSING_OUT, MISSING_IN and REPEATED), and its state (AttendanceDayStatus:
+            from the punches, a correction asked, corrected). A corrected day's minutes are its approved correction's
+            (attendanceCorrectionId); the punches stay as they were.</description>
+        <field name="attendanceDayId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="attendanceDate" type="date"/>
+        <field name="timeZone" type="text-short"/>
+        <field name="firstInDate" type="date-time"/>
+        <field name="lastOutDate" type="date-time"/>
+        <field name="punchCount" type="number-integer"/>
+        <field name="punchedMinutes" type="number-integer"><description>The minutes between the day's paired punches</description></field>
+        <field name="workedMinutes" type="number-integer"><description>The day's minutes: the approved correction's, else the
+            punches'</description></field>
+        <field name="flagsText" type="text-medium"><description>What the punches lack, comma separated: MISSING_OUT, MISSING_IN, REPEATED</description></field>
+        <field name="statusEnumId" type="id"><description>AttendanceDayStatus</description></field>
+        <field name="attendanceCorrectionId" type="id"><description>The approved correction in effect</description></field>
+        <relationship type="one" title="AttendanceDayStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.attendance.AttendancePunch" short-alias="punches">
+            <key-map field-name="attendanceDayId"/></relationship>
+        <index name="ATT_DAY_EMPL" unique="true"><index-field name="partyRelationshipId"/><index-field name="attendanceDate"/></index>
+        <index name="ATT_DAY_ORG"><index-field name="organizationPartyId"/><index-field name="attendanceDate"/></index>
+        <index name="ATT_DAY_PARTY"><index-field name="partyId"/><index-field name="attendanceDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Attendance Day Status" enumTypeId="AttendanceDayStatus"/>
+            <moqui.basic.Enumeration enumId="AdsRecorded" description="Recorded" sequenceNum="1" enumTypeId="AttendanceDayStatus"/>
+            <moqui.basic.Enumeration enumId="AdsCorrectionAsked" description="Correction asked" sequenceNum="2" enumTypeId="AttendanceDayStatus"/>
+            <moqui.basic.Enumeration enumId="AdsCorrected" description="Corrected" sequenceNum="3" enumTypeId="AttendanceDayStatus"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="AttendanceCorrection" package="mantle.humanres.attendance" cache="never">
+        <description>A correction of an employment's day: the intervals worked that day (AttendanceCorrectionInterval), their
+            minutes, the reason, who asked and when, and its state (AttendanceCorrectionStatus: waiting for approval, approved,
+            refused, withdrawn). It waits for a People approval of kind PakAttendance (PeopleApproval, bound to the correction's
+            revision); approved, it is the day's attendance. The punches it corrects are never changed.</description>
+        <field name="attendanceCorrectionId" type="id" is-pk="true"/>
+        <field name="attendanceDayId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The employment's department on the day, which approval routing reads</description></field>
+        <field name="attendanceDate" type="date"/>
+        <field name="statusEnumId" type="id"><description>AttendanceCorrectionStatus</description></field>
+        <field name="workedMinutes" type="number-integer"/>
+        <field name="reason" type="text-medium"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one-nofk" related="mantle.humanres.attendance.AttendanceDay" short-alias="day"/>
+        <relationship type="one" title="AttendanceCorrectionStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.attendance.AttendanceCorrectionInterval" short-alias="intervals">
+            <key-map field-name="attendanceCorrectionId"/></relationship>
+        <index name="ATT_CORR_DAY"><index-field name="attendanceDayId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Attendance Correction Status" enumTypeId="AttendanceCorrectionStatus"/>
+            <moqui.basic.Enumeration enumId="AcsRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="AttendanceCorrectionStatus"/>
+            <moqui.basic.Enumeration enumId="AcsApproved" description="Approved" sequenceNum="2" enumTypeId="AttendanceCorrectionStatus"/>
+            <moqui.basic.Enumeration enumId="AcsRefused" description="Refused" sequenceNum="3" enumTypeId="AttendanceCorrectionStatus"/>
+            <moqui.basic.Enumeration enumId="AcsWithdrawn" description="Withdrawn" sequenceNum="4" enumTypeId="AttendanceCorrectionStatus"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="AttendanceCorrectionInterval" package="mantle.humanres.attendance" cache="never">
+        <description>An interval worked on a corrected day, fromDate to thruDate (an interval may end the next day: an overnight
+            shift counts on the day it starts).</description>
+        <field name="attendanceCorrectionId" type="id" is-pk="true"/>
+        <field name="intervalSeqId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.attendance.AttendanceCorrection" short-alias="correction"/>
+    </entity>
+    <entity entity-name="AttendanceImport" package="mantle.humanres.attendance" cache="never">
+        <description>A file of attendance events read for an employer (TimeImport): its name, the source system, the zone its times
+            are in, how a worker is named (workerIdKind: partyId, People's person id, or workEmail) and the columns read, its state
+            (AttendanceImportStatus: previewed, imported) and its counts. Its rows are AttendanceImportRow. Admin's Imports lists it
+            through the time-and-attendance transfer target's find service.</description>
+        <field name="attendanceImportId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="fileName" type="text-medium"/>
+        <field name="sourceSystem" type="text-medium"/>
+        <field name="timeZone" type="text-short"/>
+        <field name="workerIdKind" type="text-short"/>
+        <field name="mappingJson" type="text-medium"><description>The columns read: worker, time, direction, key and device</description></field>
+        <field name="statusEnumId" type="id"><description>AttendanceImportStatus</description></field>
+        <field name="rowCount" type="number-integer"/>
+        <field name="readyCount" type="number-integer"/>
+        <field name="importedCount" type="number-integer"/>
+        <field name="skippedCount" type="number-integer"><description>Rows already recorded (a known source key) or repeated in the file</description></field>
+        <field name="errorCount" type="number-integer"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="importedByUserId" type="id"/>
+        <field name="importedDate" type="date-time"/>
+        <relationship type="one" title="AttendanceImportStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.attendance.AttendanceImportRow" short-alias="rows">
+            <key-map field-name="attendanceImportId"/></relationship>
+        <index name="ATT_IMPORT_ORG"><index-field name="organizationPartyId"/><index-field name="createdDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Attendance Import Status" enumTypeId="AttendanceImportStatus"/>
+            <moqui.basic.Enumeration enumId="AisPreviewed" description="Previewed" sequenceNum="1" enumTypeId="AttendanceImportStatus"/>
+            <moqui.basic.Enumeration enumId="AisImported" description="Imported" sequenceNum="2" enumTypeId="AttendanceImportStatus"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="AttendanceImportRow" package="mantle.humanres.attendance" cache="never">
+        <description>A row of an attendance file: its line, the values read (worker, time, direction, the event's key, the device),
+            what they were resolved to (the person, the employment, the direction, the instant, the source key) and its outcome:
+            ready, known (the source key is recorded already), duplicate (repeated in the file), refused (with its reason code and
+            message), imported (with its punch) or failed.</description>
+        <field name="attendanceImportId" type="id" is-pk="true"/>
+        <field name="rowSeqId" type="id" is-pk="true"/>
+        <field name="lineNumber" type="number-integer"/>
+        <field name="workerText" type="text-medium"/>
+        <field name="timeText" type="text-short"/>
+        <field name="directionText" type="text-short"/>
+        <field name="externalKey" type="text-medium"/>
+        <field name="deviceText" type="text-medium"/>
+        <field name="partyId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="directionEnumId" type="id"/>
+        <field name="punchDate" type="date-time"/>
+        <field name="sourceKey" type="text-medium"/>
+        <field name="outcome" type="text-short"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="message" type="text-medium"/>
+        <field name="attendancePunchId" type="id"/>
+        <relationship type="one" related="mantle.humanres.attendance.AttendanceImport" short-alias="attendanceImport"/>
+    </entity>
+</entities>

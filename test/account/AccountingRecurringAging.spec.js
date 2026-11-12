@@ -10,7 +10,14 @@ const one = (entity, key) => helper().lib.one(entity, key)
 const rows = (entity, key) => helper().lib.rows(entity, key)
 const prefix = "NATIVE_RECUR"
 const stamp = offset => new Date(Number(ec.user.nowTimestamp) + offset * 86400000)
-const day = offset => ec.l10n.format(stamp(offset), "yyyy-MM-dd")
+// A calendar day offset from today in the user's zone, by calendar arithmetic (as PaymentTerms.js addDays): steps of 24
+// hours from now cross a daylight saving change, and in the last hour of the day land on the next day.
+function day(offset) {
+    const [year, month, date] = ec.l10n.format(new Date(Number(ec.user.nowTimestamp)), "yyyy-MM-dd").split("-").map(Number)
+    const value = new Date(Date.UTC(year, month - 1, date + offset))
+    const pad = n => String(n).padStart(2, "0")
+    return value.getUTCFullYear() + "-" + pad(value.getUTCMonth() + 1) + "-" + pad(value.getUTCDate())
+}
 const calendar = value => helper().lib.policy.calendarDateText(value)
 let f, scheduleId, firstInvoiceId, lateScheduleId, failingScheduleId, paidId, oldId
 

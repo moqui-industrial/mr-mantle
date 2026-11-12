@@ -42,6 +42,20 @@ along with this software (see the LICENSE.md file). If not, see
             refuseServiceName="mantle.humanres.PeopleServices.refuse#EmploymentChange" refuseReasonRequired="Y"
             titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
 
+    <!-- P12: a leave request, or the cancellation of approved leave the person asked for (LeaveServices.submit#Request and
+        decide#Request ask for it), sent to the approvers of the step waiting (the person's manager unless a rule says otherwise);
+        approve#NotificationMessage and refuse#NotificationMessage call mantle.humanres.LeaveServices approve#Request and
+        refuse#Request as the user, which decide it at the request's revision in the message (decide#Request over record#Decision):
+        the last approval recounts the days, checks overlaps and the balance with the other reservations under the employment's
+        lock and posts the leave taken once (a cancellation its reversal once), a refusal needs a reason. The message holds
+        peopleApprovalId, leaveRequestId, sourceRevision, personName, datesText, chargedText, subjectText, organizationName,
+        departmentName and stepText: never the leave type or the person's reason. -->
+    <moqui.security.user.NotificationTopic topic="PeopleLeaveApproval" inboxEnumId="NinNotifications"
+            description="Leave to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.LeaveServices.approve#Request"
+            refuseServiceName="mantle.humanres.LeaveServices.refuse#Request" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
     <!-- P6 (the user's call, Nov 11): Employment.emplPositionId holds the seat in effect; a change dated later sets it on its date,
         through this daily job (mantle.humanres.PeopleServices.apply#DueAssignments: each employment in its own transaction, a
         failing one logged and the rest going on; a rerun changes nothing) -->
