@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's expense claims and advances (IronStone People design §9 ExpenseClaims, ExpenseClaimDetail and EmployeeAdvances,
+    PE-13, PE-24; impl-people P15). An expense claim stays an employee-from Invoice (the employee to the employer, its lines
+    ItemExpense-family InvoiceItems, its receipts InvoiceContent), not a ledger of its own: ExpenseClaim, keyed by the invoice,
+    adds the employment, the business state (a People approval of kind PakExpenseClaim, apart from the invoice's finance state),
+    the settlement route and its reservation; ExpenseClaimItem adds a line's merchant, tax, receipt and source (a line from mail or
+    chat stays to review). Business approval leaves the invoice InvoiceReceived; finance's approve#Payable alone reaches
+    InvoiceApproved, and only for a claim whose business state is approved and whose route is not reserved for payroll. An
+    employee advance (EmployeeAdvance) is an approved request for cash that finance pays as a native Payment (a prepayment from
+    the employer to the employee) and applies to the employee's claim invoices; what is outstanding is derived from the delivered
+    payment less its applications, never kept as a balance. Written only by mantle.humanres.ExpenseServices (Expense.js), which
+    checks the People scope first, and by mantle.account.InvoiceServices.create#ProjectExpenseInvoice's claim write. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ExpenseClaim" package="mantle.humanres.expense" cache="never">
+        <description>An employee's expense claim: its invoice (from the employee to the employer), the employment it is made under,
+            the department on the day it was made (which approval routing reads), an optional project for rebilling, the purpose,
+            the business state (ExpenseClaimStatus: draft, waiting for approval, returned for correction, approved, refused,
+            cancelled), the settlement route (ExpenseClaimRoute: accounts payable, or a payroll run) and the route that reserved it
+            (finance approval reserves accounts payable; a payroll run reserves payroll), so a claim reserved for one is refused by
+            the other. Who made it (the claimant, or an HR editor for them) and the decider's reason when it was returned or
+            refused.</description>
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment (PrtEmployee) it is made under</description></field>
+        <field name="partyId" type="id"><description>The claimant</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="departmentPartyId" type="id"/>
+        <field name="workEffortId" type="id"><description>A project the expenses were for, kept for rebilling</description></field>
+        <field name="purpose" type="text-medium"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"><description>ExpenseClaimStatus</description></field>
+        <field name="routeEnumId" type="id" enable-audit-log="true"><description>ExpenseClaimRoute: how it is to be settled</description></field>
+        <field name="reservedRouteEnumId" type="id" enable-audit-log="true"><description>The route that took it: once set the other is refused</description></field>
+        <field name="reservedReference" type="text-medium"><description>What reserved it (a payroll run's id)</description></field>
+        <field name="reservedDate" type="date-time"/>
+        <field name="reservedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"><description>Why it was returned or refused (the decider's, the claimant reads it)</description></field>
+        <field name="changedDate" type="date-time"><description>The last change of the claim or its lines, so a request names the
+            revision it was made at</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" title="ExpenseClaimStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ExpenseClaimRoute" related="moqui.basic.Enumeration" short-alias="route">
+            <key-map field-name="routeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="ExpenseClaimReservedRoute" related="moqui.basic.Enumeration" short-alias="reservedRoute">
+            <key-map field-name="reservedRouteEnumId" related="enumId"/></relationship>
+        <index name="EXP_CLAIM_PARTY"><index-field name="partyId"/><index-field name="statusEnumId"/></index>
+        <index name="EXP_CLAIM_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
+        <index name="EXP_CLAIM_OPER"><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Expense Claim Status" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsDraft" description="Draft" sequenceNum="1" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsSubmitted" description="Waiting for approval" sequenceNum="2" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsReturned" description="Returned for correction" sequenceNum="3" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsApproved" description="Approved" sequenceNum="4" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsRefused" description="Refused" sequenceNum="5" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.Enumeration enumId="EcsCancelled" description="Cancelled" sequenceNum="6" enumTypeId="ExpenseClaimStatus"/>
+            <moqui.basic.EnumerationType description="Expense Claim Route" enumTypeId="ExpenseClaimRoute"/>
+            <moqui.basic.Enumeration enumId="EcrPayable" description="Accounts payable" sequenceNum="1" enumTypeId="ExpenseClaimRoute"/>
+            <moqui.basic.Enumeration enumId="EcrPayroll" description="Payroll" sequenceNum="2" enumTypeId="ExpenseClaimRoute"/>
+            <!-- P15: an expense claim (ExpenseServices.decide#Claim) and an employee advance (ExpenseServices.decide#Advance),
+                the kinds of People approval of PeopleApprovalEntities.xml, each seeded with the phase that builds it -->
+            <moqui.basic.Enumeration enumId="PakExpenseClaim" description="Expense claim" sequenceNum="5" enumTypeId="PeopleApprovalKind"/>
+            <moqui.basic.Enumeration enumId="PakAdvance" description="Employee advance" sequenceNum="6" enumTypeId="PeopleApprovalKind"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ExpenseClaimItem" package="mantle.humanres.expense" cache="never">
+        <description>What a claim's line (an InvoiceItem of the claim's invoice) keeps beside the invoice's own fields: the merchant,
+            the tax the amount includes, the receipt (an InvoiceContent of the invoice), where the line came from
+            (ExpenseLineSource: entered, by mail, from chat) with its unique source key (a message makes one line once), and whether
+            the claimant has still to review it (a line from mail or chat, or with values proposed from its receipt, waits for
+            the claimant; a claim with one is not submitted).</description>
+        <field name="invoiceId" type="id" is-pk="true"/>
+        <field name="invoiceItemSeqId" type="id" is-pk="true"/>
+        <field name="merchantName" type="text-medium"/>
+        <field name="taxAmount" type="currency-amount"><description>The tax the line's amount includes, as the receipt shows it</description></field>
+        <field name="receiptContentId" type="id"><description>The receipt: an InvoiceContent of the claim's invoice</description></field>
+        <field name="sourceEnumId" type="id"><description>ExpenseLineSource</description></field>
+        <field name="sourceKey" type="text-medium"><description>Unique: the mail message or chat event it was made from</description></field>
+        <field name="reviewNeeded" type="text-indicator"><description>Y until the claimant reviews the line</description></field>
+        <relationship type="one-nofk" related="mantle.account.invoice.InvoiceItem" short-alias="item"/>
+        <relationship type="one-nofk" title="Receipt" related="mantle.account.invoice.InvoiceContent" short-alias="receipt">
+            <key-map field-name="receiptContentId" related="invoiceContentId"/></relationship>
+        <relationship type="one" title="ExpenseLineSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <index name="EXP_ITEM_SOURCE" unique="true"><index-field name="sourceKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Expense Line Source" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsEntered" description="Entered" sequenceNum="1" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsMail" description="By mail" sequenceNum="2" enumTypeId="ExpenseLineSource"/>
+            <moqui.basic.Enumeration enumId="ElsChat" description="From chat" sequenceNum="3" enumTypeId="ExpenseLineSource"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmployeeAdvance" package="mantle.humanres.expense" cache="never">
+        <description>An employee's request for cash ahead of their expenses: the employment, the purpose, the amount and currency
+            asked, when it is needed and when it should be settled, and its state (EmployeeAdvanceStatus: waiting for approval,
+            approved, refused, withdrawn), a People approval of kind PakAdvance. Approval to advance is not payment: finance pays an
+            approved advance as a native Payment (paymentId: a prepayment from the employer to the employee, delivered) and applies
+            it to the employee's claim invoices; delivered, applied and outstanding are read from that payment and its applications
+            (an undelivered or returned payment delivers nothing).</description>
+        <field name="employeeAdvanceId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"/>
+        <field name="purpose" type="text-medium"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="amount" type="currency-amount" enable-audit-log="update"/>
+        <field name="requiredDate" type="date"/>
+        <field name="expectedSettlementDate" type="date"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"><description>EmployeeAdvanceStatus</description></field>
+        <field name="paymentId" type="id"><description>The payment finance made for it</description></field>
+        <field name="decisionReason" type="text-medium"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <relationship type="one-nofk" related="mantle.account.payment.Payment" short-alias="payment"/>
+        <relationship type="one" title="EmployeeAdvanceStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <index name="EMP_ADV_PARTY"><index-field name="partyId"/><index-field name="statusEnumId"/></index>
+        <index name="EMP_ADV_ORG"><index-field name="organizationPartyId"/><index-field name="statusEnumId"/></index>
+        <index name="EMP_ADV_PAYMENT"><index-field name="paymentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employee Advance Status" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasApproved" description="Approved" sequenceNum="2" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasRefused" description="Refused" sequenceNum="3" enumTypeId="EmployeeAdvanceStatus"/>
+            <moqui.basic.Enumeration enumId="EasWithdrawn" description="Withdrawn" sequenceNum="4" enumTypeId="EmployeeAdvanceStatus"/>
+        </seed-data>
+    </entity>
+</entities>

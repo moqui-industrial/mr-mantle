@@ -73,6 +73,25 @@ function payableQuery(p) {
     else if (queue === "expenses") {
         add("fromPartyTypeEnumId", "equals", "PtyPerson")
         if (!p.statusId) add("statusId", "in", ["InvoiceIncoming", "InvoiceReceived"])
+        // People P15 (design-accounting §5 ExpensePosting, R-PPL-19): an employee's expense claim reaches finance once its
+        // business approval is done, on the accounts payable route (a claim reserved for payroll is settled by its pay run);
+        // a person's other bills (a contractor's, a worker's time) as before
+        conditions.push(
+            any([
+                cf.makeCondition("claimStatusEnumId", "is-null", null),
+                all([
+                    cf.makeCondition("claimStatusEnumId", "equals", "EcsApproved"),
+                    any([
+                        cf.makeCondition("claimReservedRouteEnumId", "is-null", null),
+                        cf.makeCondition("claimReservedRouteEnumId", "equals", "EcrPayable")
+                    ]),
+                    any([
+                        cf.makeCondition("claimRouteEnumId", "is-null", null),
+                        cf.makeCondition("claimRouteEnumId", "equals", "EcrPayable")
+                    ])
+                ])
+            ])
+        )
     } else if (["approved", "due", "overdue"].includes(queue)) {
         add("statusId", "equals", "InvoiceApproved")
         add("unpaidTotal", "greater", 0)
@@ -181,7 +200,9 @@ function attachStaged(invoiceId, p) {
         contentDate: ec.user.nowTimestamp,
         userId: ec.user.userId
     })
-    const filename = String(p.stagedFilename || "bill").replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 100)
+    const filename = String(p.stagedFilename || "bill")
+        .replace(/[^a-zA-Z0-9._ -]/g, "_")
+        .slice(0, 100)
     const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
     const contentLocation = root + "/invoice/" + invoiceId + "/content_" + out.invoiceContentId + "/" + filename
     const stream = ec.resource.getLocationReference(p.stagedLocation).openStream()
@@ -321,14 +342,17 @@ function invoiceSource(p, {part, header, payable, organizationPartyId}) {
     if (operation?.old) return lib.previous(operation)
     const invoiceDate = p.invoiceDate || ec.user.nowTimestamp
     // some lines of the part (fulfillment's): the lines named and their adjustments, keyed by the sorted line ids
-    const itemSeqIds = Array.from(p.orderItemSeqIds || []).map(String).sort()
+    const itemSeqIds = Array.from(p.orderItemSeqIds || [])
+        .map(String)
+        .sort()
     const partial = itemSeqIds.length
         ? rows("mantle.order.OrderItem", {orderId: p.orderId, orderPartSeqId: part.orderPartSeqId})
               .filter(item => itemSeqIds.includes(item.orderItemSeqId) || itemSeqIds.includes(item.parentItemSeqId))
               .sort((a, b) => String(a.orderItemSeqId).localeCompare(String(b.orderItemSeqId)))
         : null
     const sourceKey = shipmentId =>
-        ["source", p.orderId, part.orderPartSeqId, basis, shipmentId || ""].join(":") + (partial ? ":" + itemSeqIds.join(",") : "")
+        ["source", p.orderId, part.orderPartSeqId, basis, shipmentId || ""].join(":") +
+        (partial ? ":" + itemSeqIds.join(",") : "")
     let invoiceIdList = []
     if (basis === "ordered") {
         const earlier = Array.from(
