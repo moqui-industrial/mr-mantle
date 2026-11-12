@@ -5,7 +5,11 @@
 // an interview and Hired is never a stage change; an interview is a private event with a video call link and its panel's
 // scorecards, each panel member answering their own once and reading their own scorecard only, never another opening's
 // candidates, their interviews on My interviews; an application by mail once, from the opening's plus tag when the rule's owner
-// is its recruiting owner, with its resume, and nothing from a rule of anyone else.
+// is its recruiting owner, with its resume, and nothing from a rule of anyone else. P16 review: a panel member reads of the
+// application only the applicant's name, the opening, their own interviews and scorecard and the files a recruiter shared with the
+// panel, never its record host; their self-service My interviews (the user's call of Nov 12, 2026); scorecard answers opted out
+// of AI on the entity; an application from a chat message once, by a recruiter, never from their own message; an owner who left
+// files no mail, and their openings are handed over through People's lifecycle participant.
 // Standalone: spec-local organizations, people, employments, positions, a published scorecard, groups and users, artifact
 // authorization disabled (the rules are the services' own checks). The form rules are FormDefinitions'.
 // Run: ./moq test mr-mantle --spec Recruiting
@@ -94,6 +98,7 @@ spec({
         state.config = user("CONFIG", orgA, ["PEOPLE_CONFIGURE"])
         state.ana = user("ANA", orgA, ["PEOPLE_SELF_SERVICE"])
         state.ben = user("BEN", orgA, ["PEOPLE_SELF_SERVICE"])
+        state.owner = user("OWNER", orgA, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
         state.active = seat("ACTIVE", orgA, "EmpsActive")
         state.active2 = seat("ACTIVE2", orgA, "EmpsActive")
         state.planned = seat("PLANNED", orgA, "EmpsPlanned")
@@ -328,7 +333,16 @@ feature("an interview's panel each answer their own scorecard once and read no o
             board: code(run(state.ana.userId, R + "find#Applications", {})),
             projection: run(state.ana.userId, R + "get#InterviewProjection", {}),
             calendar: run(state.ana.userId, R + "find#Interviews", {}),
-            danProjection: run(state.recruiterB.userId, R + "get#InterviewProjection", {checkOnly: true})
+            danProjection: run(state.recruiterB.userId, R + "get#InterviewProjection", {checkOnly: true}),
+            // the record host (notes, files) is the recruiters': a panel member reads none of it
+            anaRecord: run(state.ana.userId, R + "check#ApplicationAccess", {employmentApplicationId: state.cara}),
+            readerRecord: run(state.reader.userId, R + "check#ApplicationAccess", {employmentApplicationId: state.cara}),
+            // the scorecard's text is opted out of AI on the entity too (FormResponseAnswer.valueText)
+            aiAnswer: run("john.doe", "org.moqui.agent.AiTaskServices.propose#AiFieldValue", {
+                entityName: "moqui.screen.form.FormResponseAnswer",
+                recordId: "_NA_",
+                fieldName: "valueText"
+            })
         }
     },
     then(r) {
@@ -348,6 +362,13 @@ feature("an interview's panel each answer their own scorecard once and read no o
         r.anaView.application.myScorecards[0].answered == true
         r.anaView.application.interviews[0].scorecards.length == 1
         r.anaView.application.emailAddress == null
+        r.anaView.application.stageText == ""
+        r.anaView.application.sourceText == null
+        r.anaView.application.files.length == 0
+        r.anaView.application.sharedFiles.length == 0
+        r.anaRecord.recordVisible == false
+        r.readerRecord.recordVisible == true
+        r.aiAnswer.error.includes("opted out of AI")
         r.benView.application.interviews[0].scorecards.length == 1
         r.benView.application.interviews[0].scorecards[0].answered == false
         !JSON.stringify(r.benView.application).includes("Clear, warm and specific")
@@ -416,6 +437,188 @@ feature(
             r.files.length == 1
             r.files[0].contentTypeEnumId == "EactResume"
             ec.resource.getLocationReference(r.files[0].contentLocation).getText().includes("five years in retail")
+        }
+    }
+)
+
+feature(
+    "a panel member's self-service: My interviews, their own interview and only the files a recruiter shared with the panel",
+    {
+        when() {
+            const resume = "dbresource://spec/recruiting/" + prefix + "/cara-resume.txt"
+            ec.resource.getLocationReference(resume).putText("Cara Candidate, store lead")
+            const fileId = call("create#mantle.humanres.employment.EmploymentApplicationContent", {
+                employmentApplicationId: state.cara,
+                contentTypeEnumId: "EactResume",
+                description: "cara-resume.txt",
+                contentLocation: resume,
+                contentDate: ec.user.nowTimestamp
+            }).applicationContentId
+            const file = who => run(who.userId, R + "get#ApplicationFile", {applicationContentId: fileId})
+            const before = code(file(state.ben))
+            const byReader = code(
+                run(state.reader.userId, R + "share#ApplicationContent", {applicationContentId: fileId, shared: true})
+            )
+            const shared = run(state.recruiter.userId, R + "share#ApplicationContent", {
+                applicationContentId: fileId,
+                shared: true
+            })
+            const anaList = run(state.ana.userId, R + "find#MyInterviews", {})
+            const benList = run(state.ben.userId, R + "find#MyInterviews", {})
+            const workEffortId = benList.interviews?.[0]?.workEffortId
+            return {
+                before,
+                byReader,
+                shared,
+                after: file(state.ben),
+                recruiterFile: file(state.reader),
+                otherEmployer: code(file(state.recruiterB)),
+                anaList,
+                benList,
+                benInterview: run(state.ben.userId, R + "get#MyInterview", {workEffortId}),
+                notOnPanel: code(run(state.recruiter.userId, R + "get#MyInterview", {workEffortId})),
+                otherEmployerInterview: code(run(state.recruiterB.userId, R + "get#MyInterview", {workEffortId})),
+                benView: run(state.ben.userId, R + "get#Application", {employmentApplicationId: state.cara}),
+                recruiterView: run(state.recruiter.userId, R + "get#Application", {employmentApplicationId: state.cara})
+            }
+        },
+        then(r) {
+            r.before == "RECORD_UNAVAILABLE"
+            r.byReader == "PERMISSION_DENIED"
+            r.shared.shared == true
+            r.after.error == ""
+            ec.resource.getLocationReference(r.after.location).getText().includes("store lead")
+            r.recruiterFile.error == ""
+            r.otherEmployer == "RECORD_UNAVAILABLE"
+            r.anaList.interviews.length == 1
+            r.anaList.interviews[0].answered == true
+            r.anaList.toAnswerCount == 0
+            r.benList.toAnswerCount == 1
+            r.benList.interviews[0].applicantName == "Cara Candidate"
+            r.benList.interviews[0].openingTitle == "Sales associate"
+            r.benInterview.interview.applicantName == "Cara Candidate"
+            r.benInterview.interview.sharedFiles.map(row => row.description).join(",") == "cara-resume.txt"
+            r.benInterview.interview.scorecard.answered == false
+            r.benInterview.interview.location.includes("/call/")
+            !JSON.stringify(r.benInterview).includes("Clear, warm and specific")
+            !JSON.stringify(r.benInterview).includes("Screening") &&
+                !JSON.stringify(r.benInterview).includes("Interview scheduled")
+            r.notOnPanel == "RECORD_UNAVAILABLE"
+            r.otherEmployerInterview == "RECORD_UNAVAILABLE"
+            r.benView.application.sharedFiles.length == 1
+            r.recruiterView.application.files.find(row => row.description == "cara-resume.txt").panelShared == true
+        }
+    }
+)
+
+feature(
+    "an application from a chat message once, by a recruiter, never from their own message; an owner who left files no mail and their opening is handed over",
+    {
+        when() {
+            // Ben, an employee, asks in a room with the recruiter for the opening by its plus tag
+            login(state.ben.userId)
+            ec.artifactExecution.disableAuthz()
+            const room = call("org.moqui.chat.ChatServices.create#Room", {
+                roomTypeEnumId: "CrtPrivate",
+                roomName: "Recruiting spec chat",
+                memberUserIdList: [state.recruiter.userId, state.reader.userId]
+            })
+            const sent = call("org.moqui.chat.ChatServices.send#Message", {
+                chatRoomId: room.chatRoomId,
+                body: "I would like to apply for +spec-sales, I know the store well"
+            })
+            login(state.recruiter.userId)
+            ec.artifactExecution.disableAuthz()
+            const own = call("org.moqui.chat.ChatServices.send#Message", {
+                chatRoomId: room.chatRoomId,
+                body: "Thanks, +spec-sales"
+            })
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            const parameters = {chatRoomId: room.chatRoomId, eventSeq: sent.eventSeq}
+            const made = run(state.recruiter.userId, R + "create#ApplicationFromChat", parameters)
+            const again = run(state.recruiter.userId, R + "create#ApplicationFromChat", parameters)
+            const byReader = code(run(state.reader.userId, R + "create#ApplicationFromChat", parameters))
+            const notMember = code(run(state.recruiterB.userId, R + "create#ApplicationFromChat", parameters))
+            const fromOwn = code(
+                run(state.recruiter.userId, R + "create#ApplicationFromChat", {
+                    chatRoomId: room.chatRoomId,
+                    eventSeq: own.eventSeq
+                })
+            )
+            // an opening the owner owns, its mail after the owner left, and its hand-over through People's lifecycle participant
+            const opening = run(state.recruiter.userId, R + "store#Opening", {
+                organizationPartyId: orgA,
+                title: "Stock lead",
+                emplPositionIds: state.active,
+                ownerPartyId: state.owner.partyId,
+                intakePlusTag: "spec-owner",
+                action: "open"
+            })
+            const owned = run("john.doe", "mantle.humanres.PeopleApprovalServices.find#OwnedApprovals", {
+                userId: state.owner.userId
+            })
+            const employment = ec.entity
+                .find("mantle.party.PartyRelationship")
+                .condition({fromPartyId: state.owner.partyId, toPartyId: orgA, relationshipTypeEnumId: "PrtEmployee"})
+                .disableAuthz()
+                .one()
+            call("update#mantle.party.PartyRelationship", {
+                partyRelationshipId: employment.partyRelationshipId,
+                thruDate: ec.user.nowTimestamp
+            })
+            const emailMessageId = call("create#moqui.basic.email.EmailMessage", {
+                statusId: "ES_RECEIVED",
+                subject: "Stock lead",
+                fromAddress: "hal.spec@example.test",
+                fromName: "Hal Mailer",
+                toAddresses: "jobs+spec-owner@example.test",
+                receivedDate: ec.user.nowTimestamp
+            }).emailMessageId
+            const leftMail = run("john.doe", R + "create#ApplicationFromEmail", {
+                emailMessageId,
+                ruleOwnerUserId: state.owner.userId
+            })
+            const transfer = to =>
+                run("john.doe", "mantle.humanres.PeopleApprovalServices.transfer#ApprovalOwner", {
+                    fromUserId: state.owner.userId,
+                    toUserId: to,
+                    approvalResourceId: "opening:" + opening.jobOpeningId,
+                    reason: "Left"
+                })
+            const elsewhere = code(transfer(state.recruiterB.userId))
+            const handed = transfer(state.recruiter.userId)
+            return {
+                made,
+                again,
+                byReader,
+                notMember,
+                fromOwn,
+                owned,
+                leftMail,
+                elsewhere,
+                handed,
+                openingId: opening.jobOpeningId,
+                row: made.employmentApplicationId ? application(made.employmentApplicationId) : null
+            }
+        },
+        then(r) {
+            r.made.error == ""
+            r.made.created == true
+            r.row.jobOpeningId == state.openingId
+            r.row.applyingPartyId == state.ben.partyId
+            r.row.comments.startsWith("I would like to apply")
+            r.again.created == false
+            r.again.employmentApplicationId == r.made.employmentApplicationId
+            r.byReader == "PERMISSION_DENIED"
+            r.notMember == "RECORD_UNAVAILABLE"
+            r.fromOwn == "NOT_AN_APPLICANT"
+            r.owned.resourceList.some(row => row.resourceId == "opening:" + r.openingId && row.transferable)
+            r.leftMail.reason == "RULE_NOT_ALLOWED"
+            r.elsewhere == "NOT_EMPLOYED"
+            r.handed.error == ""
+            ec.entity.find("mantle.humanres.recruitment.JobOpening").condition("jobOpeningId", r.openingId).disableAuthz().one()
+                .ownerPartyId == state.recruiter.partyId
         }
     }
 )

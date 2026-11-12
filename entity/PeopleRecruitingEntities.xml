@@ -79,15 +79,20 @@ along with this software (see the LICENSE.md file). If not, see
             employer, open when this one was made: flagged for review, never merged</description></field>
         <field name="comments" type="text-medium"/>
         <field name="createdByUserId" type="id"/>
+        <field name="sourceKey" type="text-medium"><description>The chat message an application was made from (chat:room:seq),
+            once (create#ApplicationFromChat)</description></field>
         <relationship type="one-nofk" related="mantle.humanres.recruitment.JobOpening" short-alias="opening"/>
         <index name="EMPL_APP_OPENING"><index-field name="jobOpeningId"/><index-field name="statusId"/></index>
         <index name="EMPL_APP_EMAIL"><index-field name="emailMessageId"/></index>
         <index name="EMPL_APP_PARTY"><index-field name="applyingPartyId"/></index>
+        <index name="EMPL_APP_SOURCE"><index-field name="sourceKey"/></index>
     </extend-entity>
     <entity entity-name="EmploymentApplicationContent" package="mantle.humanres.employment" cache="never">
         <description>A private file of an application (its resume, a cover letter; the application's content host, PE-01): read
             and added only by a recruiter of its employer (mantle.humanres.RecruitingServices.check#ApplicationAccess), never on
-            the applicant's Party record or a public link.</description>
+            the applicant's Party record or a public link. A recruiter shares a file with the interview panel (panelShared Y; none
+            is shared by default, the resume of a mail application either): a panel member reads the shared files of the
+            applications they interview, and no other (get#ApplicationFile; the user's call of Nov 12, 2026).</description>
         <field name="applicationContentId" type="id" is-pk="true"/>
         <field name="employmentApplicationId" type="id"/>
         <field name="contentTypeEnumId" type="id"/>
@@ -95,6 +100,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-medium"/>
         <field name="contentDate" type="date-time"/>
         <field name="userId" type="id"/>
+        <field name="panelShared" type="text-indicator" enable-audit-log="update"><description>Y: shared with the
+            application's interview panels</description></field>
         <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
         <relationship type="one" title="EmploymentApplicationContentType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="contentTypeEnumId"/></relationship>

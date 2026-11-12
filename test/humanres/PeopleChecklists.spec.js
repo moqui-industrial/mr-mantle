@@ -3,7 +3,9 @@
 // get#TaskObjectTags; IronStone People design §4, §12 ChecklistTemplates, §13, F22, F52; impl-people P7): an HR editor keeps their
 // employer's templates and another employer's HR neither reads nor changes them; an onboarding task is on the new employee's phone
 // and an offboarding task is not; the person and HR read the equipment held and HR returns it to a receiving custodian of the
-// employer, completing the return task. The instantiation itself is WorkProcess's.
+// employer, completing the return task. The instantiation itself is WorkProcess's. P16 review: a step linking an exit interview
+// is recorded once on its task, by one of its people, on the employer's published exit interview form, with no link; its answers
+// read by the task's people and the employer's HR, never by the leaver.
 // Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules
 // are the services' own checks). Run: ./moq test mr-mantle --spec PeopleChecklists
 const prefix = "PEOPLE_CHKL_SPEC"
@@ -485,6 +487,96 @@ feature(
             out.task === "WeComplete"
             out.custody.join("|") === "|SN-77|Chkl MGR/true;Chkl HOLDER/false"
             out.custodyB === "RECORD_UNAVAILABLE"
+        }
+    }
+)
+
+feature(
+    "an exit interview step is recorded once on its task by its interviewer, read by HR of the employer and never by the leaver",
+    {
+        when() {
+            const out = {}
+            const leaver = person("LEAVER")
+            const employment = employ(leaver, orgA)
+            const uLeaver = user("LEAVER", ["PEOPLE_SELF_SERVICE"], [], leaver)
+            const uConfig = user("CONFIG", ["PEOPLE_CONFIGURE"], [orgA])
+            // the employer's exit interview form (the form rules are FormDefinitions')
+            const F = "mantle.party.FormDefinitionServices."
+            const formId = run(uConfig, F + "create#Form", {
+                purposeEnumId: "DbfpExitInterview",
+                organizationPartyId: orgA,
+                description: "Exit interview"
+            }).formId
+            run(uConfig, F + "save#FormField", {
+                formId,
+                newFieldName: "why",
+                title: "Why are you leaving",
+                fieldTypeEnumId: "DBFFT_text-area",
+                isRequired: "Y"
+            })
+            run(uConfig, F + "publish#Form", {formId})
+            const rootId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTask",
+                statusId: "WeInPlanning",
+                workEffortName: "Offboarding: Chkl LEAVER"
+            }).workEffortId
+            call("create#mantle.humanres.checklist.EmploymentChecklist", {
+                workEffortId: rootId,
+                partyRelationshipId: employment,
+                partyId: leaver,
+                organizationPartyId: orgA,
+                lifecycleKindEnumId: "ClkOffboarding",
+                startedDate: ec.user.nowTimestamp
+            })
+            const taskId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetTask",
+                statusId: "WeInPlanning",
+                workEffortName: "Hold the exit interview",
+                parentWorkEffortId: rootId,
+                rootWorkEffortId: rootId
+            }).workEffortId
+            call("create#mantle.humanres.checklist.ChecklistStep", {
+                workEffortId: taskId,
+                sourceLinkEnumId: "ClsExitInterview",
+                visibilityEnumId: "ChvStaff",
+                isProtected: "Y"
+            })
+            call("create#mantle.work.effort.WorkEffortParty", {
+                workEffortId: taskId,
+                partyId: state.mgr,
+                roleTypeId: "Assignee",
+                fromDate: since,
+                statusId: "WeptAssigned"
+            })
+            const submit = (username, values) => run(username, P + "submit#ExitInterview", {workEffortId: taskId, values})
+            const before = run(state.uMgr, P + "get#ChecklistTask", {workEffortId: taskId}).exitInterview
+            out.before = [before.formId === formId, before.canAnswer, before.answered]
+            out.byLeaver = code(submit(uLeaver, {why: "Moving"}))
+            out.byReader = code(submit(state.reader, {why: "Moving"}))
+            out.missing = code(submit(state.uMgr, {}))
+            out.recorded = submit(state.uMgr, {why: "Moving to the coast"}).error
+            out.again = code(submit(state.uMgr, {why: "Again"}))
+            const asHr = run(state.hr, P + "get#ChecklistTask", {workEffortId: taskId}).exitInterview
+            out.hr = [asHr.answered, asHr.canAnswer, asHr.answers.map(answer => answer.displayText).join()]
+            out.hrB = code(run(state.hrB, P + "get#ChecklistTask", {workEffortId: taskId}))
+            out.leaverRead = code(run(uLeaver, P + "get#ChecklistTask", {workEffortId: taskId}))
+            const invitation = rows("mantle.party.FormInvitation", {invitationKey: "exit:" + taskId})[0]
+            out.invitation = [invitation.partyId === leaver, invitation.recordId === taskId, invitation.statusEnumId]
+            out.link = ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js").linkAllowed(formId)
+            return out
+        },
+        then(out) {
+            out.before.join("|") === "true|true|false"
+            out.byLeaver === "RECORD_UNAVAILABLE"
+            out.byReader === "RECORD_UNAVAILABLE"
+            out.missing === "FORM_VALUES_INVALID"
+            out.recorded === ""
+            out.again === "ALREADY_ANSWERED"
+            out.hr.join("|") === "true|false|Moving to the coast"
+            out.hrB === "RECORD_UNAVAILABLE"
+            out.leaverRead === "RECORD_UNAVAILABLE"
+            out.invitation.join("|") === "true|true|FinResponded"
+            out.link === false
         }
     }
 )

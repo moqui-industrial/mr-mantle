@@ -4,7 +4,9 @@
 // to a SUPPORT_POLICY_EDIT holder, whose case feedback form the People holder may not make; another employer's holder is
 // refused the form and the employer; a form with no field does not publish. A form of a People purpose takes no publication,
 // public or by invitation, and its invitations carry no link, while a case feedback form takes an invited publication and no
-// public one. find#Forms lists each user the purposes they read: the People holder's scorecard, never the feedback form.
+// public one. find#Forms lists each user the purposes they read: the People holder's scorecard, never the feedback form. P16
+// review: a form of a purpose the user does not read is refused as a missing one, and Customer Service's purposes are built only
+// through their own services (the case rules), never the generic ones, whatever the user holds.
 // Standalone: spec-local organizations, people, employments, groups and users, artifact authorization disabled (the rules are
 // the services' own checks). Customer Service's own form rules are CaseFeedback's and SupportTemplates' specs.
 // Run: ./moq test mr-mantle --spec FormDefinitions
@@ -153,8 +155,8 @@ feature(
             r.read.form.fields.map(field => field.title).join(",") == "Overall,Evidence"
             r.read.form.canEdit == false
             r.read.form.editFields == null
-            r.otherPurpose == "PERMISSION_DENIED"
-            r.otherPurposeRead == "PERMISSION_DENIED"
+            r.otherPurpose == "RECORD_UNAVAILABLE"
+            r.otherPurposeRead == "RECORD_UNAVAILABLE"
             r.feedbackByPeople == "PERMISSION_DENIED"
             r.otherEmployer == "RECORD_UNAVAILABLE"
             r.otherEmployerCreate == "RECORD_UNAVAILABLE"
@@ -187,7 +189,22 @@ feature("a People form takes no publication and its invitations no link; a case 
             }),
             peopleFeedbackList: code(run(state.people, F + "find#Forms", {purposeEnumIds: ["DbfpCaseFeedback"]})),
             supportList: run(state.support, F + "find#Forms", {purposeEnumIds: ["DbfpCaseFeedback"], organizationPartyId: orgA}),
-            feedbackFormId: feedback.formId
+            feedbackFormId: feedback.formId,
+            // the case rules (every field customer-visible, the rating) are CaseFeedback's: the generic services refuse the purpose
+            genericField: code(
+                run(state.support, F + "save#FormField", {
+                    formId: feedback.formId,
+                    title: "Internal",
+                    audienceEnumId: "CfaInternal"
+                })
+            ),
+            genericCreate: code(
+                run(state.support, F + "create#Form", {
+                    purposeEnumId: "DbfpCaseFeedback",
+                    organizationPartyId: orgA,
+                    description: "Generic"
+                })
+            )
         }
     },
     then(r) {
@@ -204,5 +221,7 @@ feature("a People form takes no publication and its invitations no link; a case 
         r.peopleList.purposes.every(purpose => purpose.canEdit)
         r.peopleFeedbackList == "PERMISSION_DENIED"
         r.supportList.forms.map(form => form.formId).join(",") == r.feedbackFormId
+        r.genericField == "PURPOSE_UNAVAILABLE"
+        r.genericCreate == "PURPOSE_UNAVAILABLE"
     }
 })

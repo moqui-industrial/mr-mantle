@@ -1037,10 +1037,28 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="equipment" type="Map"/>
             <parameter name="access" type="Map"/>
             <parameter name="siblings" type="List"/>
+            <parameter name="exitInterview" type="Map"><description>A step linking an exit interview (impl-people P16 review): the
+                form (the employer's only published exit interview form, or the one answered), whether it was recorded, whether
+                the caller records it (one of the task's people) and the answers for the task's people and HR readers</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getChecklistTask', context)"/>
             <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="ExitInterview" allow-remote="false">
+        <description>The exit interview a checklist step links (ClsExitInterview, impl-people P16 review): one of the task's current
+            people (a protected task: an assignee who is not the leaver) records the leaver's answers once (ALREADY_ANSWERED) on the
+            employer's published form of the exit interview purpose (FORM_REQUIRED for none or several), checked against it
+            (FORM_VALUES_INVALID); kept as a FormInvitation naming the leaver and the task, with no link. Anyone else, and a task of
+            no such step, is refused alike (RECORD_UNAVAILABLE). Read back through get#ChecklistTask alone.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="values" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="formResponseId"/></out-parameters>
+        <actions>
+            <set field="formResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('submitExitInterview', context).formResponseId"/>
         </actions>
     </service>
     <service verb="get" noun="AssignedEquipment" allow-remote="false">

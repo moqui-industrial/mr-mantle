@@ -15,9 +15,13 @@
 // - mail intake (create#ApplicationFromEmail, the createApplication mail rule action): runs with authorization off, so it checks
 //   itself that the rule may file into the opening and answers a message once.
 // Who reads what: a recruiter (PEOPLE_RECRUIT_VIEW) of the employer, in People's scope (People.js scopeOf), reads its openings
-// and applications and every scorecard; PEOPLE_RECRUIT_EDIT changes them. A panel member reads the applications they interview
-// (the applicant, the opening, the stage, the files and their interviews) and their own scorecard, never another reviewer's nor
-// another opening's candidates. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
+// and applications and every scorecard; PEOPLE_RECRUIT_EDIT changes them. A panel member (the user's call of Nov 12, 2026: from
+// People or from their self-service, find#MyInterviews and get#MyInterview) reads of an application they interview only the
+// applicant's name, the opening and its employer, the interviews they are on the panel of with their own scorecard, and the
+// files a recruiter shared with the panel (EmploymentApplicationContent.panelShared, get#ApplicationFile): never its stage,
+// source, referral, contact, notes or other files, the application's record (its notes and files host is the recruiters'),
+// another reviewer's scorecard nor another opening's candidates. Missing and unauthorized records are refused alike
+// (RECORD_UNAVAILABLE).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
@@ -288,20 +292,24 @@ function checkSeats(organizationPartyId, positionIds) {
             )
     }
 }
-// A recruiting owner: the caller, or a person employed by the employer or one of its agents now.
-function checkOwner(userScope, ownerPartyId, organizationPartyId) {
-    if (ownerPartyId === userScope.partyId) return
-    const related = people
+// Whether a person is employed by the employer, or one of its agents, now.
+const worksFor = (partyId, organizationPartyId) =>
+    !!partyId &&
+    !!one("mantle.party.Person", {partyId}) &&
+    people
         .current(
             find(RELATIONSHIP)
-                .condition("fromPartyId", ownerPartyId)
+                .condition("fromPartyId", partyId)
                 .condition("toPartyId", organizationPartyId)
                 .condition("relationshipTypeEnumId", "in", ["PrtEmployee", "PrtAgent"]),
             null
         )
-        .count()
-    if (!one("mantle.party.Person", {partyId: ownerPartyId}) || !related)
-        denied("OWNER_INVALID", "The recruiting owner works for the employer")
+        .count() > 0
+const enabledAccount = account => !!account && account.disabled !== "Y" && (ms(account.terminateDate) ?? Infinity) > nowMs()
+// A recruiting owner: the caller, or a person employed by the employer or one of its agents now.
+function checkOwner(userScope, ownerPartyId, organizationPartyId) {
+    if (ownerPartyId === userScope.partyId) return
+    if (!worksFor(ownerPartyId, organizationPartyId)) denied("OWNER_INVALID", "The recruiting owner works for the employer")
 }
 // store#Opening: a new opening (a draft, or open with action open) of an employer in the recruiter's scope, or a change of one
 // at the revision read; action open, close or reopen. Its seats are approved active positions of the employer; its plus tag is
@@ -809,9 +817,60 @@ function interviewRows(items, access, partyId) {
 }
 // get#Application: an application the caller reads, as a recruiter (everything, every scorecard) or a panel member (the
 // applicant's name, the opening, the stage, the files and their interviews, and their own scorecards to answer or answered).
+// The files of an application a recruiter shared with its interview panels.
+function sharedFiles(employmentApplicationId) {
+    return rows(CONTENT, {employmentApplicationId})
+        .filter(file => file.panelShared === "Y" && !!file.contentLocation)
+        .sort((a, b) => (ms(b.contentDate) ?? 0) - (ms(a.contentDate) ?? 0))
+        .map(file => ({
+            applicationContentId: file.applicationContentId,
+            description: fileName(file),
+            typeText: one("moqui.basic.Enumeration", {enumId: file.contentTypeEnumId})?.description || "",
+            contentDateText: dateText(file.contentDate)
+        }))
+}
+const fileName = file =>
+    file.description ||
+    String(file.contentLocation || "")
+        .split("/")
+        .pop() ||
+    file.applicationContentId
+// The interviews of an application a party is on the panel of (their scorecard assignments name them).
+const panelInterviews = (employmentApplicationId, partyId) =>
+    interviewsOf([employmentApplicationId]).filter(item => item.invitations.some(row => row.partyId === partyId))
+// What a panel member reads of an application they interview (the user's call of Nov 12, 2026): the applicant's name, the
+// opening and its employer, their own interviews with their own scorecard, and the files shared with the panel; nothing else.
+function panelView(application, partyId) {
+    const names = people.personNames([application.applyingPartyId])
+    const interviews = interviewRows(panelInterviews(application.employmentApplicationId, partyId), "panel", partyId)
+    return {
+        employmentApplicationId: application.employmentApplicationId,
+        access: "panel",
+        applicantName: names[application.applyingPartyId] || "",
+        jobOpeningId: application.jobOpeningId || null,
+        openingTitle: openingTitles([application.jobOpeningId])[application.jobOpeningId] || "",
+        organizationPartyId: application.organizationPartyId,
+        openingOrganizationName:
+            people.organizationNames([application.organizationPartyId])[application.organizationPartyId] || "",
+        stageText: "",
+        possibleDuplicate: false,
+        canEdit: false,
+        canMove: false,
+        nextStages: [],
+        files: [],
+        sharedFiles: sharedFiles(application.employmentApplicationId),
+        interviews,
+        myScorecards: interviews.flatMap(interview =>
+            interview.scorecards
+                .filter(card => card.own)
+                .map(card => Object.assign({}, card, {interviewText: interview.whenText}))
+        )
+    }
+}
 function getApplication(p) {
     const userScope = people.scopeOf()
     const {application, access} = readableApplication(userScope, p.employmentApplicationId)
+    if (access === "panel") return {application: panelView(application, userScope.partyId)}
     const row = applicationRows(userScope, [application])[0]
     const opening = application.jobOpeningId ? one(OPENING, {jobOpeningId: application.jobOpeningId}) : null
     const recruiter = access === "recruiter"
@@ -819,19 +878,16 @@ function getApplication(p) {
         .sort((a, b) => (ms(b.contentDate) ?? 0) - (ms(a.contentDate) ?? 0))
         .map(file => ({
             applicationContentId: file.applicationContentId,
-            description:
-                file.description ||
-                String(file.contentLocation || "")
-                    .split("/")
-                    .pop() ||
-                file.applicationContentId,
+            description: fileName(file),
             typeText: one("moqui.basic.Enumeration", {enumId: file.contentTypeEnumId})?.description || "",
             contentDateText: dateText(file.contentDate),
-            hasFile: !!file.contentLocation
+            hasFile: !!file.contentLocation,
+            panelShared: file.panelShared === "Y"
         }))
     const interviews = interviewRows(interviewsOf([application.employmentApplicationId]), access, userScope.partyId)
     const out = Object.assign(row, {
         access,
+        sharedFiles: sharedFiles(application.employmentApplicationId),
         canEdit: recruiter && row.canEdit,
         openingOrganizationName:
             people.organizationNames([application.organizationPartyId])[application.organizationPartyId] || "",
@@ -1160,9 +1216,112 @@ function getInterviewProjection(p) {
     return {admitted, eventList}
 }
 
+// ===== My interviews (the user's call of Nov 12, 2026: a panel member answers from their self-service) =====
+// The caller's own scorecard assignments of interviews, newest first.
+const myInvitations = partyId => panelInvitations(partyId).filter(row => row.contextEntityName === WORK)
+// find#MyInterviews: the interviews the caller is on the panel of (no party parameter: their own), the coming ones and those of
+// the last 30 days, and any older one whose scorecard is still to submit; each with when, the applicant's name, the opening, its
+// employer and the scorecard's state. Nothing about the application beyond those.
+function findMyInterviews(p) {
+    const userScope = people.scopeOf()
+    const invitations = myInvitations(userScope.partyId)
+    if (!invitations.length) return {interviews: [], toAnswerCount: 0}
+    const byEvent = new Map(invitations.map(row => [row.contextId, row]))
+    const interviews = Array.from(
+        find(INTERVIEW).condition("workEffortId", "in", Array.from(byEvent.keys())).limit(listCap).list()
+    )
+    const events = new Map(
+        interviews.length
+            ? Array.from(
+                  find(WORK)
+                      .condition(
+                          "workEffortId",
+                          "in",
+                          interviews.map(row => row.workEffortId)
+                      )
+                      .list()
+              ).map(row => [row.workEffortId, row])
+            : []
+    )
+    const applications = new Map(
+        interviews.length
+            ? Array.from(
+                  find(APPLICATION)
+                      .condition("employmentApplicationId", "in", unique(interviews.map(row => row.employmentApplicationId)))
+                      .list()
+              ).map(row => [row.employmentApplicationId, row])
+            : []
+    )
+    const names = people.personNames(unique(Array.from(applications.values()).map(row => row.applyingPartyId)))
+    const titles = openingTitles(interviews.map(row => row.jobOpeningId))
+    const organizations = people.organizationNames(unique(interviews.map(row => row.organizationPartyId)))
+    const since = nowMs() - 30 * 24 * hourMs
+    const found = interviews
+        .map(interview => {
+            const event = events.get(interview.workEffortId)
+            const invitation = byEvent.get(interview.workEffortId)
+            const application = applications.get(interview.employmentApplicationId)
+            if (!event || !application) return null
+            const startMs = ms(event.estimatedStartDate)
+            const endMs = ms(event.estimatedCompletionDate)
+            const cancelled = event.statusId === "WeCancelled"
+            const answered = !!invitation.formResponseId
+            if ((endMs ?? startMs ?? 0) < since && (answered || cancelled)) return null
+            return {
+                workEffortId: interview.workEffortId,
+                whenText: whenText(startMs, endMs),
+                startMs,
+                applicantName: names[application.applyingPartyId] || "",
+                openingTitle: titles[interview.jobOpeningId] || "",
+                organizationName: organizations[interview.organizationPartyId] || "",
+                cancelled,
+                answered,
+                toAnswer: !answered && !cancelled,
+                scorecardText: cancelled ? "Cancelled" : answered ? "Submitted " + dateText(invitation.responseDate) : "To submit"
+            }
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.startMs ?? 0) - (a.startMs ?? 0))
+    return {interviews: found, toAnswerCount: found.filter(row => row.toAnswer).length}
+}
+// get#MyInterview: one interview the caller is on the panel of (RECORD_UNAVAILABLE otherwise, as a missing one): when and where
+// (the call link is in its location), the note to the attendees, the applicant's name, the opening and its employer, the files
+// shared with the panel, and the caller's own scorecard (its form to answer once, or their answers). Never the application's
+// stage, source, contact, notes or other files, nor another reviewer's scorecard.
+function getMyInterview(p) {
+    const userScope = people.scopeOf()
+    const workEffortId = text(p.workEffortId)
+    const invitation = workEffortId ? myInvitations(userScope.partyId).find(row => row.contextId === workEffortId) : null
+    const interview = invitation ? one(INTERVIEW, {workEffortId}) : null
+    const event = interview ? one(WORK, {workEffortId}) : null
+    const application = interview ? one(APPLICATION, {employmentApplicationId: interview.employmentApplicationId}) : null
+    if (!invitation || !interview || !event || !application) unavailable("Interview", workEffortId)
+    const view = panelView(application, userScope.partyId)
+    const own = view.interviews.find(row => row.workEffortId === workEffortId)
+    const card = own?.scorecards.find(row => row.own) || null
+    return {
+        interview: {
+            workEffortId,
+            employmentApplicationId: application.employmentApplicationId,
+            whenText: own?.whenText || "",
+            location: own?.location || "",
+            hasCall: !!own?.hasCall,
+            cancelled: !!own?.cancelled,
+            note: event.description || "",
+            panelText: own?.panelText || "",
+            applicantName: view.applicantName,
+            openingTitle: view.openingTitle,
+            organizationName: view.openingOrganizationName,
+            sharedFiles: view.sharedFiles,
+            scorecard: card
+        }
+    }
+}
+
 // ===== files (the application's content host) =====
-// check#ApplicationAccess: whether the caller reads an application's files (a recruiter of its employer, a panel member of it)
-// and adds them (a recruiter with PEOPLE_RECRUIT_EDIT). Never refuses.
+// check#ApplicationAccess: whether the caller reads an application's record (its notes and files: a recruiter of its employer)
+// and adds files (a recruiter with PEOPLE_RECRUIT_EDIT). A panel member reads the application only through get#Application,
+// get#MyInterview and the shared files (get#ApplicationFile), never its record host. Never refuses.
 function applicationAccess(p) {
     const none = {recordVisible: false, canEdit: false}
     if (!ec.user.userId) return none
@@ -1171,11 +1330,40 @@ function applicationAccess(p) {
         : one(APPLICATION, {employmentApplicationId: text(p.employmentApplicationId)})
     if (!application) return none
     const userScope = people.scopeOf()
-    const access = accessOf(userScope, application)
+    const recruiter = recruits(userScope, application.organizationPartyId)
     return {
-        recordVisible: !!access,
-        canEdit: access === "recruiter" && recruitEdits(userScope, application.organizationPartyId),
-        organizationPartyId: access ? application.organizationPartyId : null
+        recordVisible: recruiter,
+        canEdit: recruiter && recruitEdits(userScope, application.organizationPartyId),
+        organizationPartyId: recruiter ? application.organizationPartyId : null
+    }
+}
+// share#ApplicationContent: a recruiter (PEOPLE_RECRUIT_EDIT of the employer) shares a file of an application with its interview
+// panels, or stops sharing it.
+function shareApplicationContent(p) {
+    const userScope = recruiterScope(true)
+    const file = blank(p.applicationContentId) ? null : one(CONTENT, {applicationContentId: text(p.applicationContentId)})
+    const application = file ? one(APPLICATION, {employmentApplicationId: file.employmentApplicationId}) : null
+    if (!application || !recruitEdits(userScope, application.organizationPartyId)) unavailable("File", p.applicationContentId)
+    const panelShared = truthy(p.shared) ? "Y" : "N"
+    if ((file.panelShared || "N") !== panelShared)
+        call("update#" + CONTENT, {applicationContentId: file.applicationContentId, panelShared})
+    return {applicationContentId: file.applicationContentId, shared: panelShared === "Y"}
+}
+// get#ApplicationFile: a file of an application for a recruiter of its employer, or for a member of one of its interview panels
+// when it is shared with the panel; its location, name and whether it may show inline (a raster image or a PDF). Refused alike
+// when missing or not the caller's to read (RECORD_UNAVAILABLE).
+function applicationFile(p) {
+    const file = blank(p.applicationContentId) ? null : one(CONTENT, {applicationContentId: text(p.applicationContentId)})
+    const application = file ? one(APPLICATION, {employmentApplicationId: file.employmentApplicationId}) : null
+    const userScope = people.scopeOf()
+    const access = accessOf(userScope, application)
+    if (!file || !file.contentLocation || !access || (access === "panel" && file.panelShared !== "Y"))
+        unavailable("File", p.applicationContentId)
+    const name = String(file.contentLocation).split("/").pop() || fileName(file)
+    return {
+        location: file.contentLocation,
+        fileName: name,
+        inline: /\.(png|jpe?g|gif|webp|pdf)$/i.test(name)
     }
 }
 function contentAccess(p) {
@@ -1240,11 +1428,15 @@ function createApplicationFromEmail(p) {
     if (!isOpen(opening)) return log("OPENING_CLOSED")
     const accountId = text(p.emailAccountId) || message.emailAccountId || ""
     const byAccount = !!accountId && opening.intakeEmailAccountId === accountId
-    const ownerPartyId = blank(p.ruleOwnerUserId)
-        ? null
-        : one("moqui.security.UserAccount", {userId: text(p.ruleOwnerUserId)})?.partyId
+    // the rule's owner: the opening's recruiting owner now, with an enabled account, PEOPLE_RECRUIT_EDIT and still working for
+    // the employer (an owner who left files nothing, whatever rules they left behind)
+    const owner = blank(p.ruleOwnerUserId) ? null : one("moqui.security.UserAccount", {userId: text(p.ruleOwnerUserId)})
+    const ownerPartyId = owner && enabledAccount(owner) ? owner.partyId : null
     const byOwner =
-        !!ownerPartyId && ownerPartyId === opening.ownerPartyId && userHolds(text(p.ruleOwnerUserId), "PEOPLE_RECRUIT_EDIT")
+        !!ownerPartyId &&
+        ownerPartyId === opening.ownerPartyId &&
+        worksFor(ownerPartyId, opening.organizationPartyId) &&
+        userHolds(owner.userId, "PEOPLE_RECRUIT_EDIT")
     if (!byAccount && !byOwner) return log("RULE_NOT_ALLOWED")
     const address = String(message.fromAddress || "")
         .trim()
@@ -1276,35 +1468,49 @@ function createApplicationFromEmail(p) {
                 .substring(0, 255) || null,
         createdByUserId: null
     })
-    let first = true
-    for (const file of Array.from(
-        find("moqui.basic.email.EmailMessageAttachment").condition("emailMessageId", message.emailMessageId).list()
-    )) {
-        if (!file.attachmentLocation || file.isInline === "Y") continue
+    keepFiles(
+        made.employmentApplicationId,
+        Array.from(find("moqui.basic.email.EmailMessageAttachment").condition("emailMessageId", message.emailMessageId).list())
+            .filter(file => file.attachmentLocation && file.isInline !== "Y")
+            .map(file => ({location: file.attachmentLocation, fileName: file.fileName})),
+        "email " + message.emailMessageId
+    )
+    return {
+        employmentApplicationId: made.employmentApplicationId,
+        created: true,
+        duplicateOfApplicationId: made.duplicateOfApplicationId
+    }
+}
+
+// Files of a received message or chat event kept as an application's private files, the first its resume; a file that cannot
+// be copied is logged and the rest go on.
+function keepFiles(employmentApplicationId, files, what) {
+    let first = !rows(CONTENT, {employmentApplicationId}).length
+    for (const file of files) {
         try {
             const name = String(file.fileName || "attachment").replace(/[\/\\?#%:]/g, "_")
             const applicationContentId = call("create#" + CONTENT, {
-                employmentApplicationId: made.employmentApplicationId,
+                employmentApplicationId,
                 contentTypeEnumId: first ? "EactResume" : "EactOther",
                 description: name,
                 contentDate: ec.user.nowTimestamp
             }).applicationContentId
             const location =
                 "dbresource://mantle/content/employmentApplication/" +
-                made.employmentApplicationId +
+                employmentApplicationId +
                 "/content_" +
                 applicationContentId +
                 "/" +
                 name
-            ec.resource.getLocationReference(location).copyFrom(file.attachmentLocation)
+            ec.resource.getLocationReference(location).copyFrom(file.location)
             call("update#" + CONTENT, {applicationContentId, contentLocation: location})
             first = false
         } catch (error) {
             ec.logger.error(
                 "Application " +
-                    made.employmentApplicationId +
-                    " from email " +
-                    message.emailMessageId +
+                    employmentApplicationId +
+                    " from " +
+                    what +
                     ": file " +
                     file.fileName +
                     " not kept: " +
@@ -1312,11 +1518,121 @@ function createApplicationFromEmail(p) {
             )
         }
     }
+}
+// create#ApplicationFromChat (the "Create application" create-from of a chat message): a recruiter (PEOPLE_RECRUIT_EDIT) makes an
+// application of the message's sender (a candidate writing in the room, or an employee applying from within; never the caller's
+// own message, NOT_AN_APPLICANT) to the opening of the room's record (a JobOpening's room), else the open opening whose plus tag
+// the message names (+tag), else the one open opening the caller owns (OPENING_REQUIRED otherwise), an opening the caller changes
+// and that takes applications; the message's first line its notes, its files the application's files (the first its resume).
+// Once per message; the room the caller reads, not end-to-end encrypted.
+function createApplicationFromChat(p) {
+    const userScope = recruiterScope(true)
+    const chatRoomId = text(p.chatRoomId)
+    const eventSeq = Number(p.eventSeq)
+    const notAvailable = () => unavailable("Message", eventSeq)
+    const access = chatRoomId ? lib.probe("org.moqui.chat.ChatServices.get#RoomAccess", {chatRoomId}) : null
+    if (!access?.canRead) notAvailable()
+    const room = one("moqui.chat.ChatRoom", {chatRoomId})
+    if (room?.encrypted === "Y") denied("ROOM_ENCRYPTED", "A message of an end-to-end encrypted room is not read on the server")
+    const event = one("moqui.chat.ChatEvent", {chatRoomId, eventSeq})
+    if (!event || event.eventTypeEnumId !== "CetMessage" || event.redactedDate) notAvailable()
+    const sourceKey = "chat:" + chatRoomId + ":" + eventSeq
+    const known = Array.from(find(APPLICATION).condition("sourceKey", sourceKey).list())[0]
+    if (known) {
+        if (!recruits(userScope, known.organizationPartyId)) notAvailable()
+        return {employmentApplicationId: known.employmentApplicationId, created: false}
+    }
+    if (event.senderUserId === ec.user.userId)
+        denied("NOT_AN_APPLICANT", "Make an application from the applicant's own message; add another's with Add application")
+    const sender = event.senderUserId ? one("moqui.security.UserAccount", {userId: event.senderUserId}) : null
+    const partyId = sender?.partyId && one("mantle.party.Person", {partyId: sender.partyId}) ? sender.partyId : null
+    if (!partyId) denied("NOT_AN_APPLICANT", "The message's sender is no person to apply")
+    const body = text(event.bodyText)
+    let opening = null
+    if (room?.recordEntityName === OPENING && room.recordId) opening = one(OPENING, {jobOpeningId: room.recordId})
+    if (!opening) {
+        const tags = Array.from(body.matchAll(/(?:^|\s)\+([A-Za-z0-9][A-Za-z0-9._-]{1,40})\b/g)).map(match =>
+            match[1].toLowerCase()
+        )
+        if (tags.length)
+            opening =
+                Array.from(
+                    find(OPENING).condition("intakePlusTag", "in", unique(tags)).condition("statusId", "JoOpen").list()
+                )[0] || null
+    }
+    if (!opening && userScope.partyId) {
+        const owned = Array.from(
+            find(OPENING).condition("ownerPartyId", userScope.partyId).condition("statusId", "JoOpen").list()
+        ).filter(isOpen)
+        if (owned.length === 1) opening = owned[0]
+    }
+    if (!opening)
+        denied("OPENING_REQUIRED", "Post it in the opening's room, or name the opening's plus tag in the message (+tag)")
+    if (!recruitEdits(userScope, opening.organizationPartyId)) unavailable("Opening", opening.jobOpeningId)
+    if (!isOpen(opening)) denied("OPENING_CLOSED", (opening.title || opening.jobOpeningId) + " takes no application now")
+    const made = makeApplication(opening, partyId, {
+        sourceKey,
+        comments: body.split("\n")[0].substring(0, 255) || null
+    })
+    keepFiles(
+        made.employmentApplicationId,
+        rows("moqui.chat.ChatAttachment", {chatRoomId, eventSeq})
+            .filter(row => row.location)
+            .map(row => ({location: row.location, fileName: row.fileName})),
+        "chat message " + sourceKey
+    )
     return {
         employmentApplicationId: made.employmentApplicationId,
         created: true,
         duplicateOfApplicationId: made.duplicateOfApplicationId
     }
+}
+
+// ===== People's lifecycle participant (find#OwnedApprovals, transfer#ApprovalOwner, P5): the openings a user owns =====
+// The draft and open openings a person is the recruiting owner of, as owned resources (opening:id, handed to a new owner).
+function ownedOpenings(partyId) {
+    if (!partyId) return []
+    const owned = Array.from(
+        find(OPENING).condition("ownerPartyId", partyId).condition("statusId", "in", ["JoDraft", "JoOpen"]).limit(listCap).list()
+    )
+    const organizations = people.organizationNames(unique(owned.map(row => row.organizationPartyId)))
+    return owned.map(row => ({
+        resourceId: "opening:" + row.jobOpeningId,
+        resourceName:
+            "Opening " +
+            (row.title || row.jobOpeningId) +
+            " of " +
+            (organizations[row.organizationPartyId] || row.organizationPartyId),
+        resourceKind: "jobOpening",
+        transferable: true,
+        note: "Recruiting owner"
+    }))
+}
+// An opening's recruiting owner handed from one person to another (the audit log keeps the change with its reason): with
+// PEOPLE_APPROVAL_OWNER_CHANGE (the offboarding operator) or as a recruiter who changes the employer's openings. Refused: an
+// opening that is not the person's draft or open one (RECORD_UNAVAILABLE), a new owner with no enabled account and person
+// (OWNER_INVALID) or who does not work for the employer (NOT_EMPLOYED).
+function transferOpening(p) {
+    const opening = blank(p.jobOpeningId) ? null : one(OPENING, {jobOpeningId: text(p.jobOpeningId)})
+    if (!opening || !p.fromPartyId || opening.ownerPartyId !== p.fromPartyId || !["JoDraft", "JoOpen"].includes(opening.statusId))
+        unavailable("Opening", p.jobOpeningId)
+    if (!lib.access.has("PEOPLE_APPROVAL_OWNER_CHANGE") && !recruitEdits(people.scopeOf(), opening.organizationPartyId))
+        denied(
+            "PERMISSION_DENIED",
+            "Handing over an opening needs PEOPLE_APPROVAL_OWNER_CHANGE, or PEOPLE_RECRUIT_EDIT of its employer"
+        )
+    const to = p.toUserId ? one("moqui.security.UserAccount", {userId: text(p.toUserId)}) : null
+    if (!enabledAccount(to) || !to.partyId) denied("OWNER_INVALID", "The new owner needs an enabled account with a person")
+    if (to.partyId === p.fromPartyId) denied("OWNER_INVALID", "The new owner is the current one")
+    if (!worksFor(to.partyId, opening.organizationPartyId))
+        denied("NOT_EMPLOYED", "The new owner works for the opening's employer")
+    call("update#" + OPENING, {
+        jobOpeningId: opening.jobOpeningId,
+        ownerPartyId: to.partyId,
+        ownerPartyId_changeReason:
+            text(p.reason) || "Handed over from " + (people.personNames([p.fromPartyId])[p.fromPartyId] || p.fromPartyId)
+    })
+    return {transferred: true}
 }
 
 const operations = {
@@ -1333,7 +1649,14 @@ const operations = {
     getInterviewProjection,
     applicationAccess,
     contentAccess,
-    createApplicationFromEmail
+    createApplicationFromEmail,
+    createApplicationFromChat,
+    shareApplicationContent,
+    applicationFile,
+    findMyInterviews,
+    getMyInterview,
+    ownedOpenings: p => ({resourceList: ownedOpenings(p.partyId)}),
+    transferOpening
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown recruiting operation " + op)

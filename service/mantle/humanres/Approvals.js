@@ -24,6 +24,7 @@
 // notification of the kind's topic, which the framework's approve#NotificationMessage and refuse#NotificationMessage decide
 // through the domain's handlers; the notices are read once the step is decided or the request ends.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
+const recruiting = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 const ms = lib.ms
@@ -1318,6 +1319,12 @@ function findOwnedApprovals(p) {
             transferable: true,
             note: row.alternatePartyId === partyId && row.approverPartyId !== partyId ? "Alternate" : "Approver"
         })
+    // P16 (impl-people P16 review): the draft and open openings they are the recruiting owner of, handed to a new owner
+    try {
+        for (const row of Array.from(recruiting().execute("ownedOpenings", {partyId}).resourceList || [])) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The openings owned by " + account.userId + " could not be read: " + error.message)
+    }
     const pending = Array.from(find(APPROVAL).condition("statusId", "PapPending").limit(pendingCap).list())
     for (const approval of pending) {
         try {
@@ -1353,6 +1360,14 @@ function transferApprovalOwner(p) {
     const from = ownerAccount(text(p.fromUserId))
     const to = one("moqui.security.UserAccount", {userId: text(p.toUserId)})
     const resourceId = text(p.approvalResourceId)
+    // P16: an opening's recruiting owner (Recruiting.js transferOpening checks the operator or the employer's recruiter)
+    if (resourceId.startsWith("opening:"))
+        return recruiting().execute("transferOpening", {
+            jobOpeningId: resourceId.slice("opening:".length),
+            fromPartyId: from?.partyId || null,
+            toUserId: text(p.toUserId),
+            reason: p.reason
+        })
     if (resourceId.startsWith("approval:"))
         denied("NOT_TRANSFERABLE", "A waiting request follows its route; hand over the rule or reporting line instead")
     const row = resourceId.startsWith("policy:")

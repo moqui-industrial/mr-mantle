@@ -145,10 +145,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="Application" allow-remote="false">
         <description>An application the caller reads (RECORD_UNAVAILABLE otherwise, as a missing one): a recruiter of its employer
             reads everything (the applicant's email, source, referral, contact permission, notes, a possible duplicate, the files,
-            every interview and every scorecard with its answers), a panel member of one of its interviews the applicant's name, the
-            opening, the stage, the files and their interviews with their own scorecards only (myScorecards: to answer or
-            answered), never another reviewer's. The scorecards are the application's record: the framework's get#FormResponse is
-            never the way to read one.</description>
+            every interview and every scorecard with its answers, which files are shared with the panel), a panel member of one of
+            its interviews (the user's call of Nov 12, 2026) the applicant's name, the opening and its employer, the interviews they
+            are on the panel of with their own scorecards only (myScorecards: to answer or answered) and the files shared with the
+            panel (sharedFiles), never the stage, source, contact, notes, other files or interviews, nor another reviewer's
+            scorecard. The scorecards are the application's record: the framework's get#FormResponse is never the way to read one.</description>
         <in-parameters><parameter name="employmentApplicationId" required="true"/></in-parameters>
         <out-parameters><parameter name="application" type="Map"/></out-parameters>
         <actions>
@@ -277,10 +278,11 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="check" noun="ApplicationAccess" allow-remote="false">
-        <description>Whether the caller reads an application's files and activity, its content host (PE-01): a recruiter of its
-            employer, or a panel member of one of its interviews; canEdit for a recruiter with PEOPLE_RECRUIT_EDIT. Never refuses: a
-            missing application, or one not the caller's to read, answers recordVisible false, and so does a call with no user.
-            get#RecordLinkInfo and RecordFiles read it.</description>
+        <description>Whether the caller reads an application's record, its notes and files (its content host, PE-01): a
+            recruiter of its employer; canEdit for a recruiter with PEOPLE_RECRUIT_EDIT. A panel member reads none of it: they read
+            the application through get#Application and get#MyInterview and the shared files through get#ApplicationFile. Never
+            refuses: a missing application, or one not the caller's to read, answers recordVisible false, and so does a call with
+            no user. get#RecordLinkInfo and RecordFiles read it.</description>
         <in-parameters><parameter name="employmentApplicationId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="recordVisible" type="Boolean"/>
@@ -349,7 +351,7 @@ along with this software (see the LICENSE.md file). If not, see
             message, once (a message already an application answers it), becomes a Received application to its opening (the one the
             action's value names, else the open opening whose plus tag a To or Cc address carries) when the opening takes
             applications and the rule may file into it: the opening's intake account is the message's, or the rule's owner is its
-            recruiting owner and holds PEOPLE_RECRUIT_EDIT. The sender is the applicant (the person of the address, else a new
+            recruiting owner now, with an enabled account, PEOPLE_RECRUIT_EDIT and still working for the employer. The sender is the applicant (the person of the address, else a new
             person with the Applicant role), the subject the notes, the attachments the application's private files (the first its
             resume); a possible duplicate is flagged. Otherwise nothing is made and the reason is logged and answered.</description>
         <in-parameters>
@@ -370,6 +372,87 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="employmentApplicationId" from="out.employmentApplicationId"/>
             <set field="created" from="!!out.created"/>
             <set field="reason" from="out.reason"/>
+            <set field="duplicateOfApplicationId" from="out.duplicateOfApplicationId"/>
+        </actions>
+    </service>
+    <service verb="share" noun="ApplicationContent" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT of the employer) shares a file of an application with its interview panels
+            (shared true), or stops sharing it; the change is audit-logged. RECORD_UNAVAILABLE for a file not theirs to change,
+            as a missing one. A panel member reads only the shared files (the user's call of Nov 12, 2026).</description>
+        <in-parameters>
+            <parameter name="applicationContentId" required="true"/>
+            <parameter name="shared" type="Boolean" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="shared" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="shared" from="!!ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('shareApplicationContent', context).shared"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ApplicationFile" allow-remote="false">
+        <description>A file of an application to send: for a recruiter of its employer, or for a member of one of its interview
+            panels when it is shared with the panel; its location, file name and whether it may show inline (a raster image or a
+            PDF; anything else only downloads). RECORD_UNAVAILABLE otherwise, as for a missing one.</description>
+        <in-parameters><parameter name="applicationContentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="location"/>
+            <parameter name="fileName"/>
+            <parameter name="inline" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('applicationFile', context)"/>
+            <set field="location" from="out.location"/>
+            <set field="fileName" from="out.fileName"/>
+            <set field="inline" from="!!out.inline"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MyInterviews" allow-remote="false">
+        <description>The caller's own interviews (no party parameter; the user's call of Nov 12, 2026: a panel member answers from
+            their self-service, People/SelfService and Commons/People/SelfService): those they are on the panel of, coming or of the
+            last 30 days, and any older one whose scorecard is still to submit; each with when, the applicant's name, the opening,
+            its employer and the scorecard's state (toAnswerCount: those to submit). Nothing else of the application.</description>
+        <out-parameters>
+            <parameter name="interviews" type="List"/>
+            <parameter name="toAnswerCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('findMyInterviews', context)"/>
+            <set field="interviews" from="out.interviews"/>
+            <set field="toAnswerCount" from="out.toAnswerCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyInterview" allow-remote="false">
+        <description>One interview the caller is on the panel of (RECORD_UNAVAILABLE otherwise, as a missing one): when and
+            where (a video interview's call link), the note to the attendees, the panel, the applicant's name, the opening and its
+            employer, the files a recruiter shared with the panel and the caller's own scorecard (its form to answer once with
+            submit#Scorecard, or their answers). Never the application's stage, source, contact, notes or other files, nor another
+            reviewer's scorecard.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters><parameter name="interview" type="Map"/></out-parameters>
+        <actions>
+            <set field="interview" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('getMyInterview', context).interview"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ApplicationFromChat" allow-remote="false">
+        <description>The "Create application" create-from of a chat message (ironstone.comms.ChatServices.create#FromChat kind
+            application): a recruiter (PEOPLE_RECRUIT_EDIT) makes a Received application of the message's sender (never their own
+            message: NOT_AN_APPLICANT) to the opening of the room's record (a JobOpening's room), else the open opening whose plus
+            tag the message names (+tag), else the one open opening the caller owns (OPENING_REQUIRED), one the caller changes
+            (RECORD_UNAVAILABLE otherwise) that takes applications (OPENING_CLOSED); the message's first line its notes, its files
+            the application's private files (the first its resume, none shared with the panel). Once per message; a message of a
+            room the caller does not read is RECORD_UNAVAILABLE, one of an end-to-end encrypted room ROOM_ENCRYPTED.</description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="duplicateOfApplicationId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('createApplicationFromChat', context)"/>
+            <set field="employmentApplicationId" from="out.employmentApplicationId"/>
+            <set field="created" from="!!out.created"/>
             <set field="duplicateOfApplicationId" from="out.duplicateOfApplicationId"/>
         </actions>
     </service>

@@ -137,8 +137,9 @@ function requireEdit(registration) {
     return registration
 }
 // A form of a registered purpose (of purposes, when given) of one of the user's organizations for it, which the user may edit
-// (view: or read; permission false: the caller checked); a missing form, one of an unregistered or another purpose and another
-// organization's are refused alike.
+// (view: or read; permission false: the caller checked); a missing form, one of an unregistered or another purpose, one whose
+// purpose the user does not read and another organization's are refused alike (RECORD_UNAVAILABLE); a reader's change is
+// PERMISSION_DENIED.
 function formOf(formId, options = {}) {
     const form = blank(formId) ? null : one(FORM, {formId})
     const registration = form ? registrationOf(form.purposeEnumId) : null
@@ -148,14 +149,21 @@ function formOf(formId, options = {}) {
     if (!form || !registration || !form.ownerPartyId) unavailable()
     if (options.purposes && !options.purposes.includes(form.purposeEnumId)) unavailable()
     // permission false: the caller checks it (a case template's readers and its customer projection, CaseTemplates.js)
-    if (options.permission !== false && (options.view ? !canView(registration) : !canEdit(registration)))
-        denied("PERMISSION_DENIED", (options.view ? "Reading" : "Changing") + " this " + noun + " is not permitted")
+    if (options.permission !== false && !canView(registration)) unavailable()
     try {
         requireOrganization(registration, form.ownerPartyId)
     } catch (error) {
         unavailable()
     }
+    if (options.permission !== false && !options.view && !canEdit(registration))
+        denied("PERMISSION_DENIED", "Changing this " + noun + " is not permitted")
     return form
+}
+// A purpose built only through its app's own services (mantle.party.FormPurpose ownServices: Customer Service's case templates
+// and feedback, whose rules the generic services would skip) is made and changed there, never here.
+function requireGenericBuilder(registration) {
+    if (registration?.ownServices === "Y") denied("PURPOSE_UNAVAILABLE", "This kind of form is built in its own app, not here")
+    return registration
 }
 
 // ===== the form's rows =====
@@ -814,7 +822,7 @@ function makeForm(purposeEnumId, organizationPartyId, description, comments, nou
 // create#Form: a new form of a registered purpose for one of the user's organizations for it (its edit permission), its
 // fields drafts until published: none, or the published fields of another form of the same purpose and organization.
 function createForm(p) {
-    const registration = requireEdit(registrationOf(p.purposeEnumId))
+    const registration = requireGenericBuilder(requireEdit(registrationOf(p.purposeEnumId)))
     const noun = nounOf(registration)
     const organizationPartyId = requireOrganization(registration, p.organizationPartyId)
     let fields = []
@@ -840,7 +848,8 @@ function createForm(p) {
 }
 const editForm = p => {
     const form = formOf(p.formId)
-    return {form, noun: nounOf(registrationOf(form.purposeEnumId))}
+    const registration = requireGenericBuilder(registrationOf(form.purposeEnumId))
+    return {form, noun: nounOf(registration)}
 }
 function saveField(p) {
     const {form, noun} = editForm(p)
