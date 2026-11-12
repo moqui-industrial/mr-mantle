@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's recruiting (IronStone People design §5 Openings, ApplicantPipeline, ApplicantDetail, §13 InterviewsCalendar, §15, PE-04,
+    PE-24; impl-people P16; Recruiting.js): openings over approved active seats, applications and their stages, interviews (a
+    private event with a video call link and the iMIP invitation) and the panel's scorecards (forms of the interview scorecard
+    purpose, mantle.party.FormDefinitions, assigned to each reviewer with no link), the application's private files and mail
+    intake. A recruiter (PEOPLE_RECRUIT_VIEW, PEOPLE_RECRUIT_EDIT to change) of the employer in People's scope reads and changes
+    them; a panel member reads the applications they interview and their own scorecard. Each service checks itself, then reads
+    and writes with authorization off, and names no application group. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Openings" allow-remote="false">
+        <description>A recruiter's openings (PERMISSION_DENIED without PEOPLE_RECRUIT_VIEW) of the employers in scope (one asked for,
+            ORGANIZATION_DENIED outside): by state (draft and open unless asked), a title search ignoring case, or one by id; each
+            with its employer, owner, seats, dates, state (an open one past its closing is shown closed), mail intake tag, scorecard,
+            open and all applications, whether the caller changes it and its revision. Paged, an export up to the cap.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="jobOpeningId"/>
+            <parameter name="statusId"/>
+            <parameter name="includeClosed" type="Boolean"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="openings" type="List"/>
+            <parameter name="openingsCount" type="Integer"/>
+            <parameter name="openingsPageIndex" type="Integer"/>
+            <parameter name="openingsPageSize" type="Integer"/>
+            <parameter name="openingsPageMaxIndex" type="Integer"/>
+            <parameter name="openingsPageRangeLow" type="Integer"/>
+            <parameter name="openingsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('findOpenings', context)"/>
+            <script>for (const key of ['', 'Count', 'PageIndex', 'PageSize', 'PageMaxIndex', 'PageRangeLow', 'PageRangeHigh']) context['openings' + key] = found['openings' + key]</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Opening" allow-remote="false">
+        <description>A new opening (a draft, or open with action open) of an employer in the recruiter's scope, or a change of one at
+            the revision read (REVISION_CHANGED); action open, close or reopen. PEOPLE_RECRUIT_VIEW and PEOPLE_RECRUIT_EDIT. Its seats
+            (emplPositionIds) are approved active positions of the employer (POSITION_REQUIRED, POSITION_UNAVAILABLE,
+            POSITION_NOT_APPROVED), checked again when it opens; the owner works for the employer (OWNER_INVALID); the plus tag is
+            unique among draft and open openings (TAG_INVALID, TAG_TAKEN); the scorecard a published interview scorecard of the
+            employer (FORM_UNAVAILABLE); the closing after the opening (DATES_INVALID). Close keeps the applications.</description>
+        <in-parameters>
+            <parameter name="jobOpeningId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="title"/>
+            <parameter name="description" allow-html="safe"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="emplPositionIds"/>
+            <parameter name="internalOnly"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="intakePlusTag"/>
+            <parameter name="intakeEmailAccountId"/>
+            <parameter name="scorecardFormId"/>
+            <parameter name="action"><description>open, close or reopen</description></parameter>
+            <parameter name="changeReason"/>
+            <parameter name="revision"/>
+        </in-parameters>
+        <out-parameters><parameter name="jobOpeningId"/></out-parameters>
+        <actions>
+            <set field="jobOpeningId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('storeOpening', context).jobOpeningId"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Applications" allow-remote="false">
+        <description>A recruiter's applications (PERMISSION_DENIED without PEOPLE_RECRUIT_VIEW) of the employers in scope: of an opening
+            (RECORD_UNAVAILABLE outside), by stage (the open stages unless asked), an applicant name search ignoring case; each with
+            the applicant, opening, stage, owner, applied date, next interview, source, a possible duplicate, whether the caller
+            changes and moves it, and its revision; stages: the board's columns with their counts. Paged. Panel members read their
+            applications through get#Application, never this list.</description>
+        <in-parameters>
+            <parameter name="jobOpeningId"/>
+            <parameter name="statusId"><description>One stage, or a comma list</description></parameter>
+            <parameter name="includeClosed" type="Boolean"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applications" type="List"/>
+            <parameter name="applicationsCount" type="Integer"/>
+            <parameter name="applicationsPageIndex" type="Integer"/>
+            <parameter name="applicationsPageSize" type="Integer"/>
+            <parameter name="applicationsPageMaxIndex" type="Integer"/>
+            <parameter name="applicationsPageRangeLow" type="Integer"/>
+            <parameter name="applicationsPageRangeHigh" type="Integer"/>
+            <parameter name="stages" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('findApplications', context)"/>
+            <script>for (const key of ['', 'Count', 'PageIndex', 'PageSize', 'PageMaxIndex', 'PageRangeLow', 'PageRangeHigh']) context['applications' + key] = found['applications' + key]</script>
+            <set field="stages" from="found.stages"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Application" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT) records an application to an open opening of an employer in scope
+            (OPENING_CLOSED for one that takes none): the applicant a person chosen (one related to the employer: an employee, an
+            agent or an applicant to it; any other RECORD_UNAVAILABLE, as a missing one), else the person of the exact email given,
+            else a new person (NAME_REQUIRED) with the email, with the Applicant role; the source and the referring employee
+            (SOURCE_INVALID, REFERRER_INVALID), the contact permission and notes. Received; another open application of the person to
+            the employer is flagged (duplicateOfApplicationId), never merged.</description>
+        <in-parameters>
+            <parameter name="jobOpeningId" required="true"/>
+            <parameter name="applicantPartyId"/>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="emailAddress"/>
+            <parameter name="referredByEnumId"/>
+            <parameter name="referredByPartyId"/>
+            <parameter name="contactAllowed"/>
+            <parameter name="comments"/>
+            <parameter name="applicationDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="applicantPartyId"/>
+            <parameter name="duplicateOfApplicationId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('createApplication', context)"/>
+            <set field="employmentApplicationId" from="out.employmentApplicationId"/>
+            <set field="applicantPartyId" from="out.applicantPartyId"/>
+            <set field="duplicateOfApplicationId" from="out.duplicateOfApplicationId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Application" allow-remote="false">
+        <description>An application the caller reads (RECORD_UNAVAILABLE otherwise, as a missing one): a recruiter of its employer
+            reads everything (the applicant's email, source, referral, contact permission, notes, a possible duplicate, the files,
+            every interview and every scorecard with its answers), a panel member of one of its interviews the applicant's name, the
+            opening, the stage, the files and their interviews with their own scorecards only (myScorecards: to answer or
+            answered), never another reviewer's. The scorecards are the application's record: the framework's get#FormResponse is
+            never the way to read one.</description>
+        <in-parameters><parameter name="employmentApplicationId" required="true"/></in-parameters>
+        <out-parameters><parameter name="application" type="Map"/></out-parameters>
+        <actions>
+            <set field="application" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('getApplication', context).application"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Application" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT) changes an application at the revision read: another open opening of the same
+            employer (EMPLOYER_CHANGE, OPENING_CLOSED; a closed application keeps its opening), the source and referral, the contact
+            permission and notes.</description>
+        <in-parameters>
+            <parameter name="employmentApplicationId" required="true"/>
+            <parameter name="jobOpeningId"/>
+            <parameter name="referredByEnumId"/>
+            <parameter name="referredByPartyId"/>
+            <parameter name="contactAllowed"/>
+            <parameter name="comments"/>
+            <parameter name="revision"/>
+        </in-parameters>
+        <out-parameters><parameter name="employmentApplicationId"/></out-parameters>
+        <actions>
+            <set field="employmentApplicationId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('storeApplication', context).employmentApplicationId"/>
+        </actions>
+    </service>
+    <service verb="change" noun="ApplicationStage" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT) moves applications (employmentApplicationIds, or one at its revision) to a
+            stage, with the reason kept as the stage's audit change reason; each in its own transaction. A stage moves along its flow
+            (STAGE_INVALID, SAME_STAGE; a hired, refused or withdrawn one APPLICATION_CLOSED); Interview needs a scheduled interview
+            (INTERVIEW_REQUIRED), Offer an offer (OFFER_REQUIRED), and Hired is never a stage change (HIRED_BY_OFFER). Each refused or
+            failed application is named in failures with its code; the rest go on.</description>
+        <in-parameters>
+            <parameter name="employmentApplicationIds" type="List"/>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="revision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="changedIds" type="List"/>
+            <parameter name="failures" type="List"><description>employmentApplicationId, applicantName, code, message</description></parameter>
+            <parameter name="stageText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('changeApplicationStage', context)"/>
+            <set field="changedIds" from="out.changedIds"/>
+            <set field="failures" from="out.failures"/>
+            <set field="stageText" from="out.stageText"/>
+        </actions>
+    </service>
+
+    <service verb="schedule" noun="Interview" allow-remote="false">
+        <description>A recruiter (PEOPLE_RECRUIT_EDIT) schedules an interview of an application before its offer
+            (APPLICATION_CLOSED): a private event (WetEvent, WevRestricted) owned by the caller from startDate (DATE_PAST) for
+            durationMinutes (10 to 480, DURATION_INVALID), at a location or, with videoCall, on a call link
+            (org.moqui.call.CallServices.create#CallLink, in the event's location); the panel (panelPartyIds: employees of the
+            employer with an account, PANEL_REQUIRED, PANEL_INVALID) and with inviteCandidate the applicant (CANDIDATE_NO_EMAIL) as
+            attendees; each panel member assigned the scorecard (formId, else the opening's, else the employer's only published
+            interview scorecard; SCORECARD_REQUIRED, FORM_UNAVAILABLE) with no link. A received or screening application moves to
+            Interview. The invitations follow (mantle.work.EventServices.send#EventInvitations: users notified, the candidate
+            emailed with the .ics); a failure to send is named (invitationsSent false) and the interview stays.</description>
+        <in-parameters>
+            <parameter name="employmentApplicationId" required="true"/>
+            <parameter name="startDate" type="Timestamp" required="true"/>
+            <parameter name="durationMinutes" type="Integer"/>
+            <parameter name="panelPartyIds"/>
+            <parameter name="formId"/>
+            <parameter name="videoCall" type="Boolean"/>
+            <parameter name="location"/>
+            <parameter name="inviteCandidate" type="Boolean"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="invitationIds" type="List"/>
+            <parameter name="callPath"/>
+            <parameter name="invitationsSent" type="Boolean"/>
+            <parameter name="invitationProblem"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('scheduleInterview', context)"/>
+            <script>for (const key of ['workEffortId', 'invitationIds', 'callPath', 'invitationsSent', 'invitationProblem']) context[key] = out[key]</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="Scorecard" allow-remote="false">
+        <description>A panel member answers the scorecard assigned to them (invitationId: another's or a missing one is
+            RECORD_UNAVAILABLE), once (ALREADY_ANSWERED), the values checked against the form as of now (its show and require
+            rules and each value's type; FORM_VALUES_INVALID with the reasons) and kept as one FormResponse the invitation links;
+            the response is never changed after (FormPublication.eecas.xml).</description>
+        <in-parameters>
+            <parameter name="invitationId" required="true"/>
+            <parameter name="values" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invitationId"/>
+            <parameter name="formResponseId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('submitScorecard', context)"/>
+            <set field="invitationId" from="out.invitationId"/>
+            <set field="formResponseId" from="out.formResponseId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Interviews" allow-remote="false">
+        <description>InterviewsCalendar's items from start to end (days, yyyy-MM-dd, or instants): the interviews the caller is on
+            the panel of and, for a recruiter, those of the employers in scope, each "{applicant} · {opening}" (kind interview), never
+            cancelled ones.</description>
+        <in-parameters>
+            <parameter name="start"/>
+            <parameter name="end"/>
+        </in-parameters>
+        <out-parameters><parameter name="eventList" type="List"/></out-parameters>
+        <actions>
+            <set field="eventList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('findInterviews', context).eventList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="InterviewProjection" allow-remote="false">
+        <description>My interviews, a projected CalDAV collection (CalendarProjection PeopleMyInterviews): admitted for a user on an
+            interview panel; the interviews they are on the panel of, "Interview · {opening}", never the candidate's name, another
+            reviewer's scorecard or another opening's candidates.</description>
+        <implements service="mantle.work.CalendarDavServices.define#ProjectionOwner"/>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('getInterviewProjection', context)"/>
+            <set field="admitted" from="out.admitted"/>
+            <set field="eventList" from="out.eventList"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="ApplicationAccess" allow-remote="false">
+        <description>Whether the caller reads an application's files and activity, its content host (PE-01): a recruiter of its
+            employer, or a panel member of one of its interviews; canEdit for a recruiter with PEOPLE_RECRUIT_EDIT. Never refuses: a
+            missing application, or one not the caller's to read, answers recordVisible false, and so does a call with no user.
+            get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="employmentApplicationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('applicationAccess', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ApplicationContent">
+        <description>A private file of an application (its resume, a cover letter): the row, and the uploaded file saved through
+            save#ApplicationContentFile. A recruiter of the employer with PEOPLE_RECRUIT_EDIT (check#ApplicationAccess:
+            RECORD_UNAVAILABLE outside, PERMISSION_DENIED for a reader).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.employment.EmploymentApplicationContent" include="nonpk">
+                <exclude field-name="contentLocation"/><exclude field-name="userId"/></auto-parameters>
+            <parameter name="employmentApplicationId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="applicationContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('contentAccess', context)</script>
+            <set field="userId" from="ec.user.userId"/>
+            <set field="contentDate" from="contentDate || ec.user.nowTimestamp"/>
+            <if condition="!description &amp;&amp; contentFile != null"><set field="description" from="contentFile.getName()"/></if>
+            <service-call name="create#mantle.humanres.employment.EmploymentApplicationContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.RecruitingServices.save#ApplicationContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="ApplicationContentFile" allow-remote="false">
+        <description>Internal to create#ApplicationContent, which checks the caller: the file of an application's content
+            row.</description>
+        <in-parameters>
+            <parameter name="applicationContentId" required="true"/>
+            <parameter name="employmentApplicationId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.employment.EmploymentApplicationContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.employmentApplicationId != employmentApplicationId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${applicationContentId} is not of application ${employmentApplicationId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/employmentApplication/${employmentApplicationId}/content_${applicationContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.employment.EmploymentApplicationContent" disable-authz="true"
+                    in-map="{applicationContentId:applicationContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="ApplicationFromEmail" authenticate="anonymous-all" allow-remote="false">
+        <description>The createApplication action of the mail client's rules (EmailRuleAction ErActCreateApplication, F65; run by
+            org.moqui.mail.EmailClientServices.run#EmailRules with authorization off, so it checks itself what it does): a received
+            message, once (a message already an application answers it), becomes a Received application to its opening (the one the
+            action's value names, else the open opening whose plus tag a To or Cc address carries) when the opening takes
+            applications and the rule may file into it: the opening's intake account is the message's, or the rule's owner is its
+            recruiting owner and holds PEOPLE_RECRUIT_EDIT. The sender is the applicant (the person of the address, else a new
+            person with the Applicant role), the subject the notes, the attachments the application's private files (the first its
+            resume); a possible duplicate is flagged. Otherwise nothing is made and the reason is logged and answered.</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailRuleId"/>
+            <parameter name="ruleOwnerUserId"/>
+            <parameter name="value"><description>The opening (jobOpeningId), or empty for the plus tag</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentApplicationId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="duplicateOfApplicationId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js').execute('createApplicationFromEmail', context)"/>
+            <set field="employmentApplicationId" from="out.employmentApplicationId"/>
+            <set field="created" from="!!out.created"/>
+            <set field="reason" from="out.reason"/>
+            <set field="duplicateOfApplicationId" from="out.duplicateOfApplicationId"/>
+        </actions>
+    </service>
+</services>

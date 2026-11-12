@@ -137,6 +137,9 @@ const records = {
             if (!invitation || ["FinRevoked", "FinSuppressed", "FinFailed", "FinExpired"].includes(invitation.statusEnumId))
                 return null
             if (!internal(invitation.organizationPartyId) || !invitation.partyId || internal(invitation.partyId)) return null
+            // impl-people P16: a form whose purpose takes no invited recipients (People's private purposes) has no link
+            if (!ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js").linkAllowed(invitation.formId))
+                return null
             return {organizationPartyId: invitation.organizationPartyId, partyId: invitation.partyId}
         }
     },

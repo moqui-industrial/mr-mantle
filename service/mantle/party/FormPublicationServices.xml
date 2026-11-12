@@ -25,4 +25,21 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="formResponseId" required="true"/></in-parameters>
         <actions><script>ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').guardResponse(formResponseId)</script></actions>
     </service>
+    <service verb="open" noun="Publication" allow-remote="false">
+        <description>impl-people P16: the editor of a published form (its purpose's edit permission and organization,
+            mantle.party.FormDefinitions) offers it from now with an access kind (FpaInvited by default, FpaAnonymous,
+            FpaAccount) its purpose's registration admits (mantle.party.FormPurpose accessEnumIds), for the registered
+            publication purpose; refused PUBLICATION_NOT_OFFERED for a kind the purpose does not admit, so a form of a private
+            purpose (People's) is never published to anyone, FORM_NOT_PUBLISHED before its questions are. Once per form and
+            access kind while open. Marketing's publication services build on it (impl-marketing P12).</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="accessEnumId"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/></out-parameters>
+        <actions>
+            <set field="publicationId" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('openPublication', context).publicationId"/>
+        </actions>
+    </service>
 </services>
