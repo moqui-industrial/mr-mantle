@@ -3,7 +3,9 @@
 // PEOPLE_ALL_ORGANIZATIONS widening a staff read to every internal organization while reading nothing by itself; a person
 // admitted by employment and its dates (a directory reader the current employments, an HR reader the history too), by the live
 // reporting line and as self, and a person outside the scope refused as a missing one; Home's counts (distinct people against
-// employments, the joins and exits of 30 days, an HR reader's due work); and the setup readiness answering Admin's contract.
+// employments, the joins and exits of 30 days, an HR reader's due work); the setup readiness answering Admin's contract; and (P8)
+// the manager's team (their reports' employments at the employers of the lines, none at another) and their own self-service,
+// neither reading a supplied party.
 // Standalone: spec-local organizations, people, employments, groups and users, with artifact authorization disabled (the rules
 // are the services' own permission and scope checks).
 // Run: ./moq test mr-mantle --spec PeopleScope
@@ -253,7 +255,8 @@ feature(
         },
         then({hr, both, reader, other, editOnly}) {
             hr.error == ""
-            hr.counts == {headcount: 5, employments: 5, joins: 1, exits: 1}
+            // P8: the vacant seats too (none: the spec makes no position)
+            hr.counts == {headcount: 5, employments: 5, joins: 1, exits: 1, vacancies: 0}
             hr.hasEmployees == true
             hr.dueWorkCount == 4
             hr.dueWork.map(row => row.partyId).sort() == [state.DUAL, state.JOINED, state.MANAGER, state.UNMANAGED].sort()
@@ -297,6 +300,56 @@ feature(
             one.find(row => row.checkKey == "people.managers").message == "4 employees have no manager"
             hr.error.includes("PERMISSION_DENIED")
             outside.error.includes("ORGANIZATION_DENIED")
+        }
+    }
+)
+
+feature(
+    "a manager's team is their reports' employments at the employers of their lines, not a report's at another employer; self-service is the caller's own; a supplied party changes neither",
+    {
+        when() {
+            // the manager manages the person employed by A and B too: the line is at A, where both work
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtManager",
+                fromPartyId: state.MANAGER,
+                fromRoleTypeId: "Manager",
+                toPartyId: state.DUAL,
+                toRoleTypeId: "Employee",
+                fromDate: since
+            })
+            const rowsOf = out =>
+                (out.team || []).map(row => [row.partyId, row.organizationPartyId, row.availabilityText].join(" "))
+            const team = run(state.manager, S + "get#Team")
+            // a supplied party is not a parameter of either service: it is dropped and changes nothing
+            const forged = run(state.manager, S + "get#Team", {partyId: state.BETA, managerPartyId: state.BETA})
+            const self = run(state.manager, S + "get#SelfService", {partyId: state.REPORT})
+            return {
+                team: rowsOf(team),
+                ids: (team.team || []).filter(row => row.partyRelationshipId).length,
+                forged: rowsOf(forged),
+                readerTeam: run(state.reader, S + "get#Team").error,
+                self,
+                readerSelf: run(state.reader, S + "get#SelfService").error,
+                readerCheck: run(state.reader, S + "get#SelfService", {checkOnly: true}),
+                requests: run(state.manager, S + "find#MyRequests", {partyId: state.REPORT})
+            }
+        },
+        then({team, ids, forged, readerTeam, self, readerSelf, readerCheck, requests}) {
+            team == [state.DUAL + " " + orgA + " Working", state.REPORT + " " + orgA + " Working"]
+            ids == 0
+            forged == team
+            readerTeam.includes("PERMISSION_DENIED")
+            self.error == ""
+            self.partyId == state.MANAGER
+            self.employments.map(row => row.organizationPartyId) == [orgA]
+            self.emergencyContacts == []
+            readerSelf.includes("PERMISSION_DENIED")
+            readerCheck.error == ""
+            readerCheck.available == false
+            requests.error == ""
+            requests.requestsCount == 0
         }
     }
 )

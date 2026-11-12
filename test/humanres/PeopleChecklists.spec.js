@@ -328,6 +328,29 @@ feature(
             ]
             const phone = phoneTasks(state.uEmployee)
             out.phone = [phone.includes(keys?.workEffortId), phone.includes(handbook?.workEffortId)]
+            // P8: the offboarding task's assignee is told on PeopleTaskAssigned, whose title names neither the task nor the person,
+            // and not on the generic WorkItemAssigned, whose title would
+            const notices = topic =>
+                rows("moqui.security.user.NotificationMessageByUser", {userId: state.uEmployee, topic}).filter(
+                    row => row.recordId === keys?.workEffortId
+                )
+            const told = waitFor(() => notices("PeopleTaskAssigned")[0])
+            // P8: the leaver's own due work and self-service leave out the protected task assigned to them (P7's rule); HR of the
+            // employer reads it among the employer's lifecycle tasks
+            const dueIds = (user, kinds) =>
+                (run(user, P + "find#DueWork", {kinds, pageSize: 100}).dueWork || []).map(row => row.workEffortId)
+            const mine = dueIds(state.uEmployee, "myTask")
+            out.due = [
+                mine.includes(handbook?.workEffortId),
+                mine.includes(keys?.workEffortId),
+                run(state.uEmployee, P + "get#SelfService").openTaskCount,
+                dueIds(state.hr, "checklistTask").includes(keys?.workEffortId)
+            ]
+            out.notice = [
+                !!told,
+                notices("WorkItemAssigned").length,
+                /Nova|Offboarding|keys/i.test(String(told?.titleText || "")) ? told.titleText : ""
+            ]
             return out
         },
         then(out) {
@@ -340,6 +363,8 @@ feature(
             out.separated.join("|") === "||true"
             out.keys.join("|") === "true|Y"
             out.phone.join("|") === "false|true"
+            out.notice.join("|") === "true|0|"
+            out.due.join("|") === "true|false|1|true"
         }
     }
 )

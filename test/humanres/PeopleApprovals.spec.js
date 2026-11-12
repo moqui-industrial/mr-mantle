@@ -353,6 +353,16 @@ feature(
             const retried = ask()
             const again = code(ask({operationKey: "APR-SPEC-2"}))
             const waiting = notices(position.emplPositionId)
+            // P8: the decision waits on the department head alone (find#DueWork's decision), and the requester reads it among
+            // their own requests with who decides it
+            const dueOf = username =>
+                (run(username, "mantle.humanres.PeopleServices.find#DueWork", {kinds: "decision"}).dueWork || [])
+                    .filter(row => row.sourceId === position.emplPositionId)
+                    .map(row => row.title)
+            const due = {head: dueOf(state.uHEAD), other: dueOf(state.uAPPROVER)}
+            const mine = (run(state.hr, "mantle.humanres.PeopleServices.find#MyRequests").requests || [])
+                .filter(row => row.sourceId === position.emplPositionId)
+                .map(row => [row.statusText, row.nextApproverText].join(" | "))
             const message = ec.entity
                 .find("moqui.security.user.NotificationMessage")
                 .condition("notificationMessageId", waiting[state.uHEAD])
@@ -380,7 +390,10 @@ feature(
                 notificationMessageId: waiting[state.uHEAD]
             })
             const direct = run(state.uHEAD, S + "decide#PositionApproval", {emplPositionId: position.emplPositionId})
+            due.after = dueOf(state.uHEAD)
             return {
+                due,
+                mine,
                 refusals,
                 requested: [requested.error, requested.statusId, requested.unresolved, requested.waitingText],
                 retried: [retried.peopleApprovalId === requested.peopleApprovalId, retried.repeated],
@@ -402,6 +415,8 @@ feature(
             }
         },
         then({
+            due,
+            mine,
             refusals,
             requested,
             retried,
@@ -431,6 +446,8 @@ feature(
             direct == ["", true, false]
             count == 1
             unread == []
+            due == {head: ["Approve position Office clerk"], other: [], after: []}
+            mine == ["Waiting | Apr HEAD"]
         }
     }
 )
