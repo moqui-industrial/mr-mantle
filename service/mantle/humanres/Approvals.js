@@ -24,6 +24,7 @@
 // notification of the kind's topic, which the framework's approve#NotificationMessage and refuse#NotificationMessage decide
 // through the domain's handlers; the notices are read once the step is decided or the request ends.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
+const recruiting = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 const ms = lib.ms
@@ -36,6 +37,8 @@ const POSITION = "mantle.humanres.position.EmplPosition"
 const CHANGE = "mantle.humanres.employment.EmploymentChange"
 const LEAVE_REQUEST = "mantle.humanres.leave.LeaveRequest"
 const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
+const EXPENSE_CLAIM = "mantle.humanres.expense.ExpenseClaim"
+const EMPLOYEE_ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -180,6 +183,64 @@ const kinds = {
                     subjectText: "the attendance of " + personName + " on " + dayText + " (" + workedText + " h)",
                     organizationName: names[correction.organizationPartyId] || correction.organizationPartyId || "",
                     departmentName: correction.departmentPartyId ? names[correction.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P15: an expense claim (ExpenseServices.submit#Claim and decide#Claim). The request is bound to the claim's last change, so a
+    // withdrawal or a change of its lines supersedes it. What the notice's title says: the claim, the person, the employer and
+    // department; no amount, line or purpose (a lock-screen-safe title). Its detail shows the approver the claim's total (amount
+    // and currencyUomId, which the notification lists show beside the approval; the user's call, impl-people §4, Nov 12, 2026).
+    PakExpenseClaim: {
+        topic: "PeopleExpenseApproval",
+        sourceEntityName: EXPENSE_CLAIM,
+        sourceField: "invoiceId",
+        describe(sourceId) {
+            const claim = one(EXPENSE_CLAIM, {invoiceId: sourceId})
+            if (!claim) return {label: "expense claim " + sourceId}
+            const personName = people.personNames([claim.partyId])[claim.partyId] || claim.partyId
+            const names = people.organizationNames([claim.organizationPartyId, claim.departmentPartyId].filter(Boolean))
+            const invoice = one("mantle.account.invoice.Invoice", {invoiceId: sourceId})
+            const currencyUomId = invoice?.currencyUomId || null
+            return {
+                label: "expense claim " + sourceId + " of " + personName,
+                message: {
+                    invoiceId: sourceId,
+                    summary: "Claim total",
+                    amount: ec.l10n
+                        .roundCurrency(toDecimal(invoice?.invoiceTotal ?? 0), currencyUomId)
+                        .setScale(2, "HALF_UP")
+                        .toString(),
+                    currencyUomId,
+                    partyId: claim.partyId,
+                    personName,
+                    subjectText: "the expense claim " + sourceId + " of " + personName,
+                    organizationName: names[claim.organizationPartyId] || claim.organizationPartyId || "",
+                    departmentName: claim.departmentPartyId ? names[claim.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P15: an employee advance (ExpenseServices.request#Advance and decide#Advance), bound to the advance's last change. The notice
+    // names the person, the employer and department; no amount or purpose.
+    PakAdvance: {
+        topic: "PeopleAdvanceApproval",
+        sourceEntityName: EMPLOYEE_ADVANCE,
+        sourceField: "employeeAdvanceId",
+        describe(sourceId) {
+            const advance = one(EMPLOYEE_ADVANCE, {employeeAdvanceId: sourceId})
+            if (!advance) return {label: "employee advance " + sourceId}
+            const personName = people.personNames([advance.partyId])[advance.partyId] || advance.partyId
+            const names = people.organizationNames([advance.organizationPartyId, advance.departmentPartyId].filter(Boolean))
+            return {
+                label: "advance " + sourceId + " of " + personName,
+                message: {
+                    employeeAdvanceId: sourceId,
+                    partyId: advance.partyId,
+                    personName,
+                    subjectText: "an advance for " + personName,
+                    organizationName: names[advance.organizationPartyId] || advance.organizationPartyId || "",
+                    departmentName: advance.departmentPartyId ? names[advance.departmentPartyId] || "" : ""
                 }
             }
         }
@@ -1258,6 +1319,12 @@ function findOwnedApprovals(p) {
             transferable: true,
             note: row.alternatePartyId === partyId && row.approverPartyId !== partyId ? "Alternate" : "Approver"
         })
+    // P16 (impl-people P16 review): the draft and open openings they are the recruiting owner of, handed to a new owner
+    try {
+        for (const row of Array.from(recruiting().execute("ownedOpenings", {partyId}).resourceList || [])) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The openings owned by " + account.userId + " could not be read: " + error.message)
+    }
     const pending = Array.from(find(APPROVAL).condition("statusId", "PapPending").limit(pendingCap).list())
     for (const approval of pending) {
         try {
@@ -1293,6 +1360,14 @@ function transferApprovalOwner(p) {
     const from = ownerAccount(text(p.fromUserId))
     const to = one("moqui.security.UserAccount", {userId: text(p.toUserId)})
     const resourceId = text(p.approvalResourceId)
+    // P16: an opening's recruiting owner (Recruiting.js transferOpening checks the operator or the employer's recruiter)
+    if (resourceId.startsWith("opening:"))
+        return recruiting().execute("transferOpening", {
+            jobOpeningId: resourceId.slice("opening:".length),
+            fromPartyId: from?.partyId || null,
+            toUserId: text(p.toUserId),
+            reason: p.reason
+        })
     if (resourceId.startsWith("approval:"))
         denied("NOT_TRANSFERABLE", "A waiting request follows its route; hand over the rule or reporting line instead")
     const row = resourceId.startsWith("policy:")

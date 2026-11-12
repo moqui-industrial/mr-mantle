@@ -406,7 +406,9 @@ along with this software (see the LICENSE.md file). If not, see
             target's, ORGANIZATION_DENIED) as its RequestRecord, the summary its name (SUMMARY_REQUIRED), the observed time (not
             later than now, DATE_FUTURE) and the description, a priority 1 to 9, and a photo or other file (contentFile) as
             RequestContent. A retry under operationKey answers the first request (repeated). An urgent report blocks no
-            equipment.</description>
+            equipment. P19: the message it is reported from (a chat message by chatRoomId and eventSeq, a voicemail, or a mail),
+            read under its owner's check before anything is written (SOURCE_UNAVAILABLE, SOURCE_ENCRYPTED, ONE_SOURCE), and a chat
+            message or a mail filed on the request as a communication event (MaintenanceStack.js).</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="assetId"/>
@@ -417,6 +419,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="priority"/>
             <parameter name="contentFile" type="FileItem"/>
             <parameter name="operationKey"/>
+            <parameter name="chatRoomId"/>
+            <parameter name="eventSeq" type="Integer"/>
+            <parameter name="voicemailId"/>
+            <parameter name="emailMessageId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="requestId"/>
@@ -778,6 +784,117 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="workList" type="List"/></out-parameters>
         <actions>
             <set field="workList" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('requestWork', context).workList"/>
+        </actions>
+    </service>
+
+    <!-- ===== P19: the stack contributions (design §1.4, §12; MT-12, MT-16): Report a problem from a message, the two projected
+        calendars, calendar files and the video call, in MaintenanceStack.js ===== -->
+    <service verb="get" noun="MaintenanceProblemSource" allow-remote="false" read-only="true">
+        <description>The message a problem is reported from, to prefill Commons' Report a problem (the Comms actions on a chat
+            message, a voicemail and a mail; the user's call of Nov 12): read under its owner's own check (a room the user reads, the
+            user's own voicemail, a mail the user reads; SOURCE_UNAVAILABLE otherwise, SOURCE_ENCRYPTED for an end-to-end encrypted
+            room, ONE_SOURCE for two), as a summary (the first line or the subject), a description (the text or the transcript) and
+            what it is (sourceText), for a holder of MAINTENANCE_REQUEST (PERMISSION_DENIED). sourceKind null when none is named.
+            Nothing is written.</description>
+        <in-parameters>
+            <parameter name="chatRoomId"/>
+            <parameter name="eventSeq" type="Integer"/>
+            <parameter name="voicemailId"/>
+            <parameter name="emailMessageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sourceKind"/>
+            <parameter name="summary"/>
+            <parameter name="description"/>
+            <parameter name="sourceText"/>
+            <parameter name="attachmentNames" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceStack.js').execute('problemSource', context)"/>
+            <set field="sourceKind" from="answer.sourceKind"/>
+            <set field="summary" from="answer.summary"/>
+            <set field="description" from="answer.description"/>
+            <set field="sourceText" from="answer.sourceText"/>
+            <set field="attachmentNames" from="answer.attachmentNames"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceWorkProjection" allow-remote="false" read-only="true">
+        <description>My work orders, a projected CalDAV collection (MaintenanceStackData.xml's CalendarProjection MaintenanceMyWork;
+            impl-people P12's kind): admitted is whether the user reads maintenance work (MAINTENANCE_VIEW or
+            MAINTENANCE_ASSIGNED_VIEW); without checkOnly, the open work orders assigned to the user whose planned window meets start
+            through end (epoch millis; 30 days back to 90 ahead when none), each as "Work order {id}: {name} · {target}" over its
+            planned window (an hour when it has no due), tentative while on hold. No cost, no reporter.</description>
+        <implements service="mantle.work.CalendarDavServices.define#ProjectionOwner"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceStack.js').execute('workProjection', context)"/>
+            <set field="admitted" from="answer.admitted"/>
+            <set field="eventList" from="answer.eventList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceDueProjection" allow-remote="false" read-only="true">
+        <description>Due PM for my teams, a projected CalDAV collection (CalendarProjection MaintenanceTeamDue): admitted is whether
+            the user reads the plans (MAINTENANCE_VIEW, as Plans does); without checkOnly, the next calendar due of the active plans of
+            the user's maintenance scope (MaintenancePlanServices.find#MaintenanceDue) planned from start through end, of the teams
+            the user is a member of, else of every team, each as "Due: {plan} · {target}" for an hour at its planned time. A meter
+            plan has no date and is left out. No cost.</description>
+        <implements service="mantle.work.CalendarDavServices.define#ProjectionOwner"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceStack.js').execute('dueProjection', context)"/>
+            <set field="admitted" from="answer.admitted"/>
+            <set field="eventList" from="answer.eventList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceCalendarFile" allow-remote="false" read-only="true">
+        <description>A calendar file (.ics, PUBLISH) of a work order the user reads (requireWork), its planned window through
+            mantle.work.EventServices.get#EventIcsMaps titled "Work order {id}: {name}" (NOT_SCHEDULED with no planned window), or of
+            a plan's next calendar due (get#MaintenanceDue; NO_DUE_DATE for a meter plan or an unknown due). ICALENDAR_UNAVAILABLE
+            when the tool is off, never an empty file. No cost.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="maintenanceScheduleId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fileName"/>
+            <parameter name="text"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceStack.js').execute('calendarFile', context)"/>
+            <set field="fileName" from="answer.fileName"/>
+            <set field="text" from="answer.text"/>
+        </actions>
+    </service>
+    <service verb="add" noun="MaintenanceVideoCall" allow-remote="false">
+        <description>A video call about a work order (design §1.4 Meetings): a Commons event, the user its organizer, related to the
+            work order (WeatRelatesTo), its join link a call link (org.moqui.call.CallServices.create#CallLink: lobby, video) as
+            the event's infoUrl and in its description; the attendee (a vendor's expert, with an account or an email address,
+            ATTENDEE_UNREACHABLE otherwise) and the work order's current technicians invited through
+            mantle.work.EventServices.send#EventInvitations (a party with no account gets the iMIP invitation by mail). For a
+            planner or supervisor of the work order or its assigned technician (PERMISSION_DENIED), not of a closed or cancelled
+            one (WORK_CLOSED); a start not in the past (DATE_PAST), 5 minutes to 8 hours (30 by default). A retry under
+            operationKey answers the first call.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="attendeePartyId"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="durationMinutes" type="Integer"/>
+            <parameter name="note"/>
+            <parameter name="eventUrl"><description>The event's screen, for the invitations' link</description></parameter>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="eventWorkEffortId"/>
+            <parameter name="callLinkId"/>
+            <parameter name="joinUrl"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceStack.js').execute('addVideoCall', context)"/>
+            <set field="eventWorkEffortId" from="answer.eventWorkEffortId"/>
+            <set field="callLinkId" from="answer.callLinkId"/>
+            <set field="joinUrl" from="answer.joinUrl"/>
+            <set field="skippedCount" from="answer.skippedCount"/>
+            <set field="repeated" from="!!answer.repeated"/>
         </actions>
     </service>
 </services>

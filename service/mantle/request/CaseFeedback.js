@@ -21,9 +21,13 @@
 // - A response that answers an invitation is never changed (FormPublication.eecas.xml).
 // Each service checks its permission and organization (SupportCases.js); refusals carry reason codes, the page's are PASS error
 // kinds. Nothing acts on an organization with no policy.
+// impl-people P16 (F51, F62): the builder is mantle.party.FormDefinitions (FormDefinitions.js), a feedback form a form of the
+// registered purpose DbfpCaseFeedback (mantle.party.FormPurpose); the feedback form services keep their names and add the case
+// defaults: the purpose, the rating, every field customer-visible and SUPPORT_POLICY_EDIT.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
 const templates = ec.resource.script("component://mr-mantle/service/mantle/request/CaseTemplates.js")
+const forms = ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
 const publications = ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js")
 const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
 const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -102,7 +106,7 @@ function ratingOf(fields) {
     }
     return null
 }
-const formFields = (formId, asOfDate = null, drafts = false) => templates.formAt(formId, asOfDate, drafts)
+const formFields = (formId, asOfDate = null, drafts = false) => forms.formAt(formId, asOfDate, drafts)
 // The default form: a required rating 1 to 5 (or 1 to 3), an optional reason and comment, and the customer's consent to be
 // contacted about the answer.
 function seedFields(scale) {
@@ -177,19 +181,14 @@ function createFeedbackForm(p) {
         if (scale !== 5 && scale !== 3) denied("SCALE_INVALID", "The rating is 1 to 5 or 1 to 3")
         fields = seedFields(scale)
     }
-    const formId = call("create#" + FORM, {
-        purposeEnumId: PURPOSE,
-        isDated: "Y",
-        ownerPartyId: organizationPartyId,
-        description: description.substring(0, 255),
-        comments: text(p.comments)
-    }).formId
-    for (const field of fields) templates.execute("saveField", Object.assign({formId, audienceEnumId: CUSTOMER}, field))
+    const formId = forms.makeForm(PURPOSE, organizationPartyId, description, p.comments)
+    const form = one(FORM, {formId})
+    for (const field of fields) forms.saveFieldOf(form, Object.assign({formId, audienceEnumId: CUSTOMER}, field))
     return {formId}
 }
-// The problems of a feedback form as of a date (drafts too by default): a case template's (CaseTemplates.js) and no rating.
+// The problems of a feedback form as of a date (drafts too by default): a form's (FormDefinitions.js) and no rating.
 function problemsOf(formId, asOfDate = null, drafts = true) {
-    const problems = templates.problemsOf(formId, asOfDate, drafts)
+    const problems = forms.problemsOf(formId, asOfDate, drafts)
     if (!ratingOf(formFields(formId, asOfDate, drafts)))
         problems.push({
             code: "RATING_REQUIRED",
@@ -207,19 +206,20 @@ function publishFeedbackForm(p) {
     const out = call(S + "publish#DbForm", {formId: form.formId, fromDate: p.fromDate || null})
     return {formId: form.formId, publishedFieldNames: Array.from(out.publishedFieldNames || [])}
 }
-// A field, option or condition of a feedback form, through the case template rules, every field customer-visible.
+// A field, option or condition of a feedback form, by the form definition rules (FormDefinitions.js), every field
+// customer-visible, with SUPPORT_POLICY_EDIT.
 function saveField(p) {
-    feedbackForm(p.formId)
-    const parameters = Object.assign({}, p, {audienceEnumId: CUSTOMER})
-    return templates.execute("saveField", parameters)
+    cases.requirePermission("SUPPORT_POLICY_EDIT")
+    const form = feedbackForm(p.formId)
+    return forms.saveFieldOf(form, Object.assign({}, p, {audienceEnumId: CUSTOMER}))
 }
 function saveCondition(p) {
-    feedbackForm(p.formId)
-    return templates.execute("saveCondition", p)
+    cases.requirePermission("SUPPORT_POLICY_EDIT")
+    return forms.saveConditionOf(feedbackForm(p.formId), p)
 }
 function endPart(p) {
-    feedbackForm(p.formId)
-    return templates.execute("endPart", p)
+    cases.requirePermission("SUPPORT_POLICY_EDIT")
+    return forms.endPartOf(feedbackForm(p.formId), p)
 }
 function rename(p) {
     cases.requirePermission("SUPPORT_POLICY_EDIT")

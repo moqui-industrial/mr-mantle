@@ -43,8 +43,9 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="PartyCapacity">
         <description>The capacity of people from fromDate to thruDate (days, inclusive; at most 400 days), each {partyId, source
-            (schedule: a People working schedule plans some day, impl-people P9; available: their WetAvailable working hours; policy:
-            the timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
+            (schedule: a People working schedule or a published shift plans some day, impl-people P9 and P14: a shift's hours
+            replace the schedule's that day and no holiday takes it; available: their WetAvailable working hours; policy: the
+            timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
             and leave), holiday (its name or null), leave (hours), capacity, workingScheduleId (the schedule that planned the day, or
             null)}], weekList [{weekStart, base, holidayHours, leaveHours, capacity, workDays}], base, capacity}. With no partyId and
             no partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
@@ -138,7 +139,8 @@ capacityList = []
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                 return Array.from(out?.eventList || [])
             }
-            // People's working schedules (impl-people P9): the days each person's schedule plans, read once for every party
+            // People's working schedules (impl-people P9) and published shifts (P14): the days each person's schedule or shifts
+            // plan, read once for every party
             const schedules = ec.resource.script('component://mr-mantle/service/mantle/humanres/Schedules.js')
             let plannedByParty = {}
             const entryOf = (person) => {
@@ -205,7 +207,8 @@ capacityList = []
                 }
                 const dayList = days.map((day, i) => {
                     const plannedDay = planned ? planned[day] : null
-                    const holiday = holidays[day] || (plannedDay ? plannedDay.holidayCategoryIds.map((id) => calendarHolidays[id]?.[day]).find((name) => name) : null) || null
+                    // a published shift's day (impl-people P14) is worked as rostered: no holiday takes it
+                    const holiday = plannedDay?.shift ? null : holidays[day] || (plannedDay ? plannedDay.holidayCategoryIds.map((id) => calendarHolidays[id]?.[day]).find((name) => name) : null) || null
                     const off = holiday ? base[i] : Math.min(base[i], round(leave[i]))
                     return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: holiday ? 0 : off,
                         capacity: round(Math.max(0, base[i] - off)), workingScheduleId: plannedDay ? plannedDay.workingScheduleId : null}
@@ -1122,7 +1125,10 @@ const L = (text) => ec.l10n.localize(text)
             user sees, they are on), costRate and costCurrencyUomId (the person's current vendor rate, RateAmount RaprVendor, only
             withRates for ADMIN and holders of TIME_ENTRY_RATE; an employee's is the employee's pay, null for one without
             PAYROLL_VIEW: mantle.humanres.EmploymentServices.get#PayRateAccess)}. The allocation itself is not counted against its
-            own person.
+            own person. IronStone People (impl-people P18, its SkillsMatrix's FindAvailable; an owner contract with Projects, whose
+            callers pass neither): partyIdList bounds the people to those given (the people of the caller's People scope), and
+            each candidate's skillSelfDeclared says the skill's level is the person's own claim (PartySkill sourceEnumId
+            SksSelfDeclared), which People labels and no requirement takes.
         </description>
         <in-parameters>
             <parameter name="workEffortAllocationId"/>
@@ -1134,6 +1140,7 @@ const L = (text) => ec.l10n.localize(text)
             <parameter name="skillTypeEnumId"/>
             <parameter name="limit" type="Integer" default="20"/>
             <parameter name="withRates" type="Boolean" default="false"/>
+            <parameter name="partyIdList" type="List"><description>Only these people (IronStone People's scope, P18)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="candidateList" type="List"/>
@@ -1177,6 +1184,9 @@ candidateList = []
                 const roleHolders = new Set()
                 if (role) for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('roleTypeId', role).conditionDate('fromDate', 'thruDate', null)
                         .selectField('partyId').list()) { roleHolders.add(row.partyId); pool.add(row.partyId) }
+                // People's FindAvailable bounds the pool to the people of its scope (impl-people P18)
+                const bounded = partyIdList != null ? new Set(Array.from(partyIdList).map(String)) : null
+                if (bounded) for (const id of Array.from(pool)) if (!bounded.has(id)) pool.delete(id)
                 let people = pool.size ? Array.from(ec.entity.find('mantle.party.Person').condition('partyId', 'in', Array.from(pool)).selectField('partyId').list()).map((row) => row.partyId) : []
                 if (allocation.partyId) people = people.filter((id) => id !== allocation.partyId || allocation.statusId === 'WealRequested')
                 if (!people.length) return
@@ -1221,7 +1231,8 @@ candidateList = []
                                 .list()).filter((row) => row.isTemplate !== 'Y' && (all || visible.has(row.workEffortId))).map((row) => row.workEffortName || row.workEffortId))).sort()
                         const skillRow = skillRows[person]
                         const rating = skillRow ? Number(String(skillRow.rating ?? skillRow.skillLevel ?? 0)) : null
-                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating, hasRole: roleHolders.has(person),
+                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating,
+                            skillSelfDeclared: skillRow?.sourceEnumId === 'SksSelfDeclared', hasRole: roleHolders.has(person),
                             fits: shortWeeks === 0 && needHours > 0, shortWeeks: shortWeeks, freeHours: round(freeHours), needHours: round(needHours),
                             minFreeWeek: minFree == null ? null : round(minFree), currentProjects: projects, costRate: null, costCurrencyUomId: null}
                         if (showRates && !payHidden.has(person)) {
