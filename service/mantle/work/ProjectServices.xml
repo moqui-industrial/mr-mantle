@@ -4152,7 +4152,9 @@ along with this software (see the LICENSE.md file). If not, see
             actualClientCost, rolled up from the time; profit; budget used and remaining); what was billed (the project's client invoices
             not cancelled: invoiced, paid, open; a list of them), the expenses (expense invoices on the project: total, billed through),
             the unbilled time (get#UnbilledSummary), the order lines and the milestone shares (get#MilestoneBilling: contracted, shared,
-            billed, due). BigDecimal amounts in currencyUomId. For those who manage money and see the project; else an error.</description>
+            billed, due), and the maintenance work charged to the project with its cost by currency (maintenanceList,
+            maintenanceTotalList; impl-maintenance P11). BigDecimal amounts in currencyUomId. For those who manage money and see the
+            project; else an error.</description>
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="summary" type="Map"/></out-parameters>
         <actions><script><![CDATA[
@@ -4222,6 +4224,14 @@ along with this software (see the LICENSE.md file). If not, see
                 const budget = D(project.totalClientCostAllowed)
                 const actualClient = D(project.actualClientCost)
                 const actualCost = D(project.actualCost)
+                // impl-maintenance P11 (owner contract, design-projects §4): the maintenance work charged to the project, its parts,
+                // labor and outside service by currency; a failure leaves it out, logged, and the rest of the money stands
+                let maintenance = {workList: [], totalList: []}
+                try {
+                    maintenance = ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceCosts.js').projectCosts(workEffortId)
+                } catch (error) {
+                    ec.logger.error('Project ' + workEffortId + ': its maintenance cost is left out: ' + (error && error.message ? error.message : error))
+                }
                 summary = {workEffortId: workEffortId, currencyUomId: uom, clientPartyId: clientPartyId, clientName: nameOf(clientPartyId), vendorPartyId: vendorPartyId,
                     hoursBudget: project.totalTimeAllowed != null ? D(project.totalTimeAllowed) : null, clientBudget: project.totalClientCostAllowed != null ? budget : null,
                     estimatedHours: D(project.estimatedWorkTime), actualHours: D(project.actualWorkTime), remainingHours: D(project.remainingWorkTime),
@@ -4234,7 +4244,8 @@ along with this software (see the LICENSE.md file). If not, see
                     invoiced: invoiced, paid: paid, openReceivable: open, invoiceList: invoices, expenseTotal: expenseTotal, expenseBilled: expenseBilled, expenseList: expenses,
                     unbilledHours: unbilled ? D(unbilled.hours) : zero, unbilledAmount: unbilled ? D(unbilled.amount) : zero, readyAmount: unbilled ? D(unbilled.readyAmount) : zero,
                     readyHours: unbilled ? D(unbilled.readyHours) : zero, unbilledExpenses: unbilled ? D(unbilled.expenseAmount) : zero, unbilled: unbilled,
-                    contracted: contracted, sharesDue: sharesDue, sharesBilled: sharesBilled, shareList: shares, lineList: lines}
+                    contracted: contracted, sharesDue: sharesDue, sharesBilled: sharesBilled, shareList: shares, lineList: lines,
+                    maintenanceList: maintenance.workList, maintenanceTotalList: maintenance.totalList}
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
         ]]></script></actions>
     </service>

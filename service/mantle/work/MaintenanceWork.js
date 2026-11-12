@@ -11,8 +11,9 @@
 //   the commit time over an entered finish (F7). A held order remembers where it was and resumes there.
 // - Approval: corrective work created or triaged by a planner or supervisor is approved on create; template, preventive and
 //   planned work above the organization's threshold in hours (MaintenancePolicy, zero by default: all of it) needs a
-//   supervisor; work with no estimated hours is over it. The estimate is the root's with its steps' (P6, F107). The cost half
-//   is P11's.
+//   supervisor; work with no estimated hours is over it. The estimate is the root's with its steps' (P6, F107). P11: where the
+//   policy sets an estimated-cost threshold, the work's estimated cost is computed when asked and never stored
+//   (MaintenanceCosts.js), and an estimate that cannot be priced is over it; the planner is told only that a supervisor approves.
 // - From a procedure (P6, design §4.2): create takes templateWorkEffortId and makes the root and its steps in its transaction
 //   through ProcessServices' checked path (MaintenanceProcedures.js: approved, effective, applicable to the target, the caller's
 //   instantiation permission), the procedure of the work's organization; the root then becomes the work order. A procedure's
@@ -45,6 +46,8 @@ const checks = () => ec.resource.script("component://mr-mantle/service/mantle/wo
 const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/work/WorkProcesses.js")
 // P9: the cost centre and project a work order is charged to (MaintenanceMaterials.js)
 const materials = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceMaterials.js")
+// P11: the threshold's cost half
+const costs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceCosts.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -167,7 +170,9 @@ const defaultPolicy = {
     productionRequestsManaged: false,
     warrantyRepairsManaged: false,
     procedureSelfApproval: false,
-    voiceNoteTranscription: false
+    voiceNoteTranscription: false,
+    approvalThresholdCost: null,
+    approvalThresholdCurrencyUomId: null
 }
 // The policy in effect for an organization, or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
@@ -188,6 +193,9 @@ function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
         warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
         procedureSelfApproval: flag(row.procedureSelfApproval),
         voiceNoteTranscription: flag(row.voiceNoteTranscription),
+        // P11: the estimated-cost threshold, unset by default (compared only where set), in its currency or the organization's
+        approvalThresholdCost: number(row.approvalThresholdCost),
+        approvalThresholdCurrencyUomId: row.approvalThresholdCurrencyUomId || null,
         comments: row.comments || null
     }
 }
@@ -195,6 +203,11 @@ function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
 function withinThreshold(policy, hours) {
     const threshold = Number(policy.approvalThresholdHours || 0)
     return threshold > 0 && hours != null && Number(String(hours)) <= threshold
+}
+// P11: within both halves, the hours and, where the policy sets one, the estimated cost (computed now, never stored; unknown is
+// over it). rootId is null for ad hoc work not made yet.
+function withinThresholds(policy, organizationPartyId, rootId, hours) {
+    return withinThreshold(policy, hours) && costs().withinCostThreshold(policy, organizationPartyId, rootId, hours)
 }
 function policyOrganization(userScope, organizationPartyId) {
     const id = text(organizationPartyId)
@@ -206,6 +219,9 @@ function getPolicy(p) {
     const userScope = scopeWithAny(["settingsEdit", "anyRead"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
     const policy = policyOf(organizationPartyId)
+    // P11: the cost threshold is the settings editor's and the cost reader's to read
+    if (!userScope.capabilities.settingsEdit && !userScope.capabilities.costView)
+        Object.assign(policy, {approvalThresholdCost: null, approvalThresholdCurrencyUomId: null})
     return {
         policy: Object.assign({}, policy, {
             fromDateText: dateText(policy.fromDate),
@@ -227,9 +243,13 @@ function storePolicy(p) {
     const teamId = text(p.defaultTeamPartyId)
     if (teamId) requireTeam(organizationPartyId, teamId)
     const now = ec.user.nowTimestamp
+    // P11: the cost threshold is store#MaintenanceCostThreshold's; this write keeps it
+    const kept = policyOf(organizationPartyId, now)
     for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", now).list()))
         call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: now})
     call("create#" + POLICY, {
+        approvalThresholdCost: kept.approvalThresholdCost,
+        approvalThresholdCurrencyUomId: kept.approvalThresholdCurrencyUomId,
         organizationPartyId,
         fromDate: now,
         approvalThresholdHours: threshold,
@@ -566,7 +586,7 @@ function makeOrder(userScope, target, p, options) {
         options.statusId ||
         ((kind === "MkCorrective" && !instantiatedId) ||
         userScope.capabilities.supervise ||
-        withinThreshold(policy, totalHours)
+        withinThresholds(policy, target.organizationPartyId, instantiatedId, totalHours)
             ? "WeApproved"
             : "WeInPlanning")
     const rootFields = {
@@ -950,7 +970,8 @@ function refusalOf(userScope, ctx, action) {
             if (caps.supervise) return null
             if (
                 caps.plan &&
-                ((kind === "MkCorrective" && !order.procedureWorkEffortId) || withinThreshold(policy, treeHours(root.workEffortId)))
+                ((kind === "MkCorrective" && !order.procedureWorkEffortId) ||
+                    withinThresholds(policy, ctx.organizationPartyId, root.workEffortId, treeHours(root.workEffortId)))
             )
                 return null
             return {
@@ -1715,5 +1736,8 @@ const operations = {
     },
     // P4: for Mantle's own callers only (MaintenanceIntake.js), never a service's parameters
     adoptForOwner,
-    policyOf
+    policyOf,
+    // P11: for MaintenanceCosts.js's report and estimate only
+    scopedQuery,
+    treeHours
 })

@@ -13,14 +13,16 @@ along with this software (see the LICENSE.md file). If not, see
 <http://creativecommons.org/publicdomain/zero/1.0/>.
 -->
 <!-- Maintenance settings (IronStone Maintenance design §9 Settings, §13.2 MaintenanceSettingsServices; impl-maintenance P3): an
-    organization's work policy (MaintenancePolicy), a dated row a change ends and starts, in MaintenanceWork.js. Readiness, teams
+    organization's work policy (MaintenancePolicy), a dated row a change ends and starts, in MaintenanceWork.js; its cost
+    threshold (P11) in MaintenanceCosts.js. Readiness, teams
     and lookups join in their phases (P8, P18). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
             zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
-            self-approval and no voice note transcription.
+            self-approval, no voice note transcription and no cost threshold. The cost threshold (approvalThresholdCost and its
+            currency, P11) is answered to a settings editor or a cost reader only.
             canEdit says whether the user may change it.</description>
         <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
         <out-parameters>
@@ -39,7 +41,8 @@ along with this software (see the LICENSE.md file). If not, see
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
             requests and warranty repairs become managed work, whether a procedure's last author may approve it
             (procedureSelfApproval, off by default; impl-maintenance P6), and whether a checklist step's voice note is transcribed
-            (voiceNoteTranscription, off by default; impl-maintenance P7 review).</description>
+            (voiceNoteTranscription, off by default; impl-maintenance P7 review). The cost threshold in effect is kept
+            (store#MaintenanceCostThreshold changes it).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="approvalThresholdHours"/>
@@ -58,6 +61,28 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('storePolicy', context)"/>
+            <set field="fromDate" from="answer.fromDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceCostThreshold" allow-remote="false">
+        <description>The planned-work approval threshold's cost half from now (impl-maintenance P11, §4; MAINTENANCE_SETTINGS_EDIT; the
+            organization in the user's scope, ORGANIZATION_DENIED): planned work whose estimated cost (its planned parts at their
+            approved standard cost, its estimated hours at the costing rate) is above the amount, or cannot be priced, needs a
+            supervisor's approval. An empty amount unsets it (not compared); the currency is the organization's base currency when
+            empty (a currency, VALUE_INVALID otherwise). The policy row in effect ends and the next starts with its other fields as
+            they were.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="approvalThresholdCost"/>
+            <parameter name="approvalThresholdCurrencyUomId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceCosts.js').execute('storeCostThreshold', context)"/>
             <set field="fromDate" from="answer.fromDate"/>
         </actions>
     </service>
