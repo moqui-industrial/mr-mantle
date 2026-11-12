@@ -173,6 +173,10 @@ function issue(scope, p, preference, action) {
     const record = scope.record
     if (!draftStatuses.includes(record.statusId)) denied("STATE_TRANSITION_INVALID", "This invoice cannot be finalized now")
     if (!scope.receivable) lib.requireNotHeld(record.invoiceId)
+    // People P15 (design-people §9, design-accounting §5 ExpensePosting): an employee's expense claim is approved for payment only
+    // once its business approval is done and no payroll run has reserved it; the approval reserves it for accounts payable
+    if (!scope.receivable)
+        ec.resource.script("component://mr-mantle/service/mantle/humanres/Expense.js").financeApproval(record.invoiceId)
     if (!find("mantle.account.invoice.InvoiceItem", {invoiceId: record.invoiceId}).count())
         denied("INVOICE_EMPTY", "An invoice needs at least one line")
     if (lib.totals(record).invoiceTotal.compare(0) < 0) denied("INVOICE_NEGATIVE", "Reverse a negative draft before finalizing")

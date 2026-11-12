@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's recruiting (IronStone People design §5 Openings, ApplicantPipeline, ApplicantDetail, §13 InterviewsCalendar, PE-04,
+    PE-24; impl-people P16, F9, F11): a job opening of an employer over one or more of its approved active seats, the
+    applications to it (EmploymentApplication with its opening, the Applicant role and its status flow Received, Screening,
+    Interview, Offer, Hired, with Refused and Withdrawn), an application's private files (its content host) and its interviews
+    (a private WetEvent with the panel's scorecards: FormInvitation rows of a form of the interview scorecard purpose, each
+    naming its reviewer and the application). Written only by mantle.humanres.RecruitingServices (Recruiting.js); an
+    application is never deleted, a closed opening keeps its applications. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="JobOpening" package="mantle.humanres.recruitment" cache="never">
+        <description>An opening: the text an employer recruits with (title, description), its recruiting owner, the seats it
+            fills (JobOpeningPosition: approved active positions of the employer), whether it is internal only, its state (Draft,
+            Open, Closed: a closed opening takes no new application and keeps its applications) and its dates (opened, closing),
+            its mail intake (the plus tag of the recruiting mailbox, intakePlusTag, and the mail account it is taken from,
+            intakeEmailAccountId) and the scorecard form its interviews use by default. Not a public posting: the careers page is
+            later (PASS).</description>
+        <field name="jobOpeningId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="title" type="text-medium" enable-audit-log="update"/>
+        <field name="description" type="text-very-long"/>
+        <field name="ownerPartyId" type="id" enable-audit-log="update"><description>The recruiting owner</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="internalOnly" type="text-indicator"/>
+        <field name="fromDate" type="date-time"><description>Open from</description></field>
+        <field name="thruDate" type="date-time" enable-audit-log="update"><description>Closing</description></field>
+        <field name="intakePlusTag" type="text-short"/>
+        <field name="intakeEmailAccountId" type="id"/>
+        <field name="scorecardFormId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Owner" related="mantle.party.Party" short-alias="owner">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="JobOpening" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one-nofk" title="Scorecard" related="moqui.screen.form.DbForm" short-alias="scorecardForm">
+            <key-map field-name="scorecardFormId" related="formId"/></relationship>
+        <relationship type="many" related="mantle.humanres.recruitment.JobOpeningPosition" short-alias="positions">
+            <key-map field-name="jobOpeningId"/></relationship>
+        <index name="JOB_OPEN_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="JOB_OPEN_TAG"><index-field name="intakePlusTag"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Job Opening" statusTypeId="JobOpening"/>
+            <moqui.basic.StatusItem statusId="JoDraft" statusTypeId="JobOpening" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="JoOpen" statusTypeId="JobOpening" sequenceNum="2" description="Open"/>
+            <moqui.basic.StatusItem statusId="JoClosed" statusTypeId="JobOpening" sequenceNum="3" description="Closed"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="JoDraft" toStatusId="JoOpen" transitionName="Open"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="JoOpen" toStatusId="JoClosed" transitionName="Close"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="JoClosed" toStatusId="JoOpen" transitionName="Reopen"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="JobOpeningPosition" package="mantle.humanres.recruitment" cache="never">
+        <description>A seat an opening fills: an approved active position (EmpsActive) of the opening's employer.</description>
+        <field name="jobOpeningId" type="id" is-pk="true"/>
+        <field name="emplPositionId" type="id" is-pk="true"/>
+        <relationship type="one" related="mantle.humanres.recruitment.JobOpening" short-alias="opening"/>
+        <relationship type="one" related="mantle.humanres.position.EmplPosition" short-alias="position"/>
+    </entity>
+    <extend-entity entity-name="EmploymentApplication" package="mantle.humanres.employment">
+        <field name="jobOpeningId" type="id"><description>The opening applied to (impl-people P16)</description></field>
+        <field name="organizationPartyId" type="id"><description>The opening's employer</description></field>
+        <field name="contactAllowed" type="text-indicator"><description>Y: the applicant agreed to be contacted about other
+            openings</description></field>
+        <field name="emailMessageId" type="id"><description>The message an application by mail was made from, once</description></field>
+        <field name="duplicateOfApplicationId" type="id"><description>Another application of the same person to the same
+            employer, open when this one was made: flagged for review, never merged</description></field>
+        <field name="comments" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="sourceKey" type="text-medium"><description>The chat message an application was made from (chat:room:seq),
+            once (create#ApplicationFromChat)</description></field>
+        <relationship type="one-nofk" related="mantle.humanres.recruitment.JobOpening" short-alias="opening"/>
+        <index name="EMPL_APP_OPENING"><index-field name="jobOpeningId"/><index-field name="statusId"/></index>
+        <index name="EMPL_APP_EMAIL"><index-field name="emailMessageId"/></index>
+        <index name="EMPL_APP_PARTY"><index-field name="applyingPartyId"/></index>
+        <index name="EMPL_APP_SOURCE"><index-field name="sourceKey"/></index>
+    </extend-entity>
+    <entity entity-name="EmploymentApplicationContent" package="mantle.humanres.employment" cache="never">
+        <description>A private file of an application (its resume, a cover letter; the application's content host, PE-01): read
+            and added only by a recruiter of its employer (mantle.humanres.RecruitingServices.check#ApplicationAccess), never on
+            the applicant's Party record or a public link. A recruiter shares a file with the interview panel (panelShared Y; none
+            is shared by default, the resume of a mail application either): a panel member reads the shared files of the
+            applications they interview, and no other (get#ApplicationFile; the user's call of Nov 12, 2026).</description>
+        <field name="applicationContentId" type="id" is-pk="true"/>
+        <field name="employmentApplicationId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="contentDate" type="date-time"/>
+        <field name="userId" type="id"/>
+        <field name="panelShared" type="text-indicator" enable-audit-log="update"><description>Y: shared with the
+            application's interview panels</description></field>
+        <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
+        <relationship type="one" title="EmploymentApplicationContentType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <index name="EMPL_APP_CONTENT"><index-field name="employmentApplicationId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Application Content Type" enumTypeId="EmploymentApplicationContentType"/>
+            <moqui.basic.Enumeration enumId="EactResume" description="Resume" sequenceNum="1" enumTypeId="EmploymentApplicationContentType"/>
+            <moqui.basic.Enumeration enumId="EactCoverLetter" description="Cover letter" sequenceNum="2" enumTypeId="EmploymentApplicationContentType"/>
+            <moqui.basic.Enumeration enumId="EactOther" description="Other" sequenceNum="9" enumTypeId="EmploymentApplicationContentType"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ApplicationInterview" package="mantle.humanres.recruitment" cache="never">
+        <description>An interview of an application: its private event (a WetEvent, WevRestricted, owned by who scheduled it,
+            with the panel and the candidate as its attendees), the scorecard form the panel answers (each reviewer's
+            FormInvitation, recordEntityName EmploymentApplication, contextEntityName WorkEffort) and the video call link
+            when it has one (org.moqui.call CallLink; its token is only in the invitation the attendees get).</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="employmentApplicationId" type="id"/>
+        <field name="jobOpeningId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="formId" type="id"/>
+        <field name="callLinkId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="event"/>
+        <relationship type="one" related="mantle.humanres.employment.EmploymentApplication" short-alias="application"/>
+        <index name="APP_INTERVIEW_APP"><index-field name="employmentApplicationId"/></index>
+    </entity>
+</entities>

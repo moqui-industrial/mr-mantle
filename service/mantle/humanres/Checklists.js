@@ -620,12 +620,7 @@ function getChecklistTask(p) {
     if (!task || !run) unavailable()
     const fact = one(STEP, {workEffortId}) || {}
     const partyId = ec.user.userAccount?.partyId || null
-    // a protected task (offboarding, an equipment return) is reached only by a current assignee who is not the person it is about
-    // (hiddenTaskIds): never by the holder of a return task's equipment, a party of it in the holding's role (P7 review, F22)
-    const isParty =
-        fact.isProtected === "Y"
-            ? !!partyId && !hiddenTaskIds([workEffortId], partyId).length
-            : !!partyId && rows(PARTY, {workEffortId, partyId}).some(row => (ms(row.thruDate) ?? Infinity) > nowMs())
+    const isParty = isTaskParty(fact, workEffortId, partyId)
     const hr = !!userScope.capabilities.hrView && userScope.organizationPartyIds.includes(run.organizationPartyId)
     const employee = partyId === run.partyId && fact.visibilityEnumId === "ChvEmployee"
     if (!isParty && !hr && !employee) unavailable()
@@ -694,6 +689,8 @@ function getChecklistTask(p) {
                   stepsText: ""
               }
     }
+    // P16 review: the exit interview, a form of that purpose answered once on the task (exitInterviewOf)
+    if (fact.sourceLinkEnumId === "ClsExitInterview") out.exitInterview = exitInterviewOf(run, workEffortId, isParty, hr)
     // the checklist's other tasks, for the next step
     out.siblings = Array.from(
         find(WORK).condition("rootWorkEffortId", run.workEffortId).orderBy(["sequenceNum", "workEffortId"]).limit(30).list()
@@ -705,6 +702,100 @@ function getChecklistTask(p) {
             done: !openStatuses.includes(row.statusId)
         }))
     return out
+}
+
+// Whether a person is one of a task's current people: a protected task (offboarding, an equipment return) is reached only by a
+// current assignee who is not the person it is about (hiddenTaskIds): never by the holder of a return task's equipment, a party of
+// it in the holding's role (P7 review, F22).
+function isTaskParty(fact, workEffortId, partyId) {
+    if (!partyId) return false
+    return fact.isProtected === "Y"
+        ? !hiddenTaskIds([workEffortId], partyId).length
+        : rows(PARTY, {workEffortId, partyId}).some(row => (ms(row.thruDate) ?? Infinity) > nowMs())
+}
+
+// ===== the exit interview (P7's link kind ClsExitInterview; impl-people P16 review) =====
+// A checklist step that links an exit interview is answered on its task with a form of the exit interview purpose (DbfpExitInterview,
+// mantle.party.FormDefinitions; built under People's Forms): the employer's only published one, or the one already answered. One of
+// the task's people (whoever holds the interview, or the leaver when the step is theirs) records the leaver's answers once, kept as a
+// FormInvitation naming the leaver and the task with no link (the purpose admits no publication); the answers are read by the
+// task's people and the employer's HR readers (the purpose's PEOPLE_HR_VIEW), never through another app nor the framework's
+// get#FormResponse.
+const EXIT_PURPOSE = "DbfpExitInterview"
+const INVITATION = "mantle.party.FormInvitation"
+const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
+const exitKey = workEffortId => "exit:" + workEffortId
+function exitForm(organizationPartyId) {
+    try {
+        return forms().publishedFormFor(EXIT_PURPOSE, organizationPartyId)
+    } catch (error) {
+        return null
+    }
+}
+function exitInterviewOf(run, workEffortId, isParty, hr) {
+    const invitation = one(INVITATION, {invitationKey: exitKey(workEffortId)})
+    const answered = !!invitation?.formResponseId
+    const formId = invitation?.formId || exitForm(run.organizationPartyId)
+    let answers = []
+    if (answered && (isParty || hr)) {
+        const response = one("moqui.screen.form.FormResponse", {formResponseId: invitation.formResponseId})
+        const responseMap = {}
+        for (const answer of rows("moqui.screen.form.FormResponseAnswer", {formResponseId: invitation.formResponseId}))
+            responseMap[answer.fieldName] = answer.valueText
+        answers = response ? forms().answersOf(invitation.formId, response.responseDate, responseMap) : []
+    }
+    return {
+        formId: formId || null,
+        answered,
+        canAnswer: isParty && !answered && !!formId,
+        stateText: answered
+            ? "Recorded " + dateText(invitation.responseDate)
+            : formId
+              ? "Not recorded yet"
+              : "No exit interview form: publish one under People settings, Forms",
+        answers
+    }
+}
+// submit#ExitInterview: one of the task's people records the leaver's exit interview on a task whose step links one, once
+// (ALREADY_ANSWERED), with the employer's published exit interview form (FORM_REQUIRED for none or several), the values checked
+// against it (FORM_VALUES_INVALID). Anyone else, and a task of no such step, is refused alike (RECORD_UNAVAILABLE).
+function submitExitInterview(p) {
+    const workEffortId = text(p.workEffortId)
+    const task = workEffortId ? one(WORK, {workEffortId}) : null
+    const run = task ? one(RUN, {workEffortId: task.rootWorkEffortId || task.workEffortId}) : null
+    const fact = task ? one(STEP, {workEffortId}) : null
+    const partyId = ec.user.userAccount?.partyId || null
+    if (!run || fact?.sourceLinkEnumId !== "ClsExitInterview" || !isTaskParty(fact, workEffortId, partyId))
+        denied("RECORD_UNAVAILABLE", "Task " + workEffortId + " is not available in People")
+    const key = exitKey(workEffortId)
+    const earlier = find(INVITATION, {invitationKey: key}).forUpdate(true).one()
+    if (earlier?.formResponseId) denied("ALREADY_ANSWERED", "The exit interview was recorded " + dateText(earlier.responseDate))
+    const formId = earlier?.formId || exitForm(run.organizationPartyId)
+    if (!formId) denied("FORM_REQUIRED", "Publish one exit interview form of the employer under People settings, Forms")
+    const values = typeof p.values === "string" ? lib.json(p.values, {}) : Object.assign({}, p.values || {})
+    const formResponseId = forms().recordAnswer(formId, values)
+    const answered = {formResponseId, responseDate: ec.user.nowTimestamp, statusEnumId: "FinResponded"}
+    if (earlier) call("update#" + INVITATION, Object.assign({invitationId: earlier.invitationId}, answered))
+    else
+        call(
+            "create#" + INVITATION,
+            Object.assign(
+                {
+                    formId,
+                    organizationPartyId: run.organizationPartyId,
+                    partyId: run.partyId,
+                    contactPartyId: partyId,
+                    contextEntityName: RELATIONSHIP,
+                    contextId: run.partyRelationshipId || null,
+                    recordEntityName: WORK,
+                    recordId: workEffortId,
+                    invitationKey: key,
+                    createdDate: ec.user.nowTimestamp
+                },
+                answered
+            )
+        )
+    return {workEffortId, formResponseId}
 }
 
 // ===== equipment =====
@@ -971,6 +1062,7 @@ const operations = {
     startEquipmentReturn,
     completeReturnTasks,
     getChecklistTask,
+    submitExitInterview,
     getAssignedEquipment,
     getEquipmentCustody,
     returnEquipment

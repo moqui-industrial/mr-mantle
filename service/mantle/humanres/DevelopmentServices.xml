@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's skills and qualifications (IronStone People design §10 SkillsMatrix and Qualifications, §4 Employee360
+    SkillsAndReviews, §16.2, PE-14, PE-01; impl-people P18; Development.js): a person's skill levels with each self-declaration and
+    evaluation kept, their qualifications (degrees, certificates, licences, identity documents and work permits) submitted and
+    verified by someone other than the person, renewed by a new row, with files on their own content host, and their resume
+    lines; the job classes' and work efforts' requirements they are checked against. Each service checks the caller's People
+    scope (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application
+    group. The levels of what a reader sees of a person: the person and HR of an employer of theirs everything (an identity
+    document's or work permit's reference and the files theirs alone); development every field but those references; a manager
+    and other staff readers the verified qualifications' validity only. check#Qualifications is the staffing answer (Maintenance's
+    technician assignment reads it, and Projects and Manufacturing may): qualified, expiring, missing or expired per requirement,
+    never a reference, issuer or file. P19 (training) and P20 (reviews) add their services here. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== qualifications ===== -->
+    <service verb="find" noun="Qualifications" allow-remote="false">
+        <description>The qualifications the caller reads, each as their level of projection shows it: the caller's own (mine, with
+            PEOPLE_SELF_SERVICE), one person's (partyId), one qualification (partyQualificationId), or those of everyone the
+            caller's scope reaches (a staff reader's employers' current employees, organizationPartyId narrowing them; a manager's
+            live reports). The person and HR of an employer of theirs read every field (the reference of an identity document or
+            work permit theirs alone); development every field but those references; a manager and other staff readers only
+            verified qualifications, as their type, dates and validity. show: all, waiting (submitted, not decided), valid,
+            expiring (verified, expiring within thirty days), expired, attention (verified and expiring or expired, not renewed by
+            a later verified one); qualificationTypeEnumId narrows to a type and those under it, term to the people named. Paged,
+            with an export (pageNoLimit). Refuses a caller who reads no one (PERMISSION_DENIED), a person or qualification not in
+            scope (RECORD_UNAVAILABLE), an employer outside it (ORGANIZATION_DENIED) and a show that is not one (SHOW_INVALID).</description>
+        <in-parameters>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="partyQualificationId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="show"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="qualifications" type="List"><description>partyQualificationId, partyId, personName,
+                qualificationTypeEnumId, typeText, restricted, fromDateText, thruDateText, verificationStatusId, verificationText,
+                validity and validityText (verified ones), canVerify, canChange, canReadFiles, revision; for the person, HR and
+                development also title, issuerName, referenceNumber (null where not theirs to read), submittedDateText,
+                verifiedDateText, decisionReason, comments, renewsQualificationId</description></parameter>
+            <parameter name="qualificationsCount" type="Integer"/>
+            <parameter name="qualificationsPageIndex" type="Integer"/>
+            <parameter name="qualificationsPageSize" type="Integer"/>
+            <parameter name="qualificationsPageMaxIndex" type="Integer"/>
+            <parameter name="qualificationsPageRangeLow" type="Integer"/>
+            <parameter name="qualificationsPageRangeHigh" type="Integer"/>
+            <parameter name="canSubmit" type="Boolean"><description>Whether the caller submits their own</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('findQualifications', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Qualification" allow-remote="false">
+        <description>A qualification submitted (partyId, the caller's own when empty), or one waiting or rejected changed and
+            submitted again (partyQualificationId, at the revision read): its type, title, issuer, reference, issued and expiry
+            dates and comments, and the earlier qualification it renews; it waits for verification. Submitted by the person, an HR
+            editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer of theirs, or a development editor (PEOPLE_DEVELOP_VIEW and
+            PEOPLE_DEVELOP_EDIT) for a type that is not an identity document or work permit. Refuses a person or qualification not
+            in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no type, not one or ended (TYPE_REQUIRED,
+            TYPE_INVALID, VALUE_ENDED), an identity document or work permit with no expiry (EXPIRY_REQUIRED), an expiry not after
+            the issue (DATES_INVALID), a renewal of another person's or kind's (RENEWAL_INVALID), a change of a verified or revoked
+            one, which is renewed instead (QUALIFICATION_DECIDED), and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="partyId"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="title"/>
+            <parameter name="issuerName"/>
+            <parameter name="referenceNumber"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="renewsQualificationId"/>
+            <parameter name="comments"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeQualification', context)"/>
+            <set field="partyQualificationId" from="stored.partyQualificationId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="verify" noun="Qualification" allow-remote="false">
+        <description>A waiting qualification verified (decision verify) or rejected (reject), or a verified one revoked (revoke),
+            at the revision read; the state is audit-logged with the reason. A verifier is an HR editor of an employer of the
+            person, or a development editor for a type that is not an identity document or work permit, and never the person.
+            Refuses one not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), the caller's own (SELF_APPROVAL), a
+            decision that is not one (DECISION_INVALID), verifying or rejecting one not waiting (NOT_PENDING), revoking one not
+            verified (NOT_VERIFIED), a rejection or revocation with no reason (REASON_REQUIRED) and a revision other than the one
+            read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="decision"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="verificationStatusId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('verifyQualification', context)"/>
+            <set field="verificationStatusId" from="decided.verificationStatusId"/>
+            <set field="revision" from="decided.revision"/>
+        </actions>
+    </service>
+
+    <!-- the qualification's content host (PE-01; impl-people P18, as P2's employment host and F66) -->
+    <service verb="check" noun="QualificationAccess" allow-remote="false">
+        <description>Whether the caller reads a qualification's files: the person and an HR reader (PEOPLE_HR_VIEW) of an employer
+            of theirs in scope; canEdit for an HR editor of another person's, and for the person while it waits or was rejected.
+            Never refuses: a qualification that is not one, or not the caller's to read, answers recordVisible false, and so does a
+            call with no user. get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="partyQualificationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('qualificationAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="QualificationContent">
+        <description>A file of a qualification (PartyQualificationContent, the record files of get#RecordLinkInfo): the row, and
+            the uploaded file saved through save#QualificationContentFile. Needs the person while it waits or was rejected, or an HR
+            editor of an employer of theirs (check#QualificationAccess: RECORD_UNAVAILABLE outside the scope, PERMISSION_DENIED
+            otherwise).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.ability.PartyQualificationContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyQualificationContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.ability.PartyQualificationContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.DevelopmentServices.save#QualificationContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="QualificationContentFile" allow-remote="false">
+        <description>Internal to create#QualificationContent, which checks the caller: the file of a PartyQualificationContent row
+            of that qualification.</description>
+        <in-parameters>
+            <parameter name="partyQualificationContentId" required="true"/>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.ability.PartyQualificationContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.partyQualificationId != partyQualificationId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${partyQualificationContentId} is not of qualification ${partyQualificationId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/qualification/${partyQualificationId}/content_${partyQualificationContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.ability.PartyQualificationContent" disable-authz="true"
+                    in-map="{partyQualificationContentId:partyQualificationContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <!-- ===== the staffing check ===== -->
+    <service verb="check" noun="Qualifications" allow-remote="false">
+        <description>Whether people meet requirements at a date (asOfDate, the planned work date; now when empty): those of a job
+            class (emplPositionClassId), a work effort's skill standards (workEffortId, their minimumSkillLevel), or one skill
+            (skillTypeEnumId, minimumLevel) and qualification type (qualificationTypeEnumId); with none named, each person's own
+            job class's. For each person (partyIdList or partyId, up to 500) each requirement is qualified, expiring (a verified
+            qualification expiring within thirty days), missing or expired, with the reason in words ("Self-declared only",
+            "Waiting for verification", "Expired 2026-10-01", a level below the least), and the person's state is the worst of
+            the required ones. A self-declared level and an unverified, rejected or revoked qualification meet nothing. The
+            staffing projection, the same for every caller: never a reference, issuer, title, decision reason or file. A person
+            the caller's People scope does not admit answers state unavailable and nothing else; a caller with no People reach is
+            refused (PERMISSION_DENIED), and a job class that is not one (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="partyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="minimumLevel"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="asOfDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>partyId, personName, state, stateText, requirements: [{skillTypeEnumId,
+                skillName, minimumLevel, minimumLevelText, qualificationTypeEnumId, qualificationTypeName, required, state, stateText,
+                explanation, validThruText}]</description></parameter>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('checkQualifications', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <!-- ===== skills ===== -->
+    <service verb="store" noun="Skill" allow-remote="false">
+        <description>A person's level of a skill (skillLevel, a SkillLevel value's number) as a self-declaration (the person,
+            PEOPLE_SELF_SERVICE; the caller's own skill is always one) or an evaluation (a development editor, PEOPLE_DEVELOP_EDIT,
+            reading the person as a development reader of an employer of theirs or as their manager; or, the user's call of Nov 12,
+            2026, a manager of a live reporting line without PEOPLE_DEVELOP_EDIT, recorded as the manager's evaluation,
+            SksManagerEvaluated, which meets a requirement as an evaluation does), with its date (now when empty, never later),
+            evidence and a qualification of the person it rests on; each kept as a PartySkillEvaluation, the caller its assessor.
+            PartySkill takes an evaluation, and a self-declaration only where no evaluation or earlier recorded level has set it
+            (accepted says which). Refuses a person not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no skill, not one or
+            ended (SKILL_REQUIRED, SKILL_INVALID, VALUE_ENDED), a level that is not a current one (LEVEL_INVALID), a date after now
+            (DATE_INVALID), evidence that is not the person's (QUALIFICATION_INVALID) and a revision other than the one read
+            (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="skillLevel"/>
+            <parameter name="evaluationDate" type="Timestamp"/>
+            <parameter name="evidence"/>
+            <parameter name="partyQualificationId"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partySkillEvaluationId"/>
+            <parameter name="accepted" type="Boolean"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeSkill', context)"/>
+            <set field="partySkillEvaluationId" from="stored.partySkillEvaluationId"/>
+            <set field="accepted" from="stored.accepted"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SkillsMatrix" allow-remote="false">
+        <description>People by skill: the requirements of a job class (emplPositionClassId), else one skill (skillTypeEnumId), else
+            the requirements of the page's people's job classes and the skills they hold, as columns; each cell the person's level
+            (self-declared labelled so) and whether it meets the person's requirement (met, gap, held, none), a requirement a
+            qualification proves with that qualification's validity. The people: a development or HR reader's employers' current
+            employees (organizationPartyId narrows them) and a manager's live reports, narrowed to a unit and the units under it
+            (unitPartyId, current memberships), a job class and a name (term); paged by person. Refuses a caller who reads no one's
+            skills (PERMISSION_DENIED) and an employer outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="unitPartyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="columns" type="List"><description>skillTypeEnumId, skillName, minimumLevel, minimumLevelText,
+                qualificationTypeEnumId, qualificationTypeName, required</description></parameter>
+            <parameter name="rows" type="List"><description>partyId, personName, jobText, gapCount, canEvaluate, cells: [{skillTypeEnumId,
+                level, levelText, selfDeclared, sourceText, revision, minimumLevel, required, state, qualificationState,
+                stateText}]</description></parameter>
+            <parameter name="peopleCount" type="Integer"/>
+            <parameter name="peoplePageIndex" type="Integer"/>
+            <parameter name="peoplePageSize" type="Integer"/>
+            <parameter name="peoplePageMaxIndex" type="Integer"/>
+            <parameter name="peoplePageRangeLow" type="Integer"/>
+            <parameter name="peoplePageRangeHigh" type="Integer"/>
+            <parameter name="canEvaluate" type="Boolean"/>
+            <parameter name="levelOptions" type="List"/>
+            <parameter name="asOfText"/>
+            <parameter name="scopePartyIds" type="List"><description>Every person the filters keep, on every page: the people a
+                caller bounds a staffing search to (People's FindAvailable)</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('getSkillsMatrix', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+
+    <!-- ===== a person's development record (Employee360 SkillsAndReviews) ===== -->
+    <service verb="get" noun="PersonDevelopment" allow-remote="false">
+        <description>A person's skills (level, self-declared or evaluated, when), qualifications (as find#Qualifications projects
+            them for the caller, with their expiry) and resume lines, for Employee360's Skills and reviews: the person, a manager,
+            development and HR read the skills; the person, HR and development the resume; a manager and other staff readers the
+            verified qualifications alone. With what the caller may change: declare (the person), evaluate (a development editor,
+            or a manager of a live line), submit a qualification, change the resume. Refuses a person not in scope (RECORD_UNAVAILABLE); checkOnly answers
+            visible false instead.</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="checkOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visible" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="skills" type="List"/>
+            <parameter name="qualifications" type="List"/>
+            <parameter name="resumeLines" type="List"/>
+            <parameter name="showsSkills" type="Boolean"/>
+            <parameter name="showsResume" type="Boolean"/>
+            <parameter name="canDeclare" type="Boolean"/>
+            <parameter name="canEvaluate" type="Boolean"/>
+            <parameter name="canSubmit" type="Boolean"/>
+            <parameter name="canEditResume" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('personDevelopment', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ResumeLine" allow-remote="false">
+        <description>A resume line (PartyResume) added (partyId, the caller's own when empty), changed (partyResumeId) or removed
+            (remove) by the person or an HR or development editor of an employer of theirs: its type (experience, education,
+            other), organization, role, dates and description. Refuses a person or line not in scope (RECORD_UNAVAILABLE), another
+            caller (PERMISSION_DENIED), a type that is not one (TYPE_INVALID), no organization or role (DESCRIPTION_REQUIRED) and
+            an end before the start (DATES_INVALID).</description>
+        <in-parameters>
+            <parameter name="partyResumeId"/>
+            <parameter name="partyId"/>
+            <parameter name="resumeLineTypeEnumId"/>
+            <parameter name="organizationName"/>
+            <parameter name="title"/>
+            <parameter name="fromDate" type="Date"/>
+            <parameter name="thruDate" type="Date"/>
+            <parameter name="description"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyResumeId"/></out-parameters>
+        <actions>
+            <set field="partyResumeId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeResumeLine', context).partyResumeId"/>
+        </actions>
+    </service>
+
+    <!-- ===== expiry reminders (the daily ServiceJob send_QualificationExpiryReminders, PeopleDevelopmentSetupData.xml) ===== -->
+    <service verb="send" noun="ExpiryReminders" allow-remote="false" authenticate="anonymous-all" transaction-timeout="1800">
+        <description>Each verified qualification expiring within thirty days and not renewed by a later verified one, whose person
+            was not yet reminded of that expiry, reminded once (the QualificationExpiring topic, to the person's own accounts: its
+            type and expiry, never its reference) and marked (reminderThruDate); each in its own transaction, a failing one logged
+            by its id and the rest going on. A rerun sends nothing again for the same expiry.</description>
+        <out-parameters>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="sent" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('sendExpiryReminders', context)"/>
+            <set field="sentCount" from="sent.sentCount"/>
+            <set field="failedCount" from="sent.failedCount"/>
+        </actions>
+    </service>
+</services>
