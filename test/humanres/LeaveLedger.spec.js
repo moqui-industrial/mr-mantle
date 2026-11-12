@@ -98,6 +98,9 @@ spec({
         state.danEmp = employ(state.dan, orgA)
         state.mgr = person("MGR")
         employ(state.mgr, orgA)
+        // Eve works for B: Retail's HR names her employment and is answered as for one that does not exist
+        state.eve = person("EVE")
+        state.eveEmp = employ(state.eve, orgB)
         call("create#mantle.party.PartyRelationship", {
             relationshipTypeEnumId: "PrtManager",
             fromPartyId: state.mgr,
@@ -173,6 +176,13 @@ feature(
             const second = assign([state.anaEmp, state.danEmp], "2026-01-01", state.other)
             out.otherPolicy = second.rows.map(row => row.personName + ":" + (row.reasonCode || row.outcome)).join(",")
             out.hrBAssign = code(assign([state.danEmp], "2026-01-01", state.policy, state.hrB))
+            // another employer's employment and a missing one are refused alike, neither person named
+            out.outside = assign([state.eveEmp, "NO_SUCH_EMPLOYMENT"], "2026-01-01")
+                .rows.map(row => row.personName + ":" + row.reasonCode)
+                .join(",")
+            // an assignment ends at the revision read
+            const anaAssignment = assigned.rows.find(row => row.partyRelationshipId === state.anaEmp)?.leavePolicyAssignmentId
+            out.endStale = code(run(state.hr, L + "assign#Policy", {end: true, leavePolicyAssignmentId: anaAssignment}))
             const block = run(state.hr, L + "store#BlockedInterval", {
                 leavePolicyId: state.policy,
                 blockKindEnumId: "LbkBlocked",
@@ -217,6 +227,8 @@ feature(
             out.cal === 1
             out.otherPolicy === "Leave ANA:ASSIGNMENT_OVERLAP,Leave DAN:done"
             out.hrBAssign === "RECORD_UNAVAILABLE"
+            out.outside === state.eveEmp + ":EMPLOYMENT_OUTSIDE,NO_SUCH_EMPLOYMENT:EMPLOYMENT_OUTSIDE"
+            out.endStale === "REVISION_CHANGED"
             out.block === ""
             out.blockDates === "DATES_INVALID"
             out.read === "1.5 days a month; 2 days a month from 12 months of service | 3 | 2 | Every department, Annual leave"
@@ -399,7 +411,12 @@ feature(
                 june.available,
                 june.policyName
             ].join("/")
-            const mine = run(state.uAna, L + "get#MyBalances", {asOfDate: "2026-06-30"})
+            // a supplied employment or person widens nothing: get#MyBalances declares neither
+            const mine = run(state.uAna, L + "get#MyBalances", {
+                asOfDate: "2026-06-30",
+                partyRelationshipId: state.benEmp,
+                partyId: state.ben
+            })
             out.mine = (mine.balances || [])
                 .map(row => row.partyRelationshipId + ":" + row.balance + ":" + row.canSeeLedger)
                 .join(",")

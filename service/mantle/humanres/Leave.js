@@ -670,6 +670,12 @@ function batchEmployments(policy, p) {
         .map(row => row.partyRelationshipId)
         .slice(0, batchCap)
 }
+// An employment of the policy's employer, or null: an employment of another employer is refused as a missing one is
+// (EMPLOYMENT_OUTSIDE), and its person is not named.
+function policyEmployment(policy, partyRelationshipId) {
+    const row = employmentRow(partyRelationshipId)
+    return row && row.toPartyId === policy.organizationPartyId ? row : null
+}
 // a row of a batch: the person, and the outcome (ready, done, repeated or refused with its code)
 function refusedRow(row, error) {
     row.outcome = "refused"
@@ -736,7 +742,7 @@ function assignPolicy(p) {
         const policy = row ? one(POLICY, {leavePolicyId: row.leavePolicyId}) : null
         if (!row || !policy || !canEditAt(userScope, policy.organizationPartyId))
             denied("RECORD_UNAVAILABLE", "Assignment " + text(p.leavePolicyAssignmentId) + " is not available")
-        if (text(p.expectedRevision) && text(p.expectedRevision) !== String(stampOf(row)))
+        if (text(p.expectedRevision) !== String(stampOf(row)))
             denied("REVISION_CHANGED", "This assignment changed since you read it; open the policy again")
         const thruMs = effective(p.thruDate)
         if (row.thruDate != null && ms(row.thruDate) <= thruMs) denied("ASSIGNMENT_ENDED", "The assignment has ended by then")
@@ -758,7 +764,7 @@ function assignPolicy(p) {
     if (Number.isNaN(opening)) denied("AMOUNT_INVALID", "The opening balance is a number")
     const operationKey = text(p.operationKey) || null
     const batchRows = batchEmployments(policy, p).map(partyRelationshipId => {
-        const employment = employmentRow(partyRelationshipId)
+        const employment = policyEmployment(policy, partyRelationshipId)
         const row = {partyRelationshipId, partyId: employment?.fromPartyId || null, outcome: "ready"}
         try {
             if (operationKey && rows(ASSIGNMENT, {operationKey, partyRelationshipId, leavePolicyId: policy.leavePolicyId}).length)
@@ -773,7 +779,13 @@ function assignPolicy(p) {
         for (const row of batchRows.filter(row => row.outcome === "ready"))
             inOwnTransaction(row, "Assigning a leave policy to employment", () => {
                 lockEmployment(row.partyRelationshipId)
-                checkAssignable(policy, employmentRow(row.partyRelationshipId), fromMs, thruMs, row.partyRelationshipId)
+                checkAssignable(
+                    policy,
+                    policyEmployment(policy, row.partyRelationshipId),
+                    fromMs,
+                    thruMs,
+                    row.partyRelationshipId
+                )
                 const created = call("create#" + ASSIGNMENT, {
                     leavePolicyId: policy.leavePolicyId,
                     partyRelationshipId: row.partyRelationshipId,
@@ -933,7 +945,7 @@ function checkAllocatable(policy, employment, terms, partyRelationshipId) {
 }
 function allocationRows(policy, terms, p, operationKey) {
     return batchEmployments(policy, p).map(partyRelationshipId => {
-        const employment = employmentRow(partyRelationshipId)
+        const employment = policyEmployment(policy, partyRelationshipId)
         const row = {partyRelationshipId, partyId: employment?.fromPartyId || null, amount: terms.amount, outcome: "ready"}
         try {
             if (operationKey && rows(ENTRY, {sourceKey: "allocation:" + operationKey + ":" + partyRelationshipId}).length)
@@ -993,7 +1005,12 @@ function allocateLeave(p) {
                 row.outcome = "repeated"
                 return
             }
-            row.priorBalance = checkAllocatable(policy, employmentRow(row.partyRelationshipId), terms, row.partyRelationshipId)
+            row.priorBalance = checkAllocatable(
+                policy,
+                policyEmployment(policy, row.partyRelationshipId),
+                terms,
+                row.partyRelationshipId
+            )
             const allocation = call("create#" + ALLOCATION, {
                 leavePolicyId: policy.leavePolicyId,
                 partyRelationshipId: row.partyRelationshipId,
@@ -1518,9 +1535,14 @@ function runAccrual(p) {
     const asOf = Math.min(nowMs(), p.asOfDate ? people.asOfMillis(p.asOfDate) : nowMs())
     const policyIds = text(p.leavePolicyId)
         ? [editablePolicy(userScope, p.leavePolicyId).leavePolicyId]
-        : rows(POLICY, {})
-              .filter(row => canEditAt(userScope, row.organizationPartyId))
-              .map(row => row.leavePolicyId)
+        : userScope.organizationPartyIds.length
+          ? Array.from(
+                find(POLICY)
+                    .condition("organizationPartyId", "in", userScope.organizationPartyIds)
+                    .selectField(["leavePolicyId"])
+                    .list()
+            ).map(row => row.leavePolicyId)
+          : []
     return accrueAll(accrualAssignments(policyIds, asOf, null), asOf)
 }
 // run#AccrualJob: the daily job, every assignment of every policy (or the employments given), by now.
