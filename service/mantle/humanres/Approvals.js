@@ -25,6 +25,7 @@
 // through the domain's handlers; the notices are read once the step is decided or the request ends.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const recruiting = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
+const offers = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Offers.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 const ms = lib.ms
@@ -39,6 +40,7 @@ const LEAVE_REQUEST = "mantle.humanres.leave.LeaveRequest"
 const ATTENDANCE_CORRECTION = "mantle.humanres.attendance.AttendanceCorrection"
 const EXPENSE_CLAIM = "mantle.humanres.expense.ExpenseClaim"
 const EMPLOYEE_ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
+const EMPLOYMENT_OFFER = "mantle.humanres.recruitment.EmploymentOffer"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -244,6 +246,44 @@ const kinds = {
                 }
             }
         }
+    },
+    // P17: an offer of employment (RecruitingServices change#OfferState submit, approve and refuse), bound to the offer's last
+    // change, so changed terms supersede it. With no rule the employer's HR officers decide it (defaultRole: the applicant has no
+    // manager and the recruiter may not decide their own). What the notice says: the position, the opening, the applicant, the
+    // employer and department (the title names the position alone); never pay.
+    PakOffer: {
+        topic: "PeopleOfferApproval",
+        sourceEntityName: EMPLOYMENT_OFFER,
+        sourceField: "employmentOfferId",
+        defaultRole: "ParHr",
+        // P17 review: who drafted the offer decides it no more than who submitted it or the applicant
+        selfPartyIds(sourceId) {
+            const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
+            const creator = offer?.createdByUserId ? one("moqui.security.UserAccount", {userId: offer.createdByUserId}) : null
+            return creator?.partyId ? [creator.partyId] : []
+        },
+        describe(sourceId) {
+            const offer = one(EMPLOYMENT_OFFER, {employmentOfferId: sourceId})
+            if (!offer) return {label: "offer " + sourceId}
+            const personName = people.personNames([offer.partyId])[offer.partyId] || offer.partyId
+            const names = people.organizationNames([offer.organizationPartyId, offer.departmentPartyId].filter(Boolean))
+            const position = offer.emplPositionId ? one(POSITION, {emplPositionId: offer.emplPositionId}) : null
+            const positionName = position?.description || offer.emplPositionId || ""
+            const openingTitle = offers().openingTitleOf(offer)
+            return {
+                label: "offer of " + (positionName || openingTitle || "a position") + " to " + personName,
+                message: {
+                    employmentOfferId: sourceId,
+                    partyId: offer.partyId,
+                    personName,
+                    positionName,
+                    openingTitle,
+                    subjectText: "an offer of " + (positionName || openingTitle || "a position"),
+                    organizationName: names[offer.organizationPartyId] || offer.organizationPartyId || "",
+                    departmentName: offer.departmentPartyId ? names[offer.departmentPartyId] || "" : ""
+                }
+            }
+        }
     }
 }
 function kindOf(approvalKindEnumId) {
@@ -428,15 +468,20 @@ function chooseRules(rules, request, at) {
     }
     const typeRows = general.filter(row => !row.departmentPartyId)
     if (typeRows.length) return {basis: "type", rows: typeRows}
-    // no rule: the person's manager, or for a request about no one (a position) the head of its department
-    const role = request.subjectPartyId ? "ParManager" : "ParDepartmentHead"
-    return {basis: "default", rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null}]}
+    // no rule: the kind's own default (P17: an offer's, HR), else the person's manager, or for a request about no one (a
+    // position) the head of its department
+    const role = kinds[request.approvalKindEnumId]?.defaultRole || (request.subjectPartyId ? "ParManager" : "ParDepartmentHead")
+    return {
+        basis: role === "ParHr" ? "defaultHr" : "default",
+        rows: [{sequenceNum: 1, approverRoleEnumId: role, peopleApprovalPolicyId: null}]
+    }
 }
 const basisTexts = {
     employee: "The rule for this employee",
     department: "The department's rule",
     type: "The employer's rule",
     default: "No rule: the manager decides",
+    defaultHr: "No rule: HR decides",
     defaultHead: "No rule: the head of the department decides"
 }
 // The candidates of a step's role, before who may decide: the department head (the lead of the nearest department with one), the
@@ -475,6 +520,12 @@ function roleCandidates(row, request, at) {
     }
     return {partyIds: []}
 }
+// The parties a kind keeps from deciding a request about its source beside the requester and the person it is about (P17: who
+// drafted an offer); none for a kind without its own rule or a request not yet made.
+function selfOfSource(request) {
+    const kind = kinds[request.approvalKindEnumId]
+    return kind?.selfPartyIds && request.sourceId ? kind.selfPartyIds(request.sourceId) : []
+}
 // The route of a request on the date: the basis of its rules and each step with who may decide it and how it was found (route,
 // alternate, fallback; none when unresolved). excludedByStep: the parties who decided each step (sequenceNum: [partyId]), so a
 // person decides one step of a request at most.
@@ -484,7 +535,7 @@ function resolve(request, at, excludedByStep = {}) {
     const fallbackPartyIds = rules
         .filter(row => row.approverRoleEnumId === "ParHrFallback" && row.approverPartyId)
         .map(row => row.approverPartyId)
-    const self = [request.requesterPartyId, request.subjectPartyId].filter(Boolean)
+    const self = [request.requesterPartyId, request.subjectPartyId].concat(selfOfSource(request)).filter(Boolean)
     const steps = chosen.rows.map((row, index) => {
         const sequenceNum = Number(row.sequenceNum || index + 1)
         const others = Object.entries(excludedByStep)
@@ -580,6 +631,7 @@ function explain(route, request) {
 const requestOf = approval => ({
     organizationPartyId: approval.organizationPartyId,
     approvalKindEnumId: approval.approvalKindEnumId,
+    sourceId: approval.sourceId,
     departmentPartyId: approval.departmentPartyId,
     subjectPartyId: approval.subjectPartyId,
     requesterPartyId: approval.requestedByPartyId
@@ -894,7 +946,10 @@ function recordDecision(p) {
         denied("REVISION_CHANGED", "This notice is of an earlier version; open the request again")
     const reason = text(p.reason) || null
     if (decision === "refuse" && !reason) denied("REASON_REQUIRED", "Give the reason for refusing")
-    if (partyId && [approval.requestedByPartyId, approval.subjectPartyId].includes(partyId))
+    if (
+        partyId &&
+        [approval.requestedByPartyId, approval.subjectPartyId].concat(selfOfSource(requestOf(approval))).includes(partyId)
+    )
         denied("SELF_APPROVAL", "You may not decide your own request; another approver decides it")
     const state = stateOf(approval, decisions)
     const step = state.current

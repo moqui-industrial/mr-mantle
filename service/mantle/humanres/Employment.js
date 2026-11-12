@@ -28,6 +28,8 @@ const people = ec.resource.script("component://mr-mantle/service/mantle/humanres
 const positions = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Positions.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+const offers = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Offers.js")
+const letters = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Letters.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -1256,23 +1258,24 @@ function relatedByName(nameCondition, organizationPartyIds) {
         )
     add(related("mantle.party.PartyFromAndRelationship", "fromPartyId", "toPartyId"), "fromPartyId")
     add(related("mantle.party.PartyToAndRelationship", "toPartyId", "fromPartyId"), "toPartyId")
-    // the applicants to the employers' positions
+    // the applicants to the employers' positions, and (P17) to their openings (an application names its employer, P16)
     const positionIds = Array.from(
         find(POSITION).condition("organizationPartyId", "in", organizationPartyIds).selectField("emplPositionId").list()
     ).map(row => row.emplPositionId)
-    const applicantIds = positionIds.length
-        ? unique(
-              Array.from(
-                  find("mantle.humanres.employment.EmploymentApplication")
-                      .condition("emplPositionId", "in", positionIds)
-                      .selectField("applyingPartyId")
-                      .distinct(true)
-                      .list()
-              )
-                  .map(row => row.applyingPartyId)
-                  .filter(Boolean)
-          )
-        : []
+    const factory = ec.entity.conditionFactory
+    const applied = [factory.makeCondition("organizationPartyId", "in", organizationPartyIds)]
+    if (positionIds.length) applied.push(factory.makeCondition("emplPositionId", "in", positionIds))
+    const applicantIds = unique(
+        Array.from(
+            find("mantle.humanres.employment.EmploymentApplication")
+                .condition(factory.makeCondition(applied, "or"))
+                .selectField("applyingPartyId")
+                .distinct(true)
+                .list()
+        )
+            .map(row => row.applyingPartyId)
+            .filter(Boolean)
+    )
     if (applicantIds.length)
         add(
             Array.from(
@@ -1302,6 +1305,14 @@ function personAdmitted(partyId, p, userScope) {
             find(RELATIONSHIP).condition("fromPartyId", partyId).condition("toPartyId", "in", orgIds).count() ||
             find(RELATIONSHIP).condition("toPartyId", partyId).condition("fromPartyId", "in", orgIds).count()
         if (related) return true
+        // P17: an applicant to one of their openings (an application names its employer, P16)
+        if (
+            find("mantle.humanres.employment.EmploymentApplication")
+                .condition("applyingPartyId", partyId)
+                .condition("organizationPartyId", "in", orgIds)
+                .count()
+        )
+            return true
         const positionIds = Array.from(
             find(POSITION).condition("organizationPartyId", "in", orgIds).selectField("emplPositionId").list()
         ).map(row => row.emplPositionId)
@@ -1374,22 +1385,38 @@ function relationshipsWith(partyId, organizationPartyId, at = nowMs()) {
 const overlaps = (row, fromMs, thruMs) => (row.fromMs ?? -Infinity) < (thruMs ?? Infinity) && (row.thruMs ?? Infinity) > fromMs
 // The plan of a hire, checked: the person (chosen, or new with no person matching unless confirmed), the employment (new, an
 // orphan relationship completed, or a rehire beside an ended one; an overlapping employment refused), the first assignment's
-// terms, and the findings (errors refuse the hire; warnings and notes inform it).
-function planHire(p, userScope) {
+// terms, and the findings (errors refuse the hire; warnings and notes inform it). P17: a hire from an accepted offer
+// (employmentOfferId; the offer locked by hire#Employee) is of its employer and applicant, and once (Offers.js hireProblem:
+// OFFER_USED, OFFER_NOT_ACCEPTED, OFFER_PERSON, OFFER_EMPLOYER); its working schedule follows the hire.
+function planHire(p, userScope, lockedOffer = null) {
     const findings = []
-    const organizationPartyId = text(p.organizationPartyId)
+    const offer = lockedOffer || (text(p.employmentOfferId) ? offers().offerForHire(p.employmentOfferId, userScope) : null)
+    const organizationPartyId = text(p.organizationPartyId) || offer?.organizationPartyId || ""
     if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose the employer")
     people.requireOrganization(userScope, organizationPartyId)
-    const fromMs = effective(p.fromDate)
-    const thruMs = text(p.thruDate) ? effective(p.thruDate) : null
+    // a term not given (null): the offer's, for a hire from one
+    const term = field => (p[field] != null ? p[field] : (offer?.[field] ?? null))
+    if (offer) {
+        const problem = offers().hireProblem(offer, text(p.partyId) || null, organizationPartyId)
+        if (problem) findings.push({code: problem[0], severity: "error", message: problem[1]})
+        else
+            findings.push({
+                code: "FROM_OFFER",
+                severity: "info",
+                message: "From the accepted offer " + offer.employmentOfferId + ": it is hired from once"
+            })
+    }
+    const fromMs = effective(term("fromDate"))
+    const thruMs = text(term("thruDate")) ? effective(term("thruDate")) : null
     if (thruMs != null && thruMs <= fromMs)
         findings.push({code: "DATES_INVALID", severity: "error", message: "The end is after the start"})
     let person = null
-    const partyId = text(p.partyId)
+    const partyId = text(p.partyId) || offer?.partyId || ""
     let matches = []
     if (partyId) {
         const found = one("mantle.party.Person", {partyId})
-        if (!found || !personAdmitted(partyId, p, userScope))
+        // the applicant of the offer is admitted by it
+        if (!found || (offer?.partyId !== partyId && !personAdmitted(partyId, p, userScope)))
             denied(
                 "RECORD_UNAVAILABLE",
                 "Person " + partyId + " is not available; a person not related to your employers is found by their exact email"
@@ -1468,14 +1495,17 @@ function planHire(p, userScope) {
     const terms = checkTerms(
         employment,
         {
-            departmentPartyId: text(p.departmentPartyId) || null,
-            emplPositionId: text(p.emplPositionId) || null,
-            managerPartyId: text(p.managerPartyId) || null,
-            facilityId: text(p.facilityId) || null
+            departmentPartyId: text(term("departmentPartyId")) || null,
+            emplPositionId: text(term("emplPositionId")) || null,
+            managerPartyId: text(term("managerPartyId")) || null,
+            facilityId: text(term("facilityId")) || null
         },
         assignmentFromMs,
         findings
     )
+    // P17: the offer's working schedule, which the hire's first assignment follows
+    if (offer?.workingScheduleId)
+        attempt(findings, () => schedules().checkAssignable(offer.workingScheduleId, organizationPartyId, assignmentFromMs))
     if (!terms.managerPartyId)
         findings.push({code: "NO_MANAGER", severity: "warning", message: "No manager: the person is listed under No manager"})
     if (!terms.emplPositionId)
@@ -1509,7 +1539,20 @@ function planHire(p, userScope) {
                 "Onboarding starts once hired: " + onboarding.map(row => names[row.workEffortId] || row.workEffortId).join(", ")
         })
     }
-    return {organizationPartyId, fromMs, thruMs, assignmentFromMs, person, matches, relationships, plan, orphan, terms, findings}
+    return {
+        organizationPartyId,
+        fromMs,
+        thruMs,
+        assignmentFromMs,
+        person,
+        matches,
+        relationships,
+        plan,
+        orphan,
+        terms,
+        findings,
+        offer
+    }
 }
 const planTexts = {
     new: "A new employment",
@@ -1548,6 +1591,9 @@ function previewHire(p) {
 function hireEmployee(p) {
     const userScope = editorScope("Hiring")
     const operationKey = text(p.operationKey) || null
+    // P17: the accepted offer the hire is made from, locked first, so it is consumed once (a second hire from it is OFFER_USED) and
+    // a hire sent twice at once answers the first (P17 review: the second waits on the offer, then finds the first by its key)
+    const lockedOffer = text(p.employmentOfferId) ? offers().offerForHire(p.employmentOfferId, userScope, true) : null
     if (operationKey) {
         const first = rows(CHANGE, {operationKey, requestedByUserId: ec.user.userId, changeKindEnumId: "EckHire"})[0]
         if (first) {
@@ -1564,7 +1610,7 @@ function hireEmployee(p) {
                 }
         }
     }
-    const plan = planHire(p, userScope)
+    const plan = planHire(p, userScope, lockedOffer)
     if (!plan.person) denied("PERSON_REQUIRED", "Choose or name the person")
     refuseErrors(plan.findings)
     const reason = text(p.reason) || "Hired"
@@ -1612,6 +1658,18 @@ function hireEmployee(p) {
         employmentChangeId
     })
     call("update#" + CHANGE, {employmentChangeId, employmentAssignmentId})
+    // P17: the offer's working schedule from the first day, and the offer consumed (its application hired); the offer grants
+    // nothing else: no pay is recorded and no account asked but as HR chose above
+    if (plan.offer) {
+        if (plan.offer.workingScheduleId)
+            assignSchedule({
+                partyRelationshipId,
+                workingScheduleId: plan.offer.workingScheduleId,
+                fromDate: stamp(plan.assignmentFromMs),
+                reason: "From offer " + plan.offer.employmentOfferId
+            })
+        offers().consumeOffer(plan.offer, {partyRelationshipId, employmentChangeId})
+    }
     return {
         partyId,
         partyRelationshipId,
@@ -2020,6 +2078,16 @@ function findEmploymentChanges(p) {
         if (!hrOf(row) && !approval?.canDecide) continue
         changes.push(changeRow(row, approval, hrOf(row) && !!caps.hrEdit))
     }
+    // P17: each applied change's lifecycle letter (Letters.js): offered to an HR editor, and whether it is issued
+    const issued = letters().issuedFor(changes.map(row => row.employmentChangeId))
+    for (const row of changes) {
+        row.letterIssued = !!issued[row.employmentChangeId]
+        row.letterOffered =
+            !!row.hrEdit &&
+            row.statusId === "EchApplied" &&
+            !row.withdrawnDateText &&
+            letters().letterKinds.includes(row.changeKindEnumId)
+    }
     return {changes}
 }
 function changeRow(row, approval, hrEdit = false) {
@@ -2063,6 +2131,7 @@ function changeRow(row, approval, hrEdit = false) {
             withdrawnDateText: dateText(row.withdrawnDate),
             withdrawReason: row.withdrawReason || "",
             accessRequested: row.accessRequested === "Y",
+            hrEdit,
             accessOperationId: hrEdit ? row.accessOperationId || null : null,
             accessFailure: hrEdit ? row.accessRequestFailure || "" : "",
             canRequestAccess:
@@ -2160,7 +2229,9 @@ const draftFields = {
         "emplPositionId",
         "managerPartyId",
         "facilityId",
-        "reason"
+        "reason",
+        // P17: the accepted offer the hire is made from
+        "employmentOfferId"
     ],
     change: [
         "effectiveDate",
@@ -2437,6 +2508,9 @@ function run(op, p) {
     execute: run,
     // for OrganizationServices (Organization.js) and the employee record (Employees.js)
     changeManagerOfAssignment,
+    // P17: an offer's terms checked as a hire checks them, and seats by name (Offers.js)
+    checkTerms,
+    positionNames,
     reassignDepartment,
     assignmentHistory,
     termsAt,
