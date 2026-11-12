@@ -6,9 +6,11 @@
 // - Capabilities come from the maintenance, work process, resource booking and resource policy permissions (permissions,
 //   data/MaintenanceSetupData.xml) and FACILITY_EDIT, never a group name, a calling screen or a supplied app root. Broad work
 //   view, assigned-work view and own-request view are separate; a write permission alone reads nothing (reads).
-// - The caller's organizations are the facility scope's (FacilityScope.js: their own organizations, get#PartyOrganizationInfo
-//   over get#PartyInternalOrgIds, narrowed to the active one when it is theirs; every organization for a system administrator
-//   or a holder of FACILITY_ALL_ORGANIZATIONS, organizationPartyIds null), and none for a caller who reads nothing.
+// - The caller's organizations are their own (get#PartyOrganizationInfo over get#PartyInternalOrgIds, as FacilityScope.js reads
+//   them), narrowed to the active one when it is theirs; every organization (organizationPartyIds null) for a system
+//   administrator or a holder of MAINTENANCE_ALL_ORGANIZATIONS, which reads nothing by itself; none for a caller who reads
+//   nothing. FACILITY_ALL_ORGANIZATIONS, the facility and stock scope's widening, does not widen Maintenance's (the user's
+//   call, impl-maintenance P1 review).
 // - A facility's organization is its owner, else its nearest owning ancestor (parentFacilityId); an asset's is its owner when
 //   that is an internal organization, else its facility's (equipment in the organization's custody); a work order's root is
 //   the WorkEffort's rootWorkEffortId (or itself), and its service organization the root's owner, else its facility's.
@@ -19,7 +21,6 @@
 //
 // Later phases extend the tables (permissions, reads) and call the functions; this module grants nothing by itself.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, denied} = lib
 const access = lib.access
 
@@ -47,7 +48,9 @@ const permissions = {
     bookingApprove: "RESOURCE_BOOKING_APPROVE",
     policyView: "RESOURCE_POLICY_VIEW",
     policyEdit: "RESOURCE_POLICY_EDIT",
-    facilityEdit: "FACILITY_EDIT"
+    facilityEdit: "FACILITY_EDIT",
+    // the scope of a read in every internal organization; no read by itself
+    allOrganizations: "MAINTENANCE_ALL_ORGANIZATIONS"
 }
 // The derived reads, each from view permissions only: maintenance work (broad or assigned), equipment and facilities, and
 // anything of Maintenance at all (an organization's scope). The requester's own-request view is Commons' intake, not a read
@@ -65,16 +68,30 @@ function capabilities() {
 }
 
 // ===== scope =====
+// The caller's own organizations (as FacilityScope.js reads them, without its FACILITY_ALL_ORGANIZATIONS widening): those they
+// belong to, narrowed to the active one when it is theirs; an active organization they do not belong to is set aside.
+function ownOrganizations() {
+    const info = ec.user.userId
+        ? ec.service.sync().name("mantle.party.PartyServices.get#PartyOrganizationInfo").disableAuthz().call() || {}
+        : {}
+    const memberPartyIds = Array.from(info.userOrgIds || [])
+    const filtered = Array.from(info.filterOrgIds || []).filter(partyId => memberPartyIds.includes(partyId))
+    return {
+        activeOrganizationPartyId: memberPartyIds.includes(info.activeOrgId) ? info.activeOrgId : null,
+        organizationPartyIds: filtered.length ? filtered : memberPartyIds
+    }
+}
 // The caller's capabilities, party and organizations (organizationPartyIds null: every organization).
 function scope() {
     const caps = capabilities()
-    const facility = caps.anyRead ? facilityScope.scope() : null
+    const own = caps.anyRead ? ownOrganizations() : null
+    const all = !!own && (access.systemAdmin() || caps.allOrganizations)
     return {
         capabilities: caps,
         partyId: ec.user.userAccount?.partyId || null,
-        allOrganizations: !!facility && facility.organizationPartyIds == null,
-        activeOrganizationPartyId: facility?.activeOrganizationPartyId || null,
-        organizationPartyIds: facility ? facility.organizationPartyIds : []
+        allOrganizations: all,
+        activeOrganizationPartyId: own?.activeOrganizationPartyId || null,
+        organizationPartyIds: own ? (all ? null : own.organizationPartyIds) : []
     }
 }
 // Whether the scope covers an organization.

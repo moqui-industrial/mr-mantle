@@ -1,6 +1,6 @@
 // Maintenance scope (mantle/work/MaintenanceAccess.js; IronStone Maintenance design §1.1, impl-maintenance P1): capabilities from
 // the maintenance permissions with the reads apart (a write permission alone reads nothing and has no organization), the
-// caller's organizations and FACILITY_ALL_ORGANIZATIONS widening them; a facility's organization from its nearest owning
+// caller's organizations and MAINTENANCE_ALL_ORGANIZATIONS widening them (FACILITY_ALL_ORGANIZATIONS not); a facility's organization from its nearest owning
 // ancestor and an asset's from its internal owner or its facility (a customer's asset in the organization's custody), each
 // refused outside the scope as a missing one is; a work effort's service organization from its root, read broadly with
 // MAINTENANCE_VIEW and only when assigned (to the step or its root, a current assignment) with MAINTENANCE_ASSIGNED_VIEW.
@@ -120,7 +120,9 @@ spec({
         state.planOnly = user("PLANONLY", ["MAINTENANCE_PLAN"], [orgA])
         state.tech = user("TECH", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE"], [orgA])
         state.tech2 = user("TECH2", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE"], [orgA])
-        state.every = user("EVERY", ["MAINTENANCE_VIEW", "FACILITY_ALL_ORGANIZATIONS"], [orgA])
+        state.every = user("EVERY", ["MAINTENANCE_VIEW", "MAINTENANCE_ALL_ORGANIZATIONS"], [orgA])
+        state.facilityAll = user("FACILITYALL", ["MAINTENANCE_VIEW", "FACILITY_ALL_ORGANIZATIONS"], [orgA])
+        state.allOnly = user("ALLONLY", ["MAINTENANCE_ALL_ORGANIZATIONS"], [orgA])
         state.resources = user("RESOURCES", ["MAINTENANCE_RESOURCE_VIEW", "MAINTENANCE_RESOURCE_EDIT"], [orgA])
         // A's root owned by A with a step; B's root; a root with no owner in A's room; the technician assigned to the step only,
         // the second to the root, and the first's ended assignment to B's root
@@ -154,6 +156,9 @@ feature(
                 planOnly: as(state.planOnly, summary),
                 tech: as(state.tech, summary),
                 every: as(state.every, summary),
+                facilityAll: as(state.facilityAll, summary),
+                allOnly: as(state.allOnly, summary),
+                everyOther: as(state.every, (access, userScope) => access.requireFacility(userScope, state.otherSite).organizationPartyId),
                 resources: as(state.resources, summary),
                 unknown: as(state.reader, (access, userScope) => {
                     try {
@@ -166,7 +171,7 @@ feature(
                 planRequired: as(state.reader, (access, userScope) => access.requireCapability(userScope, "plan"))
             }
         },
-        then({reader, planOnly, tech, every, resources, unknown, planRequired}) {
+        then({reader, planOnly, tech, every, facilityAll, allOnly, everyOther, resources, unknown, planRequired}) {
             reader.orgs == [orgA]
             reader.all == false
             reader.held == ["anyRead", "resourceRead", "view", "workRead"]
@@ -174,8 +179,16 @@ feature(
             planOnly.held == ["plan"]
             tech.orgs == [orgA]
             tech.held == ["anyRead", "assignedView", "execute", "resourceRead", "workRead"]
+            // MAINTENANCE_ALL_ORGANIZATIONS: every organization, B's site among them; it reads nothing by itself, and
+            // FACILITY_ALL_ORGANIZATIONS does not widen Maintenance (the user's call, P1 review)
             every.orgs == null
             every.all == true
+            every.held.includes("allOrganizations")
+            everyOther == orgB
+            facilityAll.orgs == [orgA]
+            facilityAll.all == false
+            allOnly.orgs == []
+            allOnly.held == ["allOrganizations"]
             resources.held == ["anyRead", "resourceEdit", "resourceRead", "resourceView"]
             unknown.includes("Unknown maintenance capability")
             planRequired == "PERMISSION_DENIED"
