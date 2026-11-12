@@ -27,6 +27,7 @@
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const positions = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Positions.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -55,7 +56,8 @@ const kindTexts = {
     EckLeave: "Leave of absence",
     EckReturn: "Return from leave",
     EckSeparation: "Separation",
-    EckReorganization: "Reorganization"
+    EckReorganization: "Reorganization",
+    EckSchedule: "Working schedule"
 }
 const statusTexts = {
     EchRequested: "Waiting for approval",
@@ -65,10 +67,28 @@ const statusTexts = {
     EchWithdrawn: "Withdrawn"
 }
 // the kinds of applied change HR may withdraw while their date is still to come (P7, F131): not a hire; a separation set for a
-// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation)
-const withdrawableKinds = ["EckTransfer", "EckManager", "EckLeave", "EckReturn", "EckReorganization", "EckSeparation"]
+// later date too (the user's call, Nov 11), withdrawn by its own path (withdrawSeparation); P9: a working schedule set for a later date
+const withdrawableKinds = [
+    "EckTransfer",
+    "EckManager",
+    "EckLeave",
+    "EckReturn",
+    "EckReorganization",
+    "EckSeparation",
+    "EckSchedule"
+]
 const stateTexts = {EasActive: "Working", EasLeave: "On leave of absence"}
-const termFields = ["departmentPartyId", "emplPositionId", "managerPartyId", "facilityId"]
+// P9: the working schedule and its holiday calendar are terms too, so every change carries them to the next assignment; a transfer
+// or a manager change never asks for them (assign#Schedule changes them alone)
+const termFields = [
+    "departmentPartyId",
+    "emplPositionId",
+    "managerPartyId",
+    "facilityId",
+    "workingScheduleId",
+    "holidayCategoryId"
+]
+const scheduleFields = ["workingScheduleId", "holidayCategoryId"]
 // the most people a match search answers, and the shortest name it searches by
 const matchLimit = 10
 const matchMinLength = 2
@@ -170,7 +190,7 @@ function enumNames(enumIds) {
         ])
     )
 }
-// Terms as display text: the department, position, manager and work location names.
+// Terms as display text: the department, position, manager and work location names, and the working schedule's (P9).
 function termTexts(terms) {
     const organizations = people.organizationNames([terms.departmentPartyId].filter(Boolean))
     const persons = people.personNames([terms.managerPartyId].filter(Boolean))
@@ -178,7 +198,10 @@ function termTexts(terms) {
         departmentName: terms.departmentPartyId ? organizations[terms.departmentPartyId] || terms.departmentPartyId : "",
         positionName: terms.emplPositionId ? positionNames([terms.emplPositionId])[terms.emplPositionId] || "" : "",
         managerName: terms.managerPartyId ? persons[terms.managerPartyId] || terms.managerPartyId : "",
-        facilityName: terms.facilityId ? facilityNames([terms.facilityId])[terms.facilityId] || "" : ""
+        facilityName: terms.facilityId ? facilityNames([terms.facilityId])[terms.facilityId] || "" : "",
+        scheduleName: terms.workingScheduleId
+            ? schedules().scheduleNames([terms.workingScheduleId])[terms.workingScheduleId] || ""
+            : ""
     }
 }
 
@@ -849,7 +872,8 @@ function withdrawSeparation(change, employment, reason) {
 }
 // withdraw#EmploymentChange: an applied change of an employment in the caller's scope whose date is still to come (a transfer, a
 // manager change, a leave of absence or its return date, a return, a reorganization) withdrawn by an HR editor with a reason, at
-// the employment's revision read when given; the employment's waiting changes superseded (asked at the revision before).
+// the employment's revision read when given; the employment's waiting changes superseded (asked at the revision before), but
+// for a working schedule's, which keeps them waiting with their approval (P9).
 function withdrawEmploymentChange(p) {
     const userScope = editorScope("Withdrawing a change")
     const change = changeOf(text(p.employmentChangeId))
@@ -858,16 +882,32 @@ function withdrawEmploymentChange(p) {
     if (change.statusId !== "EchApplied" || !withdrawableKinds.includes(change.changeKindEnumId) || change.causedByChangeId)
         denied(
             "NOT_WITHDRAWABLE",
-            "Only a transfer, manager change, leave, return or separation set for a later date is withdrawn"
+            "Only a transfer, manager change, leave, return, separation or working schedule set for a later date is withdrawn"
         )
     if (text(p.expectedRevision) && text(p.expectedRevision) !== people.employmentRevision(employment.partyRelationshipId))
         denied("REVISION_CHANGED", "This employment changed since you read it; open it again")
     if (!text(p.reason)) denied("REASON_REQUIRED", "Say why")
-    const done =
+    const withdraw = () =>
         change.changeKindEnumId === "EckSeparation"
             ? withdrawSeparation(change, employment, text(p.reason))
             : withdrawScheduled(change, text(p.reason))
-    supersedeWaiting(employment.partyRelationshipId)
+    let done
+    if (change.changeKindEnumId === "EckSchedule") {
+        // a working schedule withdrawn leaves the changes waiting as they were, as its assignment did (P9)
+        const waiting = rows(CHANGE, {partyRelationshipId: employment.partyRelationshipId, statusId: "EchRequested"})
+        done = approvals().keepWaiting(
+            approvalKind,
+            waiting.map(row => row.employmentChangeId),
+            () => {
+                const out = withdraw()
+                carrySchedule(employment, waiting)
+                return out
+            }
+        )
+    } else {
+        done = withdraw()
+        supersedeWaiting(employment.partyRelationshipId)
+    }
     const after = changeOf(change.employmentChangeId)
     return {
         employmentChangeId: after.employmentChangeId,
@@ -933,10 +973,19 @@ function applyChange(change) {
     const findings = []
     // a separation supersedes the changes set for its date or later, a return the leave's scheduled return (P7, F131)
     const allow = supersedesFor(kind)
-    checkDate(employment, at, findings, allow)
+    // a working schedule from the day the assignment in effect starts changes that assignment's (P9)
+    const kept = kind === "EckSchedule" ? sameStart(employment, at) : null
+    checkDate(
+        employment,
+        at,
+        findings,
+        allow || (kept ? row => row.employmentAssignmentId === kept.employmentAssignmentId : null)
+    )
     if (allow && !firstError(findings)) supersedeScheduled(employment, at, allow, change.employmentChangeId, reason)
     const before = termsAt(employment, at)
     let assignmentId = null
+    // the working schedule the change applied, when it carries terms (P9: a transfer takes the schedule in effect on its date)
+    let applied = {}
     if (kind === "EckSeparation") {
         refuseErrors(findings)
         // the employment's end before it, given back if a separation set for later is withdrawn (the user's call, Nov 11)
@@ -962,8 +1011,35 @@ function applyChange(change) {
                 reason: "Return from leave",
                 employmentChangeId: change.employmentChangeId
             })
+    } else if (kind === "EckSchedule") {
+        // P9: the working schedule alone changes; the other terms continue as they are, in the state they are in
+        refuseErrors(findings)
+        const schedule = {
+            workingScheduleId: change.workingScheduleId || null,
+            holidayCategoryId: change.holidayCategoryId || null
+        }
+        if (kept) {
+            // the assignment starting on the date (a hire's first day) follows it from its start: changed in place, audited
+            call("update#" + ASSIGNMENT, {
+                employmentAssignmentId: kept.employmentAssignmentId,
+                workingScheduleId: schedule.workingScheduleId,
+                workingScheduleId_changeReason: reason,
+                holidayCategoryId: schedule.holidayCategoryId,
+                holidayCategoryId_changeReason: reason
+            })
+            assignmentId = kept.employmentAssignmentId
+        } else
+            assignmentId = startAssignment(employment, Object.assign(termsOfRow(before), schedule), at, null, {
+                before,
+                reason,
+                employmentChangeId: change.employmentChangeId,
+                stateEnumId: before.stateEnumId || "EasActive"
+            })
     } else {
-        const terms = checkTerms(employment, termsOfRow(change), at, findings)
+        // the working schedule is not the change's to give (assign#Schedule's alone): the one in effect on the date continues,
+        // so a schedule assigned while the change waited is kept (P9)
+        applied = Object.fromEntries(scheduleFields.map(field => [field, before[field] || null]))
+        const terms = checkTerms(employment, Object.assign(termsOfRow(change), applied), at, findings)
         refuseErrors(findings)
         assignmentId = startAssignment(employment, terms, at, null, {
             before,
@@ -971,13 +1047,21 @@ function applyChange(change) {
             employmentChangeId: change.employmentChangeId
         })
     }
-    call("update#" + CHANGE, {
-        employmentChangeId: change.employmentChangeId,
-        statusId: "EchApplied",
-        appliedDate: ec.user.nowTimestamp,
-        employmentAssignmentId: assignmentId
-    })
-    supersedeWaiting(change.partyRelationshipId, change.employmentChangeId)
+    call(
+        "update#" + CHANGE,
+        Object.assign(
+            {
+                employmentChangeId: change.employmentChangeId,
+                statusId: "EchApplied",
+                appliedDate: ec.user.nowTimestamp,
+                employmentAssignmentId: assignmentId
+            },
+            applied
+        )
+    )
+    // a working schedule leaves the changes waiting as they were (assign#Schedule keeps their approval, P9); any other change
+    // supersedes them
+    if (kind !== "EckSchedule") supersedeWaiting(change.partyRelationshipId, change.employmentChangeId)
     if (kind === "EckSeparation" || before.managerPartyId !== (change.managerPartyId || null))
         approvals().reroute(employment.organizationPartyId)
     // routed again from its date: now for a change in effect, else by the daily job on the date (F134)
@@ -2191,6 +2275,7 @@ function assignmentHistory(employmentIds) {
     const seats = positionNames(found.map(row => row.emplPositionId))
     const managers = people.personNames(unique(found.map(row => row.managerPartyId).filter(Boolean)))
     const facilities = facilityNames(found.map(row => row.facilityId))
+    const scheduleNames = schedules().scheduleNames(found.map(row => row.workingScheduleId))
     const changeIds = unique(found.map(row => row.employmentChangeId).filter(Boolean))
     const changes = changeIds.length
         ? Object.fromEntries(
@@ -2212,10 +2297,119 @@ function assignmentHistory(employmentIds) {
             positionName: seats[row.emplPositionId] || "",
             managerName: managers[row.managerPartyId] || "",
             facilityName: facilities[row.facilityId] || "",
+            scheduleName: scheduleNames[row.workingScheduleId] || "",
             changeText: change ? kindTexts[change.changeKindEnumId] || "" : "",
             reason: change?.reason || row.comments || ""
         }
     })
+}
+
+// ===== a working schedule (P9; ScheduleServices assign#Schedule) =====
+// The employment follows the schedule (and the holiday calendar in place of the schedule's) from the date: an HR editor of the
+// employer's; applied at once, a change of its own (EckSchedule) that ends the assignment in effect and starts the next with the
+// other terms as they were (an employment written before People's assignments gets its first), or, from the day the assignment in
+// effect starts (a hire's first day), changes that assignment's schedule (sameStart). The date is the start of today when empty
+// (or of the employment or assignment that began later today). The schedule is one of the employer's in effect on the date
+// (Schedules.js checkAssignable), the calendar the employer's or a shared one; an empty schedule ends the following of one.
+// A transfer or separation of the employment waiting for approval stays waiting, its approval kept (Approvals.js keepWaiting), and
+// takes the schedule on its date (applyChange); the schedule's date comes before the waiting change's (CHANGE_WAITING).
+// expectedRevision, when given, is the employment's (REVISION_CHANGED); an operation key a retry answers with. Refuses:
+// DATE_OUTSIDE, ASSIGNMENT_SCHEDULED (a later change is set; choose a later date), CHANGE_WAITING, SCHEDULE_REQUIRED (a calendar
+// with no schedule), NOTHING_CHANGES and the schedule's and calendar's refusals.
+function assignSchedule(p) {
+    const userScope = editorScope("Assigning a working schedule")
+    const operationKey = text(p.operationKey) || null
+    if (operationKey) {
+        const first = rows(CHANGE, {operationKey, requestedByUserId: ec.user.userId}).find(
+            row => row.changeKindEnumId === "EckSchedule" && row.partyRelationshipId === text(p.partyRelationshipId)
+        )
+        if (first) return Object.assign(changeAnswer(first), {repeated: true})
+    }
+    const employment = employmentIn(userScope, p.partyRelationshipId)
+    const revision = people.employmentRevision(employment.partyRelationshipId)
+    if (text(p.expectedRevision) && text(p.expectedRevision) !== revision)
+        denied("REVISION_CHANGED", "This employment changed since you read it; open it again (revision " + revision + ")")
+    const at = text(p.fromDate) ? effective(p.fromDate) : scheduleStart(employment)
+    const findings = []
+    const kept = sameStart(employment, at)
+    checkDate(employment, at, findings, kept ? row => row.employmentAssignmentId === kept.employmentAssignmentId : null)
+    const waiting = rows(CHANGE, {partyRelationshipId: employment.partyRelationshipId, statusId: "EchRequested"})
+    const conflict = waiting.find(row => (ms(row.effectiveDate) ?? -Infinity) <= at)
+    if (conflict)
+        findings.push({
+            code: "CHANGE_WAITING",
+            severity: "error",
+            message:
+                "A " +
+                (kindTexts[conflict.changeKindEnumId] || "change").toLowerCase() +
+                " from " +
+                dateText(conflict.effectiveDate) +
+                " is waiting for approval; assign the schedule from an earlier date, or once it is decided"
+        })
+    const before = termsAt(employment, at)
+    const asked = {workingScheduleId: text(p.workingScheduleId) || null, holidayCategoryId: text(p.holidayCategoryId) || null}
+    if (asked.holidayCategoryId && !asked.workingScheduleId)
+        findings.push({code: "SCHEDULE_REQUIRED", severity: "error", message: "A holiday calendar goes with a schedule"})
+    if (asked.workingScheduleId)
+        attempt(findings, () => schedules().checkAssignable(asked.workingScheduleId, employment.organizationPartyId, at))
+    if (asked.holidayCategoryId)
+        attempt(findings, () => schedules().checkCalendar(asked.holidayCategoryId, employment.organizationPartyId))
+    if (scheduleFields.every(field => (asked[field] || null) === (before[field] || null)))
+        findings.push({code: "NOTHING_CHANGES", severity: "error", message: "Nothing changes from that date"})
+    refuseErrors(findings)
+    const employmentChangeId = createChange(
+        employment,
+        "EckSchedule",
+        Object.assign(termsOfRow(before), asked, {
+            statusId: "EchRequested",
+            effectiveDate: stamp(at),
+            reason: text(p.reason) || null,
+            employmentRevision: revision,
+            operationKey
+        })
+    )
+    approvals().keepWaiting(
+        approvalKind,
+        waiting.map(row => row.employmentChangeId),
+        () => {
+            applyChange(changeOf(employmentChangeId))
+            carrySchedule(employment, waiting)
+        }
+    )
+    return Object.assign(changeAnswer(changeOf(employmentChangeId)), {repeated: false})
+}
+// A schedule's date when none is given: the start of today in the user's zone, or the start of the employment or of the assignment
+// in effect when it began later today (a hire made today), so the day is planned from its start.
+function scheduleStart(employment) {
+    const now = nowMs()
+    const today = ec.user.timestampMillis(ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd"))
+    const current = assignmentsOf(employment.partyRelationshipId).find(row => openAt(row, now))
+    return Math.max(today, employment.fromMs ?? -Infinity, ms(current?.fromDate) ?? -Infinity)
+}
+// The assignment in effect on a schedule's date that starts on it (a hire's first day), whose schedule then changes in place
+// rather than by a new assignment that would void it; none when it is a change set for a later date HR may still withdraw
+// (withdraw that first, ASSIGNMENT_SCHEDULED).
+function sameStart(employment, at) {
+    const row = assignmentsOf(employment.partyRelationshipId).find(row => openAt(row, at) && ms(row.fromDate) === at)
+    if (!row) return null
+    const change = row.employmentChangeId ? changeOf(row.employmentChangeId) : null
+    if (at > nowMs() && change && withdrawableKinds.includes(change.changeKindEnumId)) return null
+    return row
+}
+// The waiting changes that carry terms (a transfer) given the working schedule in effect on their date, as they will apply it.
+function carrySchedule(employment, waiting) {
+    for (const row of waiting) {
+        if (row.changeKindEnumId === "EckSeparation") continue
+        const terms = termsAt(employment, ms(row.effectiveDate))
+        if (scheduleFields.every(field => (row[field] || null) === (terms[field] || null))) continue
+        call(
+            "update#" + CHANGE,
+            Object.assign(
+                {employmentChangeId: row.employmentChangeId},
+                Object.fromEntries(scheduleFields.map(field => [field, terms[field] || null]))
+            )
+        )
+    }
 }
 
 const operations = {
@@ -2232,7 +2426,8 @@ const operations = {
     deleteEmploymentDraft,
     applyDueAssignments,
     withdrawEmploymentChange,
-    noteAccessRequestFailure
+    noteAccessRequestFailure,
+    assignSchedule
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employment operation " + op)

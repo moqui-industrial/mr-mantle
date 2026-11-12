@@ -387,8 +387,8 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <entity entity-name="EmploymentAssignment" package="mantle.humanres.employment" cache="never">
         <description>A dated assignment inside an employment (IronStone People design §4, PE-02; impl-people P6): the department,
-            primary position, manager and work location of the employment from fromDate until thruDate, and its state (working,
-            or on a leave of absence). A transfer, a manager change or a leave ends the assignment in effect and starts the next, so
+            primary position, manager, work location and working schedule (P9) of the employment from fromDate until thruDate, and
+            its state (working, or on a leave of absence). A transfer, a manager change or a leave ends the assignment in effect and starts the next, so
             history is kept and the payroll identity (the employment) is not split; one primary assignment at a time, inside the
             employment's dates. The assignment is the source of the employment's manager (per employment: a person employed by two
             employers has a manager at each), its department membership (a dated PrtMember row from role Assignee to the
@@ -409,6 +409,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id" enable-audit-log="true"><description>The primary position held</description></field>
         <field name="managerPartyId" type="id" enable-audit-log="true"><description>The manager at the employer</description></field>
         <field name="facilityId" type="id" enable-audit-log="true"><description>The work location, a facility of the employer</description></field>
+        <field name="workingScheduleId" type="id" enable-audit-log="true"><description>The working schedule followed (impl-people P9,
+            mantle.humanres.ScheduleServices.assign#Schedule): its intervals are the person's capacity (ResourceServices
+            get#PartyCapacity) before their own working hours and the timesheet policy</description></field>
+        <field name="holidayCategoryId" type="id" enable-audit-log="true"><description>A holiday calendar in place of the schedule's
+            (WorkEffortCategory of type WcatHoliday), for this employment</description></field>
         <field name="employmentChangeId" type="id"><description>The hire or change that started it</description></field>
         <field name="comments" type="text-medium"/>
         <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
@@ -421,6 +426,9 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="managerPartyId" related="partyId"/></relationship>
         <relationship type="one-nofk" related="mantle.humanres.position.EmplPosition" short-alias="position"/>
         <relationship type="one-nofk" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one-nofk" related="mantle.humanres.schedule.WorkingSchedule" short-alias="schedule"/>
+        <relationship type="one-nofk" title="HolidayCalendar" related="mantle.work.effort.WorkEffortCategory" short-alias="holidayCalendar">
+            <key-map field-name="holidayCategoryId" related="workEffortCategoryId"/></relationship>
         <relationship type="one" title="EmploymentAssignmentState" related="moqui.basic.Enumeration" short-alias="state">
             <key-map field-name="stateEnumId" related="enumId"/></relationship>
         <relationship type="one-nofk" related="mantle.humanres.employment.EmploymentChange" short-alias="change"/>
@@ -428,6 +436,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="EMPL_ASSGN_PARTY"><index-field name="partyId"/><index-field name="organizationPartyId"/></index>
         <index name="EMPL_ASSGN_MGR"><index-field name="managerPartyId"/></index>
         <index name="EMPL_ASSGN_DEPT"><index-field name="departmentPartyId"/></index>
+        <index name="EMPL_ASSGN_SCHED"><index-field name="workingScheduleId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Employment Assignment State" enumTypeId="EmploymentAssignmentState"/>
             <moqui.basic.Enumeration enumId="EasActive" description="Working" sequenceNum="1" enumTypeId="EmploymentAssignmentState"/>
@@ -438,7 +447,7 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="EmploymentChange" package="mantle.humanres.employment" cache="never">
         <description>A hire or a dated change of an employment (IronStone People design §4 HireEmployee and EmploymentChange, PE-02;
             impl-people P6), a fact of its own: what changes (a transfer, a manager change, a leave of absence, a separation), from
-            when, the new terms, why, who asked and when, the operation key a retry answers with, and its state. A transfer and a
+            when, the new terms (with the working schedule, P9), why, who asked and when, the operation key a retry answers with, and its state. A transfer and a
             separation wait for approval (a PeopleApproval of kind PakEmploymentChange, bound to this row and the employment's
             revision, so a change of the employment meanwhile supersedes it) and are applied by the last approval; a hire, a
             manager change and a leave of absence are applied at once. Applied, the change has started the assignment
@@ -455,6 +464,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id"/>
         <field name="managerPartyId" type="id"/>
         <field name="facilityId" type="id"/>
+        <field name="workingScheduleId" type="id"><description>The schedule the assignment follows (P9)</description></field>
+        <field name="holidayCategoryId" type="id"><description>The assignment's holiday calendar in place of the schedule's (P9)</description></field>
         <field name="terminationReasonEnumId" type="id"/>
         <field name="terminationTypeEnumId" type="id"/>
         <field name="reason" type="text-long"/>
@@ -503,6 +514,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="EckSeparation" description="Separation" sequenceNum="6" enumTypeId="EmploymentChangeKind"/>
             <moqui.basic.Enumeration enumId="EckReorganization" description="Reorganization" sequenceNum="7"
                     enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckSchedule" description="Working schedule" sequenceNum="8" enumTypeId="EmploymentChangeKind"/>
             <moqui.basic.StatusType description="Employment Change" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchRequested" description="Waiting for approval" sequenceNum="1" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchApplied" description="Applied" sequenceNum="2" statusTypeId="EmploymentChange"/>
@@ -1128,6 +1140,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="workTypeEnumId" type="id"/>
         <field name="payGradeId" type="id"/>
         <field name="emplPositionClassId" type="id"/>
+        <!-- the organization a labor costing rate (RaprCost) is of, empty for a rate shared by every organization (People P10, the
+            user's call of Nov 11, 2026: RateServices.get#CostingRate prefers the employer's row, then a shared one); the rates of
+            the other purposes (Projects' client billing and worker pay) leave it empty and their lookup reads none -->
+        <field name="organizationPartyId" type="id"/>
         <!-- what we're looking for -->
         <field name="rateAmount" type="number-decimal"/>
 
@@ -1142,6 +1158,8 @@ along with this software (see the LICENSE.md file). If not, see
 
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
 
         <relationship type="one" related="mantle.humanres.rate.PayGrade" short-alias="payGrade"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass" short-alias="positionClass"/>
@@ -1252,6 +1270,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Rate Purpose" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprClient" description="Client Billing" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprVendor" description="Worker/Vendor Payment" enumTypeId="RatePurpose"/>
+            <!-- the one labor costing purpose (People P10, design-people PE-23): the cost of an hour by position class and work
+                type, never of a person, maintained by finance administration and read by RateServices.get#CostingRate -->
+            <moqui.basic.Enumeration enumId="RaprCost" description="Labor Costing" enumTypeId="RatePurpose"/>
             <!-- Default no charge client rate, always 0 -->
             <mantle.humanres.rate.RateAmount rateAmountId="NoChargeClient" rateTypeEnumId="RatpNoCharge" ratePurposeEnumId="RaprClient"
                     timePeriodUomId="TF_hr" workEffortId="" partyId="" emplPositionClassId=""

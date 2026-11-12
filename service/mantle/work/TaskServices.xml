@@ -1234,7 +1234,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Tells the users of a party newly assigned to a task of a project (WorkEffortParty Assignee, not by
             themselves) on the topic WorkItemAssigned: workEffortId, workEffortName, rootWorkEffortId, projectName, assignedByName,
             and the task as the record (the app's record link opens it). Run by the WorkEffortParty rule of WorkEffort.secas.xml;
-            a failure is logged, not the assignment's.</description>
+            a failure is logged, not the assignment's. A task of People's lifecycle work (its root's process policy People's, WppPeopleChecklist) goes to
+            mantle.humanres.PeopleServices.notify#PeopleTaskAssigned instead, whose title names nothing private.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="partyId" required="true"/>
@@ -1243,6 +1244,14 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
                 if (task == null || task.workEffortTypeEnumId !== 'WetTask' || !task.rootWorkEffortId) return
+                // People's lifecycle work (a checklist step, an equipment return) is told on its own topic, whose title names
+                // neither the task nor its root, which name the person and the change (impl-people P8)
+                if (ec.entity.find('mantle.work.effort.WorkEffortProcessPolicy').condition('workEffortId', task.rootWorkEffortId)
+                        .condition('processPolicyEnumId', 'WppPeopleChecklist').disableAuthz().count() > 0) {
+                    ec.service.sync().name('mantle.humanres.PeopleServices.notify#PeopleTaskAssigned')
+                            .parameters({workEffortId: workEffortId, partyId: partyId}).disableAuthz().call()
+                    return
+                }
                 const userIds = Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).selectField('userId')
                         .disableAuthz().list()).map((account) => account.userId).filter((userId) => userId !== ec.user.userId)
                 if (!userIds.length) return

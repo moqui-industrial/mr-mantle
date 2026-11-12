@@ -614,6 +614,29 @@ function supersede(approval) {
     })
     clearNotices(approval)
 }
+// Work on the sources' subject that leaves what was asked as it was (P9: a working schedule assigned to an employment whose
+// transfer or separation waits): the requests waiting at the sources' revision before the work are bound to the revision after it,
+// so the work neither supersedes them nor leaves them stale, and their step is sent again (the earlier notices, which name the
+// earlier revision, read). A request already stale before the work stays so. Answers what the work answers.
+function keepWaiting(approvalKindEnumId, sourceIds, work) {
+    const kind = kindOf(approvalKindEnumId)
+    const kept = []
+    for (const sourceId of unique(sourceIds || [])) {
+        const revision = revisionOf(kind, sourceId)
+        for (const approval of rows(APPROVAL, {sourceEntityName: kind.sourceEntityName, sourceId, statusId: "PapPending"}))
+            if (approval.sourceRevision === revision) kept.push(approval)
+    }
+    const result = work()
+    for (const approval of kept) {
+        call("update#" + APPROVAL, {
+            peopleApprovalId: approval.peopleApprovalId,
+            sourceRevision: revisionOf(kind, approval.sourceId)
+        })
+        clearNotices(approval)
+        notify(one(APPROVAL, {peopleApprovalId: approval.peopleApprovalId}))
+    }
+    return result
+}
 // A source changed (new terms): its requests waiting at an earlier revision are superseded and their notices read; the change
 // is asked for again.
 function sourceChanged(approvalKindEnumId, sourceId) {
@@ -1259,13 +1282,122 @@ function transferApprovalOwner(p) {
     return {transferred: true}
 }
 
+// ===== the caller's own requests and the decisions waiting on them (P8; design §3 SelfService MyRequests, MyTeam Decisions) =====
+// the most requests and notices one list reads
+const ownCap = 200
+// A request's line as its requester or approver reads it: the kind, what it is about (the kind's own label, no pay), the
+// requester, the dates and the state.
+function lineOf(approval, statusId = statusOf(approval)) {
+    const kind = kinds[approval.approvalKindEnumId]
+    const described = kind ? kind.describe(approval.sourceId) : {label: approval.sourceId}
+    return {
+        peopleApprovalId: approval.peopleApprovalId,
+        approvalKindEnumId: approval.approvalKindEnumId,
+        kindText: enumTexts([approval.approvalKindEnumId])[approval.approvalKindEnumId] || approval.approvalKindEnumId,
+        summary: described.label ? described.label.charAt(0).toUpperCase() + described.label.slice(1) : approval.sourceId,
+        message: described.message || {},
+        sourceEntityName: approval.sourceEntityName,
+        sourceId: approval.sourceId,
+        subjectPartyId: approval.subjectPartyId || null,
+        organizationPartyId: approval.organizationPartyId,
+        requestedDate: approval.requestedDate,
+        requestedDateText: dateText(approval.requestedDate),
+        effectiveDateText: dateText(approval.effectiveDate),
+        statusId,
+        statusText: statusTexts[statusId] || statusId
+    }
+}
+// find#MyRequests: the People requests the caller made (any kind, newest first; with openOnly those waiting), each with its
+// state, who decides the step waiting (or that no one may yet) and a refusal's reason, the requester's own to read. No supplied
+// user or party is read: they are the caller's.
+function findMyRequests(p) {
+    if (!ec.user.userId) denied("PERMISSION_DENIED", "Your requests are not available")
+    let query = find(APPROVAL).condition("requestedByUserId", ec.user.userId)
+    if (p.openOnly === true || p.openOnly === "true") query = query.condition("statusId", "PapPending")
+    const found = Array.from(query.orderBy("-requestedDate").limit(ownCap).list())
+    const requests = found.map(approval => {
+        const statusId = statusOf(approval)
+        const line = lineOf(approval, statusId)
+        delete line.message
+        let nextText = ""
+        let returnReason = ""
+        if (statusId === "PapPending") {
+            const state = stateOf(approval)
+            const route = explain(state.route, requestOf(approval))
+            const index = state.current ? state.steps.indexOf(state.current) : -1
+            nextText = index < 0 ? "" : route[index].unresolved ? "No one may decide it yet" : route[index].approverNames
+        } else if (statusId === "PapRefused") {
+            const refused = decisionsOf(approval).filter(row => row.decisionEnumId === "PpdRefused")
+            returnReason = refused.length ? refused[refused.length - 1].reason || "" : ""
+        }
+        return Object.assign(line, {nextApproverText: nextText, returnReason})
+    })
+    return lib.pageList(requests, p, "requests")
+}
+// How many of the caller's own requests wait (get#SelfService's count).
+function openRequestCount() {
+    if (!ec.user.userId) return 0
+    return Array.from(
+        find(APPROVAL).condition({requestedByUserId: ec.user.userId, statusId: "PapPending"}).limit(ownCap).list()
+    ).filter(approval => statusOf(approval) === "PapPending").length
+}
+// The decisions waiting on the caller: the requests waiting whose notices reached them and whose step waiting they may decide
+// now (an approver of it, PEOPLE_REQUEST_APPROVE), newest first. Read from the notices, so a request whose route never reached
+// the caller is not read; each is checked against its route now, so a step another decided or one routed elsewhere is not theirs.
+// Each line's title names the request as its notice does (a separation names no one).
+function waitingFor(limit = 50) {
+    const userId = ec.user.userId
+    const partyId = ec.user.userAccount?.partyId || null
+    if (!userId || !partyId || !approvePermissions.some(permission => lib.access.has(permission))) return []
+    const topics = Object.values(kinds).map(kind => kind.topic)
+    const notices = Array.from(
+        find("moqui.security.user.NotificationMessageByUser", {userId})
+            .condition("topic", "in", topics)
+            .selectField(["notificationMessageId", "messageJson", "sentDate"])
+            .orderBy("-sentDate")
+            .limit(ownCap)
+            .list()
+    )
+    const approvalIds = unique(notices.map(row => lib.json(row.messageJson, {})?.peopleApprovalId).filter(Boolean))
+    if (!approvalIds.length) return []
+    const pending = Array.from(
+        find(APPROVAL).condition("peopleApprovalId", "in", approvalIds).condition("statusId", "PapPending").list()
+    )
+    const found = []
+    for (const approval of pending) {
+        if (found.length >= limit) break
+        try {
+            if (statusOf(approval) !== "PapPending") continue
+            const state = stateOf(approval)
+            if (!state.current || !state.current.approvers.some(row => row.partyId === partyId && row.userId === userId)) continue
+            const line = lineOf(approval)
+            const message = line.message
+            delete line.message
+            found.push(
+                Object.assign(line, {
+                    title: "Approve " + (message.subjectText || line.summary.charAt(0).toLowerCase() + line.summary.slice(1)),
+                    organizationName: message.organizationName || "",
+                    stepText: stepLabel(state.steps, state.current),
+                    requestedByName:
+                        people.personNames([approval.requestedByPartyId].filter(Boolean))[approval.requestedByPartyId] || ""
+                })
+            )
+        } catch (error) {
+            // one request that cannot be read is logged and the rest go on
+            ec.logger.error("People decision " + approval.peopleApprovalId + " could not be read: " + error.message)
+        }
+    }
+    return found.sort((a, b) => (ms(b.requestedDate) || 0) - (ms(a.requestedDate) || 0))
+}
+
 const operations = {
     findPolicies,
     storePolicy,
     resolveApprovers,
     recordDecision,
     findOwnedApprovals,
-    transferApprovalOwner
+    transferApprovalOwner,
+    findMyRequests
 }
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown approval operation " + op)
@@ -1277,6 +1409,11 @@ function run(op, p) {
     request,
     sourceChanged,
     sourceSummary,
+    // P9: a change beside a waiting request that leaves what was asked as it was (a working schedule assigned)
+    keepWaiting,
     // for P6's separation and manager change (People's employment changes): an employer's waiting requests routed again
-    reroute
+    reroute,
+    // P8: the decisions waiting on the caller (find#DueWork, the Today source, MyTeam) and their own open requests (get#SelfService)
+    waitingFor,
+    openRequestCount
 })

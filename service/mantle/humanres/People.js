@@ -407,6 +407,23 @@ const homeCounts = {
                 .condition("thruDate", ">", stamp(asOf - recentDays * day))
                 .condition("thruDate", "<=", stamp(asOf))
                 .count()
+    },
+    // P8: the vacant seats in effect (P4's positions, a position reader's: HR, recruiting, payroll or the administrator), through
+    // find#Positions' own scope; one that cannot be counted is left out
+    vacancies: {
+        needs: ["hrView", "recruitView", "payrollView", "configure"],
+        count: (organizationPartyIds, asOf, p) =>
+            lib.probe("mantle.humanres.PositionServices.find#Positions", {
+                organizationPartyId: p.organizationPartyId || null,
+                vacancy: "vacant",
+                asOfDate: stamp(asOf),
+                pageSize: 1
+            }).positionsCount
+    },
+    // P8: the People decisions waiting on the caller now (Approvals.js waitingFor), whatever the employer
+    decisions: {
+        needs: "requestApprove",
+        count: () => approvals().waitingFor(dueWorkCap).length
     }
 }
 function home(p) {
@@ -416,8 +433,16 @@ function home(p) {
     const organizationPartyIds = organizationsFor(userScope, p.organizationPartyId)
     const asOf = asOfMillis(p.asOfDate)
     const counts = {}
-    for (const [name, definition] of Object.entries(homeCounts))
-        if (caps[definition.needs]) counts[name] = organizationPartyIds.length ? definition.count(organizationPartyIds, asOf) : 0
+    for (const [name, definition] of Object.entries(homeCounts)) {
+        const needs = Array.isArray(definition.needs) ? definition.needs : [definition.needs]
+        if (!needs.some(capability => caps[capability])) continue
+        // one count that fails is logged by name and left out; the others go on
+        try {
+            counts[name] = organizationPartyIds.length ? definition.count(organizationPartyIds, asOf, p) : 0
+        } catch (error) {
+            ec.logger.error("People Home count " + name + " failed: " + error.message)
+        }
+    }
     // the due work an HR reader clears: employees with no manager, the first few by name
     let dueWork = []
     let dueWorkCount = 0
@@ -523,7 +548,149 @@ function readiness(p) {
     return {checks}
 }
 
-const operations = {scope, home, readiness}
+// ===== find#DueWork (P8; design §3 Home DueWork, MyTeam Decisions, SelfService) =====
+// The due work the caller clears, of the kinds asked (all they may read when none is asked), each kind with the capability that
+// reads it: the People decisions waiting on them (PEOPLE_REQUEST_APPROVE; Approvals.js waitingFor), an HR reader's employees
+// with no manager and the open lifecycle tasks of the employers in scope (checklist steps and equipment returns), and the
+// caller's own open People tasks. A protected task about the caller (their own offboarding) is never theirs to see here, as an
+// HR reader of their own employer or as its assignee (Checklists.js hiddenTaskIds, the P7 rule), unless its step is the
+// employee's to see.
+const checklists = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Checklists.js")
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+const dueWorkCap = 200
+const dueKinds = {
+    decision: {text: "Decision", reads: (caps, userScope) => !!caps.requestApprove && !!userScope.partyId},
+    noManager: {text: "No manager", reads: caps => !!caps.hrView},
+    checklistTask: {text: "Lifecycle task", reads: caps => !!caps.hrView},
+    myTask: {text: "Your task", reads: (caps, userScope) => !!userScope.partyId}
+}
+const dueDay = millis => (millis == null ? "" : ec.l10n.format(new Date(millis), "yyyy-MM-dd"))
+// The caller's own open People tasks (myTask), the rule above applied.
+function myTasks(userScope) {
+    if (!userScope.partyId) return []
+    const tasks = checklists().lifecycleTasks({assigneePartyId: userScope.partyId})
+    if (!tasks.length) return []
+    const hidden = new Set(
+        checklists().hiddenTaskIds(
+            tasks.map(row => row.workEffortId),
+            userScope.partyId
+        )
+    )
+    return tasks.filter(row => !hidden.has(row.workEffortId))
+}
+function myTaskCount() {
+    return myTasks(scopeOf()).length
+}
+function taskLine(row, kind, names, organizations, now) {
+    const due = lib.ms(row.dueDate)
+    return {
+        dueKind: kind,
+        dueText: row.kindText ? row.kindText + " task" : dueKinds[kind].text,
+        title: row.workEffortName,
+        partyId: row.partyId,
+        personName: names[row.partyId] || row.partyId,
+        organizationPartyId: row.organizationPartyId,
+        organizationName: organizations[row.organizationPartyId] || "",
+        dueDate: due,
+        whenText: due == null ? "" : "Due " + dueDay(due),
+        overdue: due != null && due < now,
+        assigneeText: row.assigneePartyIds.map(partyId => names[partyId] || partyId).join(", "),
+        workEffortId: row.workEffortId
+    }
+}
+function dueWork(p) {
+    const userScope = scopeOf()
+    const caps = userScope.capabilities
+    const asked = p.kinds
+        ? (Array.isArray(p.kinds) ? p.kinds : String(p.kinds).split(",")).map(kind => String(kind).trim()).filter(Boolean)
+        : Object.keys(dueKinds)
+    for (const kind of asked)
+        if (!Object.hasOwn(dueKinds, kind)) denied("KIND_INVALID", "Due work of kind " + kind + " is unknown")
+    const kinds = asked.filter(kind => dueKinds[kind].reads(caps, userScope))
+    if (!kinds.length) denied("PERMISSION_DENIED", "Due work is not available")
+    const organizationPartyIds = kinds.some(kind => kind === "noManager" || kind === "checklistTask")
+        ? organizationsFor(userScope, p.organizationPartyId)
+        : []
+    const now = asOfMillis(null)
+    const found = []
+    const seen = new Set()
+    if (kinds.includes("decision"))
+        for (const row of approvals().waitingFor(dueWorkCap))
+            found.push({
+                dueKind: "decision",
+                dueText: row.kindText,
+                title: row.title,
+                partyId: row.subjectPartyId,
+                personName: "",
+                organizationPartyId: row.organizationPartyId,
+                organizationName: row.organizationName,
+                dueDate: null,
+                whenText: "Asked " + row.requestedDateText,
+                overdue: false,
+                assigneeText: row.stepText,
+                peopleApprovalId: row.peopleApprovalId,
+                approvalKindEnumId: row.approvalKindEnumId,
+                sourceId: row.sourceId,
+                requestedDate: lib.ms(row.requestedDate)
+            })
+    const tasks = []
+    if (kinds.includes("myTask")) for (const row of myTasks(userScope)) tasks.push([row, "myTask"])
+    if (kinds.includes("checklistTask") && organizationPartyIds.length)
+        // the caller's own protected work (their offboarding) is not theirs to see as HR either
+        for (const row of checklists().lifecycleTasks({organizationPartyIds}))
+            if (!(row.partyId === userScope.partyId && row.isProtected && !row.employeeSees)) tasks.push([row, "checklistTask"])
+    if (kinds.includes("noManager") && organizationPartyIds.length)
+        for (const row of withoutManager(organizationPartyIds, now))
+            found.push({
+                dueKind: "noManager",
+                dueText: dueKinds.noManager.text,
+                title: "Name a manager",
+                partyId: row.partyId,
+                organizationPartyId: row.organizationPartyId,
+                dueDate: null,
+                whenText: "",
+                overdue: false,
+                assigneeText: ""
+            })
+    const partyIds = unique(
+        tasks
+            .flatMap(([row]) => [row.partyId].concat(row.assigneePartyIds))
+            .concat(found.map(row => row.partyId))
+            .filter(Boolean)
+    )
+    const names = personNames(partyIds)
+    const organizations = organizationNames(
+        unique(
+            tasks
+                .map(([row]) => row.organizationPartyId)
+                .concat(found.map(row => row.organizationPartyId))
+                .filter(Boolean)
+        )
+    )
+    for (const row of found) {
+        if (row.dueKind === "decision") continue
+        row.personName = names[row.partyId] || row.partyId || ""
+        row.organizationName = organizations[row.organizationPartyId] || ""
+    }
+    for (const row of found) if (row.dueKind === "decision") row.personName = row.partyId ? names[row.partyId] || "" : ""
+    for (const [row, kind] of tasks) {
+        if (seen.has(row.workEffortId)) continue
+        seen.add(row.workEffortId)
+        found.push(taskLine(row, kind, names, organizations, now))
+    }
+    const rank = row => (row.overdue ? 0 : row.dueDate != null ? 1 : 2)
+    found.sort(
+        (a, b) =>
+            rank(a) - rank(b) ||
+            (a.dueDate ?? 0) - (b.dueDate ?? 0) ||
+            (b.requestedDate ?? 0) - (a.requestedDate ?? 0) ||
+            String(a.personName).localeCompare(String(b.personName)) ||
+            String(a.title).localeCompare(String(b.title))
+    )
+    return Object.assign(lib.pageList(found, p, "dueWork"), {kinds})
+}
+
+const operations = {scope, home, readiness, dueWork}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown People operation " + op)
     return operations[op](p || {})
@@ -549,5 +716,7 @@ function run(op, p) {
     unitsUnder,
     // P6: the assignments in effect and an employment's revision (Employment.js, Approvals.js, Organization.js, Employees.js)
     assignmentsAt,
-    employmentRevision
+    employmentRevision,
+    // P8: the caller's own open People tasks (get#SelfService)
+    myTaskCount
 })
