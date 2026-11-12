@@ -1066,7 +1066,8 @@ function scheduleInterview(p) {
     try {
         call("mantle.work.EventServices.send#EventInvitations", {
             workEffortId,
-            eventUrl: "/qapps/People/Staffing/InterviewsCalendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
+            // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
+            eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
         })
     } catch (error) {
         invitationsSent = false
