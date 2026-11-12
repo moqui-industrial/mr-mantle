@@ -1,0 +1,528 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's reviews and goals (IronStone People design §11 ReviewCycles, Reviews, ReviewDetail and Goals, §15 the review release,
+    §16.2, PE-16, PE-01, PE-21; impl-people P20; Reviews.js): review templates and cycles of an employer, set up and started by a
+    development editor into one review per person (each in its own transaction, failures named); a review's steps (the person's self
+    assessment, the reviewer's assessment and the feedback the reviewer asks for), each a response of the step's review form
+    (People's DbfpReview purpose) answered once and locked; the reviewer's private notes, their author's alone; finalizing (after a
+    People approval of kind PakReview when the template asks: the PeopleReviewStep topic), releasing (the employee-visible review
+    stored once as its page and PDF) and the person's acknowledgment; the review's files (its content host); goals, WorkEfforts of
+    the WetGoal type and WepGoal purpose, in no task list. Each service checks the caller's People scope (People.js) and the People
+    permissions itself, then reads and writes with authorization off, and names no application group. The reviewer's private notes
+    reach no other reader, the release, an export, Chatter, a notice or the search index; the assessments' text is opted out of AI
+    (PerformanceReviewStep.summary, PerformanceNote.noteText, FormResponseAnswer.valueText). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== templates and cycles ===== -->
+    <service verb="find" noun="Cycles" allow-remote="false">
+        <description>The review cycles of the employers whose reviews the caller administers (a development reader's,
+            PEOPLE_DEVELOP_VIEW; organizationPartyId narrows them): show open (draft and in progress, the default), closed or all,
+            term the cycle's name; newest period first, paged. Each with its scope, template, period, due dates, state, counts
+            (reviews, assessed, released, acknowledged, excluded) and what a development editor may do (change a draft, start,
+            close). With the employers' templates (includeEnded the ended ones too). Refuses a show that is not one (SHOW_INVALID)
+            and an employer outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="show"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="term"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="cycles" type="List"><description>reviewCycleId, cycleName, organizationPartyId, organizationName,
+                departmentPartyId, scopeText, reviewTemplateId, templateName, periodFromDate, periodThruDate, periodText, selfDueDate,
+                managerDueDate, dueText, statusEnumId, statusText, progressText, reviewCount, selfDone, managerDone, releasedCount,
+                acknowledgedCount, excludedCount, openCount, canChange, canStart, canClose, revision</description></parameter>
+            <parameter name="cyclesCount" type="Integer"/>
+            <parameter name="cyclesPageIndex" type="Integer"/>
+            <parameter name="cyclesPageSize" type="Integer"/>
+            <parameter name="cyclesPageMaxIndex" type="Integer"/>
+            <parameter name="cyclesPageRangeLow" type="Integer"/>
+            <parameter name="cyclesPageRangeHigh" type="Integer"/>
+            <parameter name="canSetUp" type="Boolean"/>
+            <parameter name="templates" type="List"><description>reviewTemplateId, templateName, organizationPartyId, organizationName,
+                description, selfAssessment, feedbackAllowed, feedbackReleased, approvalRequired, selfFormId, managerFormId,
+                feedbackFormId, stepsText, releaseText, formsText, ended, revision</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('findCycles', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ReviewTemplate" allow-remote="false">
+        <description>A review template added (organizationPartyId) or changed (reviewTemplateId, at its revision, only while no
+            started cycle uses it), or ended (end), by a development editor (PEOPLE_DEVELOP_EDIT) of its employer: its name, the
+            steps it asks for (selfAssessment, feedbackAllowed), the review form of each step (a published form of the DbfpReview
+            purpose of the employer; none: a written summary) and its release policy (approvalRequired: finalizing waits for a
+            People approval of kind PakReview; feedbackReleased: the feedback is part of what the person reads once released). Refuses
+            PERMISSION_DENIED, ORGANIZATION_DENIED, ORGANIZATION_REQUIRED, RECORD_UNAVAILABLE, NAME_REQUIRED, FORM_UNAVAILABLE,
+            TEMPLATE_IN_USE (end it and add another) and REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="reviewTemplateId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="templateName"/>
+            <parameter name="description"/>
+            <parameter name="selfAssessment"/>
+            <parameter name="feedbackAllowed"/>
+            <parameter name="feedbackReleased"/>
+            <parameter name="approvalRequired"/>
+            <parameter name="selfFormId"/>
+            <parameter name="managerFormId"/>
+            <parameter name="feedbackFormId"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="reviewTemplateId"/><parameter name="revision"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('storeReviewTemplate', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Cycle" allow-remote="false">
+        <description>A draft review cycle added (organizationPartyId) or changed (reviewCycleId, at its revision), or a started one
+            closed (close with its reason), by a development editor of its employer: its name, the unit reviewed and the units under
+            it (departmentPartyId; empty: the whole employer), the template (the employer's, not ended), the period and the due
+            dates of the self and reviewer assessments. Closing needs every review released, acknowledged or excluded, unless
+            excludeOpen excludes the open ones with the reason. Refuses PERMISSION_DENIED, ORGANIZATION_DENIED, ORGANIZATION_REQUIRED,
+            RECORD_UNAVAILABLE, NAME_REQUIRED, DEPARTMENT_OUTSIDE, TEMPLATE_INVALID, DATE_INVALID, DATES_INVALID, CYCLE_STARTED (a
+            started cycle is not changed), NOT_ACTIVE, REVIEWS_OPEN, REASON_REQUIRED and REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="reviewCycleId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="cycleName"/>
+            <parameter name="reviewTemplateId"/>
+            <parameter name="periodFromDate"/>
+            <parameter name="periodThruDate"/>
+            <parameter name="selfDueDate"/>
+            <parameter name="managerDueDate"/>
+            <parameter name="close" type="Boolean"/>
+            <parameter name="excludeOpen" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reviewCycleId"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('storeCycle', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="start" noun="Cycle" allow-remote="false" transaction-timeout="1800">
+        <description>A draft or started review cycle (at its revision) started by a development editor of its employer: one review
+            for each current employee of the employer in its scope who has none in it yet, each in its own transaction, with the
+            person's self assessment (when the template asks for one) and the reviewer's assessment, the reviewer being the manager
+            of the employment's live reporting line; the person and the reviewer are told (PeopleReviewUpdate). A person with no
+            reviewer is named and left out (NO_REVIEWER), and any other failure of one person is named while the rest go on; a later
+            start adds the people left out. preview answers the people with their reviewers and what keeps one out, changing
+            nothing. Refuses PERMISSION_DENIED, RECORD_UNAVAILABLE, CYCLE_CLOSED, TEMPLATE_INVALID and REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="reviewCycleId" required="true"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reviewCycleId"/>
+            <parameter name="participants" type="List"><description>partyId, personName, partyRelationshipId, departmentPartyId,
+                managerPartyId, managerName, alreadyReviewed, problem</description></parameter>
+            <parameter name="startedCount" type="Integer"/>
+            <parameter name="startedIds" type="List"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="failures" type="List"><description>partyId, personName, code, message</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('startCycle', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+
+    <!-- ===== reviews ===== -->
+    <service verb="find" noun="Reviews" allow-remote="false">
+        <description>The reviews the caller reads, by what they do: show todo (the default: their own step waiting, a decision of
+            the review's approval, a release, an acknowledgment), mine (their own reviews), team (the reviews they are the reviewer
+            of, while they work for the employer), all (a development reader's employers', never their own); reviewCycleId and term
+            (the person's name) narrow them. Paged, earliest due first; each with the person, the cycle and period, the employer,
+            the reviewer, the self and reviewer assessments' states, the feedback given of asked (not to the person reviewed), the
+            earliest due date, the state and what the caller has to do; never a rating, an answer or a note. Refuses a show that is
+            not one (SHOW_INVALID).</description>
+        <in-parameters>
+            <parameter name="show"/>
+            <parameter name="reviewCycleId"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reviews" type="List"><description>performanceReviewId, reviewCycleId, cycleName, periodText, partyId,
+                personName, organizationName, reviewerName, selfStateText, managerStateText, feedbackText, dueText, statusEnumId,
+                statusText, todoText, isOwn</description></parameter>
+            <parameter name="reviewsCount" type="Integer"/>
+            <parameter name="reviewsPageIndex" type="Integer"/>
+            <parameter name="reviewsPageSize" type="Integer"/>
+            <parameter name="reviewsPageMaxIndex" type="Integer"/>
+            <parameter name="reviewsPageRangeLow" type="Integer"/>
+            <parameter name="reviewsPageRangeHigh" type="Integer"/>
+            <parameter name="todoCount" type="Integer"/>
+            <parameter name="canSeeAll" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('findReviews', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Review" allow-remote="false">
+        <description>A review as the caller reads it: the person, the cycle and period, the employer, the reviewer and the state;
+            the overall rating to the reviewer, development, an approver and, once released, the person; the steps the caller sees,
+            each with the content they read (the person their own self assessment and, once released, the reviewer's assessment and
+            the feedback the template shares; the reviewer every step but feedback an earlier reviewer asked for; a feedback giver
+            their own; development and an approver every step); the caller's own private notes, never another's; the approval while
+            it waits; the release and acknowledgment; and what the caller may do (assess, give feedback, ask for and withdraw
+            feedback, return, finalize, decide, release, acknowledge, reassign, exclude, note). Refuses a review not in reach
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="performanceReviewId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="review" type="Map"/>
+            <parameter name="steps" type="List"><description>performanceReviewStepId, stepKindEnumId, kindText, partyId, assigneeName,
+                statusEnumId, statusText, dueText, submittedText, readable, summary, ratingText, answers, answersText, returnReason,
+                cancelReason, formId, isOwn, revision</description></parameter>
+            <parameter name="notes" type="List"><description>The caller's own: performanceNoteId, noteText, noteDateText, revision</description></parameter>
+            <parameter name="approval" type="Map"/>
+            <parameter name="isSelf" type="Boolean"/>
+            <parameter name="isReviewer" type="Boolean"/>
+            <parameter name="isDevelop" type="Boolean"/>
+            <parameter name="isApprover" type="Boolean"/>
+            <parameter name="ownStepId"/>
+            <parameter name="ownStepKindEnumId"/>
+            <parameter name="ownFormId"/>
+            <parameter name="canAssess" type="Boolean"/>
+            <parameter name="canGiveFeedback" type="Boolean"/>
+            <parameter name="canRequestFeedback" type="Boolean"/>
+            <parameter name="canReturnSelf" type="Boolean"/>
+            <parameter name="canReturnManager" type="Boolean"/>
+            <parameter name="canFinalize" type="Boolean"/>
+            <parameter name="canDecide" type="Boolean"/>
+            <parameter name="canRelease" type="Boolean"/>
+            <parameter name="canAcknowledge" type="Boolean"/>
+            <parameter name="canExclude" type="Boolean"/>
+            <parameter name="canReassign" type="Boolean"/>
+            <parameter name="canNote" type="Boolean"/>
+            <parameter name="canAddFiles" type="Boolean"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('getReview', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Assessment" allow-remote="false">
+        <description>The caller's own self assessment (the person) or reviewer's assessment (the reviewer, while they work for the
+            employer) of a review in progress, answered once and locked: the step's review form (values, checked by
+            FormDefinitions and kept as a FormResponse its FormInvitation locks), the summary, and the reviewer's overall rating
+            (PerformanceReviewRating). Refuses RECORD_UNAVAILABLE, NOT_ASSIGNED, ALREADY_SUBMITTED, REVIEW_CLOSED, ASSESSMENT_REQUIRED,
+            FORM_VALUES_INVALID and VALUE_INVALID.</description>
+        <in-parameters>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="summary"/>
+            <parameter name="ratingEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="performanceReviewId"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="statusEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('storeAssessment', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="Feedback" allow-remote="false">
+        <description>The caller's own feedback on a review in progress, asked of them by its reviewer: answered once on the
+            template's feedback form (values) or as a summary, and locked. Read by its giver, the reviewer who asked, development and
+            an approver, and by the person once released only when the template shares feedback (never anonymous). Refuses as
+            store#Assessment.</description>
+        <in-parameters>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="summary"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="performanceReviewId"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="statusEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('submitFeedback', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="change" noun="ReviewState" allow-remote="false">
+        <description>A review's state changed by one who may, under the review's lock and at the revision read (expectedRevision):
+            requestFeedback (the reviewer, the template allowing it: a colleague working for the employer, partyId, due dueDate,
+            told); cancelFeedback (who asked for it or a development editor, with the reason); return (a submitted step,
+            performanceReviewStepId, waits again with the reason: the self assessment by the reviewer or a development editor, the
+            reviewer's assessment by a development editor); finalize (the reviewer, their assessment submitted and nothing waiting:
+            a People approval of kind PakReview when the template asks, PeopleReviewStep, else finalized); approve and refuse (an
+            approver of the step waiting, through PeopleApprovalServices.record#Decision at the review's revision, peopleApprovalId
+            and sourceRevision from the notice; the last approval finalizes it, a refusal with its reason returns the reviewer's
+            assessment); release (the reviewer or a development editor of a finalized review: the employee-visible review rendered
+            once and stored as its page and PDF, without a private note, the person told); acknowledge (the person, with an optional
+            comment); reassign (a development editor: the reviewer changed to partyId with the reason, audit-logged); exclude (a
+            development editor, with the reason). One who reads nothing of the review is answered as for a missing one
+            (RECORD_UNAVAILABLE). Refuses PERMISSION_DENIED, ACTION_INVALID, REVIEW_CLOSED, REASON_REQUIRED, FEEDBACK_NOT_ALLOWED,
+            PARTY_INVALID, NOT_EMPLOYED, ALREADY_ASKED, STEP_INVALID, NOT_WAITING, NOT_SUBMITTED, SELF_WAITING, FEEDBACK_WAITING,
+            REVISION_CHANGED, and as record#Decision refuses (SELF_APPROVAL, NOT_APPROVER, NOT_PENDING, SOURCE_CHANGED); a decision
+            retried answers the first (repeated).</description>
+        <in-parameters>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="partyId"/>
+            <parameter name="dueDate"/>
+            <parameter name="reason"/>
+            <parameter name="comment"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="performanceReviewId"/>
+            <parameter name="performanceReviewStepId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="approvalAsked" type="Boolean"/>
+            <parameter name="revision"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('changeReviewState', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="ReviewStep" allow-remote="false">
+        <description>The PeopleReviewStep topic's approve service (approve#NotificationMessage calls it as the user):
+            change#ReviewState approve at the review and revision in the message; refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('approveNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="ReviewStep" allow-remote="false">
+        <description>The PeopleReviewStep topic's refuse service (refuse#NotificationMessage calls it as the user, with the
+            reason): change#ReviewState refuse at the review and revision in the message, returning the reviewer's assessment;
+            refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('refuseNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ReviewNote" allow-remote="false">
+        <description>A private note of the reviewer on a review not released or excluded: added by its current reviewer, changed or
+            removed (remove) only by its author, at its revision. Read by its author alone (get#Review's notes): never by the
+            person, a later reviewer, development, HR or an approver, and never in the release, an export, Chatter, a notice or the
+            search index. Refuses RECORD_UNAVAILABLE, PERMISSION_DENIED, REVIEW_CLOSED, TEXT_REQUIRED and REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="performanceNoteId"/>
+            <parameter name="noteText"/>
+            <parameter name="remove" type="Boolean"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="performanceNoteId"/><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('storeReviewNote', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ReviewRelease" allow-remote="false">
+        <description>A released review as it was released (stored once, never rendered again), to the person, its reviewer and
+            development readers of its employer: the stored page, its PDF's location and file name. Refuses a review not in reach
+            (RECORD_UNAVAILABLE) and one not released (NOT_RELEASED).</description>
+        <in-parameters><parameter name="performanceReviewId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="performanceReviewId"/>
+            <parameter name="printHtml"/>
+            <parameter name="pdfLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="releasedDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('reviewRelease', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+
+    <!-- ===== the review's content host (PE-01) ===== -->
+    <service verb="check" noun="ReviewAccess" allow-remote="false">
+        <description>Whether the caller reads a review's files and Chatter (the review is People's content host): its reviewer and
+            development readers of its employer, and the person once it is released; canEdit for the reviewer and development
+            editors. Never refuses: a review that is not one, or not the caller's to read, answers recordVisible false, and so does
+            a call with no user. get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="performanceReviewId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('reviewAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ReviewContent">
+        <description>A file of a review (PerformanceReviewContent, the record files of get#RecordLinkInfo): the row, and the
+            uploaded file saved through save#ReviewContentFile. Needs the reviewer or a development editor of the employer
+            (check#ReviewAccess: RECORD_UNAVAILABLE outside it, PERMISSION_DENIED otherwise).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.ability.PerformanceReviewContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="performanceReviewContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.ability.PerformanceReviewContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.ReviewServices.save#ReviewContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="ReviewContentFile" allow-remote="false">
+        <description>Internal to create#ReviewContent, which checks the caller: the file of a PerformanceReviewContent row of that
+            review.</description>
+        <in-parameters>
+            <parameter name="performanceReviewContentId" required="true"/>
+            <parameter name="performanceReviewId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.ability.PerformanceReviewContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.performanceReviewId != performanceReviewId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${performanceReviewContentId} is not of review ${performanceReviewId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/review/${performanceReviewId}/content_${performanceReviewContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.ability.PerformanceReviewContent" disable-authz="true"
+                    in-map="{performanceReviewContentId:performanceReviewContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <!-- ===== goals ===== -->
+    <service verb="find" noun="Goals" allow-remote="false">
+        <description>The goals the caller reads: show mine (the default), team (a manager's reports' at their lines' employers), a
+            person's (partyId: the person, their manager, development readers of the employer), a review's (performanceReviewId: the
+            goals agreed in a review its person or a full reader reads), all (a development reader's employers'); state open (the
+            default), closed or all. Paged; each with its owner, parent goal, period, measure, target, actual value and unit,
+            progress and state, and whether the caller may change it. A goal is no task: it is in no task list, CalDAV collection,
+            project or search. Refuses SHOW_INVALID and a person or review not in reach (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="show"/>
+            <parameter name="partyId"/>
+            <parameter name="performanceReviewId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="goals" type="List"><description>workEffortId, title, description, partyId, ownerName, organizationPartyId,
+                parentWorkEffortId, parentTitle, performanceReviewId, fromDate, thruDate, periodText, measureText, targetValue,
+                actualValue, unitText, progressText, percentComplete, progressNote, statusId, stateText, open, canChange,
+                revision</description></parameter>
+            <parameter name="goalsCount" type="Integer"/>
+            <parameter name="goalsPageIndex" type="Integer"/>
+            <parameter name="goalsPageSize" type="Integer"/>
+            <parameter name="goalsPageMaxIndex" type="Integer"/>
+            <parameter name="goalsPageRangeLow" type="Integer"/>
+            <parameter name="goalsPageRangeHigh" type="Integer"/>
+            <parameter name="canAdd" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('findGoals', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Goal" allow-remote="false">
+        <description>A goal agreed (partyId: the person, the caller by default; organizationPartyId when they have several
+            employments) or changed (workEffortId, at its revision), closed with its outcome (close, outcomeEnumId: GoalOutcome) or
+            cancelled (cancel, with the reason), by the person, the manager of a live line at the employer, or a development editor
+            of the employer: a WorkEffort of the WetGoal type and WepGoal purpose (title, description, period, percent complete,
+            parent goal) and its PersonGoal (measure, target, actual value, unit, progress note, the review it was agreed in). A
+            linked task's completion closes no goal. Refuses RECORD_UNAVAILABLE, PERMISSION_DENIED, NOT_EMPLOYED, TITLE_REQUIRED,
+            DATE_INVALID, DATES_INVALID, VALUE_INVALID, PERCENT_INVALID, PARENT_INVALID, REVIEW_INVALID, OUTCOME_REQUIRED,
+            REASON_REQUIRED, GOAL_CLOSED and REVISION_CHANGED.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="parentWorkEffortId"/>
+            <parameter name="performanceReviewId"/>
+            <parameter name="title"/>
+            <parameter name="description"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="measureText"/>
+            <parameter name="targetValue"/>
+            <parameter name="actualValue"/>
+            <parameter name="unitText"/>
+            <parameter name="percentComplete"/>
+            <parameter name="progressNote"/>
+            <parameter name="close" type="Boolean"/>
+            <parameter name="outcomeEnumId"/>
+            <parameter name="cancel" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/><parameter name="statusId"/><parameter name="revision"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Reviews.js').execute('storeGoal', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+</services>

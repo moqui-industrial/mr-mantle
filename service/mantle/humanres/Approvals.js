@@ -43,6 +43,8 @@ const EMPLOYEE_ADVANCE = "mantle.humanres.expense.EmployeeAdvance"
 const EMPLOYMENT_OFFER = "mantle.humanres.recruitment.EmploymentOffer"
 // P19: a place in a training session
 const PERSON_TRAINING = "mantle.humanres.ability.PersonTraining"
+const PERFORMANCE_REVIEW = "mantle.humanres.ability.PerformanceReview"
+const reviews = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Reviews.js")
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -313,6 +315,36 @@ const kinds = {
                     subjectText: "training for " + personName + " (" + courseText + (dayText ? ", " + dayText : "") + ")",
                     organizationName: names[enrollment.organizationPartyId] || enrollment.organizationPartyId || "",
                     departmentName: enrollment.departmentPartyId ? names[enrollment.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P20: the finalizing of a review whose template asks for approval (ReviewServices.change#ReviewState finalize, approve and
+    // refuse), bound to the review's last change. With no rule the employer's HR officers decide it (defaultRole: the person's
+    // manager is usually the reviewer who asks). What the notice says: the cycle, the employer and department in its title (no
+    // person), the person in its message; never a rating, an answer or a note.
+    PakReview: {
+        topic: "PeopleReviewStep",
+        sourceEntityName: PERFORMANCE_REVIEW,
+        sourceField: "performanceReviewId",
+        defaultRole: "ParHr",
+        describe(sourceId) {
+            const review = one(PERFORMANCE_REVIEW, {performanceReviewId: sourceId})
+            if (!review) return {label: "review " + sourceId}
+            const personName = people.personNames([review.partyId])[review.partyId] || review.partyId
+            const names = people.organizationNames([review.organizationPartyId, review.departmentPartyId].filter(Boolean))
+            const cycle = one("mantle.humanres.ability.ReviewCycle", {reviewCycleId: review.reviewCycleId})
+            const cycleText = cycle?.cycleName || review.reviewCycleId || ""
+            return {
+                label: "review of " + personName + ": " + cycleText,
+                message: {
+                    performanceReviewId: sourceId,
+                    partyId: review.partyId,
+                    personName,
+                    // the title is lock-screen safe (design §1.4): the cycle, never the person reviewed
+                    subjectText: "a review for " + cycleText,
+                    organizationName: names[review.organizationPartyId] || review.organizationPartyId || "",
+                    departmentName: review.departmentPartyId ? names[review.departmentPartyId] || "" : ""
                 }
             }
         }
@@ -778,6 +810,14 @@ function reroute(organizationPartyId, approvalKindEnumId = null) {
             ec.logger.error("Approval request " + approval.peopleApprovalId + " was not routed again: " + error.message)
         }
     }
+    // P20: the employer's open reviews too (Reviews.js rerouteSteps: a leaver's or a changed line's reviewer replaced, a leaver's
+    // feedback withdrawn, the review of one who left excluded), in the caller's transaction, each review on its own
+    if (!approvalKindEnumId)
+        try {
+            reviews().rerouteSteps(organizationPartyId)
+        } catch (error) {
+            ec.logger.error("The reviews of " + organizationPartyId + " were not routed again: " + error.message)
+        }
     return notified
 }
 
@@ -1423,6 +1463,13 @@ function findOwnedApprovals(p) {
     } catch (error) {
         ec.logger.error("The confidential cases handled by " + account.userId + " could not be read: " + error.message)
     }
+    // P20: the open reviews they review and the feedback asked of them, by name alone, not transferable: when they leave, each goes
+    // as Reviews.js rerouteSteps says
+    try {
+        for (const row of reviews().ownedSteps(partyId)) resourceList.push(row)
+    } catch (error) {
+        ec.logger.error("The reviews of " + account.userId + " could not be read: " + error.message)
+    }
     const pending = Array.from(find(APPROVAL).condition("statusId", "PapPending").limit(pendingCap).list())
     for (const approval of pending) {
         try {
@@ -1470,6 +1517,11 @@ function transferApprovalOwner(p) {
         denied("NOT_TRANSFERABLE", "A waiting request follows its route; hand over the rule or reporting line instead")
     if (resourceId.startsWith("case:"))
         denied("NOT_TRANSFERABLE", "A confidential case goes back to its employer's case intake handlers when its handler leaves")
+    if (resourceId.startsWith("review:") || resourceId.startsWith("reviewStep:"))
+        denied(
+            "NOT_TRANSFERABLE",
+            "A review goes to the person's manager when its reviewer leaves; development may change the reviewer"
+        )
     const row = resourceId.startsWith("policy:")
         ? one(POLICY, {peopleApprovalPolicyId: resourceId.slice("policy:".length)})
         : null

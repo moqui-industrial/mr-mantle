@@ -59,8 +59,9 @@ along with this software (see the LICENSE.md file). If not, see
     <mantle.party.FormPurpose purposeEnumId="DbfpInterviewScorecard" publicationPurposeEnumId="FppInterviewScorecard"
             editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_RECRUIT_VIEW"
             scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+    <!-- impl-people P20: a review form is also built by a development editor (the review administrator) -->
     <mantle.party.FormPurpose purposeEnumId="DbfpReview" publicationPurposeEnumId="FppReview"
-            editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_DEVELOP_VIEW"
+            editPermission="PEOPLE_CONFIGURE,PEOPLE_DEVELOP_EDIT" viewPermission="PEOPLE_DEVELOP_VIEW"
             scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
     <!-- impl-people P19 review: a training assessment is also built by a development editor (the learning administrator) -->
     <mantle.party.FormPurpose purposeEnumId="DbfpTrainingAssessment" publicationPurposeEnumId="FppTrainingAssessment"

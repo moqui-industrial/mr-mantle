@@ -24,8 +24,8 @@ along with this software (see the LICENSE.md file). If not, see
     technician assignment reads it, and Projects and Manufacturing may): qualified, expiring, missing or expired per requirement,
     never a reference, issuer or file. P19's training (Training.js): courses, sessions (WepTraining events of Commons' calendar),
     places asked for and approved (PeopleTrainingApproval) or made by development, attendance, assessments (a response of a
-    training assessment form) and the completion that grants a qualification once and issues its certificate. P20 (reviews) adds
-    its services here. -->
+    training assessment form) and the completion that grants a qualification once and issues its certificate. P20's reviews and
+    goals are ReviewServices (Reviews.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <!-- ===== qualifications ===== -->

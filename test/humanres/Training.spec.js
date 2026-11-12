@@ -210,18 +210,19 @@ feature("a course and its session are a development editor's: a WepTraining even
             calendarId,
             workEffortId: state.sessionId
         }).error
-        // P19 review: a development editor builds a training assessment form, not another People purpose's
+        // P19 review: a development editor builds a training assessment form, not every People purpose's
         const F = "mantle.party.FormDefinitionServices."
         out.devForm = run(state.dev.userId, F + "create#Form", {
             purposeEnumId: "DbfpTrainingAssessment",
             organizationPartyId: orgA,
             description: "Train spec development's assessment"
         })
+        // (P20: the review purpose admits a development editor too; an exit interview stays the People administrator's)
         out.devReviewForm = code(
             run(state.dev.userId, F + "create#Form", {
-                purposeEnumId: "DbfpReview",
+                purposeEnumId: "DbfpExitInterview",
                 organizationPartyId: orgA,
-                description: "Train spec review"
+                description: "Train spec exit interview"
             })
         )
         out.anaList = run(state.ana.userId, D + "find#Training", {})
