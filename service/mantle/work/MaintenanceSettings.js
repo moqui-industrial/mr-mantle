@@ -581,14 +581,20 @@ function readiness(p) {
         const subject = organizationName(organizationPartyId)
         for (const check of readinessChecks) {
             let found
-            // one check that fails is shown unavailable, by name, and the others go on
+            // one check that fails is shown unavailable, by name, and the others go on: in an error frame of its own, so a
+            // message a failing call left (get#CostingRate's, say) fails neither the next check nor the provider (P18 review R2)
+            ec.message.pushErrors()
             try {
                 found = check.run(organizationPartyId)
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
             } catch (error) {
                 ec.logger.error(
                     "Maintenance readiness " + check.checkKey + " for " + organizationPartyId + " failed: " + error.message
                 )
                 found = {state: "unavailable", reasonCode: "CHECK_FAILED", message: check.title + " could not be checked"}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
             }
             checks.push({
                 checkKey: check.checkKey,

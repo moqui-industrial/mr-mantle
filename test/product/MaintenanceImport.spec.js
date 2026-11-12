@@ -1,9 +1,11 @@
 // The equipment import (mantle.product.MaintenanceImportServices validate#, apply#EquipmentImportRow and
 // find#EquipmentImportScopes, MaintenanceImport.js; the framework's import target `equipment` through
 // org.moqui.admin.DataTransferServices; IronStone Maintenance design §6 EquipmentImport, §12; impl-maintenance P18, F36, F51):
-// a holder of MAINTENANCE_RESOURCE_EDIT without MAINTENANCE_IMPORT is refused; a row naming another organization's equipment
-// (by ID or by its source key) or location is refused while the next rows are applied; the same file applied twice makes one
-// asset with one starting reading; a starting reading below the last one of a counting meter is refused.
+// a holder of MAINTENANCE_RESOURCE_EDIT without MAINTENANCE_IMPORT is refused, and a user with no maintenance permission gets no
+// organization and no row checked (the row services are every user's to call); a row naming another organization's equipment
+// or location is refused while the next rows are applied, and another organization's source key is not this one's (P18 review
+// R1); a row that fails at apply does not stop the next; equipment whose source key is another is refused; the same file
+// applied twice makes one asset with one starting reading; a starting reading below the last one of a counting meter is refused.
 // Standalone: spec-local organizations, facilities, a model with a counting hour meter, groups and users; artifact
 // authorization on, as the wizard calls the steps.
 // Run: ./moq test mr-mantle --spec MaintenanceImport
@@ -45,15 +47,20 @@ function as(username, action) {
 const step = (verb, params) => result(T + verb, Object.assign({targetId: TARGET}, params))
 const rowOf = (out, itemSeqId) => Array.from(out.importRows || []).find(row => Number(row.itemSeqId) === itemSeqId)
 const rows = (entityName, conditions) => Array.from(ec.entity.find(entityName).condition(conditions).disableAuthz().list())
-// a file staged, validated and applied as the user
-function importFile(username, organizationPartyId, content) {
-    return as(username, () => {
+// a file staged, validated and applied as the user (between, as the spec's administrator)
+function importFile(username, organizationPartyId, content, between = null) {
+    const checked = as(username, () => {
         const staged = step("stage#Import", {organizationPartyId, sourceText: content})
         if (!staged.operationKey) return {staged}
         const validated = step("validate#Import", {operationKey: staged.operationKey, mappingRevision: staged.mappingRevision})
-        const applied = step("apply#Import", {operationKey: staged.operationKey, inputFingerprint: validated.inputFingerprint})
-        return {staged, validated, applied}
+        return {staged, validated}
     })
+    if (!checked.validated) return checked
+    if (between) between()
+    const applied = as(username, () =>
+        step("apply#Import", {operationKey: checked.staged.operationKey, inputFingerprint: checked.validated.inputFingerprint})
+    )
+    return Object.assign(checked, {applied})
 }
 const keyed = key =>
     rows("mantle.product.asset.AssetIdentification", {identificationTypeEnumId: "AitMntSourceKey", idValue: "CMMS / " + key})
@@ -145,6 +152,7 @@ spec({
         }
         state.importer = user("IMPORTER", ["MAINTENANCE_IMPORT", "MAINTENANCE_RESOURCE_EDIT", "MAINTENANCE_RESOURCE_VIEW"])
         state.editor = user("EDITOR", ["MAINTENANCE_RESOURCE_EDIT", "MAINTENANCE_RESOURCE_VIEW"])
+        state.none = user("NONE", [])
     },
     setup() {
         ec.artifactExecution.disableAuthz()
@@ -165,10 +173,24 @@ feature(
             return {
                 editor: as(state.editor, () => step("stage#Import", {organizationPartyId: orgA, sourceText: content})),
                 target: as(state.importer, () => result(T + "get#ImportTarget", {targetId: TARGET, organizationPartyId: orgA})),
-                otherOrg: as(state.importer, () => step("stage#Import", {organizationPartyId: orgB, sourceText: content}))
+                otherOrg: as(state.importer, () => step("stage#Import", {organizationPartyId: orgB, sourceText: content})),
+                // the row and scope services called directly by a user with no maintenance permission (P18 review)
+                noneScopes: as(state.none, () =>
+                    result("mantle.product.MaintenanceImportServices.find#EquipmentImportScopes", {targetId: TARGET})
+                ),
+                noneRow: as(state.none, () =>
+                    result("mantle.product.MaintenanceImportServices.validate#EquipmentImportRow", {
+                        targetId: TARGET,
+                        scopeKey: orgA,
+                        rowValues: {externalSource: "CMMS", externalKey: "B-PUMP", assetId: prefix + "_B_PUMP"}
+                    })
+                )
             }
         },
         then(r) {
+            Array.from(r.noneScopes.scopeList || []).length == 0
+            r.noneRow.error.includes("PERMISSION_DENIED")
+            r.noneRow.valid !== true && !r.noneRow.displayText
             r.editor.error.includes("MAINTENANCE_IMPORT")
             !r.editor.operationKey
             Array.from(r.target.target.scopeList)
@@ -181,25 +203,27 @@ feature(
     }
 )
 
-feature("a row for another organization's equipment or location is refused and the other rows are applied", {
+feature("a row for another organization's equipment or location is refused and the other rows are applied; a source key is the organization's", {
     when() {
         const content = [
             "Source system,Source key,Existing equipment ID,Name,Location ID,Model ID,Meter type ID,Starting reading",
             "CMMS,C1-" + run + ",,Compressor C1," + prefix + "_SITE_A," + prefix + "_MODEL,PdMtrMotorTime,1200",
             "CMMS,B-OTHER-" + run + "," + prefix + "_B_PUMP,B's pump,,,,",
-            "CMMS,B-PUMP,,B's pump by key,,,,",
+            "CMMS,B-PUMP,,A's pump keyed as B's,,,,",
             "CMMS,LOC-" + run + ",,Drill at B," + prefix + "_SITE_B,,,",
             "CMMS,C2-" + run + ",,Compressor C2," + prefix + "_SITE_A,,,"
         ].join("\n")
         return importFile(state.importer, orgA, content)
     },
     then(r) {
-        r.validated.validCount == 2
+        r.validated.validCount == 3
         rowOf(r.validated, 2).errorMessage.includes("not available in this organization")
-        rowOf(r.validated, 3).errorMessage.includes("source key")
         rowOf(r.validated, 4).errorMessage.includes("not one of Maintenance Import Spec A")
-        r.applied.appliedCount == 2
+        r.applied.appliedCount == 3
         r.applied.state == "partial"
+        // B's source key names A's own new pump, and B's pump is untouched (R1)
+        keyed("B-PUMP").filter(row => rows("mantle.product.asset.Asset", {assetId: row.assetId})[0].ownerPartyId == orgA).length == 1
+        keyed("B-PUMP").some(row => row.assetId == prefix + "_B_PUMP")
         keyed("C1-" + run).length == 1
         keyed("C2-" + run).length == 1
         rows("mantle.product.asset.Asset", {assetId: prefix + "_B_PUMP"})[0].assetName == "Import B pump"
@@ -231,5 +255,41 @@ feature("the same file applied twice makes one asset and one starting reading; a
         rows("mantle.product.maintenance.AssetMeter", {assetId: keyed("TWICE-" + run)[0].assetId}).length == 1
         r.lower.validated.validCount == 0
         rowOf(r.lower.validated, 1).errorMessage.includes("below the last one (300")
+    }
+})
+
+feature("a row that fails at apply does not stop the next; equipment whose source key is another is refused", {
+    when() {
+        const siteX = prefix + "_SITE_X_" + run
+        call("create#mantle.facility.Facility", {
+            facilityId: siteX,
+            facilityName: "Import site X",
+            facilityTypeEnumId: "FcTpBuilding",
+            ownerPartyId: orgA
+        })
+        const content = [
+            "Source system,Source key,Name,Location ID",
+            "CMMS,LATHE-" + run + ",Lathe," + siteX,
+            "CMMS,MILL-" + run + ",Mill," + prefix + "_SITE_A"
+        ].join("\n")
+        // validated while site X is A's, applied after it became B's
+        const moved = importFile(state.importer, orgA, content, () =>
+            call("update#mantle.facility.Facility", {facilityId: siteX, ownerPartyId: orgB})
+        )
+        const millId = keyed("MILL-" + run)[0]?.assetId
+        const rekeyed = importFile(state.importer, orgA, "Source system,Source key,Existing equipment ID,Name\nCMMS,MILL2-" + run + "," + millId + ",Mill")
+        return {moved, millId, rekeyed}
+    },
+    then(r) {
+        r.moved.validated.validCount == 2
+        r.moved.applied.appliedCount == 1
+        r.moved.applied.state == "partial"
+        rowOf(r.moved.applied, 1).result != "applied"
+        rowOf(r.moved.applied, 2).result == "applied"
+        keyed("LATHE-" + run).length == 0
+        !!r.millId
+        r.rekeyed.validated.validCount == 0
+        rowOf(r.rekeyed.validated, 1).errorMessage.includes("is source key CMMS / MILL-")
+        keyed("MILL2-" + run).length == 0
     }
 })

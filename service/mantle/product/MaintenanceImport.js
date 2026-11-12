@@ -4,7 +4,8 @@
 // org.moqui.admin.DataTransferServices for each row of a staged file, as the importer.
 //
 // A row is one piece of equipment of the batch's organization (its scope), kept by its source system and key: an
-// AssetIdentification of type AitMntSourceKey whose value is the source and the key, one asset a source key. A row whose key, or
+// AssetIdentification of type AitMntSourceKey whose value is the source and the key, one asset of the organization a source key
+// (another organization's equipment may have the same key: its import is its own). A row whose key, or
 // whose equipment ID, names equipment already there changes that equipment; any other registers new equipment. The writes are
 // Maintenance's own guarded services, as the importer: store#MaintenanceEquipment (the identity, the model, the location and the
 // supplier warranty), change#MaintenanceCustody (the custodian, when it changes) and record#MaintenanceMeter (the starting
@@ -86,18 +87,32 @@ function rowValues(p, organizationPartyId) {
     for (const field of fields) if (text(values[field])) normalized[field] = text(values[field])
     return normalized
 }
-// The equipment a row names, or null for new equipment: by its ID, else by its source key; either of another organization
-// is refused, and an ID and a key naming two pieces of equipment too.
+// The equipment of the organization a source key names (one at most): a key is the organization's, so another organization's
+// equipment with the same source system and key is neither found nor named (P18 review R1).
+function keyedOf(sourceKey, organizationPartyId) {
+    if (!sourceKey) return null
+    const keyed = Array.from(
+        find(IDENTIFICATION, {identificationTypeEnumId: sourceKeyType, idValue: sourceKey}).selectField("assetId").list()
+    )
+        .map(row => row.assetId)
+        .filter(assetId => maintenanceAccess.assetOrganization(assetId) === organizationPartyId)
+    if (keyed.length > 1) throw new Error("Source key " + sourceKey + " names more than one piece of equipment")
+    return keyed[0] || null
+}
+// The equipment a row names, or null for new equipment: by its ID, else by its source key in the organization; equipment of
+// another organization by ID is refused, an ID and a key naming two pieces of equipment too, and so is equipment whose
+// source key is another one (one asset a source key, and one source key an asset).
 function existingOf(values, organizationPartyId) {
     const sourceKey = sourceKeyOf(values)
-    const keyed = sourceKey
-        ? Array.from(find(IDENTIFICATION, {identificationTypeEnumId: sourceKeyType, idValue: sourceKey}).limit(2).list())
-        : []
-    if (keyed.length > 1) throw new Error("Source key " + sourceKey + " names more than one piece of equipment")
-    const keyedId = keyed[0]?.assetId || null
+    const keyedId = keyedOf(sourceKey, organizationPartyId)
     const named = text(values.assetId) || null
     if (named && keyedId && named !== keyedId)
         throw new Error("Source key " + sourceKey + " is equipment " + keyedId + ", not " + named)
+    if (named && !keyedId && sourceKey && maintenanceAccess.assetOrganization(named) === organizationPartyId) {
+        const stored = one(IDENTIFICATION, {assetId: named, identificationTypeEnumId: sourceKeyType})
+        if (stored && stored.idValue !== sourceKey)
+            throw new Error("Equipment " + named + " is source key " + stored.idValue + ", not " + sourceKey)
+    }
     const assetId = named || keyedId
     if (!assetId) return null
     const asset = one(ASSET, {assetId})
@@ -238,7 +253,7 @@ function applyRow(p) {
                 })
             ).assetId
         }
-        // the source key, kept with the equipment (one a source key; an equipment with another key keeps its first)
+        // the source key, kept with the equipment (one a source key; plan refuses equipment that has another)
         const sourceKey = sourceKeyOf(values)
         if (!one(IDENTIFICATION, {assetId, identificationTypeEnumId: sourceKeyType}))
             lib.call("create#" + IDENTIFICATION, {assetId, identificationTypeEnumId: sourceKeyType, idValue: sourceKey})
