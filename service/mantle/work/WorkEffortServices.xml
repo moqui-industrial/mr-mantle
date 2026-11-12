@@ -442,7 +442,8 @@ along with this software (see the LICENSE.md file). If not, see
             WepPhoneCall, WepEmail and WepToDo are the activities) and their events (WetEvent not cancelled; WepMeeting is a
             meeting) on which the user's party has a WorkEffortParty row in effect now that is not declined or unassigned,
             less those the user snoozed past now on that row (snoozedThruDate, snooze#UserTodayItem). A production run
-            (WepProductionRun) and the operations under it are left out: they are worked through an app's today-source.
+            (WepProductionRun) and the operations under it are left out: they are worked through an app's today-source; so is
+            managed work (a maintenance work order and its steps, ProcessServices.check#ManagedWork's rule).
 
             Days are those of the session's time zone: the user's UserAccount.timeZone once logged in, the server's for
             internal work with no user. The groups:
@@ -641,6 +642,10 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const [taskId, parentId] of parentIds) if (runParents.has(parentId)) runIds.add(taskId)
                 }
                 for (const id of runIds) byId.delete(id)
+                // managed work (a maintenance work order and its steps) is worked through its app's today-source, where it
+                // opens its work order and has no Mark done (impl-maintenance P3)
+                if (taskIds.length) for (const id of ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+                        .managedIds(taskIds)) byId.delete(id)
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds)
                 if (taskIds.length && ec.entity.find('mantle.humanres.checklist.ChecklistStep').condition('workEffortId', 'in', taskIds)

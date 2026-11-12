@@ -189,6 +189,25 @@ function requireWork(userScope, workEffortId) {
         denied("NOT_ASSIGNED", "Work " + workEffortId + " is not assigned to you")
     return {workEffortId, rootWorkEffortId: rootOf(workEffortId).workEffortId, organizationPartyId}
 }
+// Whether a work effort is managed maintenance work the caller may not reach outside Maintenance (impl-maintenance F69; the
+// record check of get#RecordLinkInfo and search#Universal, in every app): its root has a MaintenanceWorkOrder row and the caller
+// is neither a current party of the root or of the work effort itself nor admitted by requireWork. An organization role alone
+// does not open it. Ordinary work, and a missing work effort, answer false (their own rules apply).
+function workHidden(workEffortId, partyId) {
+    if (!workEffortId || !ec.entity.isEntityDefined("mantle.work.maintenance.MaintenanceWorkOrder")) return false
+    const workEffort = one("mantle.work.effort.WorkEffort", {workEffortId})
+    if (!workEffort) return false
+    const rootId = workEffort.rootWorkEffortId || workEffort.workEffortId
+    if (!one("mantle.work.maintenance.MaintenanceWorkOrder", {workEffortId: rootId})) return false
+    if (assignedTo(ids([rootId, workEffortId]), partyId)) return false
+    try {
+        requireWork(scope(), workEffortId)
+        return false
+    } catch (error) {
+        return true
+    }
+}
+const ids = list => Array.from(new Set(list.filter(Boolean)))
 
 ;({
     permissions,
@@ -206,6 +225,7 @@ function requireWork(userScope, workEffortId) {
     requireFacility,
     requireAsset,
     requireWork,
+    workHidden,
     denied,
     reasonCode: lib.reasonCode
 })

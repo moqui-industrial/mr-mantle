@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance settings (IronStone Maintenance design §9 Settings, §13.2 MaintenanceSettingsServices; impl-maintenance P3): an
+    organization's work policy (MaintenancePolicy), a dated row a change ends and starts, in MaintenanceWork.js. Readiness, teams
+    and lookups join in their phases (P8, P18). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="MaintenancePolicy" allow-remote="false">
+        <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
+            read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
+            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed.
+            canEdit says whether the user may change it.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="policy" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('getPolicy', context)"/>
+            <set field="policy" from="answer.policy"/>
+            <set field="canEdit" from="answer.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenancePolicy" allow-remote="false">
+        <description>An organization's work policy from now (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope),
+            ending the row in effect: the approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
+            default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
+            requests and warranty repairs become managed work.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="approvalThresholdHours"/>
+            <parameter name="closurePolicyEnumId"/>
+            <parameter name="defaultMaintenanceTypeEnumId"/>
+            <parameter name="defaultTeamPartyId"/>
+            <parameter name="productionRequestsManaged"/>
+            <parameter name="warrantyRepairsManaged"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('storePolicy', context)"/>
+            <set field="fromDate" from="answer.fromDate"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance's read-only projections (IronStone Maintenance design §3 Home, §8, §13.2 MaintenanceReportServices; impl-maintenance
+    P3): Home's counters, the user's work and the teams' work, in MaintenanceWork.js. The reports join in P17. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="MaintenanceHome" allow-remote="false">
+        <description>Home's counts over the user's maintenance scope (a work read; with the assigned view alone, the user's own
+            work), narrowed to an organization or a facility (with those inside it): open, unassigned, high priority and overdue
+            work orders, read in a few queries; the counts of overdue preventive maintenance, unknown meter readings and
+            unavailable resources are not configured until their records exist (null, never zero). myWorkList: the user's open work,
+            by priority and due; teamWorkList, for a broad reader only (teamTotals): per team its open, active, unscheduled,
+            blocked and overdue work. No cost.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="counters" type="Map"/>
+            <parameter name="myWorkList" type="List"/>
+            <parameter name="teamWorkList" type="List"/>
+            <parameter name="teamTotals" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('home', context)"/>
+            <set field="counters" from="answer.counters"/>
+            <set field="myWorkList" from="answer.myWorkList"/>
+            <set field="teamWorkList" from="answer.teamWorkList"/>
+            <set field="teamTotals" from="answer.teamTotals"/>
+        </actions>
+    </service>
+</services>

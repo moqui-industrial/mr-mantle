@@ -2280,6 +2280,12 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition('workEffortId', workEffortId).condition('isProtected', 'Y').disableAuthz().count() > 0
                     && ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                         .hiddenTaskIds([workEffortId], partyId).length > 0
+            // a maintenance work order and its steps (the root has a MaintenanceWorkOrder row) are reached only as Maintenance
+            // admits them, in every app: a maintenance reader of its service organization, a technician it is assigned to, or a
+            // party of the work (mantle/work/MaintenanceAccess.js requireWork; impl-maintenance P3, F69), beside People's
+            // protected tasks; an organization role alone does not open it
+            const maintenanceHidden = (workEffort, partyId) => ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
+                    .workHidden(workEffort.workEffortId, partyId)
             const workEffortVisible = (workEffort, s) => {
                 if (s.partyIds.length === 0) return false
                 const ids = [workEffort.workEffortId]
@@ -2689,6 +2695,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName !== WORK_EFFORT && entityName !== REQUEST && entityName !== ORDER) return true
                 const s = userScope()
                 if (entityName === WORK_EFFORT && protectedHidden(value.workEffortId, s.userPartyId)) return false
+                if (entityName === WORK_EFFORT && maintenanceHidden(value, s.userPartyId)) return false
                 if (s.orgIds == null || staffSees(entityName)) return true
                 if (entityName === ORDER) return orderVisible(value, s)
                 return entityName === WORK_EFFORT ? workEffortVisible(value, s) : requestVisible(value, s)

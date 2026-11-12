@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance work orders (IronStone Maintenance design §3, §13.2 MaintenanceServices; impl-maintenance P3), in MaintenanceWork.js:
+    the scoped list, the record, create, the header's writer, the one writer of a work order's assignments, the lifecycle and its
+    bulk form, the adoption of an open AssetMaintenance, and the work order's own time entry points (impl-maintenance F66: the time
+    services check no work access). Each checks the maintenance permission and the work order's service organization and, for a
+    technician, the assignment (mantle/work/MaintenanceAccess.js), never a group or a calling screen; a missing work order and one
+    outside the scope are refused alike (RECORD_UNAVAILABLE). The generic task and work-effort services refuse a work order and its
+    steps (MANAGED_WORK, ProcessServices.check#ManagedWork). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="MaintenanceWorkOrders" allow-remote="false">
+        <description>The work orders of the user's maintenance scope (MAINTENANCE_VIEW; with MAINTENANCE_ASSIGNED_VIEW alone, those
+            assigned to the user; PERMISSION_DENIED without), never a template or a step, scoped and filtered in the query before
+            paging: text (id or name), organization, facility (with those inside it), equipment, status (open by default; done; all;
+            or one), kind, source, high priority, overdue, blocked (on hold), mine, an assignee, a team, unassigned, and a window
+            (fromDate, thruDate). Ordered by priority and due. Each row carries its target, organization, assignees, team, window,
+            due, status and the reason it is held; no cost. A holder of MAINTENANCE_ALL_ORGANIZATIONS with an active organization
+            lists that organization's work (F83).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="statusId"/>
+            <parameter name="maintenanceKindEnumId"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="highPriority"/>
+            <parameter name="overdue"/>
+            <parameter name="blocked"/>
+            <parameter name="mine"/>
+            <parameter name="unassigned"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workOrderList" type="List"/>
+            <parameter name="workOrderListCount" type="Integer"/>
+            <parameter name="workOrderListPageIndex" type="Integer"/>
+            <parameter name="workOrderListPageSize" type="Integer"/>
+            <parameter name="workOrderListPageMaxIndex" type="Integer"/>
+            <parameter name="workOrderListPageRangeLow" type="Integer"/>
+            <parameter name="workOrderListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('findWorkOrders', context)"/>
+            <set field="workOrderList" from="answer.workOrderList"/>
+            <set field="workOrderListCount" from="answer.workOrderListCount"/>
+            <set field="workOrderListPageIndex" from="answer.workOrderListPageIndex"/>
+            <set field="workOrderListPageSize" from="answer.workOrderListPageSize"/>
+            <set field="workOrderListPageMaxIndex" from="answer.workOrderListPageMaxIndex"/>
+            <set field="workOrderListPageRangeLow" from="answer.workOrderListPageRangeLow"/>
+            <set field="workOrderListPageRangeHigh" from="answer.workOrderListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceWorkOrder" allow-remote="false">
+        <description>One work order the user may read (a step is read as its root's): its header (target, organization, kind,
+            type, source, severity, priority, the planned window and estimated hours, the actual start and finish, the hold or
+            cancel reason, the outcome and disposition, its team and technicians, its revision), its assignments, its time (a
+            technician with the assigned view sees their own entries and total, never the team's), the user's running timer on
+            it, the lifecycle actions open from its status each allowed or with why not, the completion blockers, and what the
+            user may do (edit, schedule, log time), and its history (the audit log of its status, priority, estimate and target, newest
+            first). No cost.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workOrder" type="Map"/>
+            <parameter name="assignmentList" type="List"/>
+            <parameter name="timeEntryList" type="List"/>
+            <parameter name="ownHours"/>
+            <parameter name="totalHours"/>
+            <parameter name="timer" type="Map"/>
+            <parameter name="actionList" type="List"/>
+            <parameter name="blockerList" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canSchedule" type="Boolean"/>
+            <parameter name="canLogTime" type="Boolean"/>
+            <parameter name="assigned" type="Boolean"/>
+            <parameter name="historyList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('getWorkOrder', context)"/>
+            <set field="workOrder" from="answer.workOrder"/>
+            <set field="assignmentList" from="answer.assignmentList"/>
+            <set field="timeEntryList" from="answer.timeEntryList"/>
+            <set field="ownHours" from="answer.ownHours"/>
+            <set field="totalHours" from="answer.totalHours"/>
+            <set field="timer" from="answer.timer"/>
+            <set field="actionList" from="answer.actionList"/>
+            <set field="blockerList" from="answer.blockerList"/>
+            <set field="canEdit" from="answer.canEdit"/>
+            <set field="canSchedule" from="answer.canSchedule"/>
+            <set field="canLogTime" from="answer.canLogTime"/>
+            <set field="assigned" from="answer.assigned"/>
+            <set field="historyList" from="answer.historyList"/>
+        </actions>
+    </service>
+    <service verb="create" noun="MaintenanceWorkOrder" allow-remote="false">
+        <description>New ad hoc work (MAINTENANCE_PLAN or _SUPERVISE): a root WorkEffort (WetTask, WepMaintenance, no project,
+            owned by the target's organization, the WorkEffortMaintenance flow) for one target, equipment (assetId; not stock; its
+            facility is the work's) or a facility, in the user's scope, with its MaintenanceWorkOrder row and, for equipment, its
+            primary AssetMaintenance (create#AssetMaintenance, created or scheduled, the planned start as its date, no interval).
+            Corrective work, work a supervisor creates and planned work within the organization's approval threshold in hours are
+            approved on create; other planned work waits in planning for a supervisor (MaintenancePolicy; no estimate is over the
+            threshold). The team defaults to the policy's. A retry with operationKey answers the first root (repeated); changed
+            input under the key is OPERATION_KEY_CONFLICT. Refusals: TARGET_REQUIRED, TARGET_INVALID, NAME_REQUIRED, VALUE_INVALID,
+            DATES_INVALID, TEAM_UNAVAILABLE, RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="maintenanceKindEnumId"/>
+            <parameter name="maintenanceTypeEnumId"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="severityEnumId"/>
+            <parameter name="failureModeEnumId"/>
+            <parameter name="priority"/>
+            <parameter name="estimatedWorkTime"><description>Estimated hours</description></parameter>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"><description>The planned finish, the work's due</description></parameter>
+            <parameter name="teamPartyId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="statusId"/>
+            <parameter name="approved" type="Boolean"/>
+            <parameter name="assetMaintenanceId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('createWorkOrder', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="approved" from="!!answer.approved || answer.statusId != 'WeInPlanning'"/>
+            <set field="assetMaintenanceId" from="answer.assetMaintenanceId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="adopt" noun="MaintenanceRecord" allow-remote="false">
+        <description>An open AssetMaintenance with no linked work (Manufacturing's maintenance request, the baseline's) made into a
+            managed work order (MAINTENANCE_PLAN or _SUPERVISE; its equipment in the user's scope): a root approved, or in progress
+            when the record is, the record its primary AssetMaintenance and linked to the root. Once: a retry, or a second adoption,
+            answers the first root (repeated). Refused: a completed or cancelled record (RECORD_CLOSED; history stays unmanaged), a
+            warranty repair (OWNER_PATH; Customer Service's), one with other linked work (LINKED_WORK).</description>
+        <in-parameters>
+            <parameter name="assetMaintenanceId" required="true"/>
+            <parameter name="workEffortName"/>
+            <parameter name="priority"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="statusId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('adoptRecord', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceWorkOrder" allow-remote="false">
+        <description>A work order's header (MAINTENANCE_PLAN or _SUPERVISE; open work only, WORK_CLOSED): name, description,
+            priority, estimated hours (after approval a supervisor's alone, APPROVAL_REQUIRED), type, severity, failure mode, and
+            its target before work starts (equipment work keeps equipment, TARGET_KIND; the same organization, ORGANIZATION_CHANGE;
+            WORK_STARTED), the AssetMaintenance following. At the revision read (RECORD_CHANGED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="priority"/>
+            <parameter name="estimatedWorkTime"/>
+            <parameter name="maintenanceTypeEnumId"/>
+            <parameter name="severityEnumId"/>
+            <parameter name="failureModeEnumId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('storeWorkOrder', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="revision" from="answer.revision"/>
+        </actions>
+    </service>
+    <service verb="schedule" noun="MaintenanceWorkOrder" allow-remote="false">
+        <description>The one writer of a work order's assignments (MAINTENANCE_PLAN or _SUPERVISE; open work only): its team (an
+            OrgTeam the organization owns, TEAM_UNAVAILABLE; empty removes it), its technicians (assigneePartyIds replaces the
+            current Assignee rows, ending the others now; each a person employed by or an agent of the organization now,
+            ASSIGNEE_UNAVAILABLE) and its planned window (DATES_INVALID). Scheduling grants no approval. The AssetMaintenance is
+            scheduled with an approved root's window. New technicians are told on MaintenanceWork. At the revision read
+            (RECORD_CHANGED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="assigneePartyIds" type="List"/>
+            <parameter name="estimatedStartDate" type="Timestamp"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="addedPartyIds" type="List"/>
+            <parameter name="removedPartyIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('scheduleWorkOrder', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="addedPartyIds" from="answer.addedPartyIds"/>
+            <set field="removedPartyIds" from="answer.removedPartyIds"/>
+        </actions>
+    </service>
+    <service verb="transition" noun="MaintenanceWorkOrder" allow-remote="false">
+        <description>The lifecycle of a work order (design §3), the only path to its status: approve (a supervisor; a planner for
+            corrective work or work within the approval threshold, APPROVAL_REQUIRED), start (the assigned technician or a
+            supervisor, NOT_ASSIGNED; actualStartDate, now when empty, never later), hold (a reason, REASON_REQUIRED; no running
+            timer, TIMER_RUNNING; approved work a supervisor's, as the flow's row needs MAINTENANCE_SUPERVISE beside
+            Manufacturing's PRODUCTION_SUPERVISE; work in progress also the assigned technician's), resume (to the status it came
+            from), complete (the assigned technician or a supervisor; no
+            running timer; the outcome, OUTCOME_REQUIRED, and for equipment the disposition, DISPOSITION_REQUIRED; the entered
+            actualCompletionDate, now when empty, written in the same update, never later or before the start), close (a
+            supervisor; completion closes it under the MclOnComplete policy) and cancel (a reason; started work a supervisor's;
+            time, files and history kept). A status the action is not open from is STATUS_INVALID. The primary AssetMaintenance
+            follows. At the revision read (RECORD_CHANGED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action" required="true"><description>approve, start, hold, resume, complete, close or cancel</description></parameter>
+            <parameter name="expectedRevision"/>
+            <parameter name="holdReasonEnumId"/>
+            <parameter name="cancelReasonEnumId"/>
+            <parameter name="outcomeEnumId"/>
+            <parameter name="dispositionEnumId"/>
+            <parameter name="failureModeEnumId"/>
+            <parameter name="actualStartDate" type="Timestamp"/>
+            <parameter name="actualCompletionDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="statusId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="resultCode"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('transitionWorkOrder', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="resultCode" from="answer.resultCode"/>
+        </actions>
+    </service>
+    <service verb="act" noun="MaintenanceWorkOrders" allow-remote="false">
+        <description>One lifecycle action (transition#MaintenanceWorkOrder) on each of several work orders, each in its own
+            transaction: a result per work order (ok, resultCode, or the refusal's reasonCode and message), the rest going on.</description>
+        <in-parameters>
+            <parameter name="workEffortIds" type="List" required="true"/>
+            <parameter name="action" required="true"/>
+            <parameter name="holdReasonEnumId"/>
+            <parameter name="cancelReasonEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="successCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('actWorkOrders', context)"/>
+            <set field="results" from="answer.results"/>
+            <set field="successCount" from="answer.successCount"/>
+            <set field="failedCount" from="answer.failedCount"/>
+        </actions>
+    </service>
+    <service verb="start" noun="MaintenanceTimer" allow-remote="false">
+        <description>The user's timer on a work order or step (MAINTENANCE_EXECUTE; assigned to the step or its root, NOT_ASSIGNED;
+            the work in progress, WORK_NOT_STARTED; never a template, TEMPLATE_TIME), then TimesheetServices.start#Timer unchanged
+            (one timer a person: a running one stops).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="comments"/>
+            <parameter name="workTypeEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="timeEntryId"/>
+            <parameter name="alreadyRunning" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('startTimer', context)"/>
+            <set field="timeEntryId" from="answer.timeEntryId"/>
+            <set field="alreadyRunning" from="!!answer.alreadyRunning"/>
+        </actions>
+    </service>
+    <service verb="stop" noun="MaintenanceTimer" allow-remote="false">
+        <description>The user's running timer on a work order's tree (assigned; NO_TIMER when none runs there), through
+            TimesheetServices.stop#Timer unchanged.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="timeEntryId"/>
+            <parameter name="hours"/>
+            <parameter name="discarded" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('stopTimer', context)"/>
+            <set field="timeEntryId" from="answer.timeEntryId"/>
+            <set field="hours" from="answer.hours"/>
+            <set field="discarded" from="!!answer.discarded"/>
+        </actions>
+    </service>
+    <service verb="record" noun="MaintenanceTime" allow-remote="false">
+        <description>The user's own time on a work order or step, as start#MaintenanceTimer checks it, by its start and end or its
+            start and hours (HOURS_INVALID, DATES_INVALID; worked, not to come, DATE_FUTURE), through TimeServices.store#TimeEntry
+            unchanged (its timesheet lock applies).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="hours"/>
+            <parameter name="workTypeEnumId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters><parameter name="timeEntryId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('recordTime', context)"/>
+            <set field="timeEntryId" from="answer.timeEntryId"/>
+        </actions>
+    </service>
+</services>

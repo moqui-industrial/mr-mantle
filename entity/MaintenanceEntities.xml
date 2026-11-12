@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance work orders (IronStone Maintenance design §3 "Record shape", §9 Settings, MT-02; impl-maintenance P3). A work
+    order is a root WorkEffort (a WetTask of purpose WepMaintenance with no project) and its MaintenanceWorkOrder row, keyed by the
+    root's workEffortId: the row is what makes the root managed, so the generic task and work-effort services refuse it and its
+    steps (mantle.work.ProcessServices.check#ManagedWork reads this entity by name, impl-maintenance F59) and only
+    mantle.work.MaintenanceServices changes it. Equipment work has one primary AssetMaintenance (assetMaintenanceId), which
+    follows the root's status; facility work has none and its facility is WorkEffort.facilityId. The organization's work policy is
+    a dated MaintenancePolicy row: a change starts a new row and ends the one in effect. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="MaintenanceWorkOrder" package="mantle.work.maintenance" cache="never">
+        <description>A maintenance work order: the extension of its root WorkEffort (workEffortId), with its target equipment
+            (assetId; a facility's work has none and names WorkEffort.facilityId), its primary AssetMaintenance, its kind, type,
+            source, severity and failure mode, the hold and cancel reasons and the status a hold came from, the outcome and the
+            resource disposition entered at completion, the cost centre and the project a repair is charged to, a revision every
+            write increments (a stale write is refused naming the current one) and the operation key and request it was created
+            with (a retry answers the first root; changed input under the key is refused).</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="assetId" type="id" enable-audit-log="update"/>
+        <field name="assetMaintenanceId" type="id"><description>The primary AssetMaintenance of equipment work, made at
+            create or adopted (adopt#MaintenanceRecord); it follows the root's status</description></field>
+        <field name="maintenanceKindEnumId" type="id" enable-audit-log="update"><description>MaintenanceKind: corrective or
+            preventive</description></field>
+        <field name="maintenanceTypeEnumId" type="id"><description>MaintenanceType (an AssetMaintenance's type)</description></field>
+        <field name="sourceEnumId" type="id"><description>MaintenanceSource: how the work came</description></field>
+        <field name="severityEnumId" type="id"/>
+        <field name="failureModeEnumId" type="id"/>
+        <field name="holdReasonEnumId" type="id"/>
+        <field name="holdFromStatusId" type="id"><description>The status the root was in when held, which Resume returns
+            to</description></field>
+        <field name="cancelReasonEnumId" type="id"/>
+        <field name="outcomeEnumId" type="id"><description>MaintenanceOutcome, entered at completion</description></field>
+        <field name="dispositionEnumId" type="id"><description>MaintenanceDisposition: the resource's state the technician
+            declared at completion (completion does not imply restoration)</description></field>
+        <field name="costCenterId" type="id" enable-audit-log="update"/>
+        <field name="projectWorkEffortId" type="id" enable-audit-log="update"/>
+        <field name="revision" type="number-integer"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="operationHash" type="text-medium"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" related="mantle.product.asset.Asset" short-alias="asset"/>
+        <relationship type="one" related="mantle.product.maintenance.AssetMaintenance" short-alias="assetMaintenance"/>
+        <relationship type="one" title="MaintenanceKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="maintenanceKindEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceType" related="moqui.basic.Enumeration" short-alias="type">
+            <key-map field-name="maintenanceTypeEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceSeverity" related="moqui.basic.Enumeration" short-alias="severity">
+            <key-map field-name="severityEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceFailureMode" related="moqui.basic.Enumeration" short-alias="failureMode">
+            <key-map field-name="failureModeEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceHoldReason" related="moqui.basic.Enumeration" short-alias="holdReason">
+            <key-map field-name="holdReasonEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceCancelReason" related="moqui.basic.Enumeration" short-alias="cancelReason">
+            <key-map field-name="cancelReasonEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceOutcome" related="moqui.basic.Enumeration" short-alias="outcome">
+            <key-map field-name="outcomeEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceDisposition" related="moqui.basic.Enumeration" short-alias="disposition">
+            <key-map field-name="dispositionEnumId"/></relationship>
+        <relationship type="one-nofk" title="Project" related="mantle.work.effort.WorkEffort" short-alias="project">
+            <key-map field-name="projectWorkEffortId" related="workEffortId"/></relationship>
+        <index name="MNT_WO_ASSET_MNT"><index-field name="assetMaintenanceId"/></index>
+        <index name="MNT_WO_OPKEY"><index-field name="operationKey"/></index>
+        <index name="MNT_WO_ASSET"><index-field name="assetId"/></index>
+    </entity>
+
+    <view-entity entity-name="MaintenanceWorkOrderDetail" package="mantle.work.maintenance">
+        <description>A work order with its root WorkEffort, for the scoped lists (find#MaintenanceWorkOrders): the scope, the
+            filters, the order and the page are in the query.</description>
+        <member-entity entity-alias="MWO" entity-name="mantle.work.maintenance.MaintenanceWorkOrder"/>
+        <member-entity entity-alias="WEFF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="MWO">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="MWO"/>
+        <alias entity-alias="WEFF" name="workEffortName"/>
+        <alias entity-alias="WEFF" name="description"/>
+        <alias entity-alias="WEFF" name="statusId"/>
+        <alias entity-alias="WEFF" name="priority"/>
+        <alias entity-alias="WEFF" name="ownerPartyId"/>
+        <alias entity-alias="WEFF" name="facilityId"/>
+        <alias entity-alias="WEFF" name="isTemplate"/>
+        <alias entity-alias="WEFF" name="estimatedStartDate"/>
+        <alias entity-alias="WEFF" name="estimatedCompletionDate"/>
+        <alias entity-alias="WEFF" name="actualStartDate"/>
+        <alias entity-alias="WEFF" name="actualCompletionDate"/>
+        <alias entity-alias="WEFF" name="estimatedWorkTime"/>
+        <alias entity-alias="WEFF" name="lastUpdatedStamp"/>
+    </view-entity>
+
+    <entity entity-name="MaintenancePolicy" package="mantle.work.maintenance" cache="never">
+        <description>An organization's maintenance work policy from fromDate (design-maintenance §9 MaintenanceSettings): the
+            default maintenance type and team of new work, the planned-work approval threshold in hours (template, preventive
+            and planned work above it needs a supervisor's approval; zero, the default, puts all of it before a supervisor, and
+            work with no estimated hours is over it; the cost half is impl-maintenance P11's), the closure policy (a supervisor
+            closes completed work, or completion closes it) and whether the organization's production maintenance requests and
+            warranty repairs become managed work (off by default; the adapters are later phases'). A change ends the row in
+            effect and starts the next; with no row the defaults hold.</description>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="defaultMaintenanceTypeEnumId" type="id"/>
+        <field name="defaultTeamPartyId" type="id"/>
+        <field name="approvalThresholdHours" type="number-decimal"/>
+        <field name="closurePolicyEnumId" type="id"><description>MaintenanceClosurePolicy</description></field>
+        <field name="productionRequestsManaged" type="text-indicator"/>
+        <field name="warrantyRepairsManaged" type="text-indicator"/>
+        <field name="changedByUserId" type="id"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="DefaultTeam" related="mantle.party.Party" short-alias="defaultTeam">
+            <key-map field-name="defaultTeamPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="DefaultMaintenanceType" related="moqui.basic.Enumeration" short-alias="defaultType">
+            <key-map field-name="defaultMaintenanceTypeEnumId"/></relationship>
+        <relationship type="one" title="MaintenanceClosurePolicy" related="moqui.basic.Enumeration" short-alias="closurePolicy">
+            <key-map field-name="closurePolicyEnumId"/></relationship>
+    </entity>
+</entities>
