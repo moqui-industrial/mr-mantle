@@ -356,7 +356,9 @@ along with this software (see the LICENSE.md file). If not, see
             (REASON_REQUIRED), which the audit log keeps. A blank parentFacilityId keeps the stored parent unless
             clearParent; a parent equal to the stored one is kept without being checked again. The scope is
             FacilityScope.js's: the user's organizations (the active one when it is theirs), every one with
-            FACILITY_ALL_ORGANIZATIONS. Contact details go through create#Facility and update#Facility.</description>
+            FACILITY_ALL_ORGANIZATIONS. Contact details go through create#Facility and update#Facility. bookable (Y or N),
+            capacity (above zero), capacityUomId and timeZone (a known zone id) are checked (VALUE_INVALID) and an empty one
+            clears it (impl-maintenance P2, F16).</description>
         <in-parameters>
             <parameter name="facilityId"/>
             <parameter name="facilityName"/>
@@ -369,6 +371,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="openedDate" type="Timestamp"/>
             <parameter name="closedDate" type="Timestamp"/>
             <parameter name="defaultDaysToShip" type="Integer"/>
+            <!-- impl-maintenance P2 (F16): a room's people capacity and booking, and the facility's time zone -->
+            <parameter name="bookable"><description>Y when it can be booked on a calendar (a meeting room).</description></parameter>
+            <parameter name="capacity" type="BigDecimal"><description>How many people it holds; not zero or less.</description></parameter>
+            <parameter name="capacityUomId"/>
+            <parameter name="timeZone"><description>A zone id; empty takes the nearest ancestor's.</description></parameter>
             <parameter name="address1"/>
             <parameter name="address2"/>
             <parameter name="city"/>
@@ -391,6 +398,31 @@ along with this software (see the LICENSE.md file). If not, see
                     .execute('storeFacility', context)"/>
             <set field="facilityId" from="saved.facilityId"/>
             <set field="created" from="saved.created"/>
+        </actions>
+    </service>
+    <service verb="store" noun="FacilityFeature" allow-remote="false">
+        <description>A room feature of one of the user's facilities (FACILITY_EDIT; the facility scope of store#Facility): a new
+            one from fromDate (now when not given), or, with end, the end of the one in effect at thruDate (now when not given).
+            Refuses a feature that is not a RoomFeature (VALUE_INVALID), a second current row of a feature (FEATURE_EXISTS), an
+            end with none in effect (RECORD_UNAVAILABLE) and an end before its start (DATES_INVALID). Rows are ended, never
+            deleted (impl-maintenance P2).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="featureEnumId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean" default="false"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="featureEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilitySetup.js')
+                    .execute('storeFeature', context)"/>
+            <set field="fromDate" from="saved.fromDate"/>
         </actions>
     </service>
     <service verb="store" noun="FacilityLocation" allow-remote="false">

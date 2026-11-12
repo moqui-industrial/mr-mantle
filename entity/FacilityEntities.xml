@@ -32,6 +32,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="bookable" type="text-indicator"><description>Y when this facility can be booked on a calendar (a meeting room). Type FcTpRoom alone does not make it bookable.</description></field>
         <field name="capacity" type="number-decimal"><description>How many people it holds. Not FacilityLocation.capacity, which is a bin.</description></field>
         <field name="capacityUomId" type="id"/>
+        <field name="timeZone" type="text-short"><description>The facility's time zone (a zone id such as America/Chicago). A
+            facility with none takes its nearest ancestor's, and equipment its facility's (impl-maintenance P2, F16).</description></field>
         <field name="openedDate" type="date-time"/>
         <field name="closedDate" type="date-time"/>
         <field name="description" type="text-medium"/>
@@ -69,6 +71,8 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="stateGeoId"/></relationship>
 
         <relationship type="many" related="mantle.facility.FacilityCertification" short-alias="certifications">
+            <key-map field-name="facilityId"/></relationship>
+        <relationship type="many" related="mantle.facility.FacilityFeature" short-alias="features">
             <key-map field-name="facilityId"/></relationship>
         <relationship type="many" related="mantle.facility.FacilityContactMech" short-alias="contactMechs">
             <key-map field-name="facilityId"/></relationship>
@@ -139,6 +143,27 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="shipmentBoxTypeId" type="id" is-pk="true"/>
         <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
         <relationship type="one" related="mantle.shipment.ShipmentBoxType" short-alias="boxType"/>
+    </entity>
+    <!-- A room's dated feature (IronStone Maintenance design §6 Facilities; impl-maintenance P2, F16): a projector, a video
+        conference system, step-free access. Ended by its thruDate, never deleted, so a room's features on a past day stay
+        readable. Written by FacilityServices.store#FacilityFeature under FACILITY_EDIT. -->
+    <entity entity-name="FacilityFeature" package="mantle.facility" cache="never">
+        <field name="facilityId" type="id" is-pk="true"/>
+        <field name="featureEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" title="Feature" related="moqui.basic.Enumeration">
+            <key-map field-name="featureEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Room Feature" enumTypeId="RoomFeature"/>
+            <moqui.basic.Enumeration description="Projector" enumId="RfProjector" enumTypeId="RoomFeature" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Display screen" enumId="RfDisplay" enumTypeId="RoomFeature" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Video conference" enumId="RfVideoConference" enumTypeId="RoomFeature" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Whiteboard" enumId="RfWhiteboard" enumTypeId="RoomFeature" sequenceNum="4"/>
+            <moqui.basic.Enumeration description="Step-free access" enumId="RfStepFree" enumTypeId="RoomFeature" sequenceNum="5"/>
+        </seed-data>
     </entity>
     <entity entity-name="FacilityCertification" package="mantle.facility" cache="never">
         <field name="facilityCertificationId" type="id" is-pk="true"/>
