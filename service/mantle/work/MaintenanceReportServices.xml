@@ -14,8 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Maintenance's read-only projections (IronStone Maintenance design §3 Home, §8, §13.2 MaintenanceReportServices; impl-maintenance
     P3): Home's counters, the user's work and the teams' work, in MaintenanceWork.js; P14 the preventive compliance report, in
-    MaintenancePlans.js; P11: the cost reader's costs (WorkCosts and MaintenanceCostReport), in MaintenanceCosts.js. The other
-    reports join in P17. -->
+    MaintenancePlans.js; P11: the cost reader's costs (WorkCosts and MaintenanceCostReport), in MaintenanceCosts.js; P17 the work status
+    report, in MaintenanceReports.js. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="get" noun="MaintenanceHome" allow-remote="false">
         <description>Home's counts over the user's maintenance scope (a work read; with the assigned view alone, the user's own
@@ -65,6 +65,7 @@ along with this software (see the LICENSE.md file). If not, see
                 (the summary counts all)</description></parameter>
             <parameter name="pageIndex" type="Integer"/>
             <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"><description>Every row, to 5000 (a CSV export, P17)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="summary" type="Map"/>
@@ -123,6 +124,61 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceCosts.js').execute('costs', context)"/>
             <set field="costs" from="answer.costs"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceStatusReport" allow-remote="false" read-only="true">
+        <description>The work status report (design §8 WorkStatusReport; impl-maintenance P17; MAINTENANCE_VIEW in the scope's
+            organizations, PERMISSION_DENIED otherwise, ORGANIZATION_DENIED for another organization), over execution roots only
+            (procedures and process steps are never counted), at most 2000 (summary.capped): in the period from fromDate (30 days
+            before the as-of time unless given) to the as-of time (thruDate, now unless given), the work orders opened (created),
+            completed (complete at the as-of time by a completion in the period: a completion reopened is not counted, an order
+            completed, reopened and completed again counts once, in the period of its last completion) and cancelled, and at the as-of time the backlog (open),
+            the overdue (backlog past its required completion, never unscheduled work) and the unassigned (backlog with no
+            technician), each from the status audit of the root. Narrowed to an organization, a facility (with those inside it),
+            equipment, a team (at the as-of time), a source or a kind; grouped by state, team, resource, source, kind or none
+            (groupList, each with the six counts); statusList the counted work orders, of one measure and one group when given
+            (paged; pageNoLimit to 2000). No cost, rate or amount.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="maintenanceKindEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"><description>The as-of time: the end of the period</description></parameter>
+            <parameter name="groupBy"><description>state, team (the default), resource, source, kind or none</description></parameter>
+            <parameter name="measure"><description>opened, completed, cancelled, backlog, overdue or unassigned: the rows of one
+                measure (the summary counts all)</description></parameter>
+            <parameter name="groupKey"><description>The rows of one group of groupList</description></parameter>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="summary" type="Map"/>
+            <parameter name="groupList" type="List"/>
+            <parameter name="measureList" type="List"/>
+            <parameter name="statusList" type="List"/>
+            <parameter name="statusListCount" type="Integer"/>
+            <parameter name="statusListPageIndex" type="Integer"/>
+            <parameter name="statusListPageSize" type="Integer"/>
+            <parameter name="statusListPageMaxIndex" type="Integer"/>
+            <parameter name="statusListPageRangeLow" type="Integer"/>
+            <parameter name="statusListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceReports.js').execute('statusReport', context)"/>
+            <set field="summary" from="answer.summary"/>
+            <set field="groupList" from="answer.groupList"/>
+            <set field="measureList" from="answer.measureList"/>
+            <set field="statusList" from="answer.statusList"/>
+            <set field="statusListCount" from="answer.statusListCount"/>
+            <set field="statusListPageIndex" from="answer.statusListPageIndex"/>
+            <set field="statusListPageSize" from="answer.statusListPageSize"/>
+            <set field="statusListPageMaxIndex" from="answer.statusListPageMaxIndex"/>
+            <set field="statusListPageRangeLow" from="answer.statusListPageRangeLow"/>
+            <set field="statusListPageRangeHigh" from="answer.statusListPageRangeHigh"/>
         </actions>
     </service>
 </services>
