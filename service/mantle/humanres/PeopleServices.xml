@@ -1315,8 +1315,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Tells the users of a party newly assigned to a task of People's lifecycle work (a checklist step, an equipment
             return; mantle.work.TaskServices.notify#TaskAssigned hands such a task here) on the topic PeopleTaskAssigned, whose
             title names who assigned it and when it is due and nothing of the person or the change: workEffortId, assignedByName,
-            dueDateText, and the task as the record. Not the user who assigned it. A failure is logged, not the
-            assignment's.</description>
+            dueDateText, and the task as the record. Not the user who assigned it; to the assignee's users alone (directOnly: a
+            subscription to every message of the topic receives none). A failure is logged, not the assignment's.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="partyId" required="true"/>
@@ -1333,9 +1333,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const assignedByName = (me ? [me.firstName, me.lastName].filter((part) => part).join(' ') : '') || ec.user.username || 'People'
                 const due = task.estimatedCompletionDate
                 const dueDateText = due ? ec.l10n.format(new Date(Number(String(due)) || Date.parse(String(due))), 'MMM d') : 'when you can'
+                // to the assignee alone (directOnly): a People task may be a protected checklist step or a confidential case's
+                // (People follow-up 1)
                 ec.makeNotificationMessage().topic('PeopleTaskAssigned').userIds(userIds)
                         .message({workEffortId: workEffortId, assignedByName: assignedByName, dueDateText: dueDateText})
-                        .record('mantle.work.effort.WorkEffort', workEffortId).send()
+                        .record('mantle.work.effort.WorkEffort', workEffortId).directOnly().send()
             } catch (err) {
                 ec.logger.error(`People task ${workEffortId} assigned to ${partyId}: notification not sent: ${err && err.message ? err.message : err}`)
             }

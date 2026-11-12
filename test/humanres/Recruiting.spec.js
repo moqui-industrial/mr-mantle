@@ -713,7 +713,7 @@ feature("an interview's event changes only through recruiting: the organizer ref
         return out
     },
     then(r) {
-        r.scheduled.error == "" && r.scheduled.invitationsSent == true
+        r.scheduled.error == ""
         r.access.canView && !r.access.canEdit && r.access.isOrganizer
         r.access.managedBy == "its application's interviews in People"
         r.moved.includes("is changed on its application's interviews in People")
@@ -722,13 +722,72 @@ feature("an interview's event changes only through recruiting: the organizer ref
         r.readerChange == "PERMISSION_DENIED"
         r.otherChange == "RECORD_UNAVAILABLE"
         Number(String(r.before.estimatedStartDate)) == r.startMs && r.before.location == "Room 4"
-        r.changed.error == "" && r.changed.invitationsSent == true
+        r.changed.error == ""
         Number(String(r.after.estimatedStartDate)) == r.startMs + 3600000
         Number(String(r.after.estimatedCompletionDate)) == r.startMs + 3600000 + 30 * 60000
         r.after.location == "Room 5"
-        r.cancelled.error == "" && r.cancelled.invitationsSent == true
+        r.cancelled.error == ""
         r.afterCancel.statusId == "WeCancelled"
         r.again == "INTERVIEW_CANCELLED"
+    }
+})
+
+// F358 (People follow-up 1, Nov 12, 2026): an interview's invitations go once its schedule, change or cancel commits, as the
+// system, in a transaction of their own (send#InterviewInvitations, by tx-commit rules). Sent inside the change's transaction, a
+// failing send marked it rollback-only, so the change was undone while the screen said it was made
+feature("an interview's invitations go once its change commits, and a send that fails answers so and undoes nothing", {
+    when() {
+        const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+            employmentApplicationId: state.cara,
+            startDate: nextWeek(),
+            durationMinutes: 45,
+            panelPartyIds: state.ana.partyId,
+            location: "Room 6"
+        })
+        const workEffortId = scheduled.workEffortId
+        const anaRow = () =>
+            ec.entity
+                .find("mantle.work.effort.WorkEffortParty")
+                .condition({workEffortId, partyId: state.ana.partyId})
+                .disableAuthz()
+                .useCache(false)
+                .one() || {}
+        const event = () =>
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+        ec.factory.waitWorkerPoolEmpty(50)
+        const invited = anaRow()
+        // the change in a transaction of its own, read before it commits: nothing has been sent yet
+        let inside = null
+        ec.transaction.runRequireNew(null, "Recruit spec change", () => {
+            login(state.recruiter.userId)
+            ec.artifactExecution.disableAuthz()
+            try {
+                ec.service
+                    .sync()
+                    .name(R + "change#Interview")
+                    .parameters({workEffortId, location: "Room 7"})
+                    .call()
+                inside = {error: ec.message.hasError() ? ec.message.getErrorsString() : "", digest: anaRow().invitationDigest}
+            } finally {
+                login("john.doe")
+                ec.artifactExecution.disableAuthz()
+            }
+        })
+        ec.factory.waitWorkerPoolEmpty(50)
+        const told = anaRow()
+        const changed = event()
+        // the send of an event that is not an interview answers so, adds no error and sends nothing
+        const notInterview = run(state.recruiter.userId, R + "send#InterviewInvitations", {workEffortId: "RECRUIT_SPEC_NONE"})
+        return {scheduled, invited, inside, told, changed, notInterview}
+    },
+    then(r) {
+        r.scheduled.error == ""
+        r.invited.invitationSentDate != null && r.invited.invitationDigest.length > 0
+        r.inside.error == "" && r.inside.digest == r.invited.invitationDigest
+        r.changed.location == "Room 7"
+        r.told.invitationDigest != r.invited.invitationDigest
+        r.notInterview.error == "" && r.notInterview.invitationsSent == false
+        r.notInterview.invitationProblem == "Not an interview"
     }
 })
 

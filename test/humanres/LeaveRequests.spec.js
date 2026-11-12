@@ -441,9 +441,30 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
             .one().statusId
         // the afternoon: approved, then cancelled by HR at once (a reason needed)
         decide(state.pm, "approve")
+        // F359 (People follow-up 1): its "Out of office" is Ana's, but kept by People (the EventManager PeopleLeave): Mantle's
+        // event services refuse her its move and cancel, and it changes only with the request
+        const pmEffort = Array.from(
+            ec.entity
+                .find("mantle.humanres.leave.LeaveRequestSegment")
+                .condition({leaveRequestId: state.pm})
+                .disableAuthz()
+                .list()
+        )[0].workEffortId
+        const E = "mantle.work.EventServices."
+        out.ownAccess = run(state.uAna, E + "check#EventAccess", {workEffortId: pmEffort, permission: "check"})
+        out.ownMove = run(state.uAna, E + "update#EventOccurrence", {
+            workEffortId: pmEffort,
+            start: "2027-03-03 13:00",
+            end: "2027-03-03 17:00"
+        }).error
+        out.ownCancel = run(state.uAna, E + "cancel#EventOccurrence", {workEffortId: pmEffort}).error
+        const pmEvent = () =>
+            ec.entity.find("mantle.work.effort.WorkEffort").condition({workEffortId: pmEffort}).disableAuthz().one()
+        out.pmKept = pmEvent().statusId
         out.hrNoReason = code(decide(state.pm, "cancel", state.hr))
         out.hrCancel = decide(state.pm, "cancel", state.hr, {reason: "Shop closed"}).statusEnumId
         out.pmReversals = entries({sourceKey: "leave-reversal:" + state.pm})
+        out.pmCancelled = pmEvent().statusId
         // the person's notice names who cancelled it and why (not the approval before it)
         out.pmNotice = run(state.uAna, L + "get#Request", {leaveRequestId: state.pm}).notice || {}
         out.balance = (run(state.uAna, L + "get#MyBalances").balances || [])[0] || {}
@@ -472,7 +493,12 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
         hrOwnCan,
         balance,
         withdrawOther,
-        withdrawRefused
+        withdrawRefused,
+        ownAccess,
+        ownMove,
+        ownCancel,
+        pmKept,
+        pmCancelled
     }) {
         asked == "LrsCancelRequested" && cancelled == "LrsCancelled" && retry
         reversals.length == 1 && total(reversals) == 0.5
@@ -483,6 +509,10 @@ feature("a cancellation the person asks reverses once when approved, and HR's ca
         // 3 granted, 1 taken back, the half days taken and given back: 2, nothing pending
         balance.balance == 2 && balance.pending == 0 && balance.available == 2
         withdrawOther == "NOT_YOURS" && withdrawRefused == "NOT_PENDING"
+        ownAccess.canView && !ownAccess.canEdit && ownAccess.isOrganizer && ownAccess.eventManagerId == "PeopleLeave"
+        ownMove.includes("is changed on its leave request in People")
+        ownCancel.includes("is changed on its leave request in People")
+        pmKept == "WeApproved" && pmCancelled == "WeCancelled"
     }
 })
 

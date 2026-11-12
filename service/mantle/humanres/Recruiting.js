@@ -972,8 +972,8 @@ function siteUrl() {
 // the link in the event's location, so the iMIP invitation carries it), with the panel (employees of the employer with an
 // account) and, when asked, the candidate as attendees; each panel member assigned the scorecard (the form given, else the
 // opening's, else the employer's only published interview scorecard; SCORECARD_REQUIRED for none) with no link. Moves a
-// received or screening application to Interview. The invitations go after (send#EventInvitations: a user is notified, the
-// candidate gets an email with the .ics); a failure to send is named and the interview stays.
+// received or screening application to Interview. The invitations go once it commits (send#InterviewInvitations: a user is
+// notified, the candidate gets an email with the .ics); a failure to send is logged and the interview stays.
 function scheduleInterview(p) {
     const userScope = recruiterScope(true)
     const application = editableApplication(userScope, p.employmentApplicationId)
@@ -1080,22 +1080,34 @@ function scheduleInterview(p) {
             statusId: "EaInterview",
             statusId_changeReason: "Interview scheduled"
         })
-    const invitationProblem = tellAttendees(workEffortId)
-    return {workEffortId, invitationIds, callPath, invitationsSent: !invitationProblem, invitationProblem}
+    return {workEffortId, invitationIds, callPath}
 }
-// The interview's attendees told of it (send#EventInvitations: the new or changed ones, a cancel when it is cancelled), as the
-// system, since the event is People's (the EventManager PeopleInterview: no user changes it on Commons' screens); the caller was
-// checked. A failure is named and logged, and what was done stays.
-function tellAttendees(workEffortId) {
+// send#InterviewInvitations: the interview's attendees told of it (send#EventInvitations: the new or changed ones, a cancel when
+// it is cancelled) once schedule, change or cancel#Interview commits (their tx-commit rules, PeopleRecruiting.secas.xml; F358,
+// People follow-up 1). Sent before the commit, a failing send marked the interview's own transaction rollback-only, so the change
+// was undone while the screen said it was made. As the system, since the event is People's (the EventManager PeopleInterview: no
+// user changes it on Commons' screens); the caller was checked by the service that changed it. The send runs in a transaction of
+// its own, so its failure is named, logged and answered (invitationsSent false) and marks nothing else; the interview stays.
+function sendInterviewInvitations(p) {
+    const workEffortId = text(p.workEffortId)
+    if (!workEffortId || !one(INTERVIEW, {workEffortId})) {
+        ec.logger.warn("No invitations sent for " + (workEffortId || "no event") + ": not an interview")
+        return {workEffortId, invitationsSent: false, invitationProblem: "Not an interview"}
+    }
     let problem = null
     ec.message.pushErrors()
     try {
         ec.artifactExecution.runAsSystem(() =>
-            call("mantle.work.EventServices.send#EventInvitations", {
-                workEffortId,
-                // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
-                eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
-            })
+            ec.service
+                .sync()
+                .name("mantle.work.EventServices.send#EventInvitations")
+                .parameters({
+                    workEffortId,
+                    // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
+                    eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
+                })
+                .requireNewTransaction(true)
+                .call()
         )
         if (ec.message.hasError()) problem = ec.message.getErrorsString()
     } catch (error) {
@@ -1105,7 +1117,7 @@ function tellAttendees(workEffortId) {
         ec.message.popErrors()
     }
     if (problem) ec.logger.error("Interview " + workEffortId + ": the invitations were not sent: " + problem)
-    return problem
+    return {workEffortId, invitationsSent: !problem, invitationProblem: problem}
 }
 // change#Interview and cancel#Interview: a recruiter of the employer changes or cancels a scheduled interview here, the only
 // place its event changes (Commons calendar editors, Nov 12, 2026: the EventManager PeopleInterview keeps it from Commons'
@@ -1121,7 +1133,8 @@ function interviewToChange(p) {
     return {interview, event}
 }
 // change#Interview: a new start (from now on), length (10 minutes to 8 hours), place (not of a video interview, whose place is
-// its call link, kept open until a day after the new end) or note; what is not given stays. The attendees are told.
+// its call link, kept open until a day after the new end) or note; what is not given stays. The attendees are told once it
+// commits (send#InterviewInvitations).
 function changeInterview(p) {
     const {interview, event} = interviewToChange(p)
     const workEffortId = interview.workEffortId
@@ -1149,11 +1162,10 @@ function changeInterview(p) {
         if (link && (ms(link.expiryDate) ?? Infinity) < wantMs)
             call("update#moqui.call.CallLink", {callLinkId: interview.callLinkId, expiryDate: stamp(wantMs)})
     }
-    const invitationProblem = tellAttendees(workEffortId)
-    return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
+    return {workEffortId}
 }
 // cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its video call's link closed (closeCallLink)
-// and the attendees told.
+// and the attendees told once it commits (send#InterviewInvitations).
 function cancelInterview(p) {
     const {interview} = interviewToChange(p)
     const workEffortId = interview.workEffortId
@@ -1163,8 +1175,7 @@ function cancelInterview(p) {
         statusId_changeReason: text(p.reason) || "Interview cancelled"
     })
     closeCallLink(interview.callLinkId)
-    const invitationProblem = tellAttendees(workEffortId)
-    return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
+    return {workEffortId}
 }
 // The video call link of a cancelled interview takes no one more (Commons calendar editors review, Nov 12, 2026). The framework's
 // revoke#CallLink is its owner's (the recruiter who scheduled it): it revokes the link and removes its guests at once. Another
@@ -1764,6 +1775,7 @@ const operations = {
     scheduleInterview,
     changeInterview,
     cancelInterview,
+    sendInterviewInvitations,
     submitScorecard,
     findInterviews,
     getInterviewProjection,

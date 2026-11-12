@@ -279,7 +279,8 @@ function unfollow(requestId, partyId) {
         find(FOLLOWER).condition({recordEntityName: REQUEST, recordId: requestId}).condition("userId", "in", userIds).deleteAll()
 }
 // A PeopleCaseUpdate notice to the case's people (or the parties given) but the current user: the case's id and fixed words, no
-// push. A failure is logged and the change stays.
+// push, to them alone (directOnly: a Tools subscription to every message of the topic receives none; the user's call of Nov 12,
+// 2026, People follow-up 1). A failure is logged and the change stays.
 function tell(requestId, noticeKind, partyIds = null) {
     try {
         const people = peopleOf(requestId)
@@ -292,6 +293,7 @@ function tell(requestId, noticeKind, partyIds = null) {
             .topic("PeopleCaseUpdate")
             .message({requestId, noticeText: notices[noticeKind] || notices.updated})
             .userIds(userIds)
+            .directOnly()
             .send()
         return userIds
     } catch (error) {
