@@ -18,6 +18,8 @@ const day = 24 * 60 * 60 * 1000
 const state = {}
 // the fields of a directory row for a reader who is not HR: the public work identity
 const publicFields = [
+    // the department of the employment's assignment (P6)
+    "departmentName",
     "jobTitle",
     "managerName",
     "managerPartyId",

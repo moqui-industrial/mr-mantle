@@ -29,6 +29,19 @@ along with this software (see the LICENSE.md file). If not, see
             refuseServiceName="mantle.humanres.PositionServices.refuse#PositionApproval" refuseReasonRequired="Y"
             titleTemplate="Approve the activation of position ${positionName} (${organizationName}, ${stepText})"/>
 
+    <!-- P6: an employment change, a transfer or a separation (PeopleServices.apply#EmploymentChange asks for it), sent to the
+        approvers of the step waiting; approve#NotificationMessage and refuse#NotificationMessage call mantle.humanres.PeopleServices
+        approve#EmploymentChange and refuse#EmploymentChange as the user, which decide the request at the revision in the message
+        (decide#EmploymentChange over record#Decision): the last step's approval applies the change, a refusal needs a reason.
+        The message holds peopleApprovalId, employmentChangeId, sourceRevision, changeText, subjectText, organizationName,
+        departmentName and stepText, and no pay; the title of a separation names no one (it may show on a locked screen). -->
+    <moqui.security.user.NotificationTopic topic="PeopleEmploymentChangeApproval" inboxEnumId="NinNotifications"
+            description="Employment change to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PeopleServices.approve#EmploymentChange"
+            refuseServiceName="mantle.humanres.PeopleServices.refuse#EmploymentChange" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
     <!-- the skill levels People's lookups maintain (PeopleServices find#Lookups and store#Lookup; design §12 Lookups, PE-03):
         the vocabulary of PartySkill.skillLevel and of a requirement's level (P18), each value's enumCode its number -->
     <moqui.basic.EnumerationType description="Skill Level" enumTypeId="SkillLevel"/>

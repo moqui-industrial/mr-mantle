@@ -550,50 +550,25 @@ function storePositionHolder(p) {
         denied("RECORD_UNAVAILABLE", "Position " + text(p.emplPositionId) + " is not available")
     const partyId = text(p.partyId)
     if (!partyId) denied("PERSON_REQUIRED", "Choose the person")
-    // the person's name only once they hold the position or are employed by its employer: a supplied party is not named
-    const nameOf = () => people.personNames([partyId])[partyId] || partyId
-    const holders = holdersOf([position.emplPositionId])[position.emplPositionId] || []
-    // another holder in the period (the person's own employment naming the seat is the holding being written, not another)
-    const otherHolder = (holding, except) =>
-        holders.find(
-            holder =>
-                holder !== except && !(holder.partyId === partyId && holder.source === "employment") && overlaps(holder, holding)
-        )
-    const occupied = other =>
-        denied(
-            "POSITION_OCCUPIED",
-            (people.personNames([other.partyId])[other.partyId] || other.partyId) +
-                " holds this position then; a seat has one holder"
-        )
     if (text(p.holderFromDate)) {
         const holderFromMs = /^\d+$/.test(text(p.holderFromDate)) ? Number(text(p.holderFromDate)) : effective(p.holderFromDate)
-        const row = rows(HOLDER, {emplPositionId: position.emplPositionId, partyId, roleTypeId: holderRole}).find(
-            found => ms(found.fromDate) === holderFromMs
-        )
-        if (!row) denied("RECORD_UNAVAILABLE", "This holding is not available")
-        if ((ms(row.thruDate) ?? Infinity) <= nowMs()) denied("HOLDER_ENDED", nameOf() + "'s holding has ended")
-        let thruMs = effective(p.thruDate)
-        if (thruMs <= holderFromMs) denied("DATE_STALE", "A holding ends after it starts")
-        // a holding ends with the position at the latest, and a later end overlaps no other holder
-        if (ms(position.thruDate) != null && thruMs > ms(position.thruDate)) thruMs = ms(position.thruDate)
-        const self = holders.find(
-            holder => holder.source === "position" && holder.partyId === partyId && holder.fromMs === holderFromMs
-        )
-        const other = otherHolder({fromMs: holderFromMs, thruMs}, self)
-        if (other) occupied(other)
-        call("update#" + HOLDER, {
-            emplPositionId: row.emplPositionId,
-            partyId: row.partyId,
-            roleTypeId: row.roleTypeId,
-            fromDate: row.fromDate,
-            thruDate: new Date(thruMs),
-            comments: [row.comments, text(p.changeReason)].filter(Boolean).join("; ") || null
-        })
-        return {emplPositionId: position.emplPositionId, partyId, fromMs: holderFromMs}
+        return endHolding(position, partyId, holderFromMs, effective(p.thruDate), text(p.changeReason), true)
     }
-    const fromMs = effective(p.fromDate)
+    return holdSeat(
+        position,
+        partyId,
+        effective(p.fromDate),
+        text(p.thruDate) ? effective(p.thruDate) : null,
+        text(p.changeReason)
+    )
+}
+// A person's holding of a seat from fromMs to thruMs (open when null), checked as store#PositionHolder checks it but not the
+// caller, which has checked its own (store#PositionHolder; P6's hire and employment change, Employment.js, applied by an
+// approver too): the seat in effect and not inactive on the date, the person employed by its employer then, no other holder in
+// the period; a holding ends with the position at the latest.
+function holdSeat(position, partyId, fromMs, thruMs, reason) {
+    const holders = holdersOf([position.emplPositionId])[position.emplPositionId] || []
     const positionThruMs = ms(position.thruDate)
-    let thruMs = text(p.thruDate) ? effective(p.thruDate) : null
     if (thruMs != null && thruMs <= fromMs) denied("DATE_STALE", "A holding ends after it starts")
     if ((ms(position.fromDate) ?? -Infinity) > fromMs || (positionThruMs ?? Infinity) <= fromMs)
         denied("POSITION_NOT_IN_EFFECT", "The position is not in effect on that date")
@@ -610,7 +585,7 @@ function storePositionHolder(p) {
                 (people.organizationNames([position.organizationPartyId])[position.organizationPartyId] || "the employer") +
                 " on that date"
         )
-    const other = otherHolder({fromMs, thruMs})
+    const other = otherHolder(holders, partyId, {fromMs, thruMs})
     if (other) occupied(other)
     call("create#" + HOLDER, {
         emplPositionId: position.emplPositionId,
@@ -618,10 +593,50 @@ function storePositionHolder(p) {
         roleTypeId: holderRole,
         fromDate: new Date(fromMs),
         thruDate: thruMs == null ? null : new Date(thruMs),
-        comments: text(p.changeReason) || null
+        comments: reason || null
     })
     return {emplPositionId: position.emplPositionId, partyId, fromMs}
 }
+// The end of a person's holding of a seat (the row starting holderFromMs) on thruMs, capped at the seat's end and refused when a
+// later end reaches another holder's period. checkEnded refuses a holding that has ended (store#PositionHolder); P6's changes end
+// the holding in effect, which has not.
+function endHolding(position, partyId, holderFromMs, thruMs, reason, checkEnded = false) {
+    const nameOf = () => people.personNames([partyId])[partyId] || partyId
+    const holders = holdersOf([position.emplPositionId])[position.emplPositionId] || []
+    const row = rows(HOLDER, {emplPositionId: position.emplPositionId, partyId, roleTypeId: holderRole}).find(
+        found => ms(found.fromDate) === holderFromMs
+    )
+    if (!row) denied("RECORD_UNAVAILABLE", "This holding is not available")
+    if (checkEnded && (ms(row.thruDate) ?? Infinity) <= nowMs()) denied("HOLDER_ENDED", nameOf() + "'s holding has ended")
+    if (thruMs <= holderFromMs) denied("DATE_STALE", "A holding ends after it starts")
+    // a holding ends with the position at the latest, and a later end overlaps no other holder
+    if (ms(position.thruDate) != null && thruMs > ms(position.thruDate)) thruMs = ms(position.thruDate)
+    const self = holders.find(
+        holder => holder.source === "position" && holder.partyId === partyId && holder.fromMs === holderFromMs
+    )
+    const other = otherHolder(holders, partyId, {fromMs: holderFromMs, thruMs}, self)
+    if (other) occupied(other)
+    call("update#" + HOLDER, {
+        emplPositionId: row.emplPositionId,
+        partyId: row.partyId,
+        roleTypeId: row.roleTypeId,
+        fromDate: row.fromDate,
+        thruDate: new Date(thruMs),
+        comments: [row.comments, reason].filter(Boolean).join("; ") || null
+    })
+    return {emplPositionId: position.emplPositionId, partyId, fromMs: holderFromMs}
+}
+// another holder of the seat in the period (the person's own employment naming the seat is the holding being written, not another)
+const otherHolder = (holders, partyId, holding, except) =>
+    holders.find(
+        holder =>
+            holder !== except && !(holder.partyId === partyId && holder.source === "employment") && overlaps(holder, holding)
+    )
+const occupied = other =>
+    denied(
+        "POSITION_OCCUPIED",
+        (people.personNames([other.partyId])[other.partyId] || other.partyId) + " holds this position then; a seat has one holder"
+    )
 
 // ===== the activation approval (P5) =====
 const approvalKind = "PakPosition"
@@ -896,4 +911,11 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown position operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({
+    execute: run,
+    // P6: a seat's holders and a holding written or ended by a hire or an employment change (Employment.js), whose caller is checked
+    holdersOf,
+    holdSeat,
+    endHolding,
+    checkDepartment
+})

@@ -16,9 +16,11 @@ along with this software (see the LICENSE.md file). If not, see
     scope, which every People service checks first and then reads and writes with authorization off, Home's counts and the setup
     readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
     to ADMIN) and names no application group. P2 adds the employee record over Employees.js: the directory, Employee360's
-    regions, the employment history, the personal information correction and the employment content host. Later services of
-    the family (hire and employment change) join this file. P5 adds People's HR vocabularies over Lookups.js (find#Lookups,
-    store#Lookup). -->
+    regions, the employment history, the personal information correction and the employment content host. P5 adds People's HR
+    vocabularies over Lookups.js (find#Lookups, store#Lookup). P6 adds the hire and the employment change over Employment.js
+    (preview#Hire, hire#Employee, preview#EmploymentChange, apply#EmploymentChange, decide#EmploymentChange and the
+    PeopleEmploymentChangeApproval topic's approve and refuse services, find#EmploymentChanges): the dated assignment of an
+    employment and its projections (department membership, position occupancy, reporting line). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="Scope" allow-remote="false">
@@ -203,7 +205,7 @@ along with this software (see the LICENSE.md file). If not, see
                 or team reader</description></parameter>
             <parameter name="hostEmploymentId"/>
             <parameter name="capabilities" type="Map"><description>editPersonal, editHr, selfFields (the fields the caller may
-                change), files</description></parameter>
+                change), files, changeEmployment (an HR editor of the opened employment's employer, P6)</description></parameter>
         </out-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
@@ -221,14 +223,22 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="EmploymentHistory" allow-remote="false">
         <description>A person's employments, newest first, with employer, job title, dates, state and termination reason
-            (design §4 EmploymentHistory; P6 adds the dated assignments): an HR reader's of the employers in their scope, any
-            dates; the person's own, all of them. Refuses anyone else (PERMISSION_DENIED) and a person outside the scope
+            (design §4 EmploymentHistory), and their dated assignments (P6: dates, state, department, position, manager, work
+            location and the change that started each): an HR reader's of the employers in their scope, any dates; the person's
+            own, all of them. Refuses anyone else (PERMISSION_DENIED) and a person outside the scope
             (RECORD_UNAVAILABLE).</description>
         <in-parameters><parameter name="partyId" required="true"/></in-parameters>
-        <out-parameters><parameter name="history" type="List"/></out-parameters>
+        <out-parameters>
+            <parameter name="history" type="List"/>
+            <parameter name="assignments" type="List"><description>employmentAssignmentId, partyRelationshipId, organizationName,
+                fromDateText, thruDateText, stateText, departmentName, positionName, managerName, facilityName, changeText,
+                reason</description></parameter>
+        </out-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
-            <set field="history" from="ec.resource.script(module).execute('employmentHistory', context).history"/>
+            <set field="found" from="ec.resource.script(module).execute('employmentHistory', context)"/>
+            <set field="history" from="found.history"/>
+            <set field="assignments" from="found.assignments"/>
         </actions>
     </service>
 
@@ -385,6 +395,314 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Lookups.js').execute('storeLookup', context)"/>
             <set field="enumId" from="stored.enumId"/>
             <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <!-- ===== P6: the hire and the employment change (design §4 HireEmployee and EmploymentChange, PE-02; Employment.js) ===== -->
+    <service verb="define" noun="HireTerms" type="interface">
+        <description>The terms of a hire: the person (an existing one by partyId, else a new one's names, with term searching for
+            who may be them), the employer and dates, the first assignment's department, position, manager and work location, and
+            the new person's work contacts.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyId"/>
+            <parameter name="term"><description>A name searched for the person (two characters at least)</description></parameter>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="preferredName"/>
+            <parameter name="workEmail"/>
+            <parameter name="workPhone"/>
+            <parameter name="confirmNewPerson" type="Boolean"><description>A new person although someone matches</description></parameter>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="Hire" allow-remote="false">
+        <description>A hire checked before it is made (design §4 HireEmployee's Identity and EmploymentTerms): the people who may be
+            the person (People's own search with the entity filters off and public identity only, by the name searched, the names
+            given or the work email, each with their relationships with the employer and none with another employer: a person
+            employed by a second employer is found, not made again, F59), the chosen person's relationships of any type with the
+            employer (an employment, an orphan PrtEmployee relationship, a contractor's, a contact's), the plan (new, an orphan
+            completed, or a rehire beside the ended employment), the terms with their names and the findings: errors that refuse
+            the hire (as hire#Employee does) and warnings and notes. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT
+            (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED), one outside the scope (ORGANIZATION_DENIED) and a person
+            not found (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="person" type="Map"><description>partyId (none for a new one), personName, preferredName, isNew</description></parameter>
+            <parameter name="matches" type="List"><description>partyId, personName, preferredName, matchedBy, employedNow,
+                relationshipText</description></parameter>
+            <parameter name="relationships" type="List"/>
+            <parameter name="plan"><description>new, complete or rehire</description></parameter>
+            <parameter name="planText"/>
+            <parameter name="terms" type="Map"><description>departmentPartyId, emplPositionId, managerPartyId, facilityId and their
+                names, fromDateText, thruDateText</description></parameter>
+            <parameter name="findings" type="List"><description>code, severity (error, warning, info), message</description></parameter>
+            <parameter name="canHire" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('previewHire', context)"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="organizationName" from="found.organizationName"/>
+            <set field="person" from="found.person"/>
+            <set field="matches" from="found.matches"/>
+            <set field="relationships" from="found.relationships"/>
+            <set field="plan" from="found.plan"/>
+            <set field="planText" from="found.planText"/>
+            <set field="terms" from="found.terms"/>
+            <set field="findings" from="found.findings"/>
+            <set field="canHire" from="found.canHire"/>
+        </actions>
+    </service>
+    <service verb="hire" noun="Employee" allow-remote="false">
+        <description>A hire in one transaction (design §4, PE-02): the person (chosen, or a new Person whose Party owner is left as
+            it is), the Employee role, exactly one employment (a new one through EmploymentServices.create#Employment, or an
+            orphan PrtEmployee relationship of the employer completed with its Employment row, never a second relationship; a
+            rehire beside the ended one), the first assignment from the start (department, position, manager, work location) with
+            its department membership, position occupancy and reporting line, and the hire's change row. A retry with the same
+            operationKey answers the first hire. Never calls create#PersonEmployee (F5). Refuses as preview#Hire's errors say: no
+            person (PERSON_REQUIRED), a new person someone already matches unless confirmNewPerson (PERSON_MATCHES), an
+            employment of the employer overlapping (EMPLOYMENT_OVERLAP), dates out of order (DATES_INVALID), a department not of
+            the employer (NOT_A_DEPARTMENT, DEPARTMENT_OUTSIDE), a position not of the employer (RECORD_UNAVAILABLE), not in effect
+            (POSITION_NOT_IN_EFFECT), inactive (POSITION_INACTIVE), of another department (POSITION_DEPARTMENT) or held then
+            (POSITION_OCCUPIED), a manager not employed by the employer (MANAGER_NOT_EMPLOYED), a work location not the
+            employer's (FACILITY_OUTSIDE).</description>
+        <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
+        <in-parameters>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="employmentChangeId"/>
+            <parameter name="employmentAssignmentId"/>
+            <parameter name="plan"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="hired" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('hireEmployee', context)"/>
+            <set field="partyId" from="hired.partyId"/>
+            <set field="partyRelationshipId" from="hired.partyRelationshipId"/>
+            <set field="employmentChangeId" from="hired.employmentChangeId"/>
+            <set field="employmentAssignmentId" from="hired.employmentAssignmentId"/>
+            <set field="plan" from="hired.plan"/>
+            <set field="repeated" from="!!hired.repeated"/>
+        </actions>
+    </service>
+
+    <service verb="define" noun="EmploymentChangeTerms" type="interface">
+        <description>An employment change: the employment, what changes (changeKind: transfer, manager, leave, return or
+            separation), from when, the new terms (a term not passed is kept, an empty one cleared), a leave's return date, a
+            separation's termination reason and type (People's lookups), and why.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="changeKind"/>
+            <parameter name="effectiveDate"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="returnDate"/>
+            <parameter name="terminationReasonEnumId"/>
+            <parameter name="terminationTypeEnumId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="EmploymentChange" allow-remote="false">
+        <description>An employment change checked before it is asked for (design §4 EmploymentChange's Change and ImpactAndConfirm):
+            the employment's terms now (department, position, manager, work location, state) and its revision, the new terms with
+            their names, the impact (the seat vacated and the seat taken, the department and reporting line moved; for a
+            separation the employment's end, the reports left with no manager, the units left with no lead, another employer's
+            employment continuing and the approvals routed again), whether it waits for approval (a transfer and a separation)
+            and who would decide it, and the findings: errors that refuse it (as apply#EmploymentChange does) and notes. Refuses
+            a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED) and an employment outside the scope
+            (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.humanres.PeopleServices.define#EmploymentChangeTerms"/>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="employmentFromDateText"/>
+            <parameter name="employmentThruDateText"/>
+            <parameter name="revision"/>
+            <parameter name="current" type="Map"/>
+            <parameter name="changeKindEnumId"/>
+            <parameter name="changeText"/>
+            <parameter name="effectiveDateText"/>
+            <parameter name="terms" type="Map"/>
+            <parameter name="impact" type="List"><description>kind, impactText</description></parameter>
+            <parameter name="findings" type="List"/>
+            <parameter name="needsApproval" type="Boolean"/>
+            <parameter name="route" type="List"><description>stepText, explanation, unresolved</description></parameter>
+            <parameter name="canApply" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('previewEmploymentChange', context)"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="personName" from="found.personName"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="organizationName" from="found.organizationName"/>
+            <set field="employmentFromDateText" from="found.employmentFromDateText"/>
+            <set field="employmentThruDateText" from="found.employmentThruDateText"/>
+            <set field="revision" from="found.revision"/>
+            <set field="current" from="found.current"/>
+            <set field="changeKindEnumId" from="found.changeKindEnumId"/>
+            <set field="changeText" from="found.changeText"/>
+            <set field="effectiveDateText" from="found.effectiveDateText"/>
+            <set field="terms" from="found.terms"/>
+            <set field="impact" from="found.impact"/>
+            <set field="findings" from="found.findings"/>
+            <set field="needsApproval" from="found.needsApproval"/>
+            <set field="route" from="found.route"/>
+            <set field="canApply" from="found.canApply"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="EmploymentChange" allow-remote="false">
+        <description>An employment change from its effective date (design §4 EmploymentChange), at the employment's revision read
+            (expectedRevision): a manager change, a leave of absence (to an optional return date) and a return are applied now; a
+            transfer and a separation wait for approval (a PeopleApproval of kind PakEmploymentChange, routed by the employer's
+            rules, the person's manager by default, never the requester or the person; sent on the PeopleEmploymentChangeApproval
+            topic; with no one who may decide it waits) and are applied by the last approval (decide#EmploymentChange). Applied: the
+            assignment in effect ends on the date and the next starts, the department membership, position occupancy and reporting
+            line follow; a separation ends the employment (thruDate audited with the reason, the termination reason and type), its
+            assignment and projections, the person's lead and team memberships at the employer and the lines they manage there
+            (each report's assignment continues with no manager), leaves another employer's employment alone and routes the
+            employer's waiting People decisions again (a leaver decides nothing). A new change supersedes one of the employment
+            still waiting. A retry with the same operationKey answers the first. Refuses a caller without PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT (PERMISSION_DENIED), an employment outside the scope (RECORD_UNAVAILABLE), a revision other than the one
+            read (REVISION_CHANGED), no kind (KIND_INVALID), a date outside the employment (DATE_OUTSIDE) or before a change set
+            for it or later (ASSIGNMENT_SCHEDULED), terms that change nothing (NOTHING_CHANGES), no reason for one that waits for
+            approval (REASON_REQUIRED), a leave while on leave (ALREADY_ON_LEAVE), a return while working (NOT_ON_LEAVE), a
+            termination reason or type not of the list or ended (VALUE_INVALID, VALUE_ENDED) and the terms' refusals of
+            hire#Employee (SELF_REPORTING and REPORTING_CYCLE too).</description>
+        <implements service="mantle.humanres.PeopleServices.define#EmploymentChangeTerms"/>
+        <in-parameters>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="employmentAssignmentId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="waitingText"/>
+            <parameter name="unresolved" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="changed" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('applyEmploymentChange', context)"/>
+            <set field="employmentChangeId" from="changed.employmentChangeId"/>
+            <set field="partyRelationshipId" from="changed.partyRelationshipId"/>
+            <set field="statusId" from="changed.statusId"/>
+            <set field="statusText" from="changed.statusText"/>
+            <set field="applied" from="!!changed.applied"/>
+            <set field="employmentAssignmentId" from="changed.employmentAssignmentId"/>
+            <set field="peopleApprovalId" from="changed.peopleApprovalId"/>
+            <set field="waitingText" from="changed.waitingText"/>
+            <set field="unresolved" from="!!changed.unresolved"/>
+            <set field="repeated" from="!!changed.repeated"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="EmploymentChange" allow-remote="false">
+        <description>The decision service of an employment change (design §12's PeopleEmploymentChangeApproval): the step waiting
+            of the change's request (peopleApprovalId, else the change's latest) approved, or refused with a reason, through
+            PeopleApprovalServices.record#Decision, which rechecks that the caller is an approver of that step (never the
+            requester or the person) and that neither the change nor the employment has changed since the request
+            (SOURCE_CHANGED; sourceRevision, the notice's, when given). The last step's approval applies the change, checked again
+            as apply#EmploymentChange checks it; a refusal refuses it. A decision the caller already made answers the first
+            (repeated) and applies nothing again. Refuses as record#Decision does, and as apply#EmploymentChange's checks do
+            when the change no longer fits the employment.</description>
+        <in-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="peopleApprovalDecisionId"/>
+            <parameter name="statusId"/>
+            <parameter name="employmentChangeId"/>
+            <parameter name="changeStatusId"/>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('decideEmploymentChange', context)"/>
+            <set field="peopleApprovalId" from="decided.peopleApprovalId"/>
+            <set field="peopleApprovalDecisionId" from="decided.peopleApprovalDecisionId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="employmentChangeId" from="decided.employmentChangeId"/>
+            <set field="changeStatusId" from="decided.changeStatusId"/>
+            <set field="applied" from="!!decided.applied"/>
+            <set field="repeated" from="!!decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="EmploymentChange" allow-remote="false">
+        <description>The PeopleEmploymentChangeApproval topic's approve service, which the framework's approve#NotificationMessage
+            calls as the user deciding the notice: decide#EmploymentChange at the request and revision in the message (a notice of
+            an earlier revision is refused, REVISION_CHANGED or SOURCE_CHANGED); refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="applied" type="Boolean"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="applied" from="decided.applied"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="EmploymentChange" allow-remote="false">
+        <description>The PeopleEmploymentChangeApproval topic's refuse service, with the reason (the topic requires one): as
+            approve#EmploymentChange, the request and the change refused and the employment left as it is.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="EmploymentChanges" allow-remote="false">
+        <description>A person's employment changes the caller may see (Employee360's changes waiting): an HR reader's of the
+            employers in their scope (those waiting, and with includeDone those applied, refused or superseded), and a waiting one
+            whose step waiting the caller decides (a manager sees their report's transfer to approve it); each with its kind,
+            dates, new terms as names, reason and, while it waits or once refused, its approval (state, who asked, the steps, the
+            decisions, canDecide). Never pay. Others get none.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="includeDone" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="changes" type="List"/></out-parameters>
+        <actions>
+            <set field="changes" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('findEmploymentChanges', context).changes"/>
         </actions>
     </service>
 </services>

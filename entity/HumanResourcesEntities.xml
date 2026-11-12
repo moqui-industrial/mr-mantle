@@ -378,6 +378,114 @@ along with this software (see the LICENSE.md file). If not, see
                     sequenceNum="4"/>
         </seed-data>
     </entity>
+    <entity entity-name="EmploymentAssignment" package="mantle.humanres.employment" cache="never">
+        <description>A dated assignment inside an employment (IronStone People design §4, PE-02; impl-people P6): the department,
+            primary position, manager and work location of the employment from fromDate until thruDate, and its state (working,
+            or on a leave of absence). A transfer, a manager change or a leave ends the assignment in effect and starts the next, so
+            history is kept and the payroll identity (the employment) is not split; one primary assignment at a time, inside the
+            employment's dates. The assignment is the source of the employment's manager (per employment: a person employed by two
+            employers has a manager at each), its department membership (a dated PrtMember row from role Assignee to the
+            department) and its position occupancy (a dated EmplPositionParty row), which mantle.humanres.PeopleServices hire#Employee
+            and apply#EmploymentChange keep as projections in the same transaction; the reporting line is a PrtManager row from the
+            manager to the person. partyId and organizationPartyId are the employment's, kept here for the reads by person and
+            employer. Written only by PeopleServices (Employment.js) and OrganizationServices (a manager change, a unit's
+            closure).</description>
+        <field name="employmentAssignmentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment (PrtEmployee relationship and Employment)</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The legal employer</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="isPrimary" type="text-indicator" default="'Y'"/>
+        <field name="stateEnumId" type="id"><description>EmploymentAssignmentState: working, or on a leave of absence</description></field>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>A department (OrgDepartment) of the employer</description></field>
+        <field name="emplPositionId" type="id" enable-audit-log="true"><description>The primary position held</description></field>
+        <field name="managerPartyId" type="id" enable-audit-log="true"><description>The manager at the employer</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>The work location, a facility of the employer</description></field>
+        <field name="employmentChangeId" type="id"><description>The hire or change that started it</description></field>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Department" related="mantle.party.Party" short-alias="department">
+            <key-map field-name="departmentPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Manager" related="mantle.party.Party" short-alias="manager">
+            <key-map field-name="managerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.position.EmplPosition" short-alias="position"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" title="EmploymentAssignmentState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.employment.EmploymentChange" short-alias="change"/>
+        <index name="EMPL_ASSGN_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="EMPL_ASSGN_PARTY"><index-field name="partyId"/><index-field name="organizationPartyId"/></index>
+        <index name="EMPL_ASSGN_MGR"><index-field name="managerPartyId"/></index>
+        <index name="EMPL_ASSGN_DEPT"><index-field name="departmentPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Assignment State" enumTypeId="EmploymentAssignmentState"/>
+            <moqui.basic.Enumeration enumId="EasActive" description="Working" sequenceNum="1" enumTypeId="EmploymentAssignmentState"/>
+            <moqui.basic.Enumeration enumId="EasLeave" description="On leave of absence" sequenceNum="2"
+                    enumTypeId="EmploymentAssignmentState"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentChange" package="mantle.humanres.employment" cache="never">
+        <description>A hire or a dated change of an employment (IronStone People design §4 HireEmployee and EmploymentChange, PE-02;
+            impl-people P6), a fact of its own: what changes (a transfer, a manager change, a leave of absence, a separation), from
+            when, the new terms, why, who asked and when, the operation key a retry answers with, and its state. A transfer and a
+            separation wait for approval (a PeopleApproval of kind PakEmploymentChange, bound to this row and the employment's
+            revision, so a change of the employment meanwhile supersedes it) and are applied by the last approval; a hire, a
+            manager change and a leave of absence are applied at once. Applied, the change has started the assignment
+            employmentAssignmentId (a separation ends the employment's). Written only by PeopleServices (Employment.js).</description>
+        <field name="employmentChangeId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="changeKindEnumId" type="id"><description>EmploymentChangeKind</description></field>
+        <field name="statusId" type="id"/>
+        <field name="effectiveDate" type="date-time"/>
+        <field name="returnDate" type="date-time"><description>A leave of absence's end, when known</description></field>
+        <field name="departmentPartyId" type="id"/>
+        <field name="emplPositionId" type="id"/>
+        <field name="managerPartyId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="terminationReasonEnumId" type="id"/>
+        <field name="terminationTypeEnumId" type="id"/>
+        <field name="reason" type="text-long"/>
+        <field name="employmentRevision" type="text-short"><description>The employment's revision the change was asked at</description></field>
+        <field name="operationKey" type="text-short"><description>The requester's key: a retry with it answers the first</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="appliedDate" type="date-time"/>
+        <field name="employmentAssignmentId" type="id"><description>The assignment the applied change started</description></field>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" title="EmploymentChangeKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="changeKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="EmploymentChange" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one-nofk" title="RequestedBy" related="moqui.security.UserAccount" short-alias="requestedBy">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <index name="EMPL_CHG_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="EMPL_CHG_OPKEY"><index-field name="operationKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Change Kind" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckHire" description="Hire" sequenceNum="1" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckTransfer" description="Transfer" sequenceNum="2" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckManager" description="Manager change" sequenceNum="3" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckLeave" description="Leave of absence" sequenceNum="4" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckReturn" description="Return from leave" sequenceNum="5" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckSeparation" description="Separation" sequenceNum="6" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckReorganization" description="Reorganization" sequenceNum="7"
+                    enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.StatusType description="Employment Change" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchRequested" description="Waiting for approval" sequenceNum="1" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchApplied" description="Applied" sequenceNum="2" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchRefused" description="Refused" sequenceNum="3" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchSuperseded" description="Superseded" sequenceNum="4" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchApplied" transitionName="Apply"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchSuperseded" transitionName="Supersede"/>
+        </seed-data>
+    </entity>
     <entity entity-name="EmploymentApplication" package="mantle.humanres.employment" use="nontransactional">
         <field name="employmentApplicationId" type="id" is-pk="true"/>
         <field name="emplPositionId" type="id"/>
