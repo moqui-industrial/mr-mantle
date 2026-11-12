@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's lifecycle checklists (IronStone People design §4, §12 ChecklistTemplates, PE-02; impl-people P7): a checklist template
+    is a WorkEffort process (WorkProcessEntities.xml, MT-03) whose policy is People's (WppPeopleChecklist, guarding nothing), with
+    People's facts beside it: the template's employer, lifecycle kind and dates (ChecklistTemplate), each step's source link,
+    visibility, protected flag and named assignee (ChecklistStep, copied to each task made from it), and each execution's
+    employment and change (EmploymentChecklist). A separation's equipment return tasks are People's too (ChecklistStep with the
+    equipment return link). mantle.humanres.PeopleServices (Checklists.js) reads and writes them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="ChecklistTemplate" package="mantle.humanres.checklist" cache="never">
+        <description>A lifecycle checklist template: the template root WorkEffort (isTemplate Y, purpose WepPrOrgMgmt), the employer
+            whose hires, transfers or separations start it, its lifecycle kind and its dates (in use from fromDate, ended at
+            thruDate, never deleted).</description>
+        <field name="workEffortId" type="id" is-pk="true"><description>The template root</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="lifecycleKindEnumId" type="id"><description>ChecklistLifecycleKind: onboarding (a hire), a transfer or
+            offboarding (a separation)</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ChecklistLifecycleKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="lifecycleKindEnumId" related="enumId"/></relationship>
+        <index name="CHKL_TMPL_ORG"><index-field name="organizationPartyId"/><index-field name="lifecycleKindEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Checklist Lifecycle Kind" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkOnboarding" description="Onboarding" sequenceNum="1" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkTransfer" description="Transfer" sequenceNum="2" enumTypeId="ChecklistLifecycleKind"/>
+            <moqui.basic.Enumeration enumId="ClkOffboarding" description="Offboarding" sequenceNum="3" enumTypeId="ChecklistLifecycleKind"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ChecklistStep" package="mantle.humanres.checklist" cache="never">
+        <description>People's facts of a checklist step: of a template step, and of each task made from it (copied when the
+            checklist starts) or raised by a separation (an equipment return): what the task links to (an equipment return, the
+            IT access request, an exit interview), who sees it (the employee, or staff only), whether it is protected (left out of
+            the CalDAV Tasks collection on a phone: offboarding, separation and grievance-linked tasks, design §12) and, for a
+            template step, the person assigned when its role is not one People names (the employee, their manager, the HR
+            officer). A task carries the Admin lifecycle operation of its IT access request.</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="sourceLinkEnumId" type="id"><description>ChecklistSourceLink</description></field>
+        <field name="visibilityEnumId" type="id"><description>ChecklistVisibility: the employee sees it, or staff only</description></field>
+        <field name="isProtected" type="text-indicator" default="'N'"/>
+        <field name="assigneePartyId" type="id"><description>A template step's: the person a role People does not name is
+            assigned to</description></field>
+        <field name="operationId" type="id"><description>A task's: the Admin lifecycle operation (UserLifecycleOperation) of
+            its IT access request</description></field>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="ChecklistSourceLink" related="moqui.basic.Enumeration" short-alias="sourceLink">
+            <key-map field-name="sourceLinkEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="ChecklistVisibility" related="moqui.basic.Enumeration" short-alias="visibility">
+            <key-map field-name="visibilityEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Assignee" related="mantle.party.Party" short-alias="assignee">
+            <key-map field-name="assigneePartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.UserLifecycleOperation" short-alias="operation"/>
+        <index name="CHKL_STEP_OP"><index-field name="operationId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Checklist Source Link" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsItAccess" description="IT access" sequenceNum="1" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsEquipmentReturn" description="Equipment return" sequenceNum="2" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.Enumeration enumId="ClsExitInterview" description="Exit interview" sequenceNum="3" enumTypeId="ChecklistSourceLink"/>
+            <moqui.basic.EnumerationType description="Checklist Visibility" enumTypeId="ChecklistVisibility"/>
+            <moqui.basic.Enumeration enumId="ChvEmployee" description="The employee sees it" sequenceNum="1" enumTypeId="ChecklistVisibility"/>
+            <moqui.basic.Enumeration enumId="ChvStaff" description="Staff only" sequenceNum="2" enumTypeId="ChecklistVisibility"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentChecklist" package="mantle.humanres.checklist" cache="never">
+        <description>A checklist started for an employment: the execution root WorkEffort made from a template (or holding a
+            separation's equipment return tasks, with no template), the employment, the hire or change that started it and its
+            lifecycle kind. One per template and change: a retry answers it.</description>
+        <field name="workEffortId" type="id" is-pk="true"><description>The execution root</description></field>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="employmentChangeId" type="id"/>
+        <field name="templateWorkEffortId" type="id"/>
+        <field name="lifecycleKindEnumId" type="id"/>
+        <field name="startedDate" type="date-time"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one-nofk" related="mantle.humanres.employment.EmploymentChange" short-alias="change"/>
+        <relationship type="one-nofk" title="Template" related="mantle.work.effort.WorkEffort" short-alias="template">
+            <key-map field-name="templateWorkEffortId" related="workEffortId"/></relationship>
+        <relationship type="one" title="ChecklistLifecycleKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="lifecycleKindEnumId" related="enumId"/></relationship>
+        <index name="EMPL_CHKL_CHANGE"><index-field name="employmentChangeId"/></index>
+        <index name="EMPL_CHKL_EMPL"><index-field name="partyRelationshipId"/></index>
+    </entity>
+</entities>

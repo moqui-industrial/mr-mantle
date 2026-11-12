@@ -222,6 +222,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId"/></entity-find-one>
             <if condition="!workEffort"><return/></if>
@@ -281,6 +283,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList" limit="1">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -305,6 +309,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -326,6 +332,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="roleTypeId"/>
@@ -633,6 +641,12 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const [taskId, parentId] of parentIds) if (runParents.has(parentId)) runIds.add(taskId)
                 }
                 for (const id of runIds) byId.delete(id)
+                // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
+                // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds)
+                if (taskIds.length && ec.entity.find('mantle.humanres.checklist.ChecklistStep').condition('workEffortId', 'in', taskIds)
+                        .condition('isProtected', 'Y').disableAuthz().count() > 0)
+                    for (const id of ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').hiddenTaskIds(taskIds, partyId))
+                        byId.delete(id)
                 for (const entry of byId.values()) {
                     if (entry.snoozedThru != null && entry.snoozedThru > nowMillis) continue
                     const workEffort = entry.workEffort
