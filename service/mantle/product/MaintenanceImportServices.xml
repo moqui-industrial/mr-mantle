@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The equipment import target's row services (IronStone Maintenance design §6 EquipmentImport, §12; impl-maintenance P18, F36,
+    F51; data/MaintenanceSettingsData.xml): called by the framework's org.moqui.admin.DataTransferServices for each row of a staged
+    file, as the importer, in MaintenanceImport.js. Each checks MAINTENANCE_IMPORT with MAINTENANCE_RESOURCE_EDIT and the
+    organization itself, and writes through Maintenance's own guarded equipment services. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="validate" noun="EquipmentImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row would register or change one piece of equipment of the batch's organization (scopeKey),
+            changing nothing: the source key (required; one asset a source system and key), the equipment it names (by ID or by
+            source key, of the organization, not stock), a new one's name, the asset class, the model, a location of the
+            organization (equipment already elsewhere is moved in Maintenance, not by import), the custodian and the warrantor,
+            the supplier warranty's end as a date and the starting reading (a number, of one of the model's meters or a meter
+            type, not below the last reading of a counting meter). A holder of MAINTENANCE_IMPORT and MAINTENANCE_RESOURCE_EDIT
+            (PERMISSION_DENIED); refuses an organization outside their maintenance scope (ORGANIZATION_DENIED).</description>
+        <actions>
+            <set field="checked" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceImport.js').execute('validateRow', context)"/>
+            <set field="valid" from="checked.valid"/>
+            <set field="errors" from="checked.errors"/>
+            <set field="warnings" from="checked.warnings"/>
+            <set field="normalizedValues" from="checked.normalizedValues"/>
+            <set field="displayText" from="checked.displayText"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="EquipmentImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One validated row, rechecked against the current state: store#MaintenanceEquipment (new equipment of the
+            organization, or the identity of the equipment named), its source key kept (AssetIdentification AitMntSourceKey),
+            change#MaintenanceCustody when the custodian changes and record#MaintenanceMeter for a starting reading not yet
+            recorded, as the importer. A row applied again changes the same equipment and records no second reading
+            (resultRef: the assetId). Nothing posts.</description>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceImport.js').execute('applyRow', context)"/>
+            <set field="applied" from="done.applied"/>
+            <set field="reasonCode" from="done.reasonCode"/>
+            <set field="reason" from="done.reason"/>
+            <set field="resultRef" from="done.resultRef"/>
+            <set field="resultText" from="done.resultText"/>
+        </actions>
+    </service>
+    <service verb="find" noun="EquipmentImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The organizations an equipment import may be for and whose imports the caller may read: the internal
+            organizations of their maintenance scope, for a reader of equipment (MAINTENANCE_RESOURCE_VIEW or a broader maintenance
+            view). None otherwise.</description>
+        <actions>
+            <set field="scopeList" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceImport.js').execute('findScopes', context).scopeList"/>
+        </actions>
+    </service>
+</services>
