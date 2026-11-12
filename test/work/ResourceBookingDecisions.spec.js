@@ -6,7 +6,8 @@
 // the bulk decision names each failure and goes on; the availability read answers planned, requested, assigned and down intervals
 // apart with no title of a hidden event; an unmanaged room's daily series is refused by a blackout on its third meeting, while a
 // conflict past its first meeting is not checked (as before); an inventory asset with no policy is booked as before P15; and
-// Manufacturing's offline time of a work center, recorded with its center locked, refuses a booking of the center under it.
+// Manufacturing's offline time of a work center, recorded with its center locked, refuses a booking of the center under it; and a request
+// withdrawn (its booking or its event cancelled) leaves the approvers' inboxes.
 // Standalone: spec-local organization, building, rooms, equipment, a plant with a work center, groups and users; the services
 // called as each user with the artifact check aside.
 // Run: ./moq test mr-mantle --spec ResourceBookingDecisions
@@ -28,7 +29,8 @@ const hour = 3600000,
 // four days ahead at 09:00 UTC, so every booking lies in the future
 const base = Math.floor(Date.now() / day) * day + 4 * day + 9 * hour
 const at = (hours, days = 0) => new Date(base + days * day + hours * hour)
-const ms = value => (value instanceof Date ? value.getTime() : /^-?\d+$/.test(String(value)) ? Number(value) : Date.parse(String(value)))
+const ms = value =>
+    value instanceof Date ? value.getTime() : /^-?\d+$/.test(String(value)) ? Number(value) : Date.parse(String(value))
 
 // the service's answer as a user, with its error text ("" when none), in its own transaction
 function as(username, service, parameters = {}) {
@@ -183,7 +185,12 @@ spec({
             revision: 1
         })
         for (const partyId of [state.FIRST_PARTY, state.SECOND_PARTY])
-            call("create#mantle.facility.FacilityParty", {facilityId: room, partyId, roleTypeId: "BookingApprover", fromDate: since})
+            call("create#mantle.facility.FacilityParty", {
+                facilityId: room,
+                partyId,
+                roleTypeId: "BookingApprover",
+                fromDate: since
+            })
         // the plain room is not managed; it is closed on the third day of the week ahead
         call("create#mantle.work.effort.ResourceUnavailability", {
             unavailabilityKindEnumId: "RukPlanned",
@@ -291,52 +298,64 @@ feature("a request tells the room's two approvers; two approvers of overlapping 
     }
 })
 
-feature("a non-approver and an approver of other rooms are refused; a denial needs its reason; the bulk decision names its failures", {
-    when() {
-        const outsider = as(state.ann, R + "decide#ResourceBooking", {workEffortId: state.bobEvent, facilityId: room, decision: "deny", reason: "No"})
-        const elsewhere = as(state.elsewhere, R + "decide#ResourceBooking", {
-            workEffortId: state.bobEvent,
-            facilityId: room,
-            decision: "deny",
-            reason: "No"
-        })
-        const readerList = as(state.policyReader, R + "find#ResourceBookingRequests", {facilityId: room})
-        const elsewhereList = as(state.elsewhere, R + "find#ResourceBookingRequests", {})
-        const noReason = as(state.second, R + "decide#ResourceBooking", {workEffortId: state.bobEvent, facilityId: room, decision: "deny"})
-        // the bulk denial: Bob's request denied, Ann's (assigned now) named as no longer waiting
-        const bulk = as(state.second, R + "decide#ResourceBookings", {
-            bookingList: ["facility|" + room + "|" + state.bobEvent, "facility|" + room + "|" + state.annEvent].join(","),
-            decision: "deny",
-            reason: "The room is taken"
-        })
-        return {
-            outsider,
-            elsewhere,
-            readerList,
-            elsewhereList,
-            noReason,
-            bulk,
-            bob: roomBooking(state.bobEvent),
-            bobTold: notices(state.bob, "ResourceBookingNotice").filter(notice => notice.recordId === state.bobEvent)
+feature(
+    "a non-approver and an approver of other rooms are refused; a denial needs its reason; the bulk decision names its failures",
+    {
+        when() {
+            const outsider = as(state.ann, R + "decide#ResourceBooking", {
+                workEffortId: state.bobEvent,
+                facilityId: room,
+                decision: "deny",
+                reason: "No"
+            })
+            const elsewhere = as(state.elsewhere, R + "decide#ResourceBooking", {
+                workEffortId: state.bobEvent,
+                facilityId: room,
+                decision: "deny",
+                reason: "No"
+            })
+            const readerList = as(state.policyReader, R + "find#ResourceBookingRequests", {facilityId: room})
+            const elsewhereList = as(state.elsewhere, R + "find#ResourceBookingRequests", {})
+            const noReason = as(state.second, R + "decide#ResourceBooking", {
+                workEffortId: state.bobEvent,
+                facilityId: room,
+                decision: "deny"
+            })
+            // the bulk denial: Bob's request denied, Ann's (assigned now) named as no longer waiting
+            const bulk = as(state.second, R + "decide#ResourceBookings", {
+                bookingList: ["facility|" + room + "|" + state.bobEvent, "facility|" + room + "|" + state.annEvent].join(","),
+                decision: "deny",
+                reason: "The room is taken"
+            })
+            return {
+                outsider,
+                elsewhere,
+                readerList,
+                elsewhereList,
+                noReason,
+                bulk,
+                bob: roomBooking(state.bobEvent),
+                bobTold: notices(state.bob, "ResourceBookingNotice").filter(notice => notice.recordId === state.bobEvent)
+            }
+        },
+        then(r) {
+            code(r.outsider) == "PERMISSION_DENIED"
+            code(r.elsewhere) == "NOT_APPROVER"
+            // a policy reader sees the requests, read only; an approver of no room here sees none
+            r.readerList.requestList.length == 1
+            r.readerList.requestList[0].canDecide == false
+            r.elsewhereList.requestList.length == 0
+            code(r.noReason) == "REASON_REQUIRED"
+            r.bulk.decidedCount == 1
+            r.bulk.failedCount == 1
+            r.bulk.resultList.find(row => row.workEffortId == state.annEvent).reasonCode == "STATE_CHANGED"
+            r.bob.statusId == "WefRequestDenied"
+            r.bob.comments.startsWith("Denied: The room is taken")
+            r.bobTold.length == 1
+            JSON.parse(r.bobTold[0].messageJson).outcome == "denied"
         }
-    },
-    then(r) {
-        code(r.outsider) == "PERMISSION_DENIED"
-        code(r.elsewhere) == "NOT_APPROVER"
-        // a policy reader sees the requests, read only; an approver of no room here sees none
-        r.readerList.requestList.length == 1
-        r.readerList.requestList[0].canDecide == false
-        r.elsewhereList.requestList.length == 0
-        code(r.noReason) == "REASON_REQUIRED"
-        r.bulk.decidedCount == 1
-        r.bulk.failedCount == 1
-        r.bulk.resultList.find(row => row.workEffortId == state.annEvent).reasonCode == "STATE_CHANGED"
-        r.bob.statusId == "WefRequestDenied"
-        r.bob.comments.startsWith("Denied: The room is taken")
-        r.bobTold.length == 1
-        JSON.parse(r.bobTold[0].messageJson).outcome == "denied"
     }
-})
+)
 
 feature("a moved booking returns to requested; its old notice decides nothing, the new span is decided", {
     when() {
@@ -389,8 +408,16 @@ feature("the availability read answers planned, requested, assigned and down apa
         const bobLater = event(state.bob, "Bob private", at(1, 1), at(2, 1))
         as(state.bob, E + "book#Resource", {workEffortId: bobLater, facilityId: room})
         const roomRead = as(state.ann, R + "get#ResourceAvailability", {facilityId: room, fromDate: at(-1), thruDate: at(0, 3)})
-        const plainRead = as(state.ann, R + "get#ResourceAvailability", {facilityId: plainRoom, fromDate: at(-1), thruDate: at(0, 3)})
-        const projectorRead = as(state.ann, R + "get#ResourceAvailability", {assetId: projector, fromDate: at(0, 4), thruDate: at(0, 6)})
+        const plainRead = as(state.ann, R + "get#ResourceAvailability", {
+            facilityId: plainRoom,
+            fromDate: at(-1),
+            thruDate: at(0, 3)
+        })
+        const projectorRead = as(state.ann, R + "get#ResourceAvailability", {
+            assetId: projector,
+            fromDate: at(0, 4),
+            thruDate: at(0, 6)
+        })
         return {roomRead, plainRead, projectorRead}
     },
     then({roomRead, plainRead, projectorRead}) {
@@ -405,25 +432,28 @@ feature("the availability read answers planned, requested, assigned and down apa
     }
 })
 
-feature("an unmanaged room's daily series is refused by a blackout on its third meeting; a conflict past its first is not checked", {
-    when() {
-        // another booking of the plain room on the second day only
-        const other = event(state.bob, "Bob day two", at(0, 1), at(1, 1))
-        const otherBooked = as(state.bob, E + "book#Resource", {workEffortId: other, facilityId: plainRoom})
-        const daily = event(state.ann, "Ann daily", at(0), at(1), "FREQ=DAILY;COUNT=5")
-        const dailyBooked = as(state.ann, E + "book#Resource", {workEffortId: daily, facilityId: plainRoom})
-        const twoDays = event(state.ann, "Ann two days", at(0), at(1), "FREQ=DAILY;COUNT=2")
-        const twoDaysBooked = as(state.ann, E + "book#Resource", {workEffortId: twoDays, facilityId: plainRoom})
-        return {otherBooked, dailyBooked, twoDaysBooked}
-    },
-    then({otherBooked, dailyBooked, twoDaysBooked}) {
-        otherBooked.statusId == "WefAssigned"
-        dailyBooked.error.includes("Plain decision room is not available then (closed (blackout))")
-        // its second meeting clashes with Bob's: conflicts are checked on the first meeting only, as before
-        twoDaysBooked.error == ""
-        twoDaysBooked.statusId == "WefAssigned"
+feature(
+    "an unmanaged room's daily series is refused by a blackout on its third meeting; a conflict past its first is not checked",
+    {
+        when() {
+            // another booking of the plain room on the second day only
+            const other = event(state.bob, "Bob day two", at(0, 1), at(1, 1))
+            const otherBooked = as(state.bob, E + "book#Resource", {workEffortId: other, facilityId: plainRoom})
+            const daily = event(state.ann, "Ann daily", at(0), at(1), "FREQ=DAILY;COUNT=5")
+            const dailyBooked = as(state.ann, E + "book#Resource", {workEffortId: daily, facilityId: plainRoom})
+            const twoDays = event(state.ann, "Ann two days", at(0), at(1), "FREQ=DAILY;COUNT=2")
+            const twoDaysBooked = as(state.ann, E + "book#Resource", {workEffortId: twoDays, facilityId: plainRoom})
+            return {otherBooked, dailyBooked, twoDaysBooked}
+        },
+        then({otherBooked, dailyBooked, twoDaysBooked}) {
+            otherBooked.statusId == "WefAssigned"
+            dailyBooked.error.includes("Plain decision room is not available then (closed (blackout))")
+            // its second meeting clashes with Bob's: conflicts are checked on the first meeting only, as before
+            twoDaysBooked.error == ""
+            twoDaysBooked.statusId == "WefAssigned"
+        }
     }
-})
+)
 
 feature("an inventory asset with no policy is booked as before; a work center's offline time refuses a booking of it under it", {
     when() {
@@ -464,5 +494,35 @@ feature("an inventory asset with no policy is booked as before; a work center's 
         offline.error == ""
         offline.result.resultCode == "OFFLINE_RECORDED"
         lineBooked.error.includes("Decision line is not available then (planned offline (production))")
+    }
+})
+
+feature("a request withdrawn leaves the approvers' inboxes: its booking cancelled, or its event cancelled", {
+    when() {
+        const dropped = event(state.bob, "Bob dropped", at(1, 2), at(2, 2))
+        as(state.bob, E + "book#Resource", {workEffortId: dropped, facilityId: room})
+        const droppedAsked = noticeFor(state.first, dropped) != null
+        const cancelled = as(state.bob, E + "cancel#ResourceBooking", {workEffortId: dropped, facilityId: room})
+        const called = event(state.bob, "Bob called off", at(1, 3), at(2, 3))
+        as(state.bob, E + "book#Resource", {workEffortId: called, facilityId: room})
+        const calledAsked = noticeFor(state.second, called) != null
+        const eventCancelled = as(state.bob, E + "cancel#EventOccurrence", {workEffortId: called})
+        return {
+            droppedAsked,
+            cancelled,
+            droppedLeft: [noticeFor(state.first, dropped), noticeFor(state.second, dropped)],
+            calledAsked,
+            eventCancelled,
+            calledLeft: [noticeFor(state.first, called), noticeFor(state.second, called)]
+        }
+    },
+    then(r) {
+        r.droppedAsked == true
+        r.cancelled.error == ""
+        r.cancelled.cancelledCount == 1
+        r.droppedLeft == [null, null]
+        r.calledAsked == true
+        r.eventCancelled.error == ""
+        r.calledLeft == [null, null]
     }
 })

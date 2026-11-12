@@ -554,7 +554,11 @@ function recordBlock(p) {
     })
     const answer = blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
     // the bookings it covers are kept, flagged for review; their organizers are told why (P16)
-    decisions().tellAffected(answer.affectedBookingIds, resource.name, "not available then (" + String(reason.description || "a planned block").toLowerCase() + ")")
+    decisions().tellAffected(
+        answer.affectedBookingIds,
+        resource.name,
+        "not available then (" + String(reason.description || "a planned block").toLowerCase() + ")"
+    )
     return answer
 }
 // A planned block in force the caller may change, locked, with its resource.

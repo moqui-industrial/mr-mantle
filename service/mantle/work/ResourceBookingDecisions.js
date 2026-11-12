@@ -53,16 +53,15 @@ const statusText = statusId => (statusId ? one("moqui.basic.StatusItem", {status
 function keyOf(p) {
     const facilityId = text(p.facilityId)
     const assetId = text(p.assetId)
-    if (!!facilityId === !!assetId) denied("RESOURCE_REQUIRED", "Name the room (facilityId) or the equipment (assetId), one of them")
+    if (!!facilityId === !!assetId)
+        denied("RESOURCE_REQUIRED", "Name the room (facilityId) or the equipment (assetId), one of them")
     return facilityId ? {facilityId, assetId: null, kind: "facility"} : {facilityId: null, assetId, kind: "asset"}
 }
 // The booking of the resource for the event: a room's one row; equipment's current row (not denied, not ended), else its latest.
 function bookingOf(key, workEffortId, lock = false) {
     if (key.kind === "facility") return find(ROOM_BOOKING, {workEffortId, facilityId: key.facilityId}).forUpdate(lock).one()
     const now = nowMs()
-    const rows = Array.from(
-        find(ASSET_BOOKING, {workEffortId, assetId: key.assetId}).orderBy("-fromDate").forUpdate(lock).list()
-    )
+    const rows = Array.from(find(ASSET_BOOKING, {workEffortId, assetId: key.assetId}).orderBy("-fromDate").forUpdate(lock).list())
     return (
         rows.find(row => row.statusId !== statuses.asset.denied && (row.thruDate == null || ms(row.thruDate) > now)) ||
         rows[0] ||
@@ -97,9 +96,26 @@ const isRecurring = workEffortId =>
     !!one(WORK, {workEffortId})?.recurStartCron || !!one("mantle.work.effort.WorkEffortRecurrence", {workEffortId})
 
 // ===== notices =====
-// The unviewed ResourceBooking notices of a booking (of its event and resource) leave every inbox.
-function clearNotices(workEffortId, key) {
+// A notice's work in an error frame of its own: a failure is logged and leaves no error behind, so the decision, booking or block
+// that sent it stands (P16 review).
+function quietly(what, run, fallback) {
+    ec.message.pushErrors()
     try {
+        const out = run()
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        return out
+    } catch (error) {
+        ec.logger.error(what + ": " + (error?.message || error))
+        return fallback
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
+// The unviewed ResourceBooking notices of a booking (of its event and resource; every resource of the event with no key) leave
+// every inbox.
+function clearNotices(workEffortId, key) {
+    quietly("Booking " + workEffortId + ": its approval notices were not cleared", () => {
         const messageIds = Array.from(
             find(MESSAGE)
                 .condition({topic: TOPIC, recordEntityName: WORK, recordId: workEffortId})
@@ -107,26 +123,28 @@ function clearNotices(workEffortId, key) {
                 .list()
         )
             .filter(row => {
+                if (!key) return true
                 const message = lib.json(row.messageJson, {}) || {}
                 return (message.facilityId || null) === key.facilityId && (message.assetId || null) === key.assetId
             })
             .map(row => row.notificationMessageId)
         if (!messageIds.length) return
         for (const user of Array.from(
-            find(MESSAGE_USER).condition("notificationMessageId", "in", messageIds).condition("viewedDate", "is-null", null).list()
+            find(MESSAGE_USER)
+                .condition("notificationMessageId", "in", messageIds)
+                .condition("viewedDate", "is-null", null)
+                .list()
         ))
             call("update#" + MESSAGE_USER, {
                 notificationMessageId: user.notificationMessageId,
                 userId: user.userId,
                 viewedDate: ec.user.nowTimestamp
             })
-    } catch (error) {
-        ec.logger.error("Booking " + workEffortId + ": its approval notices were not cleared: " + error.message)
-    }
+    })
 }
 // notifyRequested: the approvers of the resource are told of a booking waiting for them (key: facilityId or assetId).
 function notifyRequested(p) {
-    try {
+    return quietly("Booking " + p.workEffortId + ": the approvers' notice was not sent", () => {
         const key = keyOf(p)
         const workEffortId = text(p.workEffortId)
         const resource = policies().resourceOf(key, false, true)
@@ -157,14 +175,11 @@ function notifyRequested(p) {
             .userIds(userIds)
             .send()
         return userIds.length
-    } catch (error) {
-        ec.logger.error("Booking " + p.workEffortId + ": the approvers' notice was not sent: " + error.message)
-        return 0
-    }
+    }, 0)
 }
 // The organizer of an event is told what became of its booking: outcome approved, denied, moved or conflict, with a safe detail.
 function tellOrganizer(workEffortId, resourceName, outcome, outcomeText, detail) {
-    try {
+    return quietly("Booking " + workEffortId + ": the organizer's notice was not sent", () => {
         const event = one(WORK, {workEffortId})
         if (!event?.ownerPartyId) return 0
         const userIds = userIdsOf([event.ownerPartyId]).filter(userId => userId !== ec.user.userId)
@@ -185,10 +200,7 @@ function tellOrganizer(workEffortId, resourceName, outcome, outcomeText, detail)
             .userIds(userIds)
             .send()
         return userIds.length
-    } catch (error) {
-        ec.logger.error("Booking " + workEffortId + ": the organizer's notice was not sent: " + error.message)
-        return 0
-    }
+    }, 0)
 }
 // tellAffected: an outage or planned block over bookings (their event ids) tells each organizer, safely: "out of service" or the
 // block's reason.
@@ -197,6 +209,13 @@ function tellAffected(workEffortIds, resourceName, reasonText) {
     for (const workEffortId of Array.from(new Set(Array.from(workEffortIds || []))).slice(0, 200))
         told += tellOrganizer(workEffortId, resourceName, "conflict", reasonText, "Your booking is kept; move it or cancel it")
     return told
+}
+
+// withdrawn: a booking cancelled (cancel#ResourceBooking, key facilityId or assetId) or its event cancelled (cancel#EventOccurrence,
+// no key) waits for no one: its approval notices leave the inboxes (P16 review).
+function withdrawn(workEffortId, p = null) {
+    if (!text(workEffortId)) return
+    clearNotices(text(workEffortId), p && (text(p.facilityId) || text(p.assetId)) ? keyOf(p) : null)
 }
 
 // ===== who decides =====
@@ -226,7 +245,11 @@ function decide(p) {
     if (!row || !event) denied("RECORD_UNAVAILABLE", "There is no booking of " + resource.name + " for that event")
     const wanted = statuses[key.kind]
     const expectedStatusId = text(p.expectedStatusId)
-    if (row.statusId !== wanted.requested || event.statusId === "WeCancelled" || (expectedStatusId && expectedStatusId !== row.statusId))
+    if (
+        row.statusId !== wanted.requested ||
+        event.statusId === "WeCancelled" ||
+        (expectedStatusId && expectedStatusId !== row.statusId)
+    )
         denied(
             "STATE_CHANGED",
             "The booking of " +
@@ -251,8 +274,10 @@ function decide(p) {
         // the availability again, under the lock: blocks, the managed rules and the assigned bookings over the span (a request
         // waiting holds nothing against this one); the series' meetings for a recurring event
         const link = Array.from(
-            find("mantle.work.effort.WorkEffortAssoc", {toWorkEffortId: workEffortId, workEffortAssocTypeEnumId: "WeatRecurrenceInstance"})
-                .list()
+            find("mantle.work.effort.WorkEffortAssoc", {
+                toWorkEffortId: workEffortId,
+                workEffortAssocTypeEnumId: "WeatRecurrenceInstance"
+            }).list()
         )[0]
         const own = new Set([workEffortId, link?.workEffortId].filter(Boolean))
         const conflicts = policies()
@@ -315,8 +340,7 @@ function decide(p) {
 // The ResourceBooking topic's services: the notice's booking decided, on the span and state it was sent with.
 function decideNotice(p, decision) {
     const message = p.message && typeof p.message === "object" ? p.message : lib.json(p.message, {}) || {}
-    const workEffortId =
-        text(p.workEffortId) || (p.recordEntityName && p.recordEntityName !== WORK ? null : text(p.recordId))
+    const workEffortId = text(p.workEffortId) || (p.recordEntityName && p.recordEntityName !== WORK ? null : text(p.recordId))
     if (!workEffortId) denied("SOURCE_INVALID", "The notice is not a booking's")
     return decide({
         workEffortId,
@@ -464,13 +488,16 @@ function findRequests(p) {
     if (!wantAsset) {
         let query = base(find("mantle.work.effort.WorkEffortAndFacilityBooking", {bookingStatusId: statuses.facility[status]}))
         if (wantFacility) query = query.condition("facilityId", wantFacility)
-        else if (!broad) query = query.condition("facilityId", "in", approvedFacilities.size ? Array.from(approvedFacilities) : ["_NA_"])
+        else if (!broad)
+            query = query.condition("facilityId", "in", approvedFacilities.size ? Array.from(approvedFacilities) : ["_NA_"])
         for (const row of Array.from(query.list()))
             if (allowed("facility", row.facilityId))
                 found.push({kind: "facility", facilityId: row.facilityId, assetId: null, row})
     }
     if (!wantFacility) {
-        let query = base(find("mantle.work.effort.WorkEffortAndAssetBooking", {bookingStatusId: statuses.asset[status]})).condition(
+        let query = base(
+            find("mantle.work.effort.WorkEffortAndAssetBooking", {bookingStatusId: statuses.asset[status]})
+        ).condition(
             f.makeCondition(
                 [
                     f.makeCondition("bookingThruDate", "is-null", null),
@@ -506,10 +533,7 @@ function findRequests(p) {
         const seen = visible(row.workEffortId)
         const policyKey = item.kind + "|" + (item.facilityId || item.assetId)
         if (!policyTexts.has(policyKey))
-            policyTexts.set(
-                policyKey,
-                policies().policyText(policies().policyAt(resource), policies().approversOf(resource))
-            )
+            policyTexts.set(policyKey, policies().policyText(policies().policyAt(resource), policies().approversOf(resource)))
         const conflicts =
             span && status === "requested"
                 ? policies()
@@ -520,7 +544,8 @@ function findRequests(p) {
         const conflictNames = conflicts.map(other =>
             visible(other.recurringEventId || other.workEffortId) ? other.title : "Busy"
         )
-        const booking = item.kind === "facility" ? one(ROOM_BOOKING, {workEffortId: row.workEffortId, facilityId: item.facilityId}) : null
+        const booking =
+            item.kind === "facility" ? one(ROOM_BOOKING, {workEffortId: row.workEffortId, facilityId: item.facilityId}) : null
         const stampMs = ms(booking?.lastUpdatedStamp) ?? ms(row.bookingFromDate) ?? null
         const waitedHours = stampMs == null ? null : Math.max(0, Math.floor((now - stampMs) / hourMs))
         const canDecide =
@@ -528,7 +553,9 @@ function findRequests(p) {
             !!caps.bookingApprove &&
             (item.kind === "facility" ? approvedFacilities.has(item.facilityId) : approvedAssets.has(item.assetId))
         return {
-            key: [item.kind, item.facilityId || item.assetId, row.workEffortId, span ? span[0] : "", span ? span[1] : ""].join("|"),
+            key: [item.kind, item.facilityId || item.assetId, row.workEffortId, span ? span[0] : "", span ? span[1] : ""].join(
+                "|"
+            ),
             resourceType: item.kind,
             facilityId: item.facilityId,
             assetId: item.assetId,
@@ -547,21 +574,21 @@ function findRequests(p) {
             statusText: statusText(row.bookingStatusId),
             conflictCount: conflicts.length,
             conflictText: conflictNames.join(", "),
-            waitedText:
-                waitedHours == null ? "" : waitedHours < 24 ? waitedHours + " h" : Math.floor(waitedHours / 24) + " d",
+            waitedText: waitedHours == null ? "" : waitedHours < 24 ? waitedHours + " h" : Math.floor(waitedHours / 24) + " d",
             expectedStatusId: row.bookingStatusId,
             expectedFromDate: span ? span[0] : null,
             expectedThruDate: span ? span[1] : null,
             canDecide
         }
     })
-    return Object.assign({}, paged, {canDecide: !!caps.bookingApprove && (approvedFacilities.size + approvedAssets.size) > 0})
+    return Object.assign({}, paged, {canDecide: !!caps.bookingApprove && approvedFacilities.size + approvedAssets.size > 0})
 }
 
 ;({
     notifyRequested,
     tellAffected,
     tellOrganizer,
+    withdrawn,
     execute: (op, p) => {
         const operations = {
             find: findRequests,
