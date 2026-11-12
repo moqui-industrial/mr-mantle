@@ -843,6 +843,11 @@ function adoptRepair(userScope, maintenance, p) {
         (task.rootWorkEffortId && task.rootWorkEffortId !== task.workEffortId)
     )
         denied("LINKED_WORK", "Maintenance " + assetMaintenanceId + " already has work " + task.workEffortId)
+    // the policy's team checked before any write: a refusal leaves the repair Customer Service's, unchanged (review R2)
+    const teamId =
+        policy.defaultTeamPartyId && !currentParties(task.workEffortId, teamRole).length
+            ? requireTeam(organizationPartyId, policy.defaultTeamPartyId)
+            : null
     const statusId = maintenance.statusId === "AsMntInProcess" || task.statusId === "WeInProgress" ? "WeInProgress" : "WeApproved"
     call("update#" + WORK, {
         workEffortId: task.workEffortId,
@@ -861,11 +866,10 @@ function adoptRepair(userScope, maintenance, p) {
         sourceEnumId: "MsrcWarranty",
         revision: 1
     })
-    const teamId = policy.defaultTeamPartyId
-    if (teamId && !currentParties(task.workEffortId, teamRole).length)
+    if (teamId)
         call("create#" + PARTY, {
             workEffortId: task.workEffortId,
-            partyId: requireTeam(organizationPartyId, teamId),
+            partyId: teamId,
             roleTypeId: teamRole,
             fromDate: ec.user.nowTimestamp,
             statusId: "WeptAssigned"
@@ -1169,7 +1173,8 @@ function refusalOf(userScope, ctx, action) {
         case "resume": {
             const to = order.holdFromStatusId || "WeApproved"
             if (to === "WeInProgress") {
-                if (executing(caps, assigned)) return null
+                // P12 review R4: a customer repair resumes into progress only while its claim allows it, as Start
+                if (executing(caps, assigned)) return repairs().standingOf(order)
                 return {reason: "NOT_ASSIGNED", message: "A technician assigned to the work, or a supervisor, resumes it"}
             }
             // approved work is a supervisor's to hold and resume (the flow's row needs MAINTENANCE_SUPERVISE)
@@ -1238,10 +1243,10 @@ function actionsFor(userScope, ctx) {
                 needsCancelReason: action === "cancel",
                 needsCompletion: action === "complete",
                 needsDisposition: action === "complete" && !!ctx.order.assetId,
-                // P5: Start's offline intent and Complete's follow-up
-                needsOffline: action === "start",
+                // P5: Start's offline intent and Complete's follow-up (neither for a customer's unit away, P12 review R3)
+                needsOffline: action === "start" && !customerUnitAway(userScope, ctx.order),
                 offlineIntent: ctx.order.offlineIntent === "Y",
-                needsFollowUp: action === "complete",
+                needsFollowUp: action === "complete" && !customerUnitAway(userScope, ctx.order),
                 // P14 (F187): a meter plan's work asks for the reading it took when it has none
                 readingMeterName: action === "complete" ? plans().readingNeeded(ctx.order)?.meterName || null : null,
                 // P10: the outside-service lines the caller may accept at completion, with the work's files as evidence
@@ -1354,6 +1359,12 @@ function transitionWorkOrder(p) {
         serviceAcceptanceId: accepted?.serviceAcceptanceId || null
     }
 }
+// P12 review R3: a customer repair's unit that no facility of the user's organizations holds is in no Maintenance scope; the
+// organization records no outage of it and makes no follow-up on it (further work is linked from the claim)
+const customerUnitAway = (userScope, order) =>
+    order.sourceEnumId === "MsrcWarranty" &&
+    !!order.assetId &&
+    !maintenanceAccess.covers(userScope, maintenanceAccess.assetOrganization(order.assetId))
 // The downtime of a transition (P5): Start with offline intent (the order's, or offlineIntent given) records the target's outage
 // as planned maintenance, or links the one open; Complete leaving equipment still unavailable records its outage when none is
 // open, and a follow-up (followUpName) is a new corrective work order on the same target, caused by this one and linked to its
@@ -1362,8 +1373,12 @@ function downtimeOf(userScope, ctx, action, p, workFields) {
     const {root, order} = ctx
     const target = order.assetId ? {assetId: order.assetId} : {facilityId: root.facilityId}
     const answer = {}
+    const customerUnit = customerUnitAway(userScope, order)
+    const refuseCustomerUnit = what =>
+        denied("CUSTOMER_EQUIPMENT", "Equipment " + order.assetId + " is the customer's and away from your facilities: " + what)
     if (action === "start") {
         const offline = p.offlineIntent != null && p.offlineIntent !== "" ? flag(p.offlineIntent) : order.offlineIntent === "Y"
+        if (offline && customerUnit) refuseCustomerUnit("start the work without taking it out of service here")
         if (offline)
             answer.resourceUnavailabilityId = outages.record(
                 Object.assign({}, target, {
@@ -1376,6 +1391,10 @@ function downtimeOf(userScope, ctx, action, p, workFields) {
         return answer
     }
     if (action !== "complete") return answer
+    if (customerUnit) {
+        if (text(p.followUpName)) refuseCustomerUnit("further work on it is linked from its claim, not as a follow-up")
+        return answer
+    }
     const linked = outages.workOutage(one(ORDER, {workEffortId: root.workEffortId}))
     let openId = linked?.open ? linked.resourceUnavailabilityId : outages.openOutage(target)?.resourceUnavailabilityId || null
     if (!openId && order.assetId && text(p.dispositionEnumId) === "MdispUnavailable")

@@ -1180,8 +1180,10 @@ function evidencePolicy(p) {
 // A file a check names, or a stored completed checklist: never changed, removed or given a new version.
 function protectedContent(row) {
     if (!row) return false
-    // P12: a stored intervention report is kept as it was sent, as a completed checklist is
+    // P12: a stored intervention report, and the customer's acknowledgment once its file is saved (review R5), are kept as they
+    // were stored, as a completed checklist is
     if (["WectCompletedChecklist", "WectInterventionReport"].includes(row.contentTypeEnumId)) return true
+    if (row.contentTypeEnumId === "WectAcknowledgment" && row.contentLocation) return true
     return find(EVIDENCE, {workEffortContentId: row.workEffortContentId}).count() > 0
 }
 // check#EvidenceChange: a file a check names, or the stored checklist, is not changed (EVIDENCE_PROTECTED).

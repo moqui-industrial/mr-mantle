@@ -559,8 +559,9 @@ feature("a repair is an AssetMaintenance with its task; finishing it tells the a
             assetMaintenanceId: plain.assetMaintenanceId,
             statusId: "AsMntCompleted"
         })
-        const plainNotices = rows("moqui.security.user.NotificationMessage", {topic: "WarrantyRepairFinished"}).filter(row =>
-            String(row.messageJson || "").includes(plain.assetMaintenanceId)
+        // matched by the notice's own field: a request's ID from another sequence may have the same digits
+        const plainNotices = rows("moqui.security.user.NotificationMessage", {topic: "WarrantyRepairFinished"}).filter(
+            row => JSON.parse(String(row.messageJson || "{}")).assetMaintenanceId === plain.assetMaintenanceId
         ).length
         return {
             covered,

@@ -147,6 +147,41 @@ spec({
         state.agent = user("AGENT", ["SUPPORT_CASE_EDIT"])
         state.otherAgent = user("OTHER_AGENT", ["SUPPORT_CASE_EDIT"], otherOrg)
         state.tech = user("TECH", ["MAINTENANCE_ASSIGNED_VIEW", "MAINTENANCE_EXECUTE", "STOCK_ISSUE"])
+        state.supervisor = user("SUPERVISOR", ["MAINTENANCE_VIEW", "MAINTENANCE_SUPERVISE"])
+        // review: the customer's address and the agent's mail account, for a send that goes (the mail capture keeps it)
+        const contactMechId = call("create#mantle.party.contact.ContactMech", {
+            contactMechTypeEnumId: "CmtEmailAddress",
+            infoString: "service@managed-repair-customer.example"
+        }).contactMechId
+        call("create#mantle.party.contact.PartyContactMech", {
+            partyId: customer,
+            contactMechId,
+            contactMechPurposeId: "EmailPrimary",
+            fromDate: since
+        })
+        call("create#moqui.basic.email.EmailServer", {
+            emailServerId: prefix + "_MAIL",
+            smtpHost: "127.0.0.1",
+            smtpPort: 9,
+            smtpStartTls: "N",
+            smtpSsl: "N"
+        })
+        call("create#moqui.basic.email.EmailAccount", {
+            emailAccountId: prefix + "_ACCOUNT",
+            ownerPartyId: org,
+            accountKindEnumId: "EakShared",
+            emailServerId: prefix + "_MAIL",
+            emailAddress: "service@managed-repair-org.example",
+            accountName: "Managed repair service mail",
+            statusId: "EasActive",
+            recordFilingEnumId: "ErfLinkedOnly"
+        })
+        call("create#moqui.basic.email.EmailAccountUser", {
+            emailAccountId: prefix + "_ACCOUNT",
+            userId: state.agent,
+            fromDate: since,
+            permissionEnumId: "EapSend"
+        })
         state.queue = run(state.admin, S + "save#ServiceQueue", {
             organizationPartyId: org,
             description: "Managed repair queue"
@@ -186,8 +221,12 @@ spec({
     cleanup() {
         ec.artifactExecution.enableAuthz()
         login("john.doe")
+    },
+    cleanupSpec() {
+        capture.reset()
     }
 })
+const capture = ec.factory.getTool("MailCapture")
 
 feature(
     "with the policy off a repair is no work order; with it on a claim's repair linked twice has one root, the customer's asset",
@@ -242,6 +281,8 @@ feature(
             read.workOrder.repair.allowed == true
             read.workOrder.repair.assetInScope == false
             read.workOrder.assetId == prefix + "_ASSET_1002"
+            // review R3: Start asks no offline intent for the customer's unit away
+            read.actionList.find(row => row.action === "start").needsOffline === false
         }
     }
 )
@@ -366,3 +407,122 @@ feature(
         }
     }
 )
+
+// review R5 and the narrow guard: the stored report and acknowledgment are never changed or removed, no other path stores a report,
+// and closed work takes a new report through the store alone; the agent's send goes to the customer and is filed on the case
+feature("the stored report is kept; closed work takes a report only through the store; the agent's send is filed on the case", {
+    when() {
+        const {requestId, assetMaintenanceId, workEffortId} = state.charged
+        const stored = rows("mantle.work.effort.WorkEffortContent", {
+            workEffortId,
+            contentTypeEnumId: "WectInterventionReport"
+        })[0]
+        const W2 = "mantle.work.WorkEffortServices."
+        const changed = run(state.supervisor, W2 + "update#WorkEffortContent", {
+            workEffortContentId: stored.workEffortContentId,
+            description: "Changed"
+        })
+        const removed = run(state.supervisor, "delete#mantle.work.effort.WorkEffortContent", {
+            workEffortContentId: stored.workEffortContentId
+        })
+        const forged = run(state.supervisor, "create#mantle.work.effort.WorkEffortContent", {
+            workEffortId,
+            contentTypeEnumId: "WectInterventionReport",
+            contentLocation: "dbresource://spec/forged.html"
+        })
+        const closed = run(state.supervisor, M + "transition#MaintenanceWorkOrder", {workEffortId, action: "close"})
+        const plainFile = run(state.supervisor, "create#mantle.work.effort.WorkEffortContent", {
+            workEffortId,
+            contentTypeEnumId: "WectAttachment",
+            contentLocation: "dbresource://spec/late.txt"
+        })
+        const storedAgain = run(state.tech, M + "store#InterventionReport", {workEffortId})
+        capture.enable()
+        capture.clear()
+        const sent = run(state.agent, W + "send#InterventionReport", {
+            requestId,
+            assetMaintenanceId,
+            toAddress: "Service@Managed-Repair-Customer.example",
+            operationKey: prefix + "-send-ok"
+        })
+        // filed once the send commits, on a service worker
+        const end = Date.now() + 5000
+        let filed = 0
+        while (sent.emailMessageId && !filed && Date.now() < end)
+            filed = rows("mantle.request.RequestCommEvent", {requestId}).length
+        const mail = capture.getMessages().find(row => row.toList.includes("service@managed-repair-customer.example")) || null
+        return {stored, changed, removed, forged, closed, plainFile, storedAgain, sent, filed, mail, workEffortId}
+    },
+    then({stored, changed, removed, forged, closed, plainFile, storedAgain, sent, filed, mail, workEffortId}) {
+        code(changed) == "EVIDENCE_PROTECTED"
+        code(removed) == "EVIDENCE_PROTECTED"
+        one("mantle.work.effort.WorkEffortContent", {workEffortContentId: stored.workEffortContentId}) != null
+        code(forged) == "EVIDENCE_PROTECTED"
+        closed.error == ""
+        code(plainFile) == "WORK_CLOSED"
+        storedAgain.error == ""
+        sent.error == ""
+        sent.workEffortContentId == storedAgain.workEffortContentId
+        filed > 0
+        mail != null
+        mail.attachmentNames.some(name => name.startsWith("InterventionReport-" + workEffortId))
+    }
+})
+
+// review R3, R4: a customer's unit away from the organization's facilities records no outage and takes no follow-up here (named
+// refusals, the completion itself not refused), a customer's unit is not issued as a spare, a held repair resumes only while its
+// claim allows it, and a closed case stops Start
+feature("a customer's unit away records no outage and is no spare; a resume and a Start recheck the claim", {
+    when() {
+        const {workEffortId} = state.covered
+        const transition = (fields, username = state.tech) =>
+            run(username, M + "transition#MaintenanceWorkOrder", Object.assign({workEffortId}, fields))
+        const offline = transition({action: "start", offlineIntent: "Y"})
+        const spare = run(state.tech, "mantle.work.MaintenanceExecutionServices.issue#MaintenanceMaterial", {
+            operationKey: prefix + "-spare",
+            workEffortId,
+            productId: product,
+            assetId: prefix + "_ASSET_1002",
+            quantity: 1
+        })
+        const started = transition({action: "start"})
+        const held = transition({action: "hold", holdReasonEnumId: "MhrParts"}, state.supervisor)
+        // Customer Service rejects the claim on a new look: the held repair does not resume
+        decide(state.covered.requestId, {decisionEnumId: "WdRejected", reason: "Misuse"})
+        const resumeRefused = transition({action: "resume"})
+        decide(state.covered.requestId, {decisionEnumId: "WdCovered"})
+        const resumed = transition({action: "resume"})
+        const finish = {action: "complete", outcomeEnumId: "MoutNotRepaired", dispositionEnumId: "MdispUnavailable"}
+        const followUp = transition(Object.assign({followUpName: "Order the board"}, finish))
+        const completed = transition(finish)
+        const outages = rows("mantle.work.effort.ResourceUnavailability", {assetId: prefix + "_ASSET_1002"}).length
+        // a repair of a case closed before its work started
+        const requestId = claim("1004", "Heater fan stops")
+        decide(requestId, {decisionEnumId: "WdCovered"})
+        const linked = run(state.agent, W + "link#WarrantyWork", {requestId, comments: "Fan", assigneePartyId: state.tech})
+        const caseClosed = run(state.agent, "mantle.request.SupportCaseServices.transition#Case", {
+            requestId,
+            toStatusId: "ReqCompleted",
+            resolutionEnumId: "RrFixed"
+        })
+        const startClosed = run(state.tech, M + "transition#MaintenanceWorkOrder", {
+            workEffortId: linked.workEffortId,
+            action: "start"
+        })
+        return {offline, spare, started, held, resumeRefused, resumed, followUp, completed, outages, caseClosed, startClosed}
+    },
+    then({offline, spare, started, held, resumeRefused, resumed, followUp, completed, outages, caseClosed, startClosed}) {
+        code(offline) == "CUSTOMER_EQUIPMENT"
+        code(spare) == "NOT_STOCK" || code(spare) == "OWNER_MISMATCH"
+        started.error == ""
+        held.error == ""
+        code(resumeRefused) == "NOT_APPROVED"
+        resumed.error == ""
+        code(followUp) == "CUSTOMER_EQUIPMENT"
+        completed.error == ""
+        work(state.covered.workEffortId).statusId != "WeInProgress"
+        outages == 0
+        caseClosed.error == ""
+        code(startClosed) == "CASE_CLOSED"
+    }
+})
