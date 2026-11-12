@@ -63,4 +63,8 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_POLICY_VIEW" fromDate="0"/>
     <moqui.security.UserPermission userPermissionId="RESOURCE_POLICY_EDIT" description="Resource Policy Edit (booking policies and blackouts)"/>
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_POLICY_EDIT" fromDate="0"/>
+    <!-- impl-maintenance P15 (design §7.1): a managed resource's soft conflict is booked over only by this permission, where its
+        policy allows an override, with a reason; allowConflicts alone is no authority -->
+    <moqui.security.UserPermission userPermissionId="RESOURCE_BOOKING_OVERRIDE" description="Resource Booking Override (book a managed resource over another booking, with a reason, where its policy allows)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_BOOKING_OVERRIDE" fromDate="0"/>
 </entity-facade-xml>

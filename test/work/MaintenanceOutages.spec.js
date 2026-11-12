@@ -2,7 +2,8 @@
 // order's downtime in transition#MaintenanceWorkOrder; IronStone Maintenance design §6 Downtime, §3, §7.1; impl-maintenance P5,
 // F14): an equipment-fault stop in Manufacturing records the asset's one outage, and a second fault Maintenance records links it;
 // closing the stop restores nothing and end# does, with the disposition; a technician not on the work is refused; a correction
-// keeps the original interval and the row in force is the one the reads count, and a planned block is not corrected here; a stop
+// keeps the original interval and the row in force is the one the reads count, and a planned block is corrected as a block (P15,
+// replacing the P5 review's KIND_INVALID: Manufacturing's offline time goes through record# now and its withdraw ends the row in force); a stop
 // already recorded cannot be named again to record another outage; two work orders linked to one outage cannot each end the
 // other's (no completion or cancel restores), and a restoration while linked work is open (a completion's follow-up) lists it,
 // needs its reason and leaves it open (the user's call, Nov 12). Standalone: spec-local organizations, a
@@ -397,7 +398,7 @@ feature("a correction keeps the original interval; the row in force is the one c
             unavailabilityReasonEnumId: "RurDamage"
         })
         const listed = as(state.supervisor, R + "find#ResourceUnavailability", {assetId: prefix + "_COMP"})
-        // a planned block (Manufacturing's offline time of the line) is corrected where it was made, not here
+        // a planned block (Manufacturing's offline time of the line) is corrected as a block by the supervisor of its scope (P15)
         login("john.doe")
         ec.artifactExecution.disableAuthz()
         const block = call("create#" + OUTAGE, {
@@ -418,6 +419,7 @@ feature("a correction keeps the original interval; the row in force is the one c
         })
         state.compOutage = corrected.resourceUnavailabilityId
         return {
+            block,
             original,
             noReason,
             techCorrects,
@@ -431,8 +433,8 @@ feature("a correction keeps the original interval; the row in force is the one c
             now: outage(corrected.resourceUnavailabilityId)
         }
     },
-    then({original, noReason, techCorrects, corrected, twice, linked, listed, history, plannedCorrected, kept, now}) {
-        plannedCorrected == "KIND_INVALID"
+    then({block, original, noReason, techCorrects, corrected, twice, linked, listed, history, plannedCorrected, kept, now}) {
+        plannedCorrected.correctedUnavailabilityId == block
         noReason == "REASON_REQUIRED"
         techCorrects == "PERMISSION_DENIED"
         corrected.correctedUnavailabilityId == original.resourceUnavailabilityId
