@@ -14,62 +14,174 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Resource booking and availability (design-maintenance §12 MT-07 and §13 ResourceBookingServices). Manufacturing P11 builds
     the outage fact of review Y3, record#ResourceUnavailability for an asset's actual outage, which its equipment-fault
-    downtime calls in its own transaction. Maintenance MT-07 adds find#, correct# and end#ResourceUnavailability, planned
-    blocks, facility resources and the booking policy services. -->
+    downtime calls in its own transaction. Maintenance P5 (impl-maintenance F14) gives it Maintenance's entry point and facility
+    resources and adds find#, correct# and end#ResourceUnavailability, in ResourceOutages.js; planned blocks (P15) and the
+    booking policy services (P15, P16) join later. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="record" noun="ResourceUnavailability" allow-remote="false">
-        <description>Record an actual outage of an asset (design-maintenance Downtime RecordDowntime, review Y3), or link the
-            one that is open: with the asset locked, an open actual ResourceUnavailability of the asset (no thruDate) is
-            answered (linked true) and nothing is written, so two faults of one asset are one outage; else a new one of
-            kind RukActual from fromDate (now when empty), open, with the organization of the asset's facility, the
-            description and the source production downtime. Nothing here ends an outage: Maintenance's
-            end#ResourceUnavailability restores the asset (MT-07). Internal: it checks no permission, its caller did
-            (store#ProductionDowntime checks PRODUCTION_OPERATE and the asset's facility); MT-07's Record outage adds its
-            own entry point. Refuses an asset that does not exist or is stock (ASSET_INVALID) and a kind other than
-            RukActual, until MT-07 builds planned blocks (KIND_INVALID).</description>
+        <description>Record an actual outage of a resource, equipment (assetId: an asset that is not stock) or a facility
+            (facilityId), exactly one (design-maintenance Downtime RecordDowntime, review Y3), or link the one that is open: with
+            the resource locked, its open actual outage in force (no thruDate, not superseded) is answered (linked true) and
+            nothing else is written but the work order's link, so two faults of one resource are one outage; else a new one of
+            kind RukActual from fromDate (now when empty), open, or ended at thruDate (a past outage, a supervisor's or resource
+            administrator's), with the reason (ResourceUnavailabilityReason, its planned or unplanned classification kept), the
+            description, and its source: the production downtime or the maintenance work order and step. A work order named links
+            the outage (MaintenanceWorkOrder.resourceUnavailabilityId). Bookings of the resource over it are kept and answered by
+            id (affectedBookingIds). Nothing here ends an outage: end#ResourceUnavailability restores the resource.
+            Two entry points, checked by data: Manufacturing's, sourceProductionDowntimeId an equipment-fault stop of the asset
+            in an organization the user operates (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE; the reason defaults to an
+            equipment fault); and Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a resource of the user's
+            maintenance scope, or MAINTENANCE_EXECUTE on the work order assigned to the user (workEffortId) that targets it, with
+            a reason (REASON_INVALID). Refuses a kind other than RukActual (KIND_INVALID), no resource or two (RESOURCE_REQUIRED),
+            stock or a missing asset (ASSET_INVALID), a resource or work outside the scope (RECORD_UNAVAILABLE), another
+            permission (PERMISSION_DENIED), a technician without work (WORK_REQUIRED) or on work not theirs (NOT_ASSIGNED), work
+            that is no work order on the resource (WORK_INVALID), a step of other work (STEP_INVALID), a source that is no
+            equipment fault of the asset (SOURCE_INVALID), and a start or end in the future or an end before the start
+            (INTERVAL_INVALID).</description>
         <in-parameters>
-            <parameter name="assetId" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
             <parameter name="unavailabilityKindEnumId" default-value="RukActual"/>
+            <parameter name="unavailabilityReasonEnumId"/>
             <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
             <parameter name="description"/>
             <parameter name="sourceProductionDowntimeId"/>
+            <parameter name="workEffortId"><description>The maintenance work order (its root) the outage is recorded
+                from</description></parameter>
+            <parameter name="stepWorkEffortId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="resourceUnavailabilityId"/>
-            <parameter name="linked" type="Boolean"><description>True when an open outage of the asset was
+            <parameter name="linked" type="Boolean"><description>True when an open outage of the resource was
                 answered</description></parameter>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="affectedBookingIds" type="List"/>
+            <parameter name="affectedBookingCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <if condition="unavailabilityKindEnumId != 'RukActual'">
-                <return error="true" message="KIND_INVALID: Only an actual outage is recorded here"/>
-            </if>
-            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
-            <if condition="!asset || !asset.assetTypeEnumId || ['AstTpInventory', 'AstTpSupplies'].includes(asset.assetTypeEnumId)">
-                <return error="true" message="ASSET_INVALID: Equipment ${assetId} is not available"/>
-            </if>
-            <entity-find entity-name="mantle.work.effort.ResourceUnavailability" list="openList" limit="1">
-                <econdition field-name="assetId"/>
-                <econdition field-name="unavailabilityKindEnumId" value="RukActual"/>
-                <econdition field-name="thruDate" operator="is-null"/>
-                <order-by field-name="fromDate"/>
-            </entity-find>
-            <set field="openOutage" from="Array.from(openList)[0] || null"/>
-            <if condition="openOutage">
-                <set field="resourceUnavailabilityId" from="openOutage.resourceUnavailabilityId"/>
-                <set field="linked" from="true"/>
-                <return/>
-            </if>
-            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility">
-                <field-map field-name="facilityId" from="asset.facilityId"/></entity-find-one>
-            <service-call name="create#mantle.work.effort.ResourceUnavailability" out-map="created"
-                    in-map="{unavailabilityKindEnumId:'RukActual', assetId:assetId,
-                        organizationPartyId:facility?.ownerPartyId || asset.ownerPartyId || null,
-                        fromDate:fromDate || ec.user.nowTimestamp, description:description || null,
-                        sourceProductionDowntimeId:sourceProductionDowntimeId || null, createdByUserId:ec.user.userId || null,
-                        createdDate:ec.user.nowTimestamp}"/>
-            <set field="resourceUnavailabilityId" from="created.resourceUnavailabilityId"/>
-            <set field="linked" from="false"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('record', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="linked" from="answer.linked"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="affectedBookingIds" from="answer.affectedBookingIds"/>
+            <set field="affectedBookingCount" from="answer.affectedBookingCount"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ResourceUnavailability" allow-remote="false">
+        <description>The actual outages of the user's maintenance scope (a work or resource read: MAINTENANCE_VIEW,
+            _ASSIGNED_VIEW or _RESOURCE_VIEW; PERMISSION_DENIED without), newest first, in force unless includeCorrected, scoped
+            and filtered in the query before paging: one outage, organization, equipment, facility (with those inside it and the
+            equipment there), reason, planned or unplanned (planned Y or N), open or ended (open true or false), source
+            (production or work), a work order (the outages it recorded or linked; it must be readable) and a period (fromDate,
+            thruDate overlapping). Each row carries its resource, interval and elapsed time (open ones to now), reason and
+            classification, production context (the stop's work center, reason and run, and how many stops link it), the work
+            orders recorded with or linked, who recorded and who restored it with the disposition, its corrections, the bookings
+            it affects (a count), the restoration blockers, and canRestore and canCorrect for the user. With
+            resourceUnavailabilityId, history is its correction chain. A holder of every organization with an active one lists
+            that organization's.</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="unavailabilityKindEnumId"/>
+            <parameter name="unavailabilityReasonEnumId"/>
+            <parameter name="planned"/>
+            <parameter name="open"/>
+            <parameter name="source"><description>production or work</description></parameter>
+            <parameter name="workEffortId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="includeCorrected"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outageList" type="List"/>
+            <parameter name="outageListCount" type="Integer"/>
+            <parameter name="outageListPageIndex" type="Integer"/>
+            <parameter name="outageListPageSize" type="Integer"/>
+            <parameter name="outageListPageMaxIndex" type="Integer"/>
+            <parameter name="outageListPageRangeLow" type="Integer"/>
+            <parameter name="outageListPageRangeHigh" type="Integer"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canRecord" type="Boolean"/>
+            <parameter name="canRestore" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('find', context)"/>
+            <set field="outageList" from="answer.outageList"/>
+            <set field="outageListCount" from="answer.outageListCount"/>
+            <set field="outageListPageIndex" from="answer.outageListPageIndex"/>
+            <set field="outageListPageSize" from="answer.outageListPageSize"/>
+            <set field="outageListPageMaxIndex" from="answer.outageListPageMaxIndex"/>
+            <set field="outageListPageRangeLow" from="answer.outageListPageRangeLow"/>
+            <set field="outageListPageRangeHigh" from="answer.outageListPageRangeHigh"/>
+            <set field="history" from="answer.history"/>
+            <set field="canRecord" from="answer.canRecord"/>
+            <set field="canRestore" from="answer.canRestore"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="ResourceUnavailability" allow-remote="false">
+        <description>A correction of an outage in force, a maintenance supervisor's or resource administrator's
+            (MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT, PERMISSION_DENIED) in the user's scope, with its reason
+            (REASON_REQUIRED): a new row with the corrected start, the end of an ended outage, the reason and the description,
+            which keeps who recorded and who restored it, and the corrected row kept with its values, superseded by the new one
+            (supersession, design §6); the work orders linked to it are linked to the new row. Refuses an outage outside the scope
+            (RECORD_UNAVAILABLE), one already corrected (OUTAGE_CORRECTED), a changed revision (REVISION_CHANGED), an end on an
+            open outage, which restoration gives (OUTAGE_OPEN), a reason that is no downtime reason (REASON_INVALID) and an
+            interval in the future or ending before it starts (INTERVAL_INVALID).</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="unavailabilityReasonEnumId"/>
+            <parameter name="description"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="correctedUnavailabilityId"/>
+            <parameter name="revision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('correct', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="correctedUnavailabilityId" from="answer.correctedUnavailabilityId"/>
+            <set field="revision" from="answer.revision"/>
+        </actions>
+    </service>
+    <service verb="end" noun="ResourceUnavailability" allow-remote="false">
+        <description>The restoration of a resource, the only end of an actual outage (design §6 RestoreResource, §7.1): a
+            maintenance supervisor's or resource administrator's (MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT,
+            PERMISSION_DENIED) in the user's scope, at thruDate (now when empty, not before the start nor in the future), with
+            the disposition, available for use (MdispAvailable) or usable with restrictions (MdispRestricted), and the readiness
+            evidence (endComments), once every maintenance work order linked to the outage is done: an open one is OPEN_WORK,
+            naming it, so two work orders on one resource cannot each end the other's. Closing the production downtime that
+            recorded it, completing a work order or cancelling one ends nothing. Refuses an outage outside the scope
+            (RECORD_UNAVAILABLE), one corrected (OUTAGE_CORRECTED), a planned block (KIND_INVALID), one ended
+            (OUTAGE_ENDED), a changed revision (REVISION_CHANGED), no disposition (DISPOSITION_REQUIRED) or another one
+            (DISPOSITION_INVALID) and an end out of its interval (INTERVAL_INVALID).</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="dispositionEnumId"/>
+            <parameter name="endComments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="resultCode"/>
+            <parameter name="revision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('end', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="resultCode" from="answer.resultCode"/>
+            <set field="revision" from="answer.revision"/>
         </actions>
     </service>
 </services>

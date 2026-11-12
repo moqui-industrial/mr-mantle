@@ -272,7 +272,10 @@ function evaluate(ctx, userScope, operation, run, target) {
         if (blockedEquipment.includes(asset.statusId))
             conflicts.push(conflict("EQUIPMENT", label + " is " + statusText(asset.statusId)))
         const outage = Array.from(
-            find(OUTAGE, {assetId: asset.assetId}).condition("fromDate", "less", new Date(target.thruMs)).list()
+            find(OUTAGE, {assetId: asset.assetId})
+                .condition("fromDate", "less", new Date(target.thruMs))
+                .condition("supersededByUnavailabilityId", "is-null", null)
+                .list()
         ).find(row => row.thruDate == null || ms(row.thruDate) > target.fromMs)
         if (outage) conflicts.push(conflict("EQUIPMENT", label + " is out of service from " + wall(ms(outage.fromDate))))
         const clash = rows(ASSIGN, {assetId: asset.assetId}).find(row => {

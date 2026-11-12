@@ -1029,10 +1029,16 @@ function storeOrder(p) {
 
 // ===== store#ProductionEquipment =====
 // Equipment in maintenance: an AssetMaintenance in process, not any open one, so a planned maintenance work order and a request
-// not yet started block nothing; an outage is recorded on its own (impl-maintenance §4, F13, F49; an owner contract with
-// Maintenance).
+// not yet started block nothing; or out of service, its one open outage in force (impl-maintenance §4, F13, F49, P5; an owner
+// contract with Maintenance).
 function openMaintenance(assetId) {
-    return find("mantle.product.maintenance.AssetMaintenance", {assetId, statusId: "AsMntInProcess"}).count()
+    return (
+        find("mantle.product.maintenance.AssetMaintenance", {assetId, statusId: "AsMntInProcess"}).count() ||
+        find("mantle.work.effort.ResourceUnavailability", {assetId, unavailabilityKindEnumId: "RukActual"})
+            .condition("thruDate", "is-null", null)
+            .condition("supersededByUnavailabilityId", "is-null", null)
+            .count()
+    )
 }
 const overlaps = (aFrom, aThru, bFrom, bThru) =>
     (lib.ms(aFrom) ?? -Infinity) < (lib.ms(bThru) ?? Infinity) && (lib.ms(bFrom) ?? -Infinity) < (lib.ms(aThru) ?? Infinity)

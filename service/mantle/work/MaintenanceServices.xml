@@ -135,6 +135,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedStartDate" type="Timestamp"/>
             <parameter name="estimatedCompletionDate" type="Timestamp"><description>The planned finish, the work's due</description></parameter>
             <parameter name="teamPartyId"/>
+            <parameter name="offlineIntent"><description>Y: starting the work takes its equipment or facility out of service
+                (P5)</description></parameter>
             <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
@@ -193,6 +195,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="failureModeEnumId"/>
             <parameter name="assetId"/>
             <parameter name="facilityId"/>
+            <parameter name="offlineIntent"><description>Y or N (P5)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>
@@ -244,7 +247,11 @@ along with this software (see the LICENSE.md file). If not, see
             actualCompletionDate, now when empty, written in the same update, never later or before the start), close (a
             supervisor; completion closes it under the MclOnComplete policy) and cancel (a reason; started work a supervisor's;
             time, files and history kept). A status the action is not open from is STATUS_INVALID. The primary AssetMaintenance
-            follows. At the revision read (RECORD_CHANGED).</description>
+            follows. At the revision read (RECORD_CHANGED). Downtime (P5, ResourceOutages.js): start with offline intent (the work
+            order's, or offlineIntent) records the target's outage as planned maintenance (unavailabilityReasonEnumId), or links
+            the one open; complete with equipment still unavailable (MdispUnavailable) records its outage when none is open, and
+            followUpName makes a follow-up corrective work order on the same target, caused by this one and linked to its open
+            outage; completion and cancel restore nothing (end#ResourceUnavailability does).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="action" required="true"><description>approve, start, hold, resume, complete, close or cancel</description></parameter>
@@ -256,12 +263,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="failureModeEnumId"/>
             <parameter name="actualStartDate" type="Timestamp"/>
             <parameter name="actualCompletionDate" type="Timestamp"/>
+            <parameter name="offlineIntent"/>
+            <parameter name="unavailabilityReasonEnumId"/>
+            <parameter name="followUpName"/>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>
             <parameter name="statusId"/>
             <parameter name="revision" type="Integer"/>
             <parameter name="resultCode"/>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="followUpWorkEffortId"/>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('transitionWorkOrder', context)"/>
@@ -269,6 +281,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="statusId" from="answer.statusId"/>
             <set field="revision" from="answer.revision"/>
             <set field="resultCode" from="answer.resultCode"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="followUpWorkEffortId" from="answer.followUpWorkEffortId"/>
         </actions>
     </service>
     <service verb="act" noun="MaintenanceWorkOrders" allow-remote="false">

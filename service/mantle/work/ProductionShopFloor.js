@@ -238,8 +238,10 @@ function startChecks(run, op, partyId) {
     const down = []
     for (const row of equipment) {
         const asset = one(ASSET, {assetId: row.assetId})
+        // the outage in force (a corrected row is history, impl-maintenance P5)
         const outage = find(OUTAGE, {assetId: row.assetId, unavailabilityKindEnumId: "RukActual"})
             .condition("thruDate", "is-null", null)
+            .condition("supersededByUnavailabilityId", "is-null", null)
             .count()
         if ((asset && blockedEquipment.includes(asset.statusId)) || outage) down.push(asset?.assetName || row.assetId)
     }
