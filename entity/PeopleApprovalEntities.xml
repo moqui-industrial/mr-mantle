@@ -76,6 +76,8 @@ along with this software (see the LICENSE.md file). If not, see
                     enumTypeId="PeopleApprovalKind"/>
             <!-- P12: a leave request, or the cancellation of approved leave (LeaveServices.decide#Request) -->
             <moqui.basic.Enumeration enumId="PakLeave" description="Leave" sequenceNum="3" enumTypeId="PeopleApprovalKind"/>
+            <!-- P13: a correction of a day's attendance (AttendanceServices.request#Correction and decide#Correction) -->
+            <moqui.basic.Enumeration enumId="PakAttendance" description="Attendance correction" sequenceNum="4" enumTypeId="PeopleApprovalKind"/>
             <moqui.basic.EnumerationType description="People Approver Role" enumTypeId="PeopleApproverRole"/>
             <moqui.basic.Enumeration enumId="ParDepartmentHead" description="Department head" sequenceNum="1"
                     enumTypeId="PeopleApproverRole"/>
