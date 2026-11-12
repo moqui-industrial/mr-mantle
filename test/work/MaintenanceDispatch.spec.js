@@ -38,6 +38,20 @@ function organization(partyId, name) {
     call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization", ownerPartyId: partyId})
     call("create#mantle.party.Organization", {partyId, organizationName: name})
     call("create#mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
+    // a department, so People's setup readiness, which checks every employer with current employees on the shared test
+    // database, finds this spec's employer set up (PeopleAccess's Settings check runs after this spec in a full run)
+    const department = partyId + "_DEPT"
+    call("create#mantle.party.Party", {partyId: department, partyTypeEnumId: "PtyOrganization", ownerPartyId: partyId})
+    call("create#mantle.party.Organization", {partyId: department, organizationName: name + " operations"})
+    call("create#mantle.party.PartyRole", {partyId: department, roleTypeId: "OrgDepartment"})
+    call("create#mantle.party.PartyRelationship", {
+        relationshipTypeEnumId: "PrtOrgRollup",
+        fromPartyId: department,
+        fromRoleTypeId: "OrgDepartment",
+        toPartyId: partyId,
+        toRoleTypeId: "OrgInternal",
+        fromDate: since
+    })
 }
 function person(partyId, firstName, organizationPartyId, relationshipTypeEnumId = "PrtEmployee") {
     call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
