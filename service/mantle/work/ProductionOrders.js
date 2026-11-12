@@ -1029,10 +1029,16 @@ function storeOrder(p) {
 
 // ===== store#ProductionEquipment =====
 // Equipment in maintenance: an AssetMaintenance in process, not any open one, so a planned maintenance work order and a request
-// not yet started block nothing; an outage is recorded on its own (impl-maintenance §4, F13, F49; an owner contract with
-// Maintenance).
+// not yet started block nothing; or out of service, its one open outage in force (impl-maintenance §4, F13, F49, P5; an owner
+// contract with Maintenance).
 function openMaintenance(assetId) {
-    return find("mantle.product.maintenance.AssetMaintenance", {assetId, statusId: "AsMntInProcess"}).count()
+    return (
+        find("mantle.product.maintenance.AssetMaintenance", {assetId, statusId: "AsMntInProcess"}).count() ||
+        find("mantle.work.effort.ResourceUnavailability", {assetId, unavailabilityKindEnumId: "RukActual"})
+            .condition("thruDate", "is-null", null)
+            .condition("supersededByUnavailabilityId", "is-null", null)
+            .count()
+    )
 }
 const overlaps = (aFrom, aThru, bFrom, bThru) =>
     (lib.ms(aFrom) ?? -Infinity) < (lib.ms(bThru) ?? Infinity) && (lib.ms(bFrom) ?? -Infinity) < (lib.ms(aThru) ?? Infinity)
@@ -1077,8 +1083,10 @@ function storeEquipment(p) {
         resultCode = "ENDED"
     } else {
         if (current.length) denied("ALREADY_ASSIGNED", "Equipment " + asset.assetId + " is assigned to this work order already")
-        if (blockedEquipment.includes(asset.statusId) || openMaintenance(asset.assetId))
-            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is " + (statusText(asset.statusId) || "in maintenance"))
+        if (blockedEquipment.includes(asset.statusId))
+            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is " + statusText(asset.statusId))
+        if (openMaintenance(asset.assetId))
+            denied("EQUIPMENT_BLOCKED", "Equipment " + asset.assetId + " is in maintenance or out of service")
         const fromDate = p.fromDate || run.estimatedStartDate || now
         const thruDate = p.thruDate || run.estimatedCompletionDate || null
         if (thruDate != null && lib.ms(thruDate) <= lib.ms(fromDate))

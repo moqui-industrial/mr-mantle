@@ -26,8 +26,12 @@
 //   key (a retry answers the first root; changed input under the key is OPERATION_KEY_CONFLICT).
 // - Lists (F83): a holder of every organization who chose an active organization lists that organization's work; a record
 //   check still admits every organization. Row names, assignees and counts are read in one query each per page (F96).
+// - Downtime (P5; ResourceOutages.js): Start takes the target out of service when the work has offline intent (records or links
+//   its one open outage); Complete asks the disposition and may leave the resource down, recording its outage when none is open,
+//   with a follow-up work order linked to the same outage; nothing here ends an outage (end#ResourceUnavailability does).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
+const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -446,7 +450,10 @@ const createFields = [
     "teamPartyId"
 ]
 function requestHash(p) {
-    return lib.hash(createFields.map(field => (p[field] == null ? "" : String(ms(p[field]) ?? p[field]))))
+    const values = createFields.map(field => (p[field] == null ? "" : String(ms(p[field]) ?? p[field])))
+    // P5: offline intent, hashed only when set, so a create keyed before it hashes as it did
+    if (flag(p.offlineIntent)) values.push("offline")
+    return lib.hash(values)
 }
 // A retry of a create under its operation key: the first root, or OPERATION_KEY_CONFLICT for changed input.
 function previousCreate(userScope, operationKey, hash) {
@@ -532,6 +539,7 @@ function makeOrder(userScope, target, p, options) {
         severityEnumId: severityId,
         failureModeEnumId: failureId,
         revision: 1,
+        offlineIntent: flag(p.offlineIntent) ? "Y" : null,
         operationKey: options.operationKey || null,
         operationHash: options.operationHash || null
     })
@@ -643,6 +651,7 @@ function storeWorkOrder(p) {
         ["failureModeEnumId", "MaintenanceFailureMode", "Failure mode"]
     ])
         if (p[field] != null) orderFields[field] = requireEnum(p[field], type, label)
+    if (p.offlineIntent != null && p.offlineIntent !== "") orderFields.offlineIntent = flag(p.offlineIntent) ? "Y" : "N"
     // the target: equipment work keeps equipment and facility work a facility, of the same organization
     if (!blank(p.assetId) && p.assetId !== order.assetId) {
         if (!order.assetId) denied("TARGET_KIND", "Facility work stays facility work; create equipment work instead")
@@ -887,7 +896,11 @@ function actionsFor(userScope, ctx) {
                 needsHoldReason: action === "hold",
                 needsCancelReason: action === "cancel",
                 needsCompletion: action === "complete",
-                needsDisposition: action === "complete" && !!ctx.order.assetId
+                needsDisposition: action === "complete" && !!ctx.order.assetId,
+                // P5: Start's offline intent and Complete's follow-up
+                needsOffline: action === "start",
+                offlineIntent: ctx.order.offlineIntent === "Y",
+                needsFollowUp: action === "complete"
             }
         })
 }
@@ -965,6 +978,8 @@ function transitionWorkOrder(p) {
         }
     }
     call("update#" + WORK, workFields)
+    // P5: the target out of service from the start, or left down at completion with its follow-up (ResourceOutages.js)
+    const downtime = downtimeOf(userScope, ctx, action, p, workFields)
     // completion closes the work where the organization's policy says so
     if (action === "complete" && policyOf(ctx.organizationPartyId).closurePolicyEnumId === "MclOnComplete") {
         call("update#" + WORK, {workEffortId: root.workEffortId, statusId: "WeClosed"})
@@ -976,8 +991,70 @@ function transitionWorkOrder(p) {
         workEffortId: root.workEffortId,
         statusId: one(WORK, {workEffortId: root.workEffortId}).statusId,
         revision,
-        resultCode
+        resultCode,
+        resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
+        followUpWorkEffortId: downtime.followUpWorkEffortId || null
     }
+}
+// The downtime of a transition (P5): Start with offline intent (the order's, or offlineIntent given) records the target's outage
+// as planned maintenance, or links the one open; Complete leaving equipment still unavailable records its outage when none is
+// open, and a follow-up (followUpName) is a new corrective work order on the same target, caused by this one and linked to its
+// open outage, which a restoration lists while it is open (it stays open). Hold and Cancel leave an outage as it is.
+function downtimeOf(userScope, ctx, action, p, workFields) {
+    const {root, order} = ctx
+    const target = order.assetId ? {assetId: order.assetId} : {facilityId: root.facilityId}
+    const answer = {}
+    if (action === "start") {
+        const offline = p.offlineIntent != null && p.offlineIntent !== "" ? flag(p.offlineIntent) : order.offlineIntent === "Y"
+        if (offline)
+            answer.resourceUnavailabilityId = outages.record(
+                Object.assign({}, target, {
+                    workEffortId: root.workEffortId,
+                    unavailabilityReasonEnumId: text(p.unavailabilityReasonEnumId) || "RurMaintenance",
+                    fromDate: workFields.actualStartDate || null,
+                    description: "Out of service for work order " + root.workEffortId
+                })
+            ).resourceUnavailabilityId
+        return answer
+    }
+    if (action !== "complete") return answer
+    const linked = outages.workOutage(one(ORDER, {workEffortId: root.workEffortId}))
+    let openId = linked?.open ? linked.resourceUnavailabilityId : outages.openOutage(target)?.resourceUnavailabilityId || null
+    if (!openId && order.assetId && text(p.dispositionEnumId) === "MdispUnavailable")
+        openId = outages.record(
+            Object.assign({}, target, {
+                workEffortId: root.workEffortId,
+                unavailabilityReasonEnumId: text(p.unavailabilityReasonEnumId) || "RurEquipmentFault",
+                description: "Still unavailable after work order " + root.workEffortId
+            })
+        ).resourceUnavailabilityId
+    answer.resourceUnavailabilityId = openId
+    const followUpName = text(p.followUpName)
+    if (followUpName) {
+        const team = currentParties(root.workEffortId, teamRole)[0]?.partyId || null
+        const made = makeOrder(
+            userScope,
+            {assetId: order.assetId || null, facilityId: root.facilityId || null, organizationPartyId: ctx.organizationPartyId},
+            {
+                workEffortName: followUpName,
+                description: "Follow-up of work order " + root.workEffortId,
+                maintenanceKindEnumId: "MkCorrective",
+                severityEnumId: order.severityEnumId,
+                priority: root.priority,
+                teamPartyId: team
+            },
+            {sourceEnumId: "MsrcFollowUp"}
+        )
+        call("create#mantle.work.effort.WorkEffortAssoc", {
+            workEffortId: made.workEffortId,
+            toWorkEffortId: root.workEffortId,
+            workEffortAssocTypeEnumId: "WeatCausedBy",
+            fromDate: ec.user.nowTimestamp
+        })
+        if (openId) call("update#" + ORDER, {workEffortId: made.workEffortId, resourceUnavailabilityId: openId})
+        answer.followUpWorkEffortId = made.workEffortId
+    }
+    return answer
 }
 // act#MaintenanceWorkOrders: one action on each of several work orders, each in its own transaction; a refusal or failure is
 // named for its work order and the rest go on.
@@ -1079,7 +1156,10 @@ function getWorkOrder(p) {
         assigneeNames: assignees.map(row => names[row.partyId] || row.partyId).join(", "),
         assetMaintenanceId: order.assetMaintenanceId || null,
         assetMaintenanceStatusText: maintenance ? statusText(maintenance.statusId) : "",
-        revision: Number(order.revision || 0)
+        revision: Number(order.revision || 0),
+        // P5: offline intent and the outage the work recorded or linked
+        offlineIntent: order.offlineIntent === "Y",
+        outage: outages.workOutage(order)
     }
     return {
         workOrder,
@@ -1400,7 +1480,7 @@ function home(p) {
         overdueCount: openRows.filter(overdue).length,
         overduePmCount: null,
         unknownMeterCount: null,
-        downResourceCount: null,
+        downResourceCount: outages.downCount(userScope, filters),
         capped: openRows.length >= homeLimit
     }
     const myWork = findWorkOrders(Object.assign({}, filters, {mine: "Y", pageSize: 10})).workOrderList
