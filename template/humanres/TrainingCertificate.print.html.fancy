@@ -1,0 +1,50 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A training completion certificate (IronStone People design §15; impl-people P19): issued once when an enrollment's assessment
+     passes (mantle.humanres.DevelopmentServices.complete#Training, Training.js), stored as issued (its page and PDF) and never
+     rendered again: certificateNumber, personName, courseTitle, organizationName, sessionText, completedText, assessorName,
+     attendedText, qualificationText and validThruText (what it grants and until when, empty when nothing), issuedText. No score,
+     answer or evidence of the assessment. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Training certificate')} ${certificateNumber}</title>
+<style>
+@page { size: A4 landscape; margin: 20mm; }
+body { font: 11pt Helvetica, Arial, sans-serif; color: #20252b; text-align: center; }
+.frame { border: 2px solid #20252b; padding: 14mm 12mm; }
+.kind { text-transform: uppercase; letter-spacing: 2px; color: #59606b; font-size: 10pt; margin: 0 0 6mm; }
+h1 { font-size: 24pt; margin: 0 0 4mm; }
+.person { font-size: 20pt; margin: 6mm 0 2mm; }
+.course { font-size: 14pt; margin: 2mm 0 8mm; }
+table { border-collapse: collapse; margin: 0 auto; text-align: left; }
+th, td { padding: 3px 8px; vertical-align: top; }
+th { color: #59606b; font-weight: normal; }
+.note { color: #59606b; font-size: 9pt; margin-top: 10mm; }
+</style></head>
+<body>
+<div class="frame">
+<p class="kind">${organizationName}</p>
+<h1>${ec.l10n.localize('Certificate of completion')}</h1>
+<p>${ec.l10n.localize('This certifies that')}</p>
+<p class="person">${personName}</p>
+<p class="course">${ec.l10n.localize('has completed')} ${courseTitle}</p>
+<table><tbody>
+    <#if sessionText><tr><th>${ec.l10n.localize('Session')}</th><td>${sessionText}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Completed')}</th><td>${completedText}</td></tr>
+    <#if attendedText><tr><th>${ec.l10n.localize('Attended')}</th><td>${attendedText}</td></tr></#if>
+    <#if assessorName><tr><th>${ec.l10n.localize('Assessed by')}</th><td>${assessorName}</td></tr></#if>
+    <#if qualificationText><tr><th>${ec.l10n.localize('Grants')}</th><td>${qualificationText}<#if validThruText>, ${ec.l10n.localize('valid until')} ${validThruText}</#if></td></tr></#if>
+    <tr><th>${ec.l10n.localize('Certificate')}</th><td>${certificateNumber}</td></tr>
+</tbody></table>
+<p class="note">${ec.l10n.localize('Issued')} ${issuedText}</p>
+</div>
+</body></html>

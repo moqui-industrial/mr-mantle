@@ -191,7 +191,7 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
 
-    <!-- the review and training sketches stay off until their phases (impl-people P19, P20; F6):
+    <!-- the review sketches stay off until their phase (impl-people P20; F6); the training sketch is refined below (P19):
     <entity entity-name="PerformanceReview" package="mantle.humanres.ability" use="nontransactional">
         <field name="performanceReviewId" type="id" is-pk="true"/>
         <field name="employeePartyId" type="id"/>
@@ -242,27 +242,40 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="Employee" related="mantle.party.Party">
             <key-map field-name="employeePartyId"/></relationship>
     </entity>
-    <entity entity-name="PersonTraining" package="mantle.humanres.ability" use="nontransactional">
-        <field name="partyId" type="id" is-pk="true"/>
+    -->
+
+    <!-- training (IronStone People design §10 Training and TrainingDetail, §15 the completion certificate, PE-14, PE-15;
+        impl-people P19; refined from the commented PersonTraining and TrainingClass sketches, F6): a course of an employer, its
+        sessions (each a WepTraining event of Commons' calendar with its session facts), a person's enrollment in a session with its
+        own identity, and each assessment of it. Written through mantle.humanres.DevelopmentServices (Training.js). -->
+    <entity entity-name="TrainingClass" package="mantle.humanres.ability" cache="never">
+        <description>A course an employer offers: its title, kind, what passing it grants (a qualification type, valid for
+            validityMonths from the completion; never an identity document or work permit) and whether its completion needs an
+            assessment (a response of a form of the training assessment purpose). Ended (thruDate), it takes no new session; its
+            sessions and enrollments stay. Changed by a development editor of the employer (store#TrainingClass).</description>
         <field name="trainingClassId" type="id" is-pk="true"/>
-        <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="workEffortId" type="id"/>
-        <field name="approverPartyId" type="id"/>
-        <field name="trainingApproved" type="text-indicator" enable-audit-log="true"/>
-        <field name="reason" type="text-medium"/>
-        <relationship type="one" related="mantle.party.Party"/>
-        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
-        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
-        <relationship type="one" title="Approver" related="mantle.party.Party">
-            <key-map field-name="approverPartyId"/></relationship>
-    </entity>
-    <entity entity-name="TrainingClass" package="mantle.humanres.ability" use="nontransactional">
-        <field name="trainingClassId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer that offers it</description></field>
+        <field name="title" type="text-medium"/>
         <field name="trainingClassTypeEnumId" type="id"/>
-        <field name="description" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="qualificationTypeEnumId" type="id"><description>The qualification passing grants (verified, once per
+            enrollment); empty grants none</description></field>
+        <field name="validityMonths" type="number-integer"><description>How long the granted qualification is valid; empty
+            for no expiry</description></field>
+        <field name="assessmentRequired" type="text-indicator"><description>Y: a completion needs the session's assessment form
+            answered</description></field>
+        <field name="assessmentFormId" type="id"><description>The default assessment form of its sessions (DbfpTrainingAssessment)</description></field>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" title="TrainingClassType" related="moqui.basic.Enumeration">
             <key-map field-name="trainingClassTypeEnumId"/></relationship>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="Assessment" related="moqui.screen.form.DbForm">
+            <key-map field-name="assessmentFormId" related="formId"/></relationship>
         <seed-data>
             <moqui.basic.EnumerationType description="Training Class Type" enumTypeId="TrainingClassType"/>
             <moqui.basic.Enumeration enumId="TrctBasic" description="Basic Training" enumTypeId="TrainingClassType"/>
@@ -271,7 +284,112 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="TrctImprovement" description="Improvement Training" enumTypeId="TrainingClassType"/>
         </seed-data>
     </entity>
-    -->
+    <entity entity-name="TrainingSession" package="mantle.humanres.ability" cache="never">
+        <description>A session of a course: the facts of a WepTraining event (the WorkEffort keyed here, a private event of
+            Commons' calendar whose attendees are its trainer and the people enrolled), its employer, trainer, seats and
+            assessment form. Cancelled with its event (WeCancelled). Scheduled and changed by a development editor of the
+            employer (store#Training).</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="trainingClassId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="trainerPartyId" type="id"><description>Who trains and assesses: a person working for the employer</description></field>
+        <field name="capacity" type="number-integer"><description>The seats: enrolled and waiting requests together</description></field>
+        <field name="assessmentFormId" type="id"><description>The published form of the training assessment purpose its results
+            answer (the employer's); empty: a result is the outcome and score alone</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Trainer" related="mantle.party.Party">
+            <key-map field-name="trainerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Assessment" related="moqui.screen.form.DbForm">
+            <key-map field-name="assessmentFormId" related="formId"/></relationship>
+        <index name="TRN_SESSION_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+    <entity entity-name="PersonTraining" package="mantle.humanres.ability" cache="never">
+        <description>A person's enrollment in a training session, with its own identity: requested by the person (waiting for a
+            People approval of kind PakTraining, PeopleTrainingApproval) or enrolled by a development editor of the employer;
+            approved, refused or withdrawn; the attendance the trainer records; completed once by a passing assessment, which
+            grants the course's qualification once (partyQualificationId) and issues the completion certificate, stored when
+            issued (certificateLocation, its PDF, and certificateHtmlLocation, the page html-print shows, never rendered
+            again). A failed assessment is kept (PersonTrainingResult) and another attempt follows. The status is
+            audit-logged.</description>
+        <field name="personTrainingId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="partyRelationshipId" type="id"><description>The employment the training is for</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The department the request routes by</description></field>
+        <field name="workEffortId" type="id"><description>The session</description></field>
+        <field name="trainingClassId" type="id"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="reason" type="text-medium"><description>Why the place is asked for</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"/>
+        <field name="attendedFlag" type="text-indicator" enable-audit-log="true"/>
+        <field name="attendedHours" type="number-decimal"/>
+        <field name="attendanceByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="partyQualificationId" type="id"><description>The qualification its completion granted, once</description></field>
+        <field name="certificateLocation" type="text-medium"/>
+        <field name="certificateHtmlLocation" type="text-medium"/>
+        <field name="certificateIssuedDate" type="date-time"/>
+        <field name="operationKey" type="id-long"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="Employment" related="mantle.party.PartyRelationship">
+            <key-map field-name="partyRelationshipId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
+        <relationship type="one" title="PersonTrainingStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.ability.PartyQualification"/>
+        <index name="PRS_TRN_SESSION"><index-field name="workEffortId"/></index>
+        <index name="PRS_TRN_PARTY"><index-field name="partyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Person Training Status" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsEnrolled" description="Enrolled" sequenceNum="2" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsCompleted" description="Completed" sequenceNum="3" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsRefused" description="Refused" sequenceNum="4" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsWithdrawn" description="Withdrawn" sequenceNum="5" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsCancelled" description="Session cancelled" sequenceNum="6" enumTypeId="PersonTrainingStatus"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PersonTrainingResult" package="mantle.humanres.ability" cache="never">
+        <description>One assessment of an enrollment, kept: passed or failed, with its score, the assessor (the session's trainer
+            or a development editor of the employer, never the person), the date, evidence and, when the session has an
+            assessment form, the response to it (formResponseId, kept as submitted through its FormInvitation). A failed one
+            is followed by another attempt; the passing one completes the enrollment. Written through complete#Training.</description>
+        <field name="personTrainingResultId" type="id" is-pk="true"/>
+        <field name="personTrainingId" type="id"/>
+        <field name="resultEnumId" type="id"/>
+        <field name="score" type="number-decimal"/>
+        <field name="assessedDate" type="date-time"/>
+        <field name="assessorPartyId" type="id"/>
+        <field name="assessedByUserId" type="id"/>
+        <field name="evidence" type="text-long" ai-opt-out="true"/>
+        <field name="formId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="invitationId" type="id"/>
+        <field name="operationKey" type="id-long"/>
+        <relationship type="one" related="mantle.humanres.ability.PersonTraining"/>
+        <relationship type="one" title="TrainingResult" related="moqui.basic.Enumeration">
+            <key-map field-name="resultEnumId"/></relationship>
+        <relationship type="one" title="Assessor" related="mantle.party.Party">
+            <key-map field-name="assessorPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse"/>
+        <index name="PRS_TRN_RES_ENR"><index-field name="personTrainingId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Training Result" enumTypeId="TrainingResult"/>
+            <moqui.basic.Enumeration enumId="TrrPassed" description="Passed" sequenceNum="1" enumTypeId="TrainingResult"/>
+            <moqui.basic.Enumeration enumId="TrrFailed" description="Failed" sequenceNum="2" enumTypeId="TrainingResult"/>
+        </seed-data>
+    </entity>
 
     <!-- ========================================================= -->
     <!-- mantle.humanres.employment -->
