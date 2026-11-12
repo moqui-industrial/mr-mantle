@@ -26,8 +26,9 @@
 //   unchanged. A root's totals are the sum of the distinct TimeEntry rows of its tree, never a parent's rolled-up time plus its
 //   children's.
 // - Adoption (design §6, §13.2): an open AssetMaintenance with no linked work (Manufacturing's request, the baseline's) gets a
-//   managed root, once (a retry answers the first root); completed and cancelled history stays unmanaged, a warranty repair
-//   keeps Customer Service's path (P12).
+//   managed root, once (a retry answers the first root); completed and cancelled history stays unmanaged. P12: a warranty repair
+//   (link#WarrantyWork's) is adopted only where the organization's policy manages warranty repairs, its task the root; else it keeps
+//   Customer Service's path (OWNER_PATH). Its Start rechecks the claim's decision and consent (MaintenanceRepairs.js).
 // - Writes name the revision they read (expectedRevision; RECORD_CHANGED naming the current one), and create takes an operation
 //   key (a retry answers the first root; changed input under the key is OPERATION_KEY_CONFLICT).
 // - Lists (F83): a holder of every organization who chose an active organization lists that organization's work; a record
@@ -50,6 +51,8 @@ const workProcesses = ec.resource.script("component://mr-mantle/service/mantle/w
 const materials = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceMaterials.js")
 // P11: the threshold's cost half
 const costs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceCosts.js")
+// P12: the customer repair (Customer Service's claim through WarrantyServices)
+const repairs = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceRepairs.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -769,6 +772,8 @@ function adoptWith(userScope, p) {
     const maintenance = assetMaintenanceId ? one(MAINTENANCE, {assetMaintenanceId}) : null
     if (!maintenance || !maintenance.assetId)
         denied("RECORD_UNAVAILABLE", "Maintenance " + (assetMaintenanceId || "") + " is not available")
+    // P12: a warranty repair's task becomes the root, read by its organization, not by the customer's asset
+    if (maintenance.maintenanceTypeEnumId === "MntTpWarranty") return adoptRepair(userScope, maintenance, p)
     const target = targetOf(userScope, {assetId: maintenance.assetId})
     const earlier = Array.from(find(ORDER, {assetMaintenanceId}).limit(1).list())[0]
     if (earlier) {
@@ -784,8 +789,6 @@ function adoptWith(userScope, p) {
             "RECORD_CLOSED",
             "Maintenance " + assetMaintenanceId + " is " + statusText(maintenance.statusId) + "; its history stays as it is"
         )
-    if (maintenance.maintenanceTypeEnumId === "MntTpWarranty")
-        denied("OWNER_PATH", "Maintenance " + assetMaintenanceId + " is a warranty repair, worked from its case")
     if (maintenance.taskWorkEffortId)
         denied("LINKED_WORK", "Maintenance " + assetMaintenanceId + " already has work " + maintenance.taskWorkEffortId)
     const asset = target.asset
@@ -809,6 +812,65 @@ function adoptWith(userScope, p) {
     )
     call("update#" + MAINTENANCE, {assetMaintenanceId, taskWorkEffortId: made.workEffortId})
     return Object.assign(made, {adopted: true})
+}
+
+// P12: a warranty repair Customer Service linked (an AssetMaintenance of type MntTpWarranty with its WepMaintenance task) made a
+// managed work order, once, where its organization's policy manages warranty repairs (else OWNER_PATH, worked from its case): the
+// task is the root, kept with its assignee and the organization that owns it (the claim's), the asset stays the customer's and is
+// never read as the organization's equipment, and the work is corrective and approved (in progress when the record is).
+function adoptRepair(userScope, maintenance, p) {
+    const assetMaintenanceId = maintenance.assetMaintenanceId
+    const task = maintenance.taskWorkEffortId ? one(WORK, {workEffortId: maintenance.taskWorkEffortId}) : null
+    const organizationPartyId = task?.ownerPartyId || null
+    if (!task || !maintenanceAccess.covers(userScope, organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Maintenance " + assetMaintenanceId + " is not available")
+    const earlier = one(ORDER, {workEffortId: task.workEffortId})
+    if (earlier) {
+        readOrder(userScope, earlier.workEffortId)
+        return {workEffortId: earlier.workEffortId, statusId: task.statusId, repeated: true}
+    }
+    const policy = policyOf(organizationPartyId)
+    if (!policy.warrantyRepairsManaged)
+        denied("OWNER_PATH", "Maintenance " + assetMaintenanceId + " is a warranty repair, worked from its case")
+    if (["AsMntCompleted", "AsMntCancelled"].includes(maintenance.statusId) || doneStatuses.includes(task.statusId))
+        denied(
+            "RECORD_CLOSED",
+            "Maintenance " + assetMaintenanceId + " is " + statusText(maintenance.statusId) + "; its history stays as it is"
+        )
+    if (
+        task.purposeEnumId !== "WepMaintenance" ||
+        task.isTemplate === "Y" ||
+        (task.rootWorkEffortId && task.rootWorkEffortId !== task.workEffortId)
+    )
+        denied("LINKED_WORK", "Maintenance " + assetMaintenanceId + " already has work " + task.workEffortId)
+    const statusId = maintenance.statusId === "AsMntInProcess" || task.statusId === "WeInProgress" ? "WeInProgress" : "WeApproved"
+    call("update#" + WORK, {
+        workEffortId: task.workEffortId,
+        statusFlowId: "WorkEffortMaintenance",
+        statusId,
+        timeUomId: "TF_hr",
+        priority: task.priority ?? (blank(p.priority) ? 5 : Number(p.priority)),
+        actualStartDate: statusId === "WeInProgress" ? task.actualStartDate || ec.user.nowTimestamp : task.actualStartDate || null
+    })
+    call("create#" + ORDER, {
+        workEffortId: task.workEffortId,
+        assetId: maintenance.assetId,
+        assetMaintenanceId,
+        maintenanceKindEnumId: "MkCorrective",
+        maintenanceTypeEnumId: "MntTpWarranty",
+        sourceEnumId: "MsrcWarranty",
+        revision: 1
+    })
+    const teamId = policy.defaultTeamPartyId
+    if (teamId && !currentParties(task.workEffortId, teamRole).length)
+        call("create#" + PARTY, {
+            workEffortId: task.workEffortId,
+            partyId: requireTeam(organizationPartyId, teamId),
+            roleTypeId: teamRole,
+            fromDate: ec.user.nowTimestamp,
+            statusId: "WeptAssigned"
+        })
+    return {workEffortId: task.workEffortId, statusId, approved: true, assetMaintenanceId, repeated: false, adopted: true}
 }
 
 // ===== store#MaintenanceWorkOrder =====
@@ -1099,7 +1161,8 @@ function refusalOf(userScope, ctx, action) {
                 message: "Planned work over the approval threshold needs a supervisor's approval"
             }
         case "start":
-            if (executing(caps, assigned)) return null
+            // P12: a customer repair starts only while its claim allows it (Customer Service's decision and consent)
+            if (executing(caps, assigned)) return repairs().standingOf(order)
             return caps.execute
                 ? {reason: "NOT_ASSIGNED", message: "Work order " + root.workEffortId + " is not assigned to you"}
                 : {reason: "PERMISSION_DENIED", message: "A technician assigned to the work, or a supervisor, starts it"}
@@ -1456,6 +1519,8 @@ function getWorkOrder(p) {
         // P9: the cost centre and project it is charged to
         ...materials().chargeOf(order),
         overdue: open && root.estimatedCompletionDate != null && ms(root.estimatedCompletionDate) < now,
+        // P12: a customer repair's claim, coverage and consent, and its custody (the customer's asset, read through the repair)
+        repair: repairs().summaryOf(userScope, order),
         teamPartyId: teams[0]?.partyId || null,
         teamName: teams[0] ? names[teams[0].partyId] || teams[0].partyId : "",
         assigneeNames: assignees.map(row => names[row.partyId] || row.partyId).join(", "),
@@ -1497,6 +1562,10 @@ function getWorkOrder(p) {
               ]
             : []
         ).concat(
+            // P12: a customer repair whose claim no longer allows it (a missing or changed consent) is blocked, not approved here
+            open && workOrder.repair && !workOrder.repair.allowed
+                ? [{blocker: "Customer Service's decision", detail: workOrder.repair.blockerText}]
+                : [],
             // P7: the checklist's open required steps
             openSteps.length
                 ? [{blocker: "Steps open", detail: "Required steps are completed or waived first: " + openSteps.map(row => row.name).join(", ")}]

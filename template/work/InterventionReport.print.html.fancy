@@ -1,0 +1,82 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A customer repair's intervention report (design-maintenance §12 "Customer service/intervention report"; impl-maintenance P12;
+     mantle.work.MaintenanceServices get# and store#InterventionReport, MaintenanceRepairs.js reportValues): printed from WorkOrderDetail,
+     stored on the work order and sent by Customer Service. workEffortId, workEffortName, description, organizationName,
+     customerName, requestId, requestName, decisionText, equipmentText, placeText, technicianText, statusText, startedText,
+     finishedText, outcomeText, dispositionText, costsShown with partList, laborList (description, quantityText, amountText) and
+     totalList (partsText, laborText, totalText), acknowledgmentText, acknowledgmentDateText, asOfText, printedBy. Parts and labor
+     only where the reader may read costs. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Intervention report')} ${workEffortId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+h2 { font-size: 12pt; margin: 6mm 0 2mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 40mm; font-weight: bold; }
+.lines th { border-bottom: 1px solid #20252b; }
+.lines td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; }
+.muted { color: #5b636b; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Intervention report')}</h1>
+<p class="muted">${organizationName} · ${ec.l10n.localize('Work order')} ${workEffortId}</p>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Customer')}</th><td>${customerName}</td></tr>
+    <#if requestId><tr><th>${ec.l10n.localize('Claim')}</th><td>${requestId} · ${requestName}<#if decisionText> (${decisionText})</#if></td></tr></#if>
+    <#if equipmentText><tr><th>${ec.l10n.localize('Equipment')}</th><td>${equipmentText}</td></tr></#if>
+    <#if placeText><tr><th>${ec.l10n.localize('Place')}</th><td>${placeText}</td></tr></#if>
+    <#if technicianText><tr><th>${ec.l10n.localize('Technicians')}</th><td>${technicianText}</td></tr></#if>
+    <#if startedText><tr><th>${ec.l10n.localize('Started')}</th><td>${startedText}</td></tr></#if>
+    <#if finishedText><tr><th>${ec.l10n.localize('Finished')}</th><td>${finishedText}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr>
+</tbody></table>
+<h2>${ec.l10n.localize('Work done')}</h2>
+<p>${workEffortName}</p>
+<#if description><p>${description}</p></#if>
+<#if outcomeText><p><strong>${ec.l10n.localize('Outcome')}:</strong> ${outcomeText}<#if dispositionText> · ${ec.l10n.localize('The equipment is')} ${dispositionText}</#if></p></#if>
+<#if costsShown>
+<h2>${ec.l10n.localize('Parts')}</h2>
+<#if partList.length>
+<table class="lines">
+    <thead><tr><th>${ec.l10n.localize('Part')}</th><th class="amount">${ec.l10n.localize('Quantity')}</th><th class="amount">${ec.l10n.localize('Amount')}</th></tr></thead>
+    <tbody><#list partList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td><td class="amount">${line.amountText}</td></tr></#list></tbody>
+</table>
+<#else>
+<p class="muted">${ec.l10n.localize('No part was used.')}</p>
+</#if>
+<h2>${ec.l10n.localize('Labor')}</h2>
+<#if laborList.length>
+<table class="lines">
+    <thead><tr><th>${ec.l10n.localize('Work')}</th><th class="amount">${ec.l10n.localize('Hours')}</th><th class="amount">${ec.l10n.localize('Amount')}</th></tr></thead>
+    <tbody><#list laborList as line><tr><td>${line.description}</td><td class="amount">${line.quantityText}</td><td class="amount">${line.amountText}</td></tr></#list></tbody>
+</table>
+<#else>
+<p class="muted">${ec.l10n.localize('No time is recorded.')}</p>
+</#if>
+<#list totalList as total><p><strong>${ec.l10n.localize('Parts')}:</strong> ${total.partsText} · <strong>${ec.l10n.localize('Labor')}:</strong> ${total.laborText}</p></#list>
+</#if>
+<h2>${ec.l10n.localize('Acknowledgment')}</h2>
+<#if acknowledgmentText>
+<p>${acknowledgmentText}<#if acknowledgmentDateText> · ${acknowledgmentDateText}</#if> (${ec.l10n.localize('attached')})</p>
+<#else>
+<p class="muted">${ec.l10n.localize('No acknowledgment is attached.')}</p>
+</#if>
+<p class="muted">${ec.l10n.localize('As of')} ${asOfText} · ${printedBy}</p>
+</body></html>
