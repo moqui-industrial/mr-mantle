@@ -103,15 +103,20 @@ along with this software (see the LICENSE.md file). If not, see
             the equipment's model (productMaintenanceId; VALUE_INVALID), under an operation key (a retry answers the first plan,
             repeated; changed input is OPERATION_KEY_CONFLICT). With maintenanceScheduleId, at its revision (expectedRevision;
             RECORD_CHANGED; PLAN_ENDED for an ended plan): with action activate, a draft becomes active, refused with the code of
-            its first finding (ZONE_REQUIRED: no time zone in the target's facility or above it; PROCEDURE_REQUIRED,
-            PROCEDURE_NOT_QUALIFIED: no approved procedure in effect of the organization that applies to the target;
-            INTERVAL_REQUIRED, FIRST_DUE_REQUIRED for a calendar; METER_REQUIRED, METER_NOT_COUNTING, BASELINE_REQUIRED for a
-            meter); with action end, the plan and its terms end now, with changeReason (REASON_REQUIRED); with no action, its name
-            and terms change: a draft's terms in place, an active plan's from effectiveDate (now when empty, after the terms in
-            effect began, never in the past; DATE_INVALID) with changeReason (REASON_REQUIRED), the terms in effect ended then and
-            kept, as the work done under them is. A term field left empty takes the model default's value. firstDueLocal is the
-            first obligation's local date and time in the target's zone (yyyy-MM-dd HH:mm; DATE_INVALID). A meter is one of the
-            equipment's model (METER_INVALID; a facility's plan is by the calendar).</description>
+            its first finding (ZONE_REQUIRED: no time zone in the target's facility or above it; PROCEDURE_NOT_QUALIFIED: the
+            procedure the plan or its model default names is not an approved procedure in effect of the organization that applies
+            to the target; INTERVAL_REQUIRED, FIRST_DUE_REQUIRED for a calendar; METER_REQUIRED, METER_NOT_COUNTING,
+            BASELINE_REQUIRED for a meter). A procedure is optional (the user's call, Nov 12): with none, P14 makes an ad hoc work
+            order with the plan's name and estimate (estimatedWorkTime). With action end, the plan and its terms end now, with
+            changeReason (REASON_REQUIRED); with no action, its name and terms change (a call naming no term field changes the
+            name alone): a draft's terms in place (the user's call, Nov 12), an active plan's from effectiveDate (now when empty,
+            after the terms in effect began and after any term already planned, never in the past; DATE_INVALID) with
+            changeReason (REASON_REQUIRED), the terms in effect ended then and kept, as the work done under them is. A plan whose
+            target has moved to another organization is not changed or activated (TARGET_MOVED), only ended. A term field left
+            empty takes the model default's value. firstDueLocal is the first obligation's local date and time in the target's
+            zone (yyyy-MM-dd HH:mm, no zone or offset; DATE_INVALID). A procedure named is a maintenance procedure of the
+            organization (VALUE_INVALID). A meter is one of the equipment's model (METER_INVALID; a facility's plan is by the
+            calendar).</description>
         <in-parameters>
             <parameter name="maintenanceScheduleId"/>
             <parameter name="expectedRevision"/>
@@ -137,6 +142,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="templateWorkEffortId"/>
             <parameter name="maintenanceTypeEnumId"/>
             <parameter name="teamPartyId"/>
+            <parameter name="estimatedWorkTime"><description>The hours the work takes, for an ad hoc work order of a plan with
+                no procedure (P14)</description></parameter>
             <parameter name="effectiveDate" type="Timestamp"/>
             <parameter name="changeReason"/>
         </in-parameters>

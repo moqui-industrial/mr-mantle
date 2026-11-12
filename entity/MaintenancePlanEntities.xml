@@ -24,7 +24,7 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A preventive maintenance plan of one piece of equipment (assetId) or one facility (facilityId), never both:
             its name, the equipment model's maintenance default it follows (productMaintenanceId, equipment only), its
             organization (the target's when the plan was made), its state (draft, active, ended; activation checks the time zone
-            and the procedure, an end needs a reason), a revision every write increments (a stale write is refused naming the
+            and a named procedure, an end needs a reason), a revision every write increments (a stale write is refused naming the
             current one) and the operation key and request it was created with (a retry answers the first plan).</description>
         <field name="maintenanceScheduleId" type="id" is-pk="true"/>
         <field name="scheduleName" type="text-medium"/>
@@ -81,8 +81,9 @@ along with this software (see the LICENSE.md file). If not, see
             holiday is planned on the next business day when businessDaysOnly, the due date kept; holidays of the organization
             and of holidayCategoryId, a People holiday calendar) or a meter (productMeterId, a counting meter of the equipment's
             model, every intervalQuantity of its unit from the baseline reading baselineValue at baselineDate; a reading older
-            than maxReadingAgeDays leaves the due unknown). The procedure (templateWorkEffortId), the maintenance type, the lead
-            days before the due date and the team. A field left empty takes the plan's model default's value. The trigger fields
+            than maxReadingAgeDays leaves the due unknown). The procedure (templateWorkEffortId; optional: with none the work is
+            an ad hoc work order with the plan's name and estimatedWorkTime, hours), the maintenance type, the lead days before
+            the due date and the team. A draft's terms are changed in place; from activation they are dated rows. A field left empty takes the plan's model default's value. The trigger fields
             are audit-logged, and a change starts a new row with its reason.</description>
         <field name="maintenanceScheduleId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
@@ -104,6 +105,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="templateWorkEffortId" type="id"/>
         <field name="maintenanceTypeEnumId" type="id"/>
         <field name="teamPartyId" type="id"/>
+        <field name="estimatedWorkTime" type="number-decimal"><description>The hours the work takes: P14's ad hoc work order of a
+            plan with no procedure carries it (the user's call, Nov 12)</description></field>
         <field name="changeReason" type="text-medium"/>
         <field name="changedByUserId" type="id"/>
         <relationship type="one" related="mantle.work.maintenance.MaintenanceSchedule" short-alias="schedule"/>

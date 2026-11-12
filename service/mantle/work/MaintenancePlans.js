@@ -9,8 +9,11 @@
 //   plan and one outside the scope are refused alike (RECORD_UNAVAILABLE).
 // - States: Draft (its terms changed in place), Active (a change of its terms ends the term in effect and starts the next from
 //   the effective time, with a reason; the work done under the earlier term stays as it was) and Ended (with a reason).
-//   Activation needs the target's time zone (Facility.timeZone, inherited, F16: no server zone is assumed) and a qualifying
-//   procedure (approved, in effect, applicable to the target, of the plan's organization), and the trigger's terms complete.
+//   Activation needs the target's time zone (Facility.timeZone, inherited, F16: no server zone is assumed) and the trigger's terms
+//   complete. A procedure is optional (the user's call, Nov 12): one named, by the plan or its model default, must qualify
+//   (approved, in effect, applicable to the target, of the plan's organization); with none, P14 makes an ad hoc work order with
+//   the plan's name and estimate (estimatedWorkTime, hours). A change of a plan whose target has moved to another organization is
+//   refused (TARGET_MOVED); it may still be ended.
 // - The due projection (design §5.1), read as of a time, changes nothing:
 //   - a calendar plan's obligations fall on its local first due date and time in the target's zone and every interval after it
 //     (fixed cadence) or one interval after the last completion (completion cadence); months and years keep the first date's
@@ -18,9 +21,11 @@
 //     local wall time holds across a daylight-saving change. A due date on a weekend or holiday is planned on the next business
 //     day (EventServices.get#NextBusinessDay, over the organization's WepHoliday events and the term's People holiday calendar,
 //     impl-maintenance F64) when the term asks for business days, and the due date stays the obligation. A completion covers the
-//     earliest obligation not yet covered that falls before the next one after it; obligations past and not covered are overdue.
-//   - a meter plan reads a counting meter of the equipment's model: its baseline is the reading taken in the last counted
-//     completion, else the plan's baseline; the usage since then sums the valid readings across a reset; the next threshold is
+//     earliest obligation not yet covered that falls before the next one after it, and only once it is later than the obligation one
+//     interval before the first (an older one, such as a model default's record from before the plan, covers nothing);
+//     obligations past and not covered are overdue.
+//   - a meter plan reads a counting meter of the equipment's model: its baseline is the later of the plan's baseline and the
+//     reading taken in the last counted completion that took one; the usage since then sums the valid readings across a reset; the next threshold is
 //     the baseline plus the increment. A reading older than the plan's maximum age (30 days unless set), or none at all, leaves
 //     the due unknown, never "not due".
 //   - a completion counts only when its work order (MaintenanceWorkOrder.maintenanceScheduleId) is complete or closed, or, for
@@ -169,8 +174,10 @@ const termFields = [
     "leadDays",
     "templateWorkEffortId",
     "maintenanceTypeEnumId",
-    "teamPartyId"
+    "teamPartyId",
+    "estimatedWorkTime"
 ]
+const numericTermFields = ["intervalQuantity", "baselineValue", "maxReadingAgeDays", "leadDays", "estimatedWorkTime"]
 function termsOf(maintenanceScheduleId) {
     return rows(TERM, {maintenanceScheduleId}).sort((a, b) => ms(b.fromDate) - ms(a.fromDate))
 }
@@ -186,7 +193,9 @@ function termAt(maintenanceScheduleId, at = nowMs()) {
 }
 // The term's values with the model default's where it leaves one empty, and the origin of each ("plan", "model default" or none).
 function resolve(schedule, term) {
-    const defaults = schedule.productMaintenanceId ? one(PRODUCT_MAINTENANCE, {productMaintenanceId: schedule.productMaintenanceId}) : null
+    const defaults = schedule.productMaintenanceId
+        ? one(PRODUCT_MAINTENANCE, {productMaintenanceId: schedule.productMaintenanceId})
+        : null
     const origin = {}
     const value = (field, own, inherited) => {
         if (!blank(own)) {
@@ -220,14 +229,16 @@ function resolve(schedule, term) {
         holidayCategoryId: text(t.holidayCategoryId),
         leadDays: number(t.leadDays) ?? 0,
         teamPartyId: text(t.teamPartyId),
+        estimatedWorkTime: number(t.estimatedWorkTime),
         defaults,
         origin
     }
 }
 // A first due date as entered: yyyy-MM-dd, with HH:mm or not (the default time then), as the local text kept on the term.
 function localDueText(value) {
-    const found = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}):(\d{2}))?/.exec(String(value || "").trim())
-    if (!found) denied("DATE_INVALID", "Enter the first due date as a date and a time")
+    // the whole text: a date, and a time of day with no zone or offset (the target's zone applies), seconds zero when given
+    const found = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{1,2}):(\d{2})(?::00(?:\.0+)?)?)?$/.exec(String(value || "").trim())
+    if (!found) denied("DATE_INVALID", "Enter the first due date as yyyy-MM-dd HH:mm, the local time of the target")
     const day = found[1]
     const [y, m, d] = day.split("-").map(Number)
     const check = new Date(Date.UTC(y, m - 1, d))
@@ -240,13 +251,19 @@ function localDueText(value) {
 function termFrom(p, target) {
     const term = {}
     for (const field of termFields) term[field] = blank(p[field]) ? null : p[field]
-    if (term.triggerEnumId && !one("moqui.basic.Enumeration", {enumId: term.triggerEnumId, enumTypeId: "MaintenanceScheduleTrigger"}))
+    if (
+        term.triggerEnumId &&
+        !one("moqui.basic.Enumeration", {enumId: term.triggerEnumId, enumTypeId: "MaintenanceScheduleTrigger"})
+    )
         denied("VALUE_INVALID", "Choose calendar or meter")
-    if (term.cadenceEnumId && !one("moqui.basic.Enumeration", {enumId: term.cadenceEnumId, enumTypeId: "MaintenanceScheduleCadence"}))
+    if (
+        term.cadenceEnumId &&
+        !one("moqui.basic.Enumeration", {enumId: term.cadenceEnumId, enumTypeId: "MaintenanceScheduleCadence"})
+    )
         denied("VALUE_INVALID", "Choose how the dates follow")
     if (term.intervalUomId && !Object.hasOwn(calendarUnits, term.intervalUomId))
         denied("VALUE_INVALID", "Choose days, weeks, months or years")
-    for (const field of ["intervalQuantity", "baselineValue", "maxReadingAgeDays", "leadDays"]) {
+    for (const field of numericTermFields) {
         if (term[field] == null) continue
         const value = Number(String(term[field]))
         if (!Number.isFinite(value) || value < 0 || (field !== "baselineValue" && field !== "leadDays" && value === 0))
@@ -255,7 +272,8 @@ function termFrom(p, target) {
             denied("VALUE_INVALID", "Enter a whole number of days")
     }
     if (term.firstDueLocal) term.firstDueLocal = localDueText(term.firstDueLocal)
-    if (term.baselineDate && ms(term.baselineDate) > nowMs() + 60000) denied("DATE_FUTURE", "A baseline reading is taken now or earlier")
+    if (term.baselineDate && ms(term.baselineDate) > nowMs() + 60000)
+        denied("DATE_FUTURE", "A baseline reading is taken now or earlier")
     term.businessDaysOnly = flag(term.businessDaysOnly) ? "Y" : null
     if (term.holidayCategoryId) {
         const calendar = one(CATEGORY, {workEffortCategoryId: term.holidayCategoryId})
@@ -266,11 +284,24 @@ function termFrom(p, target) {
         )
             denied("VALUE_INVALID", "Choose a holiday calendar of the organization or a shared one")
     }
-    if (term.maintenanceTypeEnumId && !one("moqui.basic.Enumeration", {enumId: term.maintenanceTypeEnumId, enumTypeId: "MaintenanceType"}))
+    // a procedure named is a maintenance procedure of the plan's organization (whether it qualifies is activation's finding)
+    if (term.templateWorkEffortId) {
+        const found = procedures.procedureOf(term.templateWorkEffortId)
+        if (!found || found.organizationPartyId !== target.organizationPartyId)
+            denied("VALUE_INVALID", "Choose a maintenance procedure of the organization")
+    }
+    if (
+        term.maintenanceTypeEnumId &&
+        !one("moqui.basic.Enumeration", {enumId: term.maintenanceTypeEnumId, enumTypeId: "MaintenanceType"})
+    )
         denied("VALUE_INVALID", "Choose a maintenance type")
     if (term.teamPartyId) {
         const team = one("mantle.party.Party", {partyId: term.teamPartyId})
-        if (!team || team.ownerPartyId !== target.organizationPartyId || !one("mantle.party.PartyRole", {partyId: term.teamPartyId, roleTypeId: "OrgTeam"}))
+        if (
+            !team ||
+            team.ownerPartyId !== target.organizationPartyId ||
+            !one("mantle.party.PartyRole", {partyId: term.teamPartyId, roleTypeId: "OrgTeam"})
+        )
             denied("VALUE_INVALID", "Choose a team of the organization")
     }
     if (term.productMeterId) {
@@ -287,8 +318,7 @@ const sameTerm = (a, b) =>
         const right = b?.[field] ?? null
         if (left == null || right == null) return left == null && right == null
         if (field === "baselineDate") return ms(left) === ms(right)
-        if (["intervalQuantity", "baselineValue", "maxReadingAgeDays", "leadDays"].includes(field))
-            return Number(String(left)) === Number(String(right))
+        if (numericTermFields.includes(field)) return Number(String(left)) === Number(String(right))
         return String(left) === String(right)
     })
 
@@ -299,8 +329,9 @@ function findingsOf(schedule, term, target) {
     const add = (code, message) => found.push({code, text: message})
     const r = resolve(schedule, term)
     if (!target.zone) add("ZONE_REQUIRED", "Set the time zone of " + target.name + "'s facility or a facility above it")
-    if (!r.templateWorkEffortId) add("PROCEDURE_REQUIRED", "Choose the procedure the work follows")
-    else {
+    // a procedure is optional (the user's call, Nov 12: with none, P14 makes an ad hoc work order with the plan's name and
+    // estimate); one named, by the plan or its model default, must qualify
+    if (r.templateWorkEffortId) {
         const refusal = procedureRefusal(r.templateWorkEffortId, schedule.organizationPartyId, target)
         if (refusal) add("PROCEDURE_NOT_QUALIFIED", refusal)
     }
@@ -308,13 +339,20 @@ function findingsOf(schedule, term, target) {
         if (!target.assetId) add("METER_INVALID", "A facility's plan is by the calendar")
         else {
             const meter = r.productMeterId ? one(PRODUCT_METER, {productMeterId: r.productMeterId}) : null
-            if (!meter || meter.productId !== target.productId) add("METER_REQUIRED", "Choose a counting meter of the equipment's model")
-            else if (meter.isCumulative !== "Y") add("METER_NOT_COUNTING", "The meter does not count up; a plan needs a counting meter")
+            if (!meter || meter.productId !== target.productId)
+                add("METER_REQUIRED", "Choose a counting meter of the equipment's model")
+            else if (meter.isCumulative !== "Y")
+                add("METER_NOT_COUNTING", "The meter does not count up; a plan needs a counting meter")
         }
         if (!(r.intervalQuantity > 0)) add("INTERVAL_REQUIRED", "Enter the increment of the meter")
-        if (r.baselineValue == null || r.baselineDate == null) add("BASELINE_REQUIRED", "Enter the baseline reading and when it was taken")
+        if (r.baselineValue == null || r.baselineDate == null)
+            add("BASELINE_REQUIRED", "Enter the baseline reading and when it was taken")
     } else {
-        if (!(r.intervalQuantity > 0) || !Number.isInteger(r.intervalQuantity) || !Object.hasOwn(calendarUnits, r.intervalUomId || ""))
+        if (
+            !(r.intervalQuantity > 0) ||
+            !Number.isInteger(r.intervalQuantity) ||
+            !Object.hasOwn(calendarUnits, r.intervalUomId || "")
+        )
             add("INTERVAL_REQUIRED", "Enter the interval as a whole number of days, weeks, months or years")
         if (!r.firstDueLocal) add("FIRST_DUE_REQUIRED", "Enter the first due date")
     }
@@ -414,17 +452,15 @@ function completionsOf(schedule) {
 // record's planned interval that is not completed is a synthetic threshold and no observation.
 function readingsOf(assetId, productMeterId, at) {
     const all = Array.from(
-        find(METER, {assetId, productMeterId})
-            .condition("readingDate", "less-equals", new Date(at))
-            .orderBy("readingDate")
-            .list()
+        find(METER, {assetId, productMeterId}).condition("readingDate", "less-equals", new Date(at)).orderBy("readingDate").list()
     )
     const statuses = {}
     return all
         .filter(row => {
             if (row.readingReasonEnumId || !row.assetMaintenanceId) return true
             if (!Object.hasOwn(statuses, row.assetMaintenanceId))
-                statuses[row.assetMaintenanceId] = one(ASSET_MAINTENANCE, {assetMaintenanceId: row.assetMaintenanceId})?.statusId || null
+                statuses[row.assetMaintenanceId] =
+                    one(ASSET_MAINTENANCE, {assetMaintenanceId: row.assetMaintenanceId})?.statusId || null
             return statuses[row.assetMaintenanceId] === "AsMntCompleted"
         })
         .map(row => ({
@@ -497,7 +533,11 @@ const unprojected = (code, message) => denied(code, message)
 
 function calendarDue(due, schedule, r, target, completions, at) {
     if (!target.zone) unprojected("ZONE_REQUIRED", "No time zone is set for " + target.name + ": no due date is projected")
-    if (!(r.intervalQuantity > 0) || !Number.isInteger(r.intervalQuantity) || !Object.hasOwn(calendarUnits, r.intervalUomId || ""))
+    if (
+        !(r.intervalQuantity > 0) ||
+        !Number.isInteger(r.intervalQuantity) ||
+        !Object.hasOwn(calendarUnits, r.intervalUomId || "")
+    )
         unprojected("INTERVAL_REQUIRED", "The interval is not set")
     if (!r.firstDueLocal) unprojected("FIRST_DUE_REQUIRED", "The first due date is not set")
     const zone = target.zone.timeZone
@@ -525,7 +565,9 @@ function calendarDue(due, schedule, r, target, completions, at) {
         const obligations = []
         const obligation = count => {
             while (obligations.length <= count)
-                obligations.push(instantIn(stepDay(anchorDay, r.intervalQuantity, r.intervalUomId, obligations.length), time, zone))
+                obligations.push(
+                    instantIn(stepDay(anchorDay, r.intervalQuantity, r.intervalUomId, obligations.length), time, zone)
+                )
             return obligations[count]
         }
         // how many obligations fall at or before a moment
@@ -534,15 +576,19 @@ function calendarDue(due, schedule, r, target, completions, at) {
             while (count < obligationCap && obligation(count) <= moment) count++
             return count
         }
+        // a completion counts once it is later than the obligation one interval before the first: an older one (a model default's
+        // record from before the plan) covers nothing
+        const window = instantIn(stepDay(anchorDay, r.intervalQuantity, r.intervalUomId, -1), time, zone)
         let covered = 0
-        for (const completion of completions) if (covered <= passedBy(completion.at)) covered++
+        for (const completion of completions) if (completion.at > window && covered <= passedBy(completion.at)) covered++
         dueDay = stepDay(anchorDay, r.intervalQuantity, r.intervalUomId, covered)
         overdueCount = Math.max(0, passedBy(at) - covered)
         due.explanation.push(everyText + " from " + r.firstDueLocal + " (" + zone + "), on fixed dates")
     }
     const dueMs = instantIn(dueDay, time, zone)
     const [, , anchorDate] = dayParts(anchorDay)
-    const clamped = ["TF_mon", "TF_yr"].includes(r.intervalUomId) && dayParts(dueDay)[2] < anchorDate && r.cadenceEnumId !== "MscCompletion"
+    const clamped =
+        ["TF_mon", "TF_yr"].includes(r.intervalUomId) && dayParts(dueDay)[2] < anchorDate && r.cadenceEnumId !== "MscCompletion"
     due.dueDate = new Date(dueMs)
     due.dueDateText = dueDay + " " + time + " " + zone
     due.overdueCount = overdueCount
@@ -555,38 +601,56 @@ function calendarDue(due, schedule, r, target, completions, at) {
     due.generateFromText = r.leadDays ? addDays(plannedDay, -r.leadDays) : plannedDay
     due.explanation.push(
         due.lastCompletionText
-            ? "Last completion " + due.lastCompletionText + (due.lastCompletionWorkEffortId ? " (work order " + due.lastCompletionWorkEffortId + ")" : "")
+            ? "Last completion " +
+                  due.lastCompletionText +
+                  (due.lastCompletionWorkEffortId ? " (work order " + due.lastCompletionWorkEffortId + ")" : "")
             : "No completion yet"
     )
-    due.explanation.push("Next due " + due.dueDateText + (clamped ? " (the " + ordinal(anchorDate) + " falls in a shorter month)" : ""))
+    due.explanation.push(
+        "Next due " + due.dueDateText + (clamped ? " (the " + ordinal(anchorDate) + " falls in a shorter month)" : "")
+    )
     if (due.moved)
         due.explanation.push(
-            "Planned for " + plannedDay + ": " + dueDay + (weekday(dueDay) % 6 === 0 ? " is a weekend day" : " is a holiday") + "; the due date stays " + dueDay
+            "Planned for " +
+                plannedDay +
+                ": " +
+                dueDay +
+                (weekday(dueDay) % 6 === 0 ? " is a weekend day" : " is a holiday") +
+                "; the due date stays " +
+                dueDay
         )
     if (r.leadDays) due.explanation.push("Work is made " + r.leadDays + " days ahead, from " + due.generateFromText)
     if (overdueCount > 1) due.explanation.push(overdueCount + " due dates have passed without a completion")
     due.state = dueMs <= at ? "overdue" : due.generateFromText <= localText(at, zone).slice(0, 10) ? "due" : "upcoming"
     due.stateText = {overdue: "Overdue", due: "Due", upcoming: "Not due yet"}[due.state]
 }
+// A meter's unit as shown with its values: its Uom's abbreviation ("1450 hr"), its type's default unit's, else (a count with no
+// unit) its name ("500 starts").
+function meterUnit(meter) {
+    if (!meter) return ""
+    const uomId =
+        meter.meterUomId ||
+        one("mantle.product.maintenance.ProductMeterType", {productMeterTypeId: meter.productMeterTypeId})?.defaultUomId
+    return uomText(uomId) || String(meter.meterName || "").toLowerCase()
+}
 const ordinal = n => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : {1: "st", 2: "nd", 3: "rd"}[n % 10] || "th")
 
 function meterDue(due, schedule, r, target, completions, at) {
     if (!target.assetId) unprojected("METER_INVALID", "A facility's plan is by the calendar")
     const meter = r.productMeterId ? one(PRODUCT_METER, {productMeterId: r.productMeterId}) : null
-    if (!meter || meter.productId !== target.productId) unprojected("METER_REQUIRED", "No counting meter of the equipment's model is chosen")
+    if (!meter || meter.productId !== target.productId)
+        unprojected("METER_REQUIRED", "No counting meter of the equipment's model is chosen")
     if (meter.isCumulative !== "Y") unprojected("METER_NOT_COUNTING", "The meter does not count up")
     if (!(r.intervalQuantity > 0)) unprojected("INTERVAL_REQUIRED", "The increment is not set")
-    // the meter's unit, else (a count) its name: "500 starts"
-    const unit =
-        uomText(meter.meterUomId || one("mantle.product.maintenance.ProductMeterType", {productMeterTypeId: meter.productMeterTypeId})?.defaultUomId) ||
-        String(meter.meterName || "").toLowerCase()
+    const unit = meterUnit(meter)
     const withUnit = value => numberText(value) + (unit ? " " + unit : "")
     due.meterName = meter.meterName || enumText(meter.productMeterTypeId) || meter.productMeterId
     due.unitText = unit
     due.increment = r.intervalQuantity
     due.intervalText = "Every " + withUnit(r.intervalQuantity)
     const readings = readingsOf(target.assetId, meter.productMeterId, at)
-    // the baseline: the reading the last counted completion took, else the plan's own
+    // the baseline: the later of the plan's own and the reading the last counted completion that took one took (a completion before
+    // the plan's baseline, such as a model default's record from before the plan, does not move it back)
     let baseline = null
     for (let index = completions.length - 1; index >= 0 && !baseline; index--) {
         const reading = completionReading(completions[index], readings)
@@ -599,9 +663,14 @@ function meterDue(due, schedule, r, target, completions, at) {
                     : "a completed maintenance record"
             }
     }
-    if (!baseline && r.baselineValue != null && r.baselineDate != null)
+    if (r.baselineValue != null && r.baselineDate != null && (!baseline || baseline.at < r.baselineDate))
         baseline = {value: r.baselineValue, at: r.baselineDate, source: "the plan's baseline"}
-    const origin = r.origin.intervalQuantity === "model default" ? " (the model default)" : r.defaults?.intervalQuantity != null && r.origin.intervalQuantity === "plan" ? " (this plan; the model default is " + withUnit(Number(String(r.defaults.intervalQuantity))) + ")" : ""
+    const origin =
+        r.origin.intervalQuantity === "model default"
+            ? " (the model default)"
+            : r.defaults?.intervalQuantity != null && r.origin.intervalQuantity === "plan"
+              ? " (this plan; the model default is " + withUnit(Number(String(r.defaults.intervalQuantity))) + ")"
+              : ""
     due.explanation.push(due.meterName + ": every " + withUnit(r.intervalQuantity) + origin)
     if (!baseline) unprojected("BASELINE_REQUIRED", "No baseline reading: record a reading or set the plan's baseline")
     due.baselineValue = baseline.value
@@ -627,7 +696,9 @@ function meterDue(due, schedule, r, target, completions, at) {
     due.nextThresholdText = withUnit(due.nextThreshold)
     due.maxReadingAgeDays = r.maxReadingAgeDays
     due.explanation.push("Last accepted reading " + due.lastReadingText)
-    due.explanation.push("Next threshold " + due.nextThresholdText + (remaining > 0 ? ", " + withUnit(remaining) + " to go" : ", reached"))
+    due.explanation.push(
+        "Next threshold " + due.nextThresholdText + (remaining > 0 ? ", " + withUnit(remaining) + " to go" : ", reached")
+    )
     if (due.readingAgeDays > r.maxReadingAgeDays) {
         due.state = "unknown"
         due.stateText = "Unknown: stale reading"
@@ -644,16 +715,17 @@ function nameOf(entityName, field, id, nameField) {
     return id ? one(entityName, {[field]: id})?.[nameField] || id : ""
 }
 // A plan for a list or a record header: names, its terms' texts and its due (a due that cannot be read is named, not raised).
-function rowOf(schedule, at = nowMs()) {
+function rowOf(schedule, at = nowMs(), known = null) {
     const term = termAt(schedule.maintenanceScheduleId, at)
     const r = resolve(schedule, term)
-    let due
-    try {
-        due = dueOf(schedule, at)
-    } catch (error) {
-        ec.logger.error("Maintenance plan " + schedule.maintenanceScheduleId + " due: " + error.message)
-        due = {state: "unknown", stateText: "Not read", stateColor: "grey-8", explanation: ["The due could not be read"]}
-    }
+    let due = known
+    if (!due)
+        try {
+            due = dueOf(schedule, at)
+        } catch (error) {
+            ec.logger.error("Maintenance plan " + schedule.maintenanceScheduleId + " due: " + error.message)
+            due = {state: "unknown", stateText: "Not read", stateColor: "grey-8", explanation: ["The due could not be read"]}
+        }
     const procedure = r.templateWorkEffortId ? one(WORK, {workEffortId: r.templateWorkEffortId}) : null
     const names = lib.partyNames([schedule.organizationPartyId, r.teamPartyId])
     return {
@@ -696,14 +768,23 @@ function termRow(term, schedule) {
         thruText: term.thruDate ? lib.dateText(term.thruDate) : "",
         inForce: fromMs <= nowMs() && (term.thruDate == null || ms(term.thruDate) > nowMs()),
         triggerText: enumText(r.triggerEnumId),
-        intervalText: r.intervalQuantity == null
-            ? ""
-            : r.meter
-              ? numberText(r.intervalQuantity) + " " + uomText(one(PRODUCT_METER, {productMeterId: r.productMeterId || "_NA_"})?.meterUomId)
-              : r.intervalQuantity + " " + (calendarUnits[r.intervalUomId]?.[r.intervalQuantity === 1 ? 0 : 1] || r.intervalUomId || ""),
+        intervalText:
+            r.intervalQuantity == null
+                ? ""
+                : r.meter
+                  ? (
+                        numberText(r.intervalQuantity) +
+                        " " +
+                        meterUnit(r.productMeterId ? one(PRODUCT_METER, {productMeterId: r.productMeterId}) : null)
+                    ).trim()
+                  : r.intervalQuantity +
+                    " " +
+                    (calendarUnits[r.intervalUomId]?.[r.intervalQuantity === 1 ? 0 : 1] || r.intervalUomId || ""),
         procedureName: nameOf(WORK, "workEffortId", r.templateWorkEffortId, "workEffortName"),
         changeReason: term.changeReason || "",
-        changedByName: term.changedByUserId ? one("moqui.security.UserAccount", {userId: term.changedByUserId})?.userFullName || term.changedByUserId : ""
+        changedByName: term.changedByUserId
+            ? one("moqui.security.UserAccount", {userId: term.changedByUserId})?.userFullName || term.changedByUserId
+            : ""
     }
 }
 
@@ -714,23 +795,41 @@ function termRow(term, schedule) {
 function findSchedules(p) {
     const userScope = listScope(readScope())
     let query = find(SCHEDULE)
-    if (userScope.organizationPartyIds != null) query = query.condition("organizationPartyId", "in", Array.from(userScope.organizationPartyIds).concat(["_NA_"]))
-    if (text(p.organizationPartyId)) query = query.condition("organizationPartyId", maintenanceAccess.requireOrganization(userScope, text(p.organizationPartyId)))
+    if (userScope.organizationPartyIds != null)
+        query = query.condition("organizationPartyId", "in", Array.from(userScope.organizationPartyIds).concat(["_NA_"]))
+    if (text(p.organizationPartyId))
+        query = query.condition(
+            "organizationPartyId",
+            maintenanceAccess.requireOrganization(userScope, text(p.organizationPartyId))
+        )
     if (text(p.assetId)) query = query.condition("assetId", text(p.assetId))
     if (text(p.facilityId)) query = query.condition("facilityId", "in", resources.subtreeIds(text(p.facilityId), null))
     if (text(p.productId)) {
-        const assetIds = Array.from(find(ASSET, {productId: text(p.productId)}).selectField("assetId").limit(1000).list()).map(row => row.assetId)
+        const assetIds = Array.from(
+            find(ASSET, {productId: text(p.productId)})
+                .selectField("assetId")
+                .limit(1000)
+                .list()
+        ).map(row => row.assetId)
         query = query.condition("assetId", "in", assetIds.concat(["_NA_"]))
     }
     const status = text(p.statusId) || "open"
-    const statusIds = {open: ["MschDraft", "MschActive"], draft: ["MschDraft"], active: ["MschActive"], ended: ["MschEnded"]}[status]
+    const statusIds = {open: ["MschDraft", "MschActive"], draft: ["MschDraft"], active: ["MschActive"], ended: ["MschEnded"]}[
+        status
+    ]
     if (statusIds) query = query.condition("statusId", "in", statusIds)
     else if (status !== "all") query = query.condition("statusId", status)
-    const termFilter = {triggerEnumId: text(p.triggerEnumId), templateWorkEffortId: text(p.templateWorkEffortId), teamPartyId: text(p.teamPartyId)}
+    const termFilter = {
+        triggerEnumId: text(p.triggerEnumId),
+        templateWorkEffortId: text(p.templateWorkEffortId),
+        teamPartyId: text(p.teamPartyId)
+    }
     if (Object.values(termFilter).some(Boolean)) {
         let terms = find(TERM).condition("thruDate", "is-null", null)
         for (const [field, value] of Object.entries(termFilter)) if (value) terms = terms.condition(field, value)
-        const ids = Array.from(terms.selectField("maintenanceScheduleId").limit(5000).list()).map(row => row.maintenanceScheduleId)
+        const ids = Array.from(terms.selectField("maintenanceScheduleId").limit(5000).list()).map(
+            row => row.maintenanceScheduleId
+        )
         query = query.condition("maintenanceScheduleId", "in", ids.concat(["_NA_"]))
     }
     if (text(p.text)) {
@@ -779,6 +878,8 @@ function getSchedule(p) {
         productMeterId: r.productMeterId,
         meterName: meter ? meter.meterName || meter.productMeterId : "",
         baselineValue: r.baselineValue,
+        meterUnitText: meterUnit(meter),
+        estimatedWorkTime: r.estimatedWorkTime,
         baselineDate: r.baselineDate == null ? null : new Date(r.baselineDate),
         baselineDateText: r.baselineDate == null ? "" : lib.dateText(new Date(r.baselineDate)),
         maxReadingAgeDays: r.maxReadingAgeDays,
@@ -798,7 +899,7 @@ function getSchedule(p) {
     }
     // the term as stored (empty where the model default applies), for the edit form
     const stored = {}
-    for (const field of termFields) stored[field] = term ? term[field] ?? null : null
+    for (const field of termFields) stored[field] = term ? (term[field] ?? null) : null
     return {
         schedule: Object.assign(rowOf(schedule, at), {
             timeZoneText: target.zone ? target.zone.timeZone + (target.zone.inherited ? " (inherited)" : "") : "",
@@ -831,9 +932,13 @@ function storeSchedule(p) {
     const action = text(p.action)
     const revision = Number(schedule.revision || 0) + 1
     const now = ec.user.nowTimestamp
+    // a plan keeps its organization: once its target has moved to another, it is ended, not changed or activated
+    const target = action === "end" ? null : scheduleTarget(schedule)
+    if (target && target.organizationPartyId !== schedule.organizationPartyId)
+        denied("TARGET_MOVED", target.name + " now belongs to another organization; end this plan and make one there")
     if (action === "activate") {
         if (schedule.statusId !== "MschDraft") denied("PLAN_NOT_DRAFT", "Plan " + id + " is already active")
-        const findings = findingsOf(schedule, termAt(id), scheduleTarget(schedule))
+        const findings = findingsOf(schedule, termAt(id), target)
         if (findings.length) denied(findings[0].code, findings.map(row => row.text).join("; "))
         call("update#" + SCHEDULE, {maintenanceScheduleId: id, statusId: "MschActive", fromDate: now, revision})
         return {maintenanceScheduleId: id, statusId: "MschActive", revision}
@@ -841,7 +946,8 @@ function storeSchedule(p) {
     if (action === "end") {
         const reason = text(p.changeReason)
         if (!reason) denied("REASON_REQUIRED", "Give the reason the plan ends")
-        for (const row of termsOf(id)) if (row.thruDate == null) call("update#" + TERM, {maintenanceScheduleId: id, fromDate: row.fromDate, thruDate: now})
+        for (const row of termsOf(id))
+            if (row.thruDate == null) call("update#" + TERM, {maintenanceScheduleId: id, fromDate: row.fromDate, thruDate: now})
         call("update#" + SCHEDULE, {
             maintenanceScheduleId: id,
             statusId: "MschEnded",
@@ -853,29 +959,56 @@ function storeSchedule(p) {
         return {maintenanceScheduleId: id, statusId: "MschEnded", revision}
     }
     if (action) throw new Error("Unknown maintenance plan action " + action)
-    // a change of the name and the terms
-    const target = scheduleTarget(schedule)
-    const wanted = termFrom(p, target)
+    // a change of the name and the terms; a call that names no term field changes the name alone
+    const termGiven = termFields.some(field => !blank(p[field]))
+    const wanted = termGiven ? termFrom(p, target) : null
     const current = termAt(id)
     const name = text(p.scheduleName)
     let changed = false
     if (name && name !== schedule.scheduleName) changed = true
-    if (!sameTerm(wanted, current)) {
+    if (termGiven && !sameTerm(wanted, current)) {
         changed = true
         if (schedule.statusId === "MschDraft" && current) {
-            call("update#" + TERM, Object.assign({maintenanceScheduleId: id, fromDate: current.fromDate, changedByUserId: ec.user.userId, changeReason: text(p.changeReason)}, wanted))
+            call(
+                "update#" + TERM,
+                Object.assign(
+                    {
+                        maintenanceScheduleId: id,
+                        fromDate: current.fromDate,
+                        changedByUserId: ec.user.userId,
+                        changeReason: text(p.changeReason)
+                    },
+                    wanted
+                )
+            )
         } else {
             const reason = text(p.changeReason)
             if (!reason) denied("REASON_REQUIRED", "Give the reason the terms change")
             const effective = blank(p.effectiveDate) ? nowMs() : ms(p.effectiveDate)
             if (current && effective <= ms(current.fromDate))
-                denied("DATE_INVALID", "The change takes effect after the terms in effect began, " + lib.dateText(current.fromDate))
+                denied(
+                    "DATE_INVALID",
+                    "The change takes effect after the terms in effect began, " + lib.dateText(current.fromDate)
+                )
             if (effective < nowMs() - 60000) denied("DATE_INVALID", "A change takes effect now or later")
+            // a term already planned from a later time is never cut short before it begins
+            const planned = termsOf(id).find(row => ms(row.fromDate) >= effective)
+            if (planned)
+                denied(
+                    "DATE_INVALID",
+                    "A change is already planned from " + lib.dateText(planned.fromDate) + "; take effect after it"
+                )
             const from = new Date(effective)
             for (const row of termsOf(id))
                 if (row.thruDate == null || ms(row.thruDate) > effective)
                     call("update#" + TERM, {maintenanceScheduleId: id, fromDate: row.fromDate, thruDate: from})
-            call("create#" + TERM, Object.assign({maintenanceScheduleId: id, fromDate: from, changedByUserId: ec.user.userId, changeReason: reason}, wanted))
+            call(
+                "create#" + TERM,
+                Object.assign(
+                    {maintenanceScheduleId: id, fromDate: from, changedByUserId: ec.user.userId, changeReason: reason},
+                    wanted
+                )
+            )
         }
     }
     if (changed) call("update#" + SCHEDULE, {maintenanceScheduleId: id, scheduleName: name || schedule.scheduleName, revision})
@@ -902,7 +1035,12 @@ function createSchedule(userScope, p) {
         if (earlier) {
             if (earlier.operationHash !== hash) denied("OPERATION_KEY_CONFLICT", "The operation key was used for another plan")
             scheduleOf(userScope, earlier.maintenanceScheduleId)
-            return {maintenanceScheduleId: earlier.maintenanceScheduleId, statusId: earlier.statusId, revision: Number(earlier.revision || 0), repeated: true}
+            return {
+                maintenanceScheduleId: earlier.maintenanceScheduleId,
+                statusId: earlier.statusId,
+                revision: Number(earlier.revision || 0),
+                repeated: true
+            }
         }
     }
     const target = targetOf(userScope, text(p.assetId), text(p.facilityId))
@@ -915,11 +1053,13 @@ function createSchedule(userScope, p) {
     }
     const term = termFrom(p, target)
     // the trigger is kept on the term: the model default's when the plan names none
-    if (!term.triggerEnumId) term.triggerEnumId = term.productMeterId || defaults?.intervalProductMeterId ? "MstMeter" : "MstCalendar"
+    if (!term.triggerEnumId)
+        term.triggerEnumId = term.productMeterId || defaults?.intervalProductMeterId ? "MstMeter" : "MstCalendar"
     if (term.triggerEnumId === "MstMeter" && !target.assetId) denied("METER_INVALID", "A facility's plan is by the calendar")
     const now = ec.user.nowTimestamp
     const name =
-        text(p.scheduleName) || (defaults?.description ? target.name + ": " + defaults.description : target.name + " preventive maintenance")
+        text(p.scheduleName) ||
+        (defaults?.description ? target.name + ": " + defaults.description : target.name + " preventive maintenance")
     const created = call("create#" + SCHEDULE, {
         scheduleName: name,
         organizationPartyId: target.organizationPartyId,
@@ -933,7 +1073,13 @@ function createSchedule(userScope, p) {
         operationKey,
         operationHash: operationKey ? hash : null
     })
-    call("create#" + TERM, Object.assign({maintenanceScheduleId: created.maintenanceScheduleId, fromDate: now, changedByUserId: ec.user.userId}, term))
+    call(
+        "create#" + TERM,
+        Object.assign(
+            {maintenanceScheduleId: created.maintenanceScheduleId, fromDate: now, changedByUserId: ec.user.userId},
+            term
+        )
+    )
     return {maintenanceScheduleId: created.maintenanceScheduleId, statusId: "MschDraft", revision: 1, repeated: false}
 }
 
@@ -952,8 +1098,13 @@ function findDue(p) {
     const at = blank(p.asOfDate) ? nowMs() : ms(p.asOfDate)
     const horizon = blank(p.thruDate) ? null : ms(p.thruDate)
     let query = find(SCHEDULE, {statusId: "MschActive"})
-    if (userScope.organizationPartyIds != null) query = query.condition("organizationPartyId", "in", Array.from(userScope.organizationPartyIds).concat(["_NA_"]))
-    if (text(p.organizationPartyId)) query = query.condition("organizationPartyId", maintenanceAccess.requireOrganization(userScope, text(p.organizationPartyId)))
+    if (userScope.organizationPartyIds != null)
+        query = query.condition("organizationPartyId", "in", Array.from(userScope.organizationPartyIds).concat(["_NA_"]))
+    if (text(p.organizationPartyId))
+        query = query.condition(
+            "organizationPartyId",
+            maintenanceAccess.requireOrganization(userScope, text(p.organizationPartyId))
+        )
     if (text(p.assetId)) query = query.condition("assetId", text(p.assetId))
     if (text(p.facilityId)) query = query.condition("facilityId", "in", resources.subtreeIds(text(p.facilityId), null))
     const schedules = Array.from(query.orderBy("maintenanceScheduleId").limit(dueScheduleCap).list())
@@ -963,8 +1114,8 @@ function findDue(p) {
     const failures = []
     for (const schedule of schedules) {
         try {
-            const row = rowOf(schedule, at)
             const due = dueOf(schedule, at)
+            const row = rowOf(schedule, at, due)
             if (states && !states.includes(due.state)) continue
             if (horizon != null && due.trigger === "calendar" && due.dueDate && ms(due.dueDate) > horizon) continue
             dueList.push(Object.assign(row, {due}))
@@ -974,7 +1125,11 @@ function findDue(p) {
         }
     }
     const order = {overdue: 0, due: 1, unknown: 2, upcoming: 3}
-    dueList.sort((a, b) => (order[a.dueState] ?? 9) - (order[b.dueState] ?? 9) || (ms(a.due.dueDate) ?? Infinity) - (ms(b.due.dueDate) ?? Infinity))
+    dueList.sort(
+        (a, b) =>
+            (order[a.dueState] ?? 9) - (order[b.dueState] ?? 9) ||
+            (ms(a.due.dueDate) ?? Infinity) - (ms(b.due.dueDate) ?? Infinity)
+    )
     return Object.assign(lib.pageList(dueList, p, "dueList"), {failures})
 }
 
