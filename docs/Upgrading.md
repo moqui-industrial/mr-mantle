@@ -163,8 +163,10 @@ These four are initial data: loading one again puts back its rows as shipped, ov
 or the rows it lacks by hand. The last phases, dispatch (P8) and customer repair (P12), added rows to
 `MaintenanceWorkData` (loaded again by `types=seed`) and to `BossSetupMaintenanceData` (Teams' grant to planners and
 supervisors among them), so a database made before them takes those rows too. mr-boss `BossSetupData.xml` also gained
-`maintenance` in the client deny patterns of `BOSS_PROJECTS_INTERNAL` (Maintenance P1); a deployment that keeps that
-file's rows as shipped loads it again, others add the package to the pattern rows.
+`maintenance` in the client deny patterns of `BOSS_PROJECTS_INTERNAL` (Maintenance P1), and the `RequestTriage` topic's
+link opens Maintenance's RequestDetail for a maintenance request (Maintenance P4; before it the planners' triage notice
+opens Projects'); a deployment that keeps that file's rows as shipped loads it again, others add the package to the
+pattern rows and change the topic's `linkTemplate` as the file has it.
 
 Start the server and refresh the three Maintenance datasets (`boss-maintenance-work-status`, `boss-maintenance-pm-compliance`
 and `boss-maintenance-outages`) from Admin's data readiness, so the work orders, obligations and outages already written are
