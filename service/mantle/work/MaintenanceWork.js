@@ -38,6 +38,8 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
+// P10: CompleteWork's outside-service line (MaintenancePurchases.js)
+const purchases = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePurchases.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -1001,7 +1003,11 @@ function actionsFor(userScope, ctx) {
                 // P5: Start's offline intent and Complete's follow-up
                 needsOffline: action === "start",
                 offlineIntent: ctx.order.offlineIntent === "Y",
-                needsFollowUp: action === "complete"
+                needsFollowUp: action === "complete",
+                // P10: the outside-service lines the caller may accept at completion, with the work's files as evidence
+                ...(action === "complete" && !refused
+                    ? purchases().completionLines(userScope, ctx)
+                    : {serviceLines: [], evidenceFiles: []})
             }
         })
 }
@@ -1081,6 +1087,8 @@ function transitionWorkOrder(p) {
     call("update#" + WORK, workFields)
     // P5: the target out of service from the start, or left down at completion with its follow-up (ResourceOutages.js)
     const downtime = downtimeOf(userScope, ctx, action, p, workFields)
+    // P10: CompleteWork's outside-service line, accepted under Purchasing's check in the completion's transaction
+    const accepted = action === "complete" ? purchases().acceptAtCompletion(userScope, ctx, p) : null
     // completion closes the work where the organization's policy says so
     if (action === "complete" && policyOf(ctx.organizationPartyId).closurePolicyEnumId === "MclOnComplete") {
         call("update#" + WORK, {workEffortId: root.workEffortId, statusId: "WeClosed"})
@@ -1094,7 +1102,8 @@ function transitionWorkOrder(p) {
         revision,
         resultCode,
         resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
-        followUpWorkEffortId: downtime.followUpWorkEffortId || null
+        followUpWorkEffortId: downtime.followUpWorkEffortId || null,
+        serviceAcceptanceId: accepted?.serviceAcceptanceId || null
     }
 }
 // The downtime of a transition (P5): Start with offline intent (the order's, or offlineIntent given) records the target's outage
