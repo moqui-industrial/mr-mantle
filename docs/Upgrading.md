@@ -128,3 +128,46 @@ The framework now records a `<field>_changeReason` passed to an entity-auto `cre
 did for `update#` (Commerce F63). Store publication writes its reason only there: a new or ended `ProductStoreProduct`
 row no longer fills its own `changeReason` field. The column stays, with the reasons of rows written before, and nothing
 reads it; no data change is needed.
+
+## Maintenance (November 2026)
+
+The Maintenance app (mr-boss `plan/impl-maintenance.md`) adds tables, which the table check makes, and seed rows, which a
+database made before or during its build lacks. Without them its screens fail in ways that look like bugs: an
+equipment-fault stop is refused (`REASON_INVALID`, no `RurEquipmentFault`), and so is Manufacturing's offline change of a
+work center (no `RurOffline`). A new database needs nothing.
+
+Stop the server and take a backup ([Upgrading](https://github.com/moqui/mr-moqui/blob/master/docs/Run-Deploy.md#upgrading)
+step 1). Load the seed files: mr-mantle's `MaintenanceWorkData`, `MaintenanceWorkOutageData`, `MaintenanceWorkResourceData`
+(after the outage file, whose reason type it uses), `MaintenanceIntakeData`, `MaintenanceProcedureData`,
+`MaintenancePurchaseData`, `MaintenanceSettingsData`, `MaintenanceStackData` and `MaintenancePlanData`: the lookups and
+status flow, the outage and blackout reasons, the mail intake action, the procedure flow, the equipment import target, the
+projected calendars, and the topic and Admin registrations of the generation job.
+
+```sh
+moqui load types=seed
+```
+
+Then the initial files, in this order: the permissions, the generation job (seeded paused, so a resumed job is not paused
+again by a later seed load), BOSS's groups, grants, bundles and registrations, and the three report datasets with their
+feed:
+
+```sh
+moqui load location=runtime/component/mr-mantle/data/MaintenanceSetupData.xml
+moqui load location=runtime/component/mr-mantle/data/MaintenancePlanSetupData.xml
+moqui load location=runtime/component/mr-boss/data/BossSetupMaintenanceData.xml
+moqui load location=runtime/component/mr-boss/data/BossMaintenanceReportData.xml
+```
+
+These four are initial data: loading one again puts back its rows as shipped, over what the deployment has changed since
+(a resumed job paused again, a group's changed grant). On a database made during the build, load only the files it lacks,
+or the rows it lacks by hand. mr-boss `BossSetupData.xml` also gained `maintenance` in the client deny patterns of
+`BOSS_PROJECTS_INTERNAL` (Maintenance P1); a deployment that keeps that file's rows as shipped loads it again, others add the
+package to the pattern rows.
+
+Start the server and refresh the three Maintenance datasets (`boss-maintenance-work-status`, `boss-maintenance-pm-compliance`
+and `boss-maintenance-outages`) from Admin's data readiness, so the work orders, obligations and outages already written are
+indexed; the feed indexes new ones as they are written. The generation job stays paused until an operations manager resumes
+it in Admin's Jobs.
+
+Insights' internal flow map template is now version 2, with Maintenance's step counted and linked. An organization's copy
+of version 1 keeps its information-only Maintenance step until it copies the template again.
