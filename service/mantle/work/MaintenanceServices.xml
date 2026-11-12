@@ -202,6 +202,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="assetId"/>
             <parameter name="facilityId"/>
             <parameter name="offlineIntent"><description>Y or N (P5)</description></parameter>
+            <parameter name="costCenterId"><description>P9: the cost centre the work is charged to (the organization or an
+                internal organization rolling up to it; VALUE_INVALID); empty clears it</description></parameter>
+            <parameter name="projectWorkEffortId"><description>P9: the project the work is charged to (a project of the
+                organization; VALUE_INVALID); empty clears it</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>

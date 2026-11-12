@@ -80,7 +80,13 @@ const mappings = {
     variance: ["VarianceReasonGlAccount", ["varianceReasonEnumId"], ["glAccountId"]],
     product: ["ProductGlAccount", ["productId", "glAccountTypeEnumId"], ["glAccountId", "contraGlAccountId"]],
     category: ["ProductCategoryGlAccount", ["productCategoryId", "glAccountTypeEnumId"], ["glAccountId", "contraGlAccountId"]],
-    account: ["GlAccountTypePartyDefault", ["partyId", "roleTypeId", "glAccountTypeEnumId"], ["glAccountId"]]
+    account: ["GlAccountTypePartyDefault", ["partyId", "roleTypeId", "glAccountTypeEnumId"], ["glAccountId"]],
+    // AC-24 (impl-maintenance P9): the expense a part issued to maintenance work posts to, dated, by kind and facility
+    maintenance: [
+        "MaintenanceCostPolicy",
+        ["maintenanceCostPolicyId"],
+        ["maintenanceKindEnumId", "facilityId", "glAccountId", "fromDate", "thruDate"]
+    ]
 }
 // What each mapping kind is called on the screens.
 const mappingLabels = {
@@ -95,7 +101,8 @@ const mappingLabels = {
     variance: "Inventory variance reasons",
     product: "Products",
     category: "Product categories",
-    account: "Party defaults"
+    account: "Party defaults",
+    maintenance: "Maintenance expense"
 }
 // The readable key of a mapping row: enumeration descriptions, sides and directions in words, other ids as they are.
 const keyWords = {
@@ -224,6 +231,7 @@ function mappingList(p) {
         )
     }
     keyTexts(mappingRows, descriptor[1])
+    if (kind === "maintenance") maintenanceKeyTexts(mappingRows)
     const selectedMapping = p.mappingToken ? mappingRows.find(row => row.mappingToken === p.mappingToken) : null
     if (p.mappingToken && !selectedMapping) throw new Error("Mapping changed; select it again")
     for (const type of rows("moqui.basic.Enumeration", {
@@ -287,6 +295,35 @@ function mappingList(p) {
         errorTransactions
     })
 }
+// AC-24: a maintenance expense row's key in words (its kind, facility and dates) and its checks: a maintenance kind or any, a
+// facility of the organization or every facility, an account (checked with the others), from now unless dated, an end after it.
+function maintenanceKeyTexts(rows) {
+    for (const row of rows) {
+        const kind = row.maintenanceKindEnumId ? one("moqui.basic.Enumeration", {enumId: row.maintenanceKindEnumId}) : null
+        const facility = row.facilityId ? one("mantle.facility.Facility", {facilityId: row.facilityId}) : null
+        row.mappingKeyText = [
+            kind ? kind.description || kind.enumId : "Any maintenance",
+            facility ? facility.facilityName || facility.facilityId : "Every facility",
+            "from " + lib.dateText(row.fromDate) + (row.thruDate ? " to " + lib.dateText(row.thruDate) : "")
+        ].join(" · ")
+    }
+}
+function maintenanceMapping(organizationPartyId, values) {
+    if (!values.glAccountId) throw new Error("Choose the expense account")
+    if (
+        values.maintenanceKindEnumId &&
+        !one("moqui.basic.Enumeration", {enumId: values.maintenanceKindEnumId, enumTypeId: "MaintenanceKind"})
+    )
+        throw new Error("Choose a maintenance kind")
+    if (values.facilityId) {
+        const owner = ec.resource
+            .script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
+            .facilityOrganization(values.facilityId)
+        if (owner !== organizationPartyId) throw new Error("Facility is outside the mapping organization")
+    }
+    if (!values.fromDate) values.fromDate = ec.user.nowTimestamp
+    if (values.thruDate && ms(values.thruDate) <= ms(values.fromDate)) throw new Error("A mapping's end must follow its start")
+}
 function storeMapping(p) {
     const s = lib.organization(p, "admin"),
         why = lib.reason(p),
@@ -297,7 +334,11 @@ function storeMapping(p) {
             organizationPartyId: s.organizationPartyId
         })
     for (const key of descriptor[1])
-        if (!values[key] && !(p.mappingKind === "asset" && key === "assetTypeGlAccountId"))
+        if (
+            !values[key] &&
+            !(p.mappingKind === "asset" && key === "assetTypeGlAccountId") &&
+            !(p.mappingKind === "maintenance" && key === "maintenanceCostPolicyId")
+        )
             throw new Error("Mapping requires " + key)
     for (const field of [...descriptor[1], ...descriptor[2]])
         if (field.endsWith("GlAccountId") || field === "glAccountId") {
@@ -319,6 +360,7 @@ function storeMapping(p) {
     }
     if (p.mappingKind === "asset" && !values.assetTypeEnumId && !values.assetId)
         throw new Error("Choose an asset type or an owned asset")
+    if (p.mappingKind === "maintenance") maintenanceMapping(s.organizationPartyId, values)
     if (values.partyId) lib.counterparty(values.partyId)
     if (values.assetId && one("mantle.product.asset.Asset", {assetId: values.assetId})?.ownerPartyId !== s.organizationPartyId)
         throw new Error("Asset is outside the mapping organization")
@@ -340,6 +382,15 @@ function storeMapping(p) {
     const key = pick(values, ["organizationPartyId", ...descriptor[1]])
     const old = descriptor[1].every(f => values[f]) ? find(entity, key).forUpdate(true).one() : null
     if (old) lib.revision(old, p.lastUpdatedStamp)
+    // a maintenance expense row is ended, not rewritten: an edit changes only its end
+    if (old && p.mappingKind === "maintenance")
+        for (const field of ["maintenanceKindEnumId", "facilityId", "glAccountId", "fromDate"])
+            if (
+                Object.hasOwn(values, field) &&
+                String(values[field] ?? "") !== String(old[field] ?? "") &&
+                !(field === "fromDate" && ms(values[field]) === ms(old[field]))
+            )
+                throw new Error("End this maintenance expense mapping and add a new one to change its " + field)
     lib.audit(Object.keys(values), why)
     call((old ? "update#" : "create#") + entity, values)
     return {complete: true}
@@ -376,6 +427,8 @@ function clone(p) {
             organizationPartyId: source
         })) {
             if (kind === "asset" && row.assetId) continue
+            // a facility is its organization's: a maintenance expense row of one is not copied
+            if (kind === "maintenance" && row.facilityId) continue
             const values = Object.assign(pick(map(row), [...descriptor[1], ...descriptor[2]]), {organizationPartyId: target})
             // A source-specific product, category or account must also be usable by the destination.
             // Name incompatible rows in the preview and leave the remaining independent mappings available.
@@ -407,6 +460,7 @@ function clone(p) {
                 })
             else {
                 if (kind === "asset") delete values.assetTypeGlAccountId
+                if (kind === "maintenance") delete values.maintenanceCostPolicyId
                 copies.push({entity: mappingEntity(descriptor), values})
             }
         }
