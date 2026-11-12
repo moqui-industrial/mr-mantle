@@ -4,7 +4,8 @@
 // the calendar file of a work order's planned window (one with none NOT_SCHEDULED, another technician's NOT_ASSIGNED) and of a plan's
 // next due; Report a problem from a chat message (read under the room check: a user outside the room gets nothing and cannot report
 // from it, a user without MAINTENANCE_REQUEST is refused, two messages are ONE_SOURCE; the report files the message on the request); and a video call about a work order (the event related to it with the
-// call link, the vendor and the technician invited; another technician and an unreachable attendee refused). Standalone: spec-local
+// call link, the vendor and the technician invited; another technician, an unreachable attendee and another user's personal contact
+// refused). Standalone: spec-local
 // organization, teams, users, work and plans; the services as each user.
 // Run: ./moq test mr-mantle --spec MaintenanceStack
 const prefix = "MNT_STACK_SPEC"
@@ -110,6 +111,18 @@ spec({
         call("mantle.party.ContactServices.create#EmailAddress", {
             partyId: prefix + "_VENDOR",
             emailAddress: "vera.vendor@example.com",
+            contactMechPurposeId: "EmailPrimary"
+        })
+        // the technician's personal contact, with an email address (another user's to the planner)
+        call("create#mantle.party.Party", {
+            partyId: prefix + "_PRIVATE",
+            partyTypeEnumId: "PtyPerson",
+            privateOwnerUserId: state.tech
+        })
+        call("create#mantle.party.Person", {partyId: prefix + "_PRIVATE", firstName: "Pat", lastName: "Private"})
+        call("mantle.party.ContactServices.create#EmailAddress", {
+            partyId: prefix + "_PRIVATE",
+            emailAddress: "pat.private@example.com",
             contactMechPurposeId: "EmailPrimary"
         })
         call("create#mantle.party.Party", {partyId: prefix + "_NOBODY", partyTypeEnumId: "PtyPerson"})
@@ -325,10 +338,16 @@ feature("a video call about a work order: an event related to it with the call l
                 workEffortId: state.scheduled,
                 attendeePartyId: prefix + "_VENDOR",
                 startDate: new Date(Date.now() - day)
+            }),
+            // another user's personal contact, as Commons' attendees leave it out (review R3)
+            privateContact: as(state.planner, M + "add#MaintenanceVideoCall", {
+                workEffortId: state.scheduled,
+                attendeePartyId: prefix + "_PRIVATE",
+                startDate: start
             })
         }
     },
-    then({made, event, parties, related, otherTech, unreachable, past}) {
+    then({made, event, parties, related, otherTech, unreachable, past, privateContact}) {
         made.joinUrl.includes("/call/")
         event.infoUrl == made.joinUrl
         event.workEffortName.includes("work order " + state.scheduled)
@@ -338,6 +357,7 @@ feature("a video call about a work order: an event related to it with the call l
         parties.includes(state.TECH_PARTY + ":WeptAssigned")
         otherTech == "NOT_ASSIGNED"
         unreachable == "ATTENDEE_UNREACHABLE"
+        privateContact == "ATTENDEE_UNAVAILABLE"
         past == "DATE_PAST"
     }
 })

@@ -46,11 +46,13 @@ const L = words => ec.l10n.localize(words)
 function signedIn() {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in first")
 }
-// A service's answer, or null when it refuses: its errors kept out of the caller's.
-function quietly(name, parameters) {
+// A service's answer, or null when it refuses: its errors kept out of the caller's. withCallerAuthz keeps the caller's
+// authorization (and so the user's entity filters) for an owner check that reads them, as the chat room check does.
+function quietly(name, parameters, withCallerAuthz = false) {
     ec.message.pushErrors()
     try {
-        const out = ec.service.sync().name(name).parameters(parameters).disableAuthz().call() || {}
+        const builder = ec.service.sync().name(name).parameters(parameters)
+        const out = (withCallerAuthz ? builder : builder.disableAuthz()).call() || {}
         return ec.message.hasError() ? null : out
     } catch (error) {
         return null
@@ -97,7 +99,9 @@ function sourceKind(p) {
 const sourceUnavailable = () => denied("SOURCE_UNAVAILABLE", "The message is not available")
 function chatSource(p) {
     if (!text(p.chatRoomId) || !text(p.eventSeq)) sourceUnavailable()
-    const access = quietly("org.moqui.chat.ChatServices.get#RoomAccess", {chatRoomId: text(p.chatRoomId)})
+    // Comms' own check, as findOrCreate#ChatCommunicationEvent calls it: with the caller's authorization, since a record room's
+    // read is the record's visibility (check#RecordVisible), which sees every record with authorization disabled (review R1)
+    const access = quietly("org.moqui.chat.ChatServices.get#RoomAccess", {chatRoomId: text(p.chatRoomId)}, true)
     if (!access?.canRead) sourceUnavailable()
     const room = one("moqui.chat.ChatRoom", {chatRoomId: text(p.chatRoomId)})
     if (room?.encrypted === "Y")
@@ -188,10 +192,14 @@ function problemSource(p) {
 function fileSource(requestId, p) {
     const kind = sourceKind(p)
     if (kind === "chat") {
-        const found = call("mantle.party.CommunicationServices.findOrCreate#ChatCommunicationEvent", {
-            chatRoomId: text(p.chatRoomId),
-            eventSeq: Number(p.eventSeq)
-        })
+        // with the caller's authorization, as Customer Service calls it: its room check reads the user's entity filters (review R1)
+        const found =
+            ec.service
+                .sync()
+                .name("mantle.party.CommunicationServices.findOrCreate#ChatCommunicationEvent")
+                .parameters({chatRoomId: text(p.chatRoomId), eventSeq: Number(p.eventSeq)})
+                .call() || {}
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
         call("mantle.party.CommunicationServices.link#CommunicationEventRecord", {
             communicationEventId: found.communicationEventId,
             recordEntityName: REQUEST,
@@ -368,7 +376,10 @@ function addVideoCall(p) {
         denied("WORK_CLOSED", "Work order " + rootId + " is " + (root.statusId === "WeClosed" ? "closed" : "cancelled"))
     const attendeePartyId = text(p.attendeePartyId)
     if (!attendeePartyId) denied("ATTENDEE_REQUIRED", "Choose who joins the call")
-    if (!one("mantle.party.Party", {partyId: attendeePartyId})) denied("ATTENDEE_UNAVAILABLE", "That person is not available")
+    // as Commons' attendees: not a disabled party, nor someone else's personal contact (review R3)
+    const attendee = one("mantle.party.Party", {partyId: attendeePartyId})
+    if (!attendee || attendee.disabled === "Y" || (attendee.privateOwnerUserId && attendee.privateOwnerUserId !== ec.user.userId))
+        denied("ATTENDEE_UNAVAILABLE", "That person is not available")
     const hasUser = find("moqui.security.UserAccount", {partyId: attendeePartyId}).count() > 0
     const email = call("mantle.party.ContactServices.get#PrimaryEmailAddress", {partyId: attendeePartyId}).emailAddress || null
     if (!hasUser && !email) denied("ATTENDEE_UNREACHABLE", "The person has no account and no email address to invite")
