@@ -117,9 +117,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="get" noun="Readiness" allow-remote="false">
-        <description>People's setup readiness, answering Admin's readiness contract with no adapter: called with providerKey and
-            an organizationPartyId (or none, for every employer in the caller's scope), returns checks of checkKey, title, state
-            (ready, warning, failed or unavailable), reasonCode, message and fixPath, with the organization's id and name. The
+        <description>People's setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider)
+            with no adapter: called with providerKey and an organizationPartyId (or none, for every employer in the caller's
+            scope), returns checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the
+            employer as subject and scope, and fixRoute (the key of People's settings), with the organization's id and name. The
             checks of what is built, for an organization with current employees (one with none answers no check): a department
             set up, every employee with a manager. Later phases add theirs. Refuses a caller without PEOPLE_CONFIGURE
             (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>

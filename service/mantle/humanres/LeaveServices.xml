@@ -1,0 +1,508 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's leave policies, allocations and balances (IronStone People design §7 LeavePolicies, LeavePolicyDetail, LeaveAllocations
+    and LeaveBalances, §16.2 LeaveServices, PE-07; impl-people P11; Leave.js): an employer's dated leave policies for the leave
+    types of People's Lookups, their accrual steps, their assignments to employments, blocked and mandatory days, allocations, the
+    accrual job, and the balances and movements read from the append-only ledger (LeaveLedgerEntry), where every movement has its
+    source and a unique source key so it posts once. Each service checks the caller's People scope (People.js) and the People
+    permissions itself, then reads and writes with authorization off, and names no application group: policies, assignments,
+    blocked days, allocations and the accrual need PEOPLE_HR_VIEW (reads) and PEOPLE_HR_EDIT (changes) of the employer; balances
+    are the person's own (PEOPLE_SELF_SERVICE), a manager's live reports' (PEOPLE_TEAM_VIEW, balances only) and an HR reader's;
+    the movements the person's and HR's. A batch (an assignment run, an allocation, the accrual) takes each employment in its own
+    transaction, names each refusal and goes on. No leave reason is in any answer. Leave requests and their consumption and
+    reversal are P12's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Policies" allow-remote="false">
+        <description>The leave policies of the employers an HR reader reads, by name or id (term, ignoring case), of an employer
+            (organizationPartyId; ORGANIZATION_DENIED outside the scope) and a leave type, those in effect on asOfDate (now when empty)
+            unless includeEnded. Each with its employer, leave type, unit, terms, accrual (its steps in effect, in words), dates,
+            state, how many employments it has now or to come, whether the caller may change it and its revision. Paged. Refuses a
+            caller without PEOPLE_HR_VIEW (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="policies" type="List"><description>leavePolicyId, policyName, organizationPartyId, organizationName,
+                leaveTypeEnumId, leaveTypeText, unitEnumId, unitText, isPaid, allocationRequired, evidenceRequired, negativeLimit,
+                accrualFrequencyEnumId, frequencyText, accrualText, description, fromDateText, thruDateText, state, stateText,
+                assignedCount, canEdit, revision</description></parameter>
+            <parameter name="policiesCount" type="Integer"/>
+            <parameter name="policiesPageIndex" type="Integer"/>
+            <parameter name="policiesPageSize" type="Integer"/>
+            <parameter name="policiesPageMaxIndex" type="Integer"/>
+            <parameter name="policiesPageRangeLow" type="Integer"/>
+            <parameter name="policiesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('findPolicies', context)"/>
+            <set field="policies" from="found.policies"/>
+            <set field="policiesCount" from="found.policiesCount || 0"/>
+            <set field="policiesPageIndex" from="found.policiesPageIndex || 0"/>
+            <set field="policiesPageSize" from="found.policiesPageSize || 20"/>
+            <set field="policiesPageMaxIndex" from="found.policiesPageMaxIndex || 0"/>
+            <set field="policiesPageRangeLow" from="found.policiesPageRangeLow || 0"/>
+            <set field="policiesPageRangeHigh" from="found.policiesPageRangeHigh || 0"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Policy" allow-remote="false">
+        <description>One leave policy an HR reader of its employer reads: its row as find#Policies gives it, how many ledger entries
+            were posted under it and whether the caller assigns it; its accrual steps (every dated step, those in effect first: months
+            of service, amount a period, cap, carry-over limit, rounding, dates, state); the employments under it (now, to come, and
+            ended; at most 500), each with the person, dates, opening balance, state and revision; and its blocked and mandatory days
+            (kind, days, department, leave type, whether an approver may override, reason, state, revision). Refuses one outside the
+            scope as missing (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="leavePolicyId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="policy" type="Map"/>
+            <parameter name="rules" type="List"/>
+            <parameter name="assignments" type="List"/>
+            <parameter name="blockedIntervals" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getPolicy', context)"/>
+            <set field="policy" from="found.policy"/>
+            <set field="rules" from="found.rules"/>
+            <set field="assignments" from="found.assignments"/>
+            <set field="blockedIntervals" from="found.blockedIntervals"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Policy" allow-remote="false">
+        <description>A new leave policy of an employer (organizationPartyId, an HR editor's) from fromDate (today when empty): its
+            name, leave type (a current value of People's leave types), unit (LuDays, the default, or LuHours), whether it is paid
+            (yes by default), whether a request needs an allocation (yes by default), its negative limit (zero by default), whether a
+            request needs evidence, its accrual frequency (LafMonthly, LafQuarterly, LafYearly; none: allocations only) and
+            description. Or a change of one at its revision (expectedRevision): its name, description and terms (audited, with
+            changeReason), its unit while nothing was posted under it (UNIT_IN_USE), its frequency while no accrual was posted
+            (FREQUENCY_IN_USE); and with end, its close from thruDate (today or later): no new assignment and no accrual from then,
+            what was posted kept. Posted entries never change. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED). Refuses:
+            ORGANIZATION_REQUIRED, ORGANIZATION_DENIED, NAME_REQUIRED, TYPE_INVALID, UNIT_INVALID, LIMIT_INVALID, FREQUENCY_INVALID,
+            a policy outside the scope (RECORD_UNAVAILABLE), REVISION_CHANGED, another employer (OWNER_CHANGE), another leave type
+            (TYPE_CHANGE), DATE_PAST.</description>
+        <in-parameters>
+            <parameter name="leavePolicyId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="policyName"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="unitEnumId"/>
+            <parameter name="isPaid"/>
+            <parameter name="allocationRequired"/>
+            <parameter name="negativeLimit"/>
+            <parameter name="evidenceRequired"/>
+            <parameter name="accrualFrequencyEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="leavePolicyId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('storePolicy', context)"/>
+            <set field="leavePolicyId" from="found.leavePolicyId"/>
+            <set field="revision" from="found.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="AccrualRule" allow-remote="false">
+        <description>An accrual step of a policy at its revision (expectedRevision): added from fromDate (today, or the policy's start
+            when later, when empty), changed from fromDate (before the step's start in place; after it the step ends then and another
+            starts, so the periods posted keep their entries) or, with end, ended from fromDate. serviceMonthsFrom is the months of
+            service it applies from (0 by default; the step with the most months reached applies), amount what accrues each period of
+            the policy's frequency, capAmount the balance an accrual does not pass, carryLimit the balance kept at a year's end (the
+            rest expires; none keeps it all), roundingIncrement the step amounts round to (0.01 when none). Needs PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT of the policy's employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope). Refuses:
+            REVISION_CHANGED, FREQUENCY_REQUIRED (the policy accrues nothing), DATE_OUTSIDE (the policy is closed), DATE_PAST (a date
+            before today once accruals were posted under the policy), SERVICE_INVALID, AMOUNT_INVALID, CAP_INVALID, CARRY_INVALID,
+            ROUNDING_INVALID, OVERLAP (another step for the same months of service in effect then), RULE_ENDED.</description>
+        <in-parameters>
+            <parameter name="leavePolicyId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="leaveAccrualRuleId"/>
+            <parameter name="serviceMonthsFrom"/>
+            <parameter name="amount"/>
+            <parameter name="capAmount"/>
+            <parameter name="carryLimit"/>
+            <parameter name="roundingIncrement"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="leaveAccrualRuleId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('storeAccrualRule', context)"/>
+            <set field="leaveAccrualRuleId" from="found.leaveAccrualRuleId"/>
+            <set field="revision" from="found.revision"/>
+        </actions>
+    </service>
+
+    <service verb="assign" noun="Policy" allow-remote="false">
+        <description>Employments put under a leave policy from fromDate (today when empty) through thruDate (open when empty): those
+            named (partyRelationshipIds, or one partyRelationshipId), else the current employees of the policy's employer, of
+            departmentPartyId and the units under it when given (by the assignment in effect now); at most 500. Each in its own
+            transaction under the employment's lock, a refusal named by its code and the rest going on: EMPLOYMENT_OUTSIDE (not of the
+            policy's employer), DATE_OUTSIDE (not employed then), ASSIGNMENT_OVERLAP (under another policy of the leave type then),
+            UNIT_MISMATCH (a balance of the type kept in another unit). openingAmount, when given, posts the opening balance once on
+            the start. With operationKey, a retry answers the rows already assigned as repeated. With preview, the rows and their
+            outcome, nothing written. Or with end, the assignment leavePolicyAssignmentId ended from thruDate (today when empty) at
+            its revision (expectedRevision), with reason; posted accruals are not recalculated. Needs PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT of the policy's employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope). Refuses: DATES_INVALID,
+            POLICY_NOT_IN_EFFECT, POLICY_CLOSED, AMOUNT_INVALID, DEPARTMENT_INVALID, REVISION_CHANGED, ASSIGNMENT_ENDED.</description>
+        <in-parameters>
+            <parameter name="leavePolicyId"/>
+            <parameter name="partyRelationshipIds" type="List"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="openingAmount"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+            <parameter name="preview" type="Boolean"/>
+            <parameter name="leavePolicyAssignmentId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"><description>partyRelationshipId, partyId, personName, outcome (ready, done, repeated,
+                refused), outcomeText, reasonCode, message, leavePolicyAssignmentId</description></parameter>
+            <parameter name="assignedCount" type="Integer"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="repeatedCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('assignPolicy', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="assignedCount" from="found.assignedCount || 0"/>
+            <set field="readyCount" from="found.readyCount || 0"/>
+            <set field="repeatedCount" from="found.repeatedCount || 0"/>
+            <set field="refusedCount" from="found.refusedCount || 0"/>
+            <set field="ended" from="!!found.ended"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="BlockedInterval" allow-remote="false">
+        <description>Days entered on a policy (leavePolicyId) on which leave is blocked or mandatory (blockKindEnumId LbkBlocked, the
+            default, or LbkMandatory) for the policy's employer, narrowed to a department of it (departmentPartyId) and a leave type
+            (leaveTypeEnumId; every type when empty), from fromDate through thruDate (whole days), with whether an approver may
+            override a blocked day and why; or a change of them (leaveBlockedIntervalId) at their revision (expectedRevision), or with
+            cancel their cancellation (kept). Approved leave is not cancelled: overlappingRequests lists the requests the days overlap
+            for review (none until leave requests exist). Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer
+            (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope). Refuses: DATE_REQUIRED, DATES_INVALID, KIND_INVALID,
+            DEPARTMENT_INVALID, TYPE_INVALID, REVISION_CHANGED, BLOCK_CANCELLED.</description>
+        <in-parameters>
+            <parameter name="leaveBlockedIntervalId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="leavePolicyId"/>
+            <parameter name="blockKindEnumId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="overrideAllowed"/>
+            <parameter name="reason"/>
+            <parameter name="cancel" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="leaveBlockedIntervalId"/>
+            <parameter name="overlappingRequests" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('storeBlockedInterval', context)"/>
+            <set field="leaveBlockedIntervalId" from="found.leaveBlockedIntervalId"/>
+            <set field="overlappingRequests" from="found.overlappingRequests"/>
+        </actions>
+    </service>
+
+    <service verb="define" noun="AllocationParameters" type="interface">
+        <description>The in-parameters preview#Allocation and allocate#Leave share: the policy, who (named employments, else a
+            department's or the employer's current employees), and the grant or adjustment.</description>
+        <in-parameters>
+            <parameter name="leavePolicyId" required="true"/>
+            <parameter name="partyRelationshipIds" type="List"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="amount"/>
+            <parameter name="periodFromDate" type="Timestamp"/>
+            <parameter name="periodThruDate" type="Timestamp"/>
+            <parameter name="expiryDate" type="Timestamp"/>
+            <parameter name="adjustment" type="Boolean"/>
+            <parameter name="reason"/>
+        </in-parameters>
+    </service>
+
+    <service verb="preview" noun="Allocation" allow-remote="false">
+        <description>The employments a grant of leave under a policy for an entitlement period (periodFromDate through
+            periodThruDate, amount, expiryDate when what is left expires) or a reasoned adjustment (adjustment, a positive or
+            negative amount) would reach: those named, else the current employees of the policy's employer, of departmentPartyId
+            and the units under it when given; at most 500. Each with its person, balance now and outcome: ready, or refused by its
+            code (EMPLOYMENT_OUTSIDE; NOT_ASSIGNED, not under the policy in the period; DUPLICATE_PERIOD, a grant of the policy for an
+            overlapping period already; NEGATIVE_LIMIT, a deduction below the policy's limit). The count ready, the total and its
+            unit, and the operation key the confirmation posts with. Nothing is written. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of
+            the policy's employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope). Refuses: AMOUNT_INVALID,
+            REASON_REQUIRED (an adjustment), PERIOD_REQUIRED (a grant), DATES_INVALID, EXPIRY_INVALID, DEPARTMENT_INVALID.</description>
+        <implements service="mantle.humanres.LeaveServices.define#AllocationParameters"/>
+        <out-parameters>
+            <parameter name="rows" type="List"><description>partyRelationshipId, partyId, personName, amount, priorBalance, outcome,
+                outcomeText, reasonCode, message</description></parameter>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="total" type="BigDecimal"/>
+            <parameter name="unitText"/>
+            <parameter name="operationKey"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('previewAllocation', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="readyCount" from="found.readyCount || 0"/>
+            <set field="refusedCount" from="found.refusedCount || 0"/>
+            <set field="total" from="found.total"/>
+            <set field="unitText" from="found.unitText"/>
+            <set field="operationKey" from="found.operationKey"/>
+        </actions>
+    </service>
+
+    <service verb="allocate" noun="Leave" allow-remote="false">
+        <description>A previewed grant or adjustment posted (operationKey, the preview's; OPERATION_REQUIRED without one): each
+            employment in its own transaction under its lock, checked again as preview#Allocation checks it, an allocation
+            (LeaveAllocation) and its ledger entry (a grant effective on the period's first day, an adjustment now or on its date)
+            posted once per operation key and employment, so a retry answers the rows already posted as repeated; a refusal named by
+            its code and the rest going on. A balance is never overwritten. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the policy's
+            employer (PERMISSION_DENIED; RECORD_UNAVAILABLE outside the scope); refuses as preview#Allocation does.</description>
+        <implements service="mantle.humanres.LeaveServices.define#AllocationParameters"/>
+        <in-parameters>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"><description>partyRelationshipId, partyId, personName, amount, priorBalance, outcome
+                (done, repeated, refused), outcomeText, reasonCode, message, leaveAllocationId</description></parameter>
+            <parameter name="allocatedCount" type="Integer"/>
+            <parameter name="repeatedCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="total" type="BigDecimal"/>
+            <parameter name="unitText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('allocateLeave', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="allocatedCount" from="found.allocatedCount || 0"/>
+            <set field="repeatedCount" from="found.repeatedCount || 0"/>
+            <set field="refusedCount" from="found.refusedCount || 0"/>
+            <set field="total" from="found.total"/>
+            <set field="unitText" from="found.unitText"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Balances" allow-remote="false">
+        <description>Leave balances as of asOfDate (now when empty; a date alone is its end): the caller's own (PEOPLE_SELF_SERVICE),
+            their live reports' at the line's employers (PEOPLE_TEAM_VIEW) and the employments of an HR reader's employers current
+            then (PEOPLE_HR_VIEW); narrowed to an employment (partyRelationshipId; RECORD_UNAVAILABLE outside the scope), a person, an
+            employer (ORGANIZATION_DENIED outside the scope), a department and the units under it (by the assignment in effect then)
+            or a leave type. One row per employment and leave type with entries by then or a policy in effect then: the person,
+            employer, leave type, unit, policy in effect, the movements by kind (opening, granted, accrued, consumed, expired,
+            adjusted), the balance, pending reservations (none until leave requests exist), what is available, the negative limit and
+            whether the caller reads its movements (find#Ledger: the person and HR). Paged by employment. Refuses a caller with none
+            of the three permissions (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="balances" type="List"><description>partyRelationshipId, partyId, personName, organizationPartyId,
+                organizationName, leaveTypeEnumId, leaveTypeText, unitEnumId, unitText, leavePolicyId, policyName, opening, granted,
+                accrued, consumed, expired, adjusted, balance, pending, available, negativeLimit, canSeeLedger</description></parameter>
+            <parameter name="balancesCount" type="Integer"><description>employments</description></parameter>
+            <parameter name="balancesPageIndex" type="Integer"/>
+            <parameter name="balancesPageSize" type="Integer"/>
+            <parameter name="balancesPageMaxIndex" type="Integer"/>
+            <parameter name="balancesPageRangeLow" type="Integer"/>
+            <parameter name="balancesPageRangeHigh" type="Integer"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getBalances', context)"/>
+            <set field="balances" from="found.balances"/>
+            <set field="balancesCount" from="found.balancesCount || 0"/>
+            <set field="balancesPageIndex" from="found.balancesPageIndex || 0"/>
+            <set field="balancesPageSize" from="found.balancesPageSize || 20"/>
+            <set field="balancesPageMaxIndex" from="found.balancesPageMaxIndex || 0"/>
+            <set field="balancesPageRangeLow" from="found.balancesPageRangeLow || 0"/>
+            <set field="balancesPageRangeHigh" from="found.balancesPageRangeHigh || 0"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="MyBalances" allow-remote="false">
+        <description>The caller's own leave balances (get#Balances in self scope: no person, employment or organization parameter,
+            so nothing widens it), as of asOfDate (now when empty), of a leave type when given: for each of their current employments
+            and leave type, the policy, the movements by kind, the balance, pending reservations and what is available. The
+            Assistant's tool for "how much leave do I have" (BOSS's AgentToolExposure, never MCP). Refuses a caller without
+            PEOPLE_SELF_SERVICE (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="balances" type="List"><description>as get#Balances gives them</description></parameter>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('getMyBalances', context)"/>
+            <set field="balances" from="found.balances"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Ledger" allow-remote="false">
+        <description>An employment's leave movements (the person's own, or an HR reader's of the employer; a manager reads balances
+            alone, and anyone else is refused alike: RECORD_UNAVAILABLE), of a leave type when given, effective from fromDate through
+            asOfDate (now when empty), newest first: each with its date, kind, leave type, amount and unit, the balance after it, what
+            it came from (an allocation and its reason, an accrual period and policy, an opening, an expiry and why) and when it was
+            posted; the balances before fromDate; and the employment's legacy EmploymentLeave rows, labelled historical, read only and
+            counted in no balance (dates, type, approved; never a reason). Paged; an export (pageNoLimit) takes up to 5,000
+            rows.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="leaveTypeEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="personName"/>
+            <parameter name="entries" type="List"><description>leaveLedgerEntryId, effectiveDateText, entryTypeEnumId, entryTypeText,
+                leaveTypeEnumId, leaveTypeText, amount, unitText, balanceAfter, sourceText, leaveAllocationId,
+                postedDateText</description></parameter>
+            <parameter name="entriesCount" type="Integer"/>
+            <parameter name="entriesPageIndex" type="Integer"/>
+            <parameter name="entriesPageSize" type="Integer"/>
+            <parameter name="entriesPageMaxIndex" type="Integer"/>
+            <parameter name="entriesPageRangeLow" type="Integer"/>
+            <parameter name="entriesPageRangeHigh" type="Integer"/>
+            <parameter name="openingBalances" type="List"/>
+            <parameter name="historical" type="List"><description>fromDay, thruDay, leaveTypeText, approvedText, label</description></parameter>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('findLedger', context)"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="personName" from="found.personName"/>
+            <set field="entries" from="found.entries"/>
+            <set field="entriesCount" from="found.entriesCount || 0"/>
+            <set field="entriesPageIndex" from="found.entriesPageIndex || 0"/>
+            <set field="entriesPageSize" from="found.entriesPageSize || 20"/>
+            <set field="entriesPageMaxIndex" from="found.entriesPageMaxIndex || 0"/>
+            <set field="entriesPageRangeLow" from="found.entriesPageRangeLow || 0"/>
+            <set field="entriesPageRangeHigh" from="found.entriesPageRangeHigh || 0"/>
+            <set field="openingBalances" from="found.openingBalances"/>
+            <set field="historical" from="found.historical"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Accrual" allow-remote="false" operation="people.leave.accrual.run">
+        <description>An HR editor's run of the leave accrual by asOfDate (now when empty, never later) for a policy of their employers
+            (leavePolicyId; RECORD_UNAVAILABLE outside the scope) or every policy of them: each assignment in its own transaction
+            (accrue#Assignment), a failure logged by its employment and policy and the rest going on. What was posted is not posted
+            again: a second run posts nothing. Needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="leavePolicyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="posted" type="Integer"/>
+            <parameter name="assignmentCount" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('runAccrual', context)"/>
+            <set field="posted" from="out.posted"/>
+            <set field="assignmentCount" from="out.assignmentCount"/>
+            <set field="failed" from="out.failed"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="AccrualJob" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800"
+            operation="people.leave.accrual.job">
+        <description>The run_LeaveAccrual job (daily): every policy assignment started by now and not ended more than a year ago (or
+            those of partyRelationshipIds), each in its own transaction (accrue#Assignment), a failing one logged by its employment
+            and policy and the rest going on; a rerun posts nothing again.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipIds" type="List"><description>Only these employments</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="posted" type="Integer"/>
+            <parameter name="assignmentCount" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('runAccrualJob', context)"/>
+            <set field="posted" from="out.posted"/>
+            <set field="assignmentCount" from="out.assignmentCount"/>
+            <set field="failed" from="out.failed"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
+
+    <service verb="accrue" noun="Assignment" authenticate="anonymous-all" allow-remote="false" transaction="force-new"
+            operation="people.leave.accrual" operation-ref="leavePolicyAssignmentId">
+        <description>Internal to run#Accrual and run#AccrualJob, which check the caller: what one policy assignment has due by
+            asOfDate (now, never later), under the employment's lock, in date order, each posted once by its source key: each ended
+            accrual period of the policy's frequency (keyed by employment, policy and period; in arrears, the step in effect on the
+            period's last day for the months of service then, in proportion to the days covered, rounded, not above the cap), at a
+            year's end the balance above the carry-over limit expired (keyed by employment, leave type and year), and what is left of
+            a grant after its expiry day (keyed by the allocation). Posts nothing that was posted.</description>
+        <in-parameters>
+            <parameter name="leavePolicyAssignmentId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="posted" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="posted" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Leave.js').execute('accrueAssignment', context).posted"/>
+        </actions>
+    </service>
+</services>

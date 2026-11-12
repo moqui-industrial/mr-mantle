@@ -477,8 +477,10 @@ function home(p) {
 
 // ===== readiness =====
 // The checks of what is built, for an organization with current employees; one with none is not yet People's and answers no
-// check. Each answers Admin's readiness contract: checkKey, title, state, reasonCode, message, fixPath.
-const settingsPath = "People/Settings"
+// check. Each answers the framework's readiness contract (moqui.server.ReadinessProvider): checkKey, title, state,
+// reasonCode, message, the employer it is for (subject, and scope, which narrows a request to it) and the key of the
+// place that fixes it (fixRoute, which the application showing the check resolves; never a path).
+const settingsRoute = "peopleSettings"
 const readinessChecks = [
     {
         checkKey: "people.departments",
@@ -539,7 +541,9 @@ function readiness(p) {
                 state: found.state,
                 reasonCode: found.reasonCode || null,
                 message: found.message,
-                fixPath: settingsPath,
+                fixRoute: settingsRoute,
+                subject: names[organizationPartyId] || organizationPartyId,
+                scope: {organizationPartyId},
                 organizationPartyId,
                 organizationName: names[organizationPartyId] || organizationPartyId
             })
