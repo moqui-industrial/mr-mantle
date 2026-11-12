@@ -252,6 +252,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id"/>
         <field name="terminationReasonEnumId" type="id" enable-audit-log="update"/>
         <field name="terminationTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="clockingEnabled" type="text-indicator" enable-audit-log="update"><description>Y: the person clocks in and out
+            for this employment (IronStone People P13, mantle.humanres.AttendanceServices store#Clocking and record#Punch): their
+            self-service offers the clock; empty or N: it does not, and a self-service punch is refused</description></field>
         <!-- not yet used: <field name="jobRequisitionId" type="id"/> -->
 
         <field name="identityTypeEnumId" type="id"/>
