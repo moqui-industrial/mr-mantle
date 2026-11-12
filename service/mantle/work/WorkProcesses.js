@@ -269,6 +269,15 @@ function instantiate(p) {
         idMap[node.workEffortId] = call("create#" + WORK, fields).workEffortId
     }
     const rootId = idMap[templateRoot.workEffortId]
+    // the execution's policy before its steps are assigned, so an assignment's notice knows whose work it is (People's lifecycle
+    // work is told on its own topic, impl-people P8)
+    call("create#" + PROCESS, {
+        workEffortId: rootId,
+        fromDate: stamp(at),
+        processPolicyEnumId: policy.processPolicyEnumId,
+        guardsExecution: policy.guardsExecution || "N",
+        operationKey
+    })
     // pass two: the dependencies inside the tree remapped, one WeatBasedOn link per node, the policies, the assignments
     const templateIds = nodes.map(node => node.workEffortId)
     for (const edge of Array.from(
@@ -307,13 +316,6 @@ function instantiate(p) {
                 statusId: "WeptAssigned"
             })
     }
-    call("create#" + PROCESS, {
-        workEffortId: rootId,
-        fromDate: stamp(at),
-        processPolicyEnumId: policy.processPolicyEnumId,
-        guardsExecution: policy.guardsExecution || "N",
-        operationKey
-    })
     return {workEffortId: rootId, idMap, repeated: false}
 }
 

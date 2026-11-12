@@ -890,6 +890,78 @@ function hiddenTaskIds(workEffortIds, partyId) {
     return protectedIds.filter(id => !reached.has(id))
 }
 
+// ===== People's open lifecycle work (P8: find#DueWork, get#SelfService) =====
+// the most open tasks one read answers
+const openTaskCap = 500
+// The open tasks of People's lifecycle work (checklist steps and equipment returns), either of the executions of the employers
+// (organizationPartyIds: an HR reader's due work) or assigned now to a party (assigneePartyId: a person's own), each with the
+// person it is about, its employer, kind, due date, assignees and its step's protection and visibility. Work that is not People's
+// (no EmploymentChecklist root) is left out. The caller's rule applies after (hiddenTaskIds for a person's own).
+function lifecycleTasks({organizationPartyIds = null, assigneePartyId = null}) {
+    const at = nowMs()
+    const factory = ec.entity.conditionFactory
+    let query = find(WORK)
+        .condition("workEffortTypeEnumId", "WetTask")
+        .condition("statusId", "in", openStatuses)
+        .condition("rootWorkEffortId", "is-not-null", null)
+    if (assigneePartyId) {
+        const assigned = unique(
+            Array.from(find(PARTY).condition({partyId: assigneePartyId, roleTypeId: "Assignee"}).list())
+                .filter(row => openAt(row, at) && !["WeptDeclined", "WeptUnassigned"].includes(row.statusId))
+                .map(row => row.workEffortId)
+        )
+        if (!assigned.length) return []
+        query = query.condition("workEffortId", "in", assigned)
+    } else {
+        const orgIds = Array.from(organizationPartyIds || [])
+        if (!orgIds.length) return []
+        const roots = Array.from(
+            find(RUN)
+                .condition("organizationPartyId", "in", orgIds)
+                .selectField("workEffortId")
+                .limit(openTaskCap * 4)
+                .list()
+        ).map(row => row.workEffortId)
+        if (!roots.length) return []
+        query = query.condition(factory.makeCondition("rootWorkEffortId", "in", roots))
+    }
+    const tasks = Array.from(query.orderBy(["estimatedCompletionDate", "workEffortId"]).limit(openTaskCap).list())
+    if (!tasks.length) return []
+    const runs = new Map(
+        Array.from(
+            find(RUN)
+                .condition("workEffortId", "in", unique(tasks.map(row => row.rootWorkEffortId)))
+                .list()
+        ).map(row => [row.workEffortId, row])
+    )
+    const lifecycle = tasks.filter(row => runs.has(row.rootWorkEffortId))
+    if (!lifecycle.length) return []
+    const ids = lifecycle.map(row => row.workEffortId)
+    const facts = new Map(Array.from(find(STEP).condition("workEffortId", "in", ids).list()).map(row => [row.workEffortId, row]))
+    const assignees = {}
+    for (const row of Array.from(find(PARTY).condition("workEffortId", "in", ids).condition("roleTypeId", "Assignee").list()))
+        if (openAt(row, at) && !["WeptDeclined", "WeptUnassigned"].includes(row.statusId))
+            (assignees[row.workEffortId] || (assignees[row.workEffortId] = [])).push(row.partyId)
+    return lifecycle.map(row => {
+        const run = runs.get(row.rootWorkEffortId)
+        const fact = facts.get(row.workEffortId) || {}
+        return {
+            workEffortId: row.workEffortId,
+            workEffortName: row.workEffortName || row.workEffortId,
+            rootWorkEffortId: row.rootWorkEffortId,
+            partyId: run.partyId,
+            organizationPartyId: run.organizationPartyId,
+            lifecycleKindEnumId: run.lifecycleKindEnumId,
+            kindText: kindTexts[run.lifecycleKindEnumId] || "",
+            dueDate: row.estimatedCompletionDate || null,
+            statusId: row.statusId,
+            isProtected: fact.isProtected === "Y",
+            employeeSees: fact.visibilityEnumId === "ChvEmployee",
+            assigneePartyIds: assignees[row.workEffortId] || []
+        }
+    })
+}
+
 const operations = {
     findChecklists,
     storeChecklist,
@@ -914,5 +986,7 @@ const operations = {
     hiddenTaskIds,
     // for withdraw#EmploymentChange (a separation withdrawn before its date)
     cancelChecklists,
+    // P8: People's open lifecycle work (find#DueWork, get#SelfService)
+    lifecycleTasks,
     equipmentRows
 })
