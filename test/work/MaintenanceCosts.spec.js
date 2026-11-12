@@ -1,5 +1,5 @@
 // Maintenance costs (mantle.work.MaintenanceReportServices.get#MaintenanceCosts, MaintenanceSettingsServices
-// store#MaintenanceCostThreshold and the Approve gate's cost half; IronStone Maintenance design §3 WorkCosts, §8
+// store#MaintenancePolicy's cost threshold and the Approve gate's cost half; IronStone Maintenance design §3 WorkCosts, §8
 // MaintenanceCostReport, §9; review Y2; impl-maintenance P11 and §4): labor is approved hours at the costing rate of the
 // technician's position class (get#CostingRate, never the entry's vendorHourRate), and approved hours of a technician with no
 // rate are shown unpriced, unapproved hours apart; the root's and the step's time are each counted once; parts are issued less
@@ -377,7 +377,7 @@ feature(
     {
         when() {
             as(state.settings, T + "store#MaintenancePolicy", {organizationPartyId: org, approvalThresholdHours: 10})
-            const threshold = as(state.settings, T + "store#MaintenanceCostThreshold", {
+            const threshold = as(state.settings, T + "store#MaintenancePolicy", {
                 organizationPartyId: org,
                 approvalThresholdCost: 500
             })
@@ -428,7 +428,7 @@ feature(
             const oddEstimate = as(state.cost, R + "get#MaintenanceCosts", {workEffortId: odd.workEffortId}).costs.estimate
             const supervisorApproves = approve(state.supervisor, over.workEffortId)
             // unset, the cost is not compared: the seal's work is the planner's to approve
-            as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: ""})
+            as(state.settings, T + "store#MaintenancePolicy", {organizationPartyId: org, approvalThresholdCost: ""})
             const unsetApproved = approve(state.planner, odd.workEffortId)
             // P11 review: the second technician now holds a class of 60 USD an hour; with both on the work its hours take the higher
             // rate. A threshold in euros leaves the estimate unknown (the costs are in dollars), so the planner cannot approve it
@@ -458,7 +458,7 @@ feature(
                 timePeriodUomId: "TF_hr",
                 fromDate: new Date(since)
             })
-            as(state.settings, T + "store#MaintenanceCostThreshold", {
+            as(state.settings, T + "store#MaintenancePolicy", {
                 organizationPartyId: org,
                 approvalThresholdCost: 500,
                 approvalThresholdCurrencyUomId: "EUR"
@@ -470,11 +470,21 @@ feature(
             })
             const euroEstimate = as(state.cost, R + "get#MaintenanceCosts", {workEffortId: pair.workEffortId}).costs.estimate
             const euroRefused = approve(state.planner, pair.workEffortId)
-            as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: 500})
+            // a field not sent is kept (P18): the currency is emptied by name, back to the organization's
+            as(state.settings, T + "store#MaintenancePolicy", {
+                organizationPartyId: org,
+                approvalThresholdCost: 500,
+                approvalThresholdCurrencyUomId: ""
+            })
             const pairEstimate = as(state.cost, R + "get#MaintenanceCosts", {workEffortId: pair.workEffortId}).costs.estimate
             const pairApproved = approve(state.planner, pair.workEffortId)
-            as(state.settings, T + "store#MaintenanceCostThreshold", {organizationPartyId: org, approvalThresholdCost: ""})
+            // the ended policies carry the threshold to the settings editor, never to the planner (P11 merge with P18)
+            const settingsEnded = as(state.settings, T + "get#MaintenancePolicy", {organizationPartyId: org}).ended
+            const plannerEnded = as(state.planner, T + "get#MaintenancePolicy", {organizationPartyId: org}).ended
+            as(state.settings, T + "store#MaintenancePolicy", {organizationPartyId: org, approvalThresholdCost: ""})
             return {
+                settingsEnded,
+                plannerEnded,
                 euroEstimate,
                 euroRefused,
                 pairEstimate,
@@ -523,6 +533,9 @@ feature(
             r.pairEstimate.labor.compare(120) == 0
             r.pairEstimate.amount.compare(160) == 0
             r.pairApproved.statusId == "WeApproved"
+            r.settingsEnded.some(row => row.approvalThresholdCost != null)
+            r.plannerEnded.length == r.settingsEnded.length
+            r.plannerEnded.every(row => row.approvalThresholdCost == null)
         }
     }
 )

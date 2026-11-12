@@ -38,6 +38,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
+// P14: a preventive plan's generation, completion credit and Home's counts (MaintenancePlans.js)
+const plans = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePlans.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 // P10: CompleteWork's outside-service line (MaintenancePurchases.js)
 const purchases = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePurchases.js")
@@ -56,6 +58,7 @@ const ORDER_VIEW = "mantle.work.maintenance.MaintenanceWorkOrderDetail"
 const POLICY = "mantle.work.maintenance.MaintenancePolicy"
 const MAINTENANCE = "mantle.product.maintenance.AssetMaintenance"
 const PARTY = "mantle.work.effort.WorkEffortParty"
+const REMINDER = "mantle.work.effort.WorkEffortReminder"
 const TIME = "mantle.work.time.TimeEntry"
 const ASSET = "mantle.product.asset.Asset"
 const FACILITY = "mantle.facility.Facility"
@@ -67,6 +70,8 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const highPriority = 3
 const teamRole = "OrgTeam"
 const assigneeRole = "Assignee"
+// a plan's work reminds its assignees a day before its due date (P14 review)
+const dueReminderMinutes = 1440
 // the relationships that make a person one of an organization's people for assignment
 const memberRelationships = ["PrtEmployee", "PrtAgent"]
 const facilityDepth = 12
@@ -162,42 +167,99 @@ function requireWindow(fromDate, thruDate) {
 }
 
 // ===== the organization's policy =====
-const defaultPolicy = {
-    approvalThresholdHours: 0,
-    closurePolicyEnumId: "MclSupervisor",
-    defaultMaintenanceTypeEnumId: null,
-    defaultTeamPartyId: null,
-    productionRequestsManaged: false,
-    warrantyRepairsManaged: false,
-    procedureSelfApproval: false,
-    voiceNoteTranscription: false,
-    approvalThresholdCost: null,
-    approvalThresholdCurrencyUomId: null
+// The policy's fields (impl-maintenance P18: the whole policy, one table; a phase that adds a field adds its row): its default
+// with no row (none), how a stored row's value reads (read) and how a call's value is checked and stored (store, with the
+// organization). A store keeps each field it is not given from the policy in effect at its start, so a section of Settings
+// changes its own fields alone and a field a later phase adds is not reset by an older form.
+const flagField = name => ({
+    none: false,
+    read: row => flag(row[name]),
+    store: value => (flag(value) ? "Y" : "N"),
+    stored: v => (v ? "Y" : "N")
+})
+const policyFields = {
+    approvalThresholdHours: {
+        none: 0,
+        read: row => number(row.approvalThresholdHours) ?? 0,
+        store: value => hoursOf(value) ?? toDecimal(0),
+        stored: value => toDecimal(value ?? 0)
+    },
+    closurePolicyEnumId: {
+        none: "MclSupervisor",
+        read: row => row.closurePolicyEnumId || "MclSupervisor",
+        store: value => requireEnum(value, "MaintenanceClosurePolicy", "Closure policy") || "MclSupervisor"
+    },
+    defaultMaintenanceTypeEnumId: {
+        none: null,
+        read: row => row.defaultMaintenanceTypeEnumId || null,
+        store: value => requireEnum(value, "MaintenanceType", "Maintenance type")
+    },
+    defaultTeamPartyId: {
+        none: null,
+        read: row => row.defaultTeamPartyId || null,
+        store: (value, organizationPartyId) => (text(value) ? requireTeam(organizationPartyId, text(value)) : null)
+    },
+    productionRequestsManaged: flagField("productionRequestsManaged"),
+    warrantyRepairsManaged: flagField("warrantyRepairsManaged"),
+    // P6
+    procedureSelfApproval: flagField("procedureSelfApproval"),
+    // P7 review
+    voiceNoteTranscription: flagField("voiceNoteTranscription"),
+    // P14: the days before a due date a plan's work is made when its terms name none (empty: on the day)
+    pmLeadDays: {
+        none: null,
+        read: row => number(row.pmLeadDays),
+        store: value => {
+            const days = blank(value) ? null : Number(String(value))
+            if (days != null && (!Number.isInteger(days) || days < 0 || days > 365))
+                denied("VALUE_INVALID", "Enter the days ahead as a whole number from 0 to 365")
+            return days
+        }
+    },
+    // P11: the threshold's cost half, unset by default (compared only where set), in its currency or the organization's
+    approvalThresholdCost: {
+        none: null,
+        read: row => (row.approvalThresholdCost == null ? null : toDecimal(row.approvalThresholdCost)),
+        store: value => {
+            if (blank(value)) return null
+            let amount
+            try {
+                amount = toDecimal(String(value).trim())
+            } catch (_) {
+                denied("VALUE_INVALID", "The cost threshold must be a number")
+            }
+            if (amount.compare(0) < 0) denied("VALUE_INVALID", "The cost threshold cannot be negative")
+            return amount
+        }
+    },
+    approvalThresholdCurrencyUomId: {
+        none: null,
+        read: row => row.approvalThresholdCurrencyUomId || null,
+        store: value => {
+            const uomId = text(value)
+            if (uomId && !one("moqui.basic.Uom", {uomId, uomTypeEnumId: "UT_CURRENCY_MEASURE"}))
+                denied("VALUE_INVALID", "Currency " + uomId + " is not known")
+            return uomId
+        }
+    }
 }
-// The policy in effect for an organization, or the defaults (fromDate null).
+const defaultPolicy = Object.fromEntries(Object.entries(policyFields).map(([name, field]) => [name, field.none]))
+// A policy row's values, or the defaults (fromDate null).
+function policyValues(organizationPartyId, row) {
+    if (!row) return Object.assign({organizationPartyId, fromDate: null, thruDate: null}, defaultPolicy)
+    const values = {organizationPartyId, fromDate: row.fromDate, thruDate: row.thruDate || null}
+    for (const [name, field] of Object.entries(policyFields)) values[name] = field.read(row)
+    values.comments = row.comments || null
+    return values
+}
+// The policy in effect for an organization at a time (now when not given), or the defaults (fromDate null).
 function policyOf(organizationPartyId, at = ec.user.nowTimestamp) {
     const row = organizationPartyId
         ? Array.from(
               find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", at).orderBy("-fromDate").limit(1).list()
           )[0]
         : null
-    if (!row) return Object.assign({organizationPartyId, fromDate: null}, defaultPolicy)
-    return {
-        organizationPartyId,
-        fromDate: row.fromDate,
-        approvalThresholdHours: number(row.approvalThresholdHours) ?? 0,
-        closurePolicyEnumId: row.closurePolicyEnumId || defaultPolicy.closurePolicyEnumId,
-        defaultMaintenanceTypeEnumId: row.defaultMaintenanceTypeEnumId || null,
-        defaultTeamPartyId: row.defaultTeamPartyId || null,
-        productionRequestsManaged: flag(row.productionRequestsManaged),
-        warrantyRepairsManaged: flag(row.warrantyRepairsManaged),
-        procedureSelfApproval: flag(row.procedureSelfApproval),
-        voiceNoteTranscription: flag(row.voiceNoteTranscription),
-        // P11: the estimated-cost threshold, unset by default (compared only where set), in its currency or the organization's
-        approvalThresholdCost: number(row.approvalThresholdCost),
-        approvalThresholdCurrencyUomId: row.approvalThresholdCurrencyUomId || null,
-        comments: row.comments || null
-    }
+    return policyValues(organizationPartyId, row)
 }
 // Within the threshold: a positive threshold and estimated hours no more than it (no estimate is over it).
 function withinThreshold(policy, hours) {
@@ -215,55 +277,90 @@ function policyOrganization(userScope, organizationPartyId) {
     maintenanceAccess.requireOrganization(userScope, id)
     return id
 }
+// A policy's display values: its dates and its names as text.
+function policyDisplay(policy) {
+    return Object.assign({}, policy, {
+        fromDateText: dateText(policy.fromDate),
+        thruDateText: dateText(policy.thruDate),
+        closurePolicyText: enumText(policy.closurePolicyEnumId),
+        defaultMaintenanceTypeText: enumText(policy.defaultMaintenanceTypeEnumId),
+        defaultTeamName: policy.defaultTeamPartyId ? partyNames([policy.defaultTeamPartyId])[policy.defaultTeamPartyId] : ""
+    })
+}
+// get#MaintenancePolicy: the policy in effect, the ones planned from a later date (P18) and the last ones that ended.
+const policyHistoryCap = 10
 function getPolicy(p) {
     const userScope = scopeWithAny(["settingsEdit", "anyRead"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
-    const policy = policyOf(organizationPartyId)
+    const now = ec.user.nowTimestamp
+    const planned = Array.from(
+        find(POLICY, {organizationPartyId})
+            .condition("fromDate", "greater", now)
+            .orderBy("fromDate")
+            .limit(policyHistoryCap)
+            .list()
+    )
+        // a withdrawn plan ended at its own start
+        .filter(row => row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
+        .map(row => policyDisplay(policyValues(organizationPartyId, row)))
+    const ended = Array.from(
+        find(POLICY, {organizationPartyId})
+            .condition("thruDate", "less-equals", now)
+            .orderBy("-fromDate")
+            .limit(policyHistoryCap)
+            .list()
+    )
+        .filter(row => ms(row.thruDate) > ms(row.fromDate))
+        .map(row => policyDisplay(policyValues(organizationPartyId, row)))
     // P11: the cost threshold is the settings editor's and the cost reader's to read
-    if (!userScope.capabilities.settingsEdit && !userScope.capabilities.costView)
-        Object.assign(policy, {approvalThresholdCost: null, approvalThresholdCurrencyUomId: null})
+    const shown = userScope.capabilities.settingsEdit || userScope.capabilities.costView
+    const hide = policy => (shown ? policy : Object.assign(policy, {approvalThresholdCost: null, approvalThresholdCurrencyUomId: null}))
     return {
-        policy: Object.assign({}, policy, {
-            fromDateText: dateText(policy.fromDate),
-            closurePolicyText: enumText(policy.closurePolicyEnumId),
-            defaultMaintenanceTypeText: enumText(policy.defaultMaintenanceTypeEnumId),
-            defaultTeamName: policy.defaultTeamPartyId ? partyNames([policy.defaultTeamPartyId])[policy.defaultTeamPartyId] : ""
-        }),
+        policy: hide(policyDisplay(policyOf(organizationPartyId))),
+        planned: planned.map(hide),
+        ended: ended.map(hide),
         canEdit: !!userScope.capabilities.settingsEdit
     }
 }
-// store#MaintenancePolicy: the organization's policy from now, ending the row in effect (MAINTENANCE_SETTINGS_EDIT).
+// store#MaintenancePolicy (MAINTENANCE_SETTINGS_EDIT): the organization's policy from fromDate (now when not given; never
+// earlier, DATE_INVALID), each field not given kept from the policy in effect then. The row in effect then ends at it; a row
+// planned to start later is refused (PLAN_PENDING, naming its date) unless withdrawPlanned, which withdraws it (ended at its own
+// start, kept for the audit; P18 review R4); a row planned for that very time is changed in place. Nothing is deleted.
 function storePolicy(p) {
     const userScope = scopeWithAny(["settingsEdit"])
     const organizationPartyId = policyOrganization(userScope, p.organizationPartyId)
-    const threshold = hoursOf(p.approvalThresholdHours) ?? toDecimal(0)
-    const closurePolicyEnumId =
-        requireEnum(p.closurePolicyEnumId, "MaintenanceClosurePolicy", "Closure policy") || defaultPolicy.closurePolicyEnumId
-    const typeId = requireEnum(p.defaultMaintenanceTypeEnumId, "MaintenanceType", "Maintenance type")
-    const teamId = text(p.defaultTeamPartyId)
-    if (teamId) requireTeam(organizationPartyId, teamId)
     const now = ec.user.nowTimestamp
-    // P11: the cost threshold is store#MaintenanceCostThreshold's; this write keeps it
-    const kept = policyOf(organizationPartyId, now)
-    for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", now).list()))
-        call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: now})
-    call("create#" + POLICY, {
-        approvalThresholdCost: kept.approvalThresholdCost,
-        approvalThresholdCurrencyUomId: kept.approvalThresholdCurrencyUomId,
-        organizationPartyId,
-        fromDate: now,
-        approvalThresholdHours: threshold,
-        closurePolicyEnumId,
-        defaultMaintenanceTypeEnumId: typeId,
-        defaultTeamPartyId: teamId,
-        productionRequestsManaged: flag(p.productionRequestsManaged) ? "Y" : "N",
-        warrantyRepairsManaged: flag(p.warrantyRepairsManaged) ? "Y" : "N",
-        procedureSelfApproval: flag(p.procedureSelfApproval) ? "Y" : "N",
-        voiceNoteTranscription: flag(p.voiceNoteTranscription) ? "Y" : "N",
+    const fromDate = blank(p.fromDate) ? now : p.fromDate
+    if (ms(fromDate) < ms(now) - minuteMs) denied("DATE_INVALID", "A policy starts now or later")
+    const at = ms(fromDate) < ms(now) ? now : fromDate
+    const kept = policyOf(organizationPartyId, at)
+    const values = {}
+    for (const [name, field] of Object.entries(policyFields)) {
+        const given = Object.hasOwn(p, name) && p[name] !== undefined
+        values[name] = given ? field.store(p[name], organizationPartyId) : field.stored ? field.stored(kept[name]) : kept[name]
+    }
+    const same = one(POLICY, {organizationPartyId, fromDate: at})
+    // a policy planned to start later is withdrawn only when the call says so (the user's call of Nov 12, P18 review R4)
+    const plannedLater = Array.from(
+        find(POLICY, {organizationPartyId}).condition("fromDate", "greater", at).orderBy("fromDate").list()
+    ).filter(row => row.thruDate == null || ms(row.thruDate) > ms(row.fromDate))
+    if (plannedLater.length && !flag(p.withdrawPlanned))
+        denied(
+            "PLAN_PENDING",
+            "A policy is planned from " +
+                plannedLater.map(row => dateText(row.fromDate)).join(", ") +
+                ": start this one then or later, or withdraw the plan"
+        )
+    for (const row of Array.from(find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", at).list()))
+        if (!same || ms(row.fromDate) !== ms(same.fromDate))
+            call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: at})
+    for (const row of plannedLater) call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: row.fromDate})
+    const fields = Object.assign({organizationPartyId, fromDate: at, thruDate: null}, values, {
         changedByUserId: ec.user.userId,
         comments: text(p.comments)
     })
-    return {organizationPartyId, fromDate: now}
+    call((same ? "update#" : "create#") + POLICY, fields)
+    return {organizationPartyId, fromDate: at}
 }
 
 // ===== targets, teams and people =====
@@ -569,7 +666,7 @@ function makeOrder(userScope, target, p, options) {
             const partyId = text(named[roleTypeId])
             if (partyId) roleParties[roleTypeId] = requireMember(target.organizationPartyId, partyId)
         }
-        instantiatedId = procedures().execute("instantiateProcedure", {
+        instantiatedId = procedures().instantiateWith(userScope, {
             templateWorkEffortId: templateId,
             assetId: target.assetId,
             facilityId: target.assetId ? null : target.facilityId,
@@ -637,6 +734,8 @@ function makeOrder(userScope, target, p, options) {
         procedureDate: instantiatedId ? ec.user.nowTimestamp : null,
         revision: 1,
         offlineIntent: flag(p.offlineIntent) ? "Y" : null,
+        // P14: the plan generated work executes, set by its generation alone (MaintenancePlans.js), never from a caller
+        maintenanceScheduleId: options.maintenanceScheduleId || null,
         operationKey: options.operationKey || null,
         operationHash: options.operationHash || null
     })
@@ -911,7 +1010,28 @@ function scheduleWorkOrder(p) {
     const revision = bump(order)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     if (added.length) notifyAssigned(root.workEffortId, added)
+    // P14 review: a plan's work reminds the people assigned to it a day before its due date
+    if (order.maintenanceScheduleId) remindAssignees(root.workEffortId, added, removed)
     return {workEffortId: root.workEffortId, revision, addedPartyIds: added, removedPartyIds: removed}
+}
+// The due reminders of a plan's work order (design §5.1, impl-maintenance P14 review): each person newly assigned to its root gets
+// a reminder a day before its due date (the root's planned finish; the reminder job, EventServices send#DueReminders, sends it on
+// the WorkEffortReminder topic) unless they have one on it already, and a person taken off it keeps none. Written here for the
+// assignee, as People's leave writes the person's (store#WorkEffortReminders sets only the caller's own).
+function remindAssignees(workEffortId, added, removed) {
+    for (const partyId of new Set(removed))
+        if (!added.includes(partyId))
+            for (const row of Array.from(find(REMINDER, {workEffortId, partyId}).list()))
+                call("delete#" + REMINDER, {workEffortId, partyId, reminderSeqId: row.reminderSeqId})
+    for (const partyId of new Set(added))
+        if (!removed.includes(partyId) && find(REMINDER, {workEffortId, partyId}).count() === 0)
+            call("create#" + REMINDER, {
+                workEffortId,
+                partyId,
+                reminderSeqId: "01",
+                offsetMinutes: dueReminderMinutes,
+                methodEnumId: "WermNotification"
+            })
 }
 // The new assignees are told on MaintenanceWork (the work order and its target, never a cost); a failure is logged.
 function notifyAssigned(workEffortId, partyIds) {
@@ -1059,6 +1179,8 @@ function actionsFor(userScope, ctx) {
                 needsOffline: action === "start",
                 offlineIntent: ctx.order.offlineIntent === "Y",
                 needsFollowUp: action === "complete",
+                // P14 (F187): a meter plan's work asks for the reading it took when it has none
+                readingMeterName: action === "complete" ? plans().readingNeeded(ctx.order)?.meterName || null : null,
                 // P10: the outside-service lines the caller may accept at completion, with the work's files as evidence
                 ...(action === "complete" && !refused
                     ? purchases().completionLines(userScope, ctx)
@@ -1115,6 +1237,8 @@ function transitionWorkOrder(p) {
             if (ms(finished) > nowMs() + minuteMs) denied("DATE_FUTURE", "The finish is now or earlier")
             if (root.actualStartDate && ms(finished) < ms(root.actualStartDate))
                 denied("DATES_INVALID", "The finish is before the work started")
+            // P14 (F187): a meter plan's work records the reading it took before it completes
+            plans().requireCompletionReading(order, root, p, finished)
             workFields.statusId = "WeComplete"
             workFields.actualCompletionDate = finished
             Object.assign(orderFields, {
@@ -1154,9 +1278,12 @@ function transitionWorkOrder(p) {
         checks().closeExecution(root.workEffortId, resultCode === "CLOSED" ? "WeClosed" : "WeCancelled")
     const revision = bump(order, orderFields)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
+    const statusAfter = one(WORK, {workEffortId: root.workEffortId}).statusId
+    // P14: the plan's obligation completed once, or open again after a cancellation
+    plans().creditCompletion(order, statusAfter)
     return {
         workEffortId: root.workEffortId,
-        statusId: one(WORK, {workEffortId: root.workEffortId}).statusId,
+        statusId: statusAfter,
         revision,
         resultCode,
         resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
@@ -1633,8 +1760,8 @@ function findWorkOrders(p) {
 
 // ===== get#MaintenanceHome =====
 // Home's counters, the caller's work and the teams' (design §3 Home): over the scope (a chosen organization or facility), read
-// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The counts of plans,
-// meters and downtime are not configured until their phases (null, never zero).
+// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The overdue plans and
+// unknown meter readings (P14) are a reader of work's, null for anyone else (never zero); downtime is P5's.
 function home(p) {
     const userScope = scopeWithAny(["workRead"])
     const filters = {organizationPartyId: p.organizationPartyId, facilityId: p.facilityId, statusId: null}
@@ -1662,8 +1789,8 @@ function home(p) {
         unassignedCount: openRows.filter(row => !assignedIds.has(row.workEffortId)).length,
         highPriorityCount: openRows.filter(row => row.priority != null && Number(row.priority) <= highPriority).length,
         overdueCount: openRows.filter(overdue).length,
-        overduePmCount: null,
-        unknownMeterCount: null,
+        // P14: the active plans overdue and those whose meter reading is unknown (a reader of work's; null for another)
+        ...plans().homeCounts(userScope, filters),
         downResourceCount: outages.downCount(userScope, filters),
         capped: openRows.length >= homeLimit
     }
@@ -1736,6 +1863,13 @@ const operations = {
     },
     // P4: for Mantle's own callers only (MaintenanceIntake.js), never a service's parameters
     adoptForOwner,
+    // P14: a plan's work order, for its generation alone (MaintenancePlans.js): the scope it resolved and the plan
+    createForPlan: (userScope, p, options) =>
+        makeOrder(userScope, targetOf(userScope, p), p, {
+            maintenanceScheduleId: options.maintenanceScheduleId,
+            operationKey: null,
+            operationHash: null
+        }),
     policyOf,
     // P11: for MaintenanceCosts.js's report and estimate only
     scopedQuery,

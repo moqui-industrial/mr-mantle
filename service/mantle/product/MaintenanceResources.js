@@ -543,10 +543,14 @@ function recordMeter(p) {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in to record a reading")
     const userScope = maintenanceAccess.scope()
     const inWork = !blank(p.workEffortId)
+    // in work: its assigned technician, or a supervisor of its organization, who completes it (a meter plan's work records its
+    // reading with Complete, impl-maintenance P14 review R2)
     if (!userScope.capabilities.resourceEdit) {
-        if (!inWork || !userScope.capabilities.execute) denied("PERMISSION_DENIED", "Maintenance resource edit is required")
+        const supervise = !!userScope.capabilities.supervise
+        if (!inWork || !(userScope.capabilities.execute || supervise))
+            denied("PERMISSION_DENIED", "Maintenance resource edit is required")
         maintenanceAccess.requireWork(userScope, p.workEffortId)
-        if (!maintenanceAccess.assignment(userScope, p.workEffortId).step)
+        if (!supervise && !maintenanceAccess.assignment(userScope, p.workEffortId).step)
             denied("NOT_ASSIGNED", "Work " + p.workEffortId + " is not assigned to you")
     }
     const asset = equipmentOf(userScope, p.assetId, true)

@@ -1481,7 +1481,11 @@ function storeDocument(found) {
 // (PROCESS_NOT_EFFECTIVE) and applicable to the target (assetId or facilityId; PROCESS_NOT_APPLICABLE); then People's two-pass
 // copy, and the requirements copied after it. A retry under operationKey answers the first root.
 function instantiateProcedure(p) {
-    const userScope = scopeWithAny(["plan", "supervise"])
+    return instantiateWith(scopeWithAny(["plan", "supervise"]), p)
+}
+// The checked instantiation for a scope already resolved: the caller's, or the preventive generation job's (P14,
+// MaintenancePlans.js), which runs with no user
+function instantiateWith(userScope, p) {
     const found = requireProcedure(userScope, p.templateWorkEffortId, "instantiate")
     const {root, policy} = found
     if (root.statusId === "WeClosed") denied("PROCESS_RETIRED", "Procedure " + root.workEffortId + " is retired")
@@ -1553,6 +1557,7 @@ const operations = {
     },
     procedureOf,
     requireProcedure,
+    instantiateWith,
     executionInstruction,
     responseText,
     effectiveAt,

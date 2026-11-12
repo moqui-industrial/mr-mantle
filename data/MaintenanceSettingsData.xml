@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance's setup of impl-maintenance P18 (IronStone Maintenance design §6 EquipmentImport, §9 Settings, §12 the equipment
+    import and outcome file; MT-12): the equipment import target, the identification its rows are kept by, and the grants of the
+    services the framework calls as the user from outside Maintenance's screens.
+
+    The import target `equipment` is a `rows` target of the framework's org.moqui.admin.DataTransferServices with no batch of its
+    own, on the pattern of staff invitations (PartyInvitationData.xml) and People's employees (PeopleLifecycleSetupData.xml). A row
+    is one piece of equipment of the batch's organization, kept by its source system and key (AssetIdentification of type
+    AitMntSourceKey, one asset a source key): registered through store#MaintenanceEquipment, its custodian through
+    change#MaintenanceCustody and its starting reading through record#MaintenanceMeter, as the importer, each row in a transaction
+    of its own; a row repeated changes the same asset and records no second reading. It imports no cost, book value, posting,
+    warranty decision or maintenance history. It asks MAINTENANCE_IMPORT and MAINTENANCE_RESOURCE_EDIT to import and
+    MAINTENANCE_RESOURCE_VIEW to view, and no ADMIN_* permission (impl-maintenance §4, F51: a target's permissions are all required,
+    so ADMIN_TRANSFER_RUN beside them would shut the resource administrator out of EquipmentImport); Admin's Imports lists a run for
+    a data operator who also holds MAINTENANCE_RESOURCE_VIEW. Its owner place is the key maintenanceEquipmentImport, which the app
+    showing the run maps (IronStone: Admin.js mountRoutes). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.Enumeration enumId="AitMntSourceKey" enumTypeId="AssetIdentificationType"
+            description="Maintenance import source and key"/>
+    <moqui.server.TransferTarget targetId="equipment" direction="import" targetMode="rows" title="Equipment"
+            description="Equipment registered in an organization, with its location, custodian, supplier warranty and starting meter reading"
+            effectsNote="Each row registers one piece of equipment, or changes the one its source key or ID names, as New equipment does: its location, custodian and starting reading. No cost, book value or maintenance history is imported."
+            ownerApp="Maintenance" targetVersion="1" fieldLabel="Equipment field" scopeLabel="Organization"
+            columnsJson="[{&quot;name&quot;:&quot;externalSource&quot;,&quot;label&quot;:&quot;Source system&quot;},{&quot;name&quot;:&quot;externalKey&quot;,&quot;label&quot;:&quot;Source key&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;assetId&quot;,&quot;label&quot;:&quot;Existing equipment ID&quot;},{&quot;name&quot;:&quot;assetName&quot;,&quot;label&quot;:&quot;Name&quot;},{&quot;name&quot;:&quot;serialNumber&quot;,&quot;label&quot;:&quot;Serial number&quot;},{&quot;name&quot;:&quot;classEnumId&quot;,&quot;label&quot;:&quot;Asset class ID&quot;},{&quot;name&quot;:&quot;productId&quot;,&quot;label&quot;:&quot;Model ID&quot;},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Location ID&quot;},{&quot;name&quot;:&quot;custodianPartyId&quot;,&quot;label&quot;:&quot;Custodian ID&quot;},{&quot;name&quot;:&quot;warrantyThruDate&quot;,&quot;label&quot;:&quot;Supplier warranty until&quot;},{&quot;name&quot;:&quot;warrantyPartyId&quot;,&quot;label&quot;:&quot;Warrantor ID&quot;},{&quot;name&quot;:&quot;productMeterTypeId&quot;,&quot;label&quot;:&quot;Meter type ID&quot;},{&quot;name&quot;:&quot;meterValue&quot;,&quot;label&quot;:&quot;Starting reading&quot;},{&quot;name&quot;:&quot;readingDate&quot;,&quot;label&quot;:&quot;Reading date&quot;},{&quot;name&quot;:&quot;comments&quot;,&quot;label&quot;:&quot;Comments&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Organization ID&quot;}]"
+            keyFields="externalSource,externalKey"
+            refusedColumns="password,group,permission,authz,userid,cost,price,bookvalue,depreciation,glaccount,acquirecost"
+            validateRowService="mantle.product.MaintenanceImportServices.validate#EquipmentImportRow"
+            applyRowService="mantle.product.MaintenanceImportServices.apply#EquipmentImportRow"
+            scopeService="mantle.product.MaintenanceImportServices.find#EquipmentImportScopes"
+            maxBytes="262144" maxRows="1000" retentionDays="30"
+            importPermission="MAINTENANCE_IMPORT,MAINTENANCE_RESOURCE_EDIT" viewPermission="MAINTENANCE_RESOURCE_VIEW"
+            ownerRoute="maintenanceEquipmentImport" sequenceNum="45"/>
+    <!-- The row and scope services, the setup readiness and the policy's and lookups' reads run as the user wherever they are
+        called (the wizard under Maintenance, Admin's Imports and Health, an apply carried on after the request): every user may
+        call them, as People's import services, and each checks the maintenance permission and organization itself. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMaintenanceSetupServices" description="Maintenance's import, readiness and settings services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMaintenanceSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.product\.MaintenanceImportServices\.(validate#EquipmentImportRow|apply#EquipmentImportRow|find#EquipmentImportScopes)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMaintenanceSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.work.MaintenanceSettingsServices.check#MaintenanceReadiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMaintenanceSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMaintenanceSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

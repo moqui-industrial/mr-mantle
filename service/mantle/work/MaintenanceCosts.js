@@ -1,6 +1,7 @@
 // Maintenance costs (IronStone Maintenance design §3 WorkCosts, §8 MaintenanceCostReport, §9's approval threshold, "Charging a
 // project"; review Y2; MT-08's labor price, MT-09, MT-11; impl-maintenance P11 and §4): mantle.work.MaintenanceReportServices
-// get#MaintenanceCosts, MaintenanceSettingsServices store#MaintenanceCostThreshold, the Approve gate's cost half
+// get#MaintenanceCosts, the Approve gate's cost half (the threshold is two of MaintenancePolicy's policyFields, stored by
+// MaintenanceSettingsServices store#MaintenancePolicy)
 // (MaintenanceWork.js) and Projects' money (ProjectServices get#ProjectMoneySummary).
 //
 // - Answered only to MAINTENANCE_COST_VIEW, over the work orders the cost reader reads (MaintenanceAccess.js and
@@ -36,7 +37,6 @@ const {find, one, denied, call, ms} = lib
 const WORK = "mantle.work.effort.WorkEffort"
 const ORDER = "mantle.work.maintenance.MaintenanceWorkOrder"
 const ORDER_VIEW = "mantle.work.maintenance.MaintenanceWorkOrderDetail"
-const POLICY = "mantle.work.maintenance.MaintenancePolicy"
 const LINE = "mantle.work.effort.WorkEffortProduct"
 const PARTY = "mantle.work.effort.WorkEffortParty"
 const ISSUANCE = "mantle.product.issuance.AssetIssuance"
@@ -710,49 +710,6 @@ function costs(p) {
     }
 }
 
-// ===== store#MaintenanceCostThreshold =====
-// The organization's estimated-cost threshold from now (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope): the
-// row in effect ends and the next starts with every other field of it as it was; an empty amount unsets it.
-function storeCostThreshold(p) {
-    signedIn()
-    const userScope = maintenanceAccess.scope()
-    maintenanceAccess.requireCapability(userScope, "settingsEdit")
-    const organizationPartyId = text(p.organizationPartyId)
-    if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose an organization")
-    maintenanceAccess.requireOrganization(userScope, organizationPartyId)
-    let amount = null
-    if (!blank(p.approvalThresholdCost)) {
-        try {
-            amount = toDecimal(p.approvalThresholdCost)
-        } catch (_) {
-            denied("VALUE_INVALID", "The cost threshold must be a number")
-        }
-        if (amount.compare(0) < 0) denied("VALUE_INVALID", "The cost threshold cannot be negative")
-    }
-    const currencyUomId = text(p.approvalThresholdCurrencyUomId)
-    if (currencyUomId && !one("moqui.basic.Uom", {uomId: currencyUomId, uomTypeEnumId: "UT_CURRENCY_MEASURE"}))
-        denied("VALUE_INVALID", "Currency " + currencyUomId + " is not known")
-    const now = ec.user.nowTimestamp
-    const current = Array.from(
-        find(POLICY, {organizationPartyId}).conditionDate("fromDate", "thruDate", now).orderBy("-fromDate").list()
-    )
-    const kept = current.length ? Object.assign({}, current[0].getMap ? current[0].getMap() : current[0]) : {}
-    for (const row of current) call("update#" + POLICY, {organizationPartyId, fromDate: row.fromDate, thruDate: now})
-    for (const field of ["lastUpdatedStamp", "thruDate"]) delete kept[field]
-    call(
-        "create#" + POLICY,
-        Object.assign(kept, {
-            organizationPartyId,
-            fromDate: now,
-            approvalThresholdCost: amount,
-            approvalThresholdCurrencyUomId: amount == null ? null : currencyUomId,
-            changedByUserId: ec.user.userId,
-            comments: text(p.comments)
-        })
-    )
-    return {organizationPartyId, fromDate: now}
-}
-
 // ===== Projects' money (owner contract) =====
 // The maintenance work charged to a project (a work order naming it, or an issuance carrying it) with its cost by currency,
 // for get#ProjectMoneySummary, which checks the money reader and the project first: per work order its total by currency and
@@ -786,7 +743,7 @@ function projectCosts(projectWorkEffortId) {
     return {workList, totalList: totalsOnly(totalsOf(sources).totalList)}
 }
 
-const operations = {costs, storeCostThreshold}
+const operations = {costs}
 ;({
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown maintenance cost operation " + op)
