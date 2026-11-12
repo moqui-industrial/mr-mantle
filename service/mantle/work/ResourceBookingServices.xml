@@ -18,7 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
     resources and adds find#, correct# and end#ResourceUnavailability, in ResourceOutages.js. Maintenance P15 adds planned blocks
     (RukPlanned: a blackout, and Manufacturing's offline time of a work center, which store#WorkCenterOffline now records here) to
     record#, correct# and end#, and the booking policy, its approvers and the one availability read (ResourcePolicy.js), which
-    EventServices' booking calls; the booking decisions are P16's. -->
+    EventServices' booking calls. Maintenance P16 adds the booking decisions (ResourceBookingDecisions.js): find#ResourceBookingRequests,
+    decide#ResourceBooking and decide#ResourceBookings, and the ResourceBooking topic's approve and refuse services. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="record" noun="ResourceUnavailability" allow-remote="false">
@@ -386,6 +387,140 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="added" from="answer.added"/>
             <set field="ended" from="answer.ended"/>
             <set field="pendingCount" from="answer.pendingCount"/>
+        </actions>
+    </service>
+    <!-- ========== Booking decisions (impl-maintenance P16; design §7.1, BookingRequests; ResourceBookingDecisions.js) ========== -->
+    <service verb="find" noun="ResourceBookingRequests" allow-remote="false" read-only="true">
+        <description>The bookings waiting for a decision (design BookingRequests BookingRows): of the resources the user approves now
+            (a current BookingApprover, RESOURCE_BOOKING_VIEW_ASSIGNED or _APPROVE), or of the resources of the user's maintenance
+            scope for a policy reader or supervisor (RESOURCE_POLICY_VIEW, _EDIT, MAINTENANCE_SUPERVISE), read only (PERMISSION_DENIED
+            for anyone else). status requested (the default), assigned or denied; not over yet; filters: one resource (facilityId or
+            assetId), the organizer (requesterPartyId), a period (fromDate, thruDate overlapping) and the resource's name (text).
+            Soonest first. Each row: the resource, the event's span now (whenText, recurring), the organizer, its purpose when the
+            user may open the event (else "Not shared with you"), the requester's notes, the policy in words, the bookings it clashes
+            with (an event the user may not see is Busy), how long it waited, canDecide (an approver of it holding
+            RESOURCE_BOOKING_APPROVE) and what a decision names: expectedStatusId, expectedFromDate and expectedThruDate.</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="status"/>
+            <parameter name="requesterPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="text"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestList" type="List"/>
+            <parameter name="requestListCount" type="Integer"/>
+            <parameter name="requestListPageIndex" type="Integer"/>
+            <parameter name="requestListPageSize" type="Integer"/>
+            <parameter name="requestListPageMaxIndex" type="Integer"/>
+            <parameter name="requestListPageRangeLow" type="Integer"/>
+            <parameter name="requestListPageRangeHigh" type="Integer"/>
+            <parameter name="canDecide" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('find', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="ResourceBooking" allow-remote="false">
+        <description>A requested booking approved or denied (design BookingDecision, §7.1 approval; the first path that decides one,
+            F15): by a current BookingApprover of the resource (NOT_APPROVER) holding RESOURCE_BOOKING_APPROVE (PERMISSION_DENIED), with
+            the resource locked (the work centers above a facility first). Refuses a booking no longer requested or a cancelled event
+            (STATE_CHANGED, also when expectedStatusId differs) and a meeting that moved from the span decided on (expectedFromDate,
+            expectedThruDate; SPAN_CHANGED). An approval rechecks the availability through the booking guard: an outage or block
+            (RESOURCE_UNAVAILABLE), the managed resource's rules, and the assigned bookings over the span (CONFLICT; a request waiting
+            holds nothing against this one, so two approvers of overlapping requests cannot both assign: the second is refused); an
+            override with allowConflicts and overrideReason where the policy allows it and the user holds RESOURCE_BOOKING_OVERRIDE. A
+            denial needs its reason (REASON_REQUIRED), kept in the booking's comments ("Denied: ..."). The booking's approval notices
+            leave every inbox, and the organizer is told on ResourceBookingNotice.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="decision" required="true"><description>approve or deny</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="expectedStatusId"/>
+            <parameter name="expectedFromDate"><description>The span decided on (a time stamp or milliseconds)</description></parameter>
+            <parameter name="expectedThruDate"/>
+            <parameter name="allowConflicts"/>
+            <parameter name="overrideReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="resourceName"/>
+            <parameter name="overridden" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('decide', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
+            <set field="overridden" from="!!answer.overridden"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="ResourceBookings" allow-remote="false">
+        <description>Several requested bookings decided alike (design BulkBookingDecision): bookingList, each {workEffortId,
+            facilityId or assetId, expectedStatusId, expectedFromDate, expectedThruDate} or its key text
+            "facility|id|workEffortId|fromMs|thruMs" (comma separated; at most 100; SELECTION_REQUIRED for none), each through
+            decide#ResourceBooking in its own transaction; a failure is named in resultList (reasonCode, message), logged, and the
+            rest go on.</description>
+        <in-parameters>
+            <parameter name="bookingList" type="Object" required="true"/>
+            <parameter name="decision" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="decidedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('decideMany', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="ResourceBooking" allow-remote="false">
+        <description>The ResourceBooking topic's approve service (Commons' approvals inbox; approve#NotificationMessage calls it as the
+            user deciding): the notice's booking (recordId the event; message facilityId or assetId, the span and state it was sent
+            with) approved through decide#ResourceBooking, which checks the user again; a meeting moved since is refused
+            SPAN_CHANGED.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="resourceName"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="ResourceBooking" allow-remote="false">
+        <description>The ResourceBooking topic's refuse service: the notice's booking denied with the reason (REASON_REQUIRED),
+            through decide#ResourceBooking.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="resourceName"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
         </actions>
     </service>
 </services>

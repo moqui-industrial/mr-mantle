@@ -1180,6 +1180,16 @@ function findInstructions(p) {
     }
 }
 
+// An execution node's instruction (impl-maintenance P7: the checklist's and the print's), with no scope check (the caller read the
+// work): its template node's instruction in effect when the execution was made, through its WeatBasedOn link; null when none.
+function executionInstruction(workEffortId) {
+    const link = rows(ASSOC, {workEffortId, workEffortAssocTypeEnumId: "WeatBasedOn"}).sort(
+        (a, b) => ms(a.fromDate) - ms(b.fromDate)
+    )[0]
+    const row = link ? instructionAt(link.toWorkEffortId, ms(link.fromDate)) : null
+    return row ? {description: row.description || "", text: textOf(row.contentLocation), summary: summaryOf(textOf(row.contentLocation))} : null
+}
+
 // ===== approval =====
 // The approvers of an organization's procedures: users holding WORK_PROCESS_APPROVE through an active group membership whose
 // party is one of the organization's people now, but the procedure's last author unless self-approval is allowed.
@@ -1548,6 +1558,8 @@ const operations = {
     procedureOf,
     requireProcedure,
     instantiateWith,
+    executionInstruction,
+    responseText,
     effectiveAt,
     applicabilityRefusal
 })
