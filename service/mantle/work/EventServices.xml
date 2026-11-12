@@ -649,16 +649,19 @@ along with this software (see the LICENSE.md file). If not, see
             (get#ManagedEvents: People's training session, People's interview, or another EventManager) is viewed as any other
             but changed by no user here (managedBy names where it is changed; impl-people P19 review, Commons calendar editors of
             Nov 12, 2026); that application's services check their own rules and write it, or call these services as the
-            system (runAsSystem: no user and authorization off), which may view and change any event. With permission view or
-            edit, an error when the user may not; an event the user may not view is "not found".
+            system (runAsSystem: no user and authorization off), which may view and change any event. A booking changes no event,
+            so canBook is canEdit, or for a kept event being its organizer (book#Resource, cancel#ResourceBooking and
+            check#ResourceBookings ask permission book; impl-maintenance F356). With permission view, edit or book, an error when
+            the user may not; an event the user may not view is "not found".
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
-            <parameter name="permission" default-value="view"><description>view or edit</description></parameter>
+            <parameter name="permission" default-value="view"><description>view, edit or book</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="canView" type="Boolean"/>
             <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canBook" type="Boolean"><description>May book, cancel and recheck the event's rooms and equipment</description></parameter>
             <parameter name="isOrganizer" type="Boolean"/>
             <parameter name="isAttendee" type="Boolean"/>
             <parameter name="managedBy"><description>Where the event is changed, when an application keeps it</description></parameter>
@@ -666,7 +669,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="workEffort" type="Map"/>
         </out-parameters>
         <actions><script><![CDATA[
-            canView = false; canEdit = false; isOrganizer = false; isAttendee = false; workEffort = null; managedBy = null; eventManagerId = null
+            canView = false; canEdit = false; canBook = false; isOrganizer = false; isAttendee = false; workEffort = null; managedBy = null; eventManagerId = null
             const cf = ec.entity.conditionFactory
             const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (row != null) {
@@ -678,7 +681,7 @@ along with this software (see the LICENSE.md file). If not, see
             const partyId = ec.user.userAccount?.partyId || null
             if (row != null && !ec.user.userId && ec.artifactExecution.authzDisabled()) {
                 // the system scope (runAsSystem, a job): the service's own code checked its caller
-                canView = true; canEdit = true
+                canView = true; canEdit = true; canBook = true
                 workEffort = row.getMap()
             } else if (row != null && ec.user.userId) {
                 isOrganizer = !!partyId && row.ownerPartyId === partyId
@@ -704,10 +707,16 @@ along with this software (see the LICENSE.md file). If not, see
                 // an event an application keeps is changed there (its own checks), never by its organizer or a calendar here
                 canEdit = !managedBy && (isOrganizer || editByCalendar)
                 canView = isOrganizer || editByCalendar || isAttendee || viewByCalendar || row.visibilityEnumId === 'WevAllUsers'
+                // a booking changes no event: the organizer of a kept event books its rooms and equipment (F356)
+                canBook = canEdit || (!!managedBy && isOrganizer)
                 if (canView) workEffort = row.getMap()
             }
-            if (permission !== 'view' && permission !== 'edit') return
+            if (permission !== 'view' && permission !== 'edit' && permission !== 'book') return
             if (!canView) { ec.message.addError(`Event ${workEffortId} not found`); return }
+            if (permission === 'book' && !canBook && managedBy) {
+                ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} books its rooms and equipment; it is changed on ${managedBy}`); return }
+            if (permission === 'book' && !canBook) {
+                ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} or an editor of its calendar may book for it`); return }
             if (permission === 'edit' && !canEdit && managedBy) { ec.message.addError(`${row.workEffortName || workEffortId} is changed on ${managedBy}`); return }
             if (permission === 'edit' && !canEdit) ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} or an editor of its calendar may change it`)
         ]]></script></actions>
@@ -2045,7 +2054,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="book" noun="Resource">
         <description>
             Books a meeting room (facilityId: a WorkEffortFacility) or equipment (assetId: a WorkEffortAssetAssign) for an
-            event, with edit access to the event, at the event's time. Without a booking policy the booking is assigned at
+            event, with book access to the event (check#EventAccess: edit access, or the organizer of an event an application
+            keeps; impl-maintenance F356), at the event's time. Without a booking policy the booking is assigned at
             once (WefAssigned, WeaaAssigned); a resource with a policy is requested (WefRequested, WeaaRequested) and waits
             for its approvers. The policy is a placeholder until Maintenance designs it: a resource needs approval when it
             has a current approver, a FacilityParty (a facility) or AssetPartyAssignment (an asset) of role BookingApprover,
@@ -2089,7 +2099,7 @@ along with this software (see the LICENSE.md file). If not, see
             approverPartyIdList = []
             conflictList = []
             if (!facilityId === !assetId) { ec.message.addError('Book one meeting room (facilityId) or one piece of equipment (assetId)'); return }
-            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'edit'}).call()
+            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'book'}).call()
             if (ec.message.hasError()) return
             const cf = ec.entity.conditionFactory
             const toMillis = (value) => {
@@ -2179,7 +2189,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="cancel" noun="ResourceBooking">
         <description>Cancels the booking of a meeting room (deletes the WorkEffortFacility) or equipment (ends the current
-            WorkEffortAssetAssign rows, thruDate now) of an event, with edit access to the event. A booking waiting for approval
+            WorkEffortAssetAssign rows, thruDate now) of an event, with book access to the event (check#EventAccess, F356). A booking waiting for approval
             leaves its approvers' inboxes (the ResourceBooking topic; impl-maintenance P16 review), as cancel#EventOccurrence's
             bookings do.</description>
         <in-parameters>
@@ -2191,7 +2201,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             cancelledCount = 0
             if (!facilityId === !assetId) { ec.message.addError('Name one meeting room (facilityId) or one piece of equipment (assetId)'); return }
-            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'edit'}).call()
+            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'book'}).call()
             if (ec.message.hasError()) return
             const now = ec.user.nowTimestamp
             const nowText = String(now)
@@ -2226,7 +2236,7 @@ along with this software (see the LICENSE.md file). If not, see
             conflictList. By book#Resource's booking policy, with reapprove (the default) a booking that was assigned for a
             resource with approvers the user is not one of is requested again (WefRequested, WeaaRequested): the approval
             was for the old time. bookingList has each booking {facilityId or assetId, resourceName, statusId,
-            previousStatusId, conflictList}. Edit access to the event (an error without it).
+            previousStatusId, conflictList}. Book access to the event (check#EventAccess, F356; an error without it).
 
             For a time not stored yet (a calendar program's change, CalendarDavServices.put#DavObject), startDate and endDate
             give the time to check instead of the event's own; with checkOnly the service only answers: a clash is in
@@ -2257,7 +2267,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             bookingList = []; conflictList = []; rerequestedCount = 0
-            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'edit'}).call()
+            ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: workEffortId, permission: 'book'}).call()
             if (ec.message.hasError()) return
             const cf = ec.entity.conditionFactory
             const toMillis = (value) => {

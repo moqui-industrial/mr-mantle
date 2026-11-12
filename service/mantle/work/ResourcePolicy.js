@@ -216,11 +216,13 @@ function blockLabel(row, resource) {
         return "Not available: " + (enumText(row.unavailabilityReasonEnumId) || "planned block").toLowerCase() + where
     return "Out of service" + where
 }
-// Whether the user may see an event (organizer, attendee, a calendar's reader or visible to all), read once per event.
+// Whether the user may see an event (organizer, attendee, a calendar's reader or visible to all), read once per event. With no user
+// (a job, or an application's call as the system) none is seen: check#EventAccess answers the system scope every event, so a clash
+// would be named by its title (F358); it is Busy.
 function eventVisibility() {
     const known = new Map()
     return workEffortId => {
-        if (!workEffortId) return false
+        if (!workEffortId || !ec.user.userId) return false
         if (!known.has(workEffortId)) {
             ec.message.pushErrors()
             let visible = false

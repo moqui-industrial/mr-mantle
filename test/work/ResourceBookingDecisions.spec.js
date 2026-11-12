@@ -7,7 +7,9 @@
 // apart with no title of a hidden event; an unmanaged room's daily series is refused by a blackout on its third meeting, while a
 // conflict past its first meeting is not checked (as before); an inventory asset with no policy is booked as before P15; and
 // Manufacturing's offline time of a work center, recorded with its center locked, refuses a booking of the center under it; and a request
-// withdrawn (its booking or its event cancelled) leaves the approvers' inboxes.
+// withdrawn (its booking or its event cancelled) leaves the approvers' inboxes. F356–F358: People's interview (an event People keeps)
+// is booked by its organizer and by no attendee; People's change rechecks the booking as the system (a clash refused and named Busy,
+// F358; a free time asks the approved booking again) and its cancel withdraws the booking and its notices.
 // Standalone: spec-local organization, building, rooms, equipment, a plant with a work center, groups and users; the services
 // called as each user with the artifact check aside.
 // Run: ./moq test mr-mantle --spec ResourceBookingDecisions
@@ -173,6 +175,7 @@ spec({
         state.ann = user("ANN", [])
         state.bob = user("BOB", ["RESOURCE_BOOKING_OVERRIDE"])
         state.scheduler = user("SCHEDULER", ["PRODUCTION_SCHEDULE", "PRODUCTION_VIEW"])
+        state.recruiter = user("RECRUITER", ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
         // the room is managed: approved by its two approvers, an override allowed with a reason
         call("create#mantle.work.effort.ResourceBookingPolicy", {
             facilityId: room,
@@ -524,5 +527,95 @@ feature("a request withdrawn leaves the approvers' inboxes: its booking cancelle
         r.calledAsked == true
         r.eventCancelled.error == ""
         r.calledLeft == [null, null]
+    }
+})
+
+feature("an interview's organizer books the managed room; People's change rechecks it and its cancel withdraws it", {
+    when() {
+        // the recruiter's interview, kept by People (an ApplicationInterview names it), with Ann on the panel
+        const interview = event(state.recruiter, "Interview: decision analyst", at(1, 6), at(2, 6))
+        call("create#mantle.humanres.employment.EmploymentApplication", {
+            employmentApplicationId: prefix + "_APP",
+            organizationPartyId: org,
+            applyingPartyId: state.BOB_PARTY,
+            statusId: "EaInterview"
+        })
+        call("create#mantle.humanres.recruitment.ApplicationInterview", {
+            workEffortId: interview,
+            employmentApplicationId: prefix + "_APP",
+            organizationPartyId: org
+        })
+        call("create#mantle.work.effort.WorkEffortParty", {
+            workEffortId: interview,
+            partyId: state.ANN_PARTY,
+            roleTypeId: "Assignee",
+            fromDate: since,
+            statusId: "WeptAssigned"
+        })
+        const access = as(state.recruiter, E + "check#EventAccess", {workEffortId: interview, permission: "check"})
+        const panelBooks = as(state.ann, E + "book#Resource", {workEffortId: interview, facilityId: room})
+        const booked = as(state.recruiter, E + "book#Resource", {workEffortId: interview, facilityId: room})
+        const asked = noticeFor(state.first, interview)
+        const approved = as(state.first, R + "approve#ResourceBooking", {
+            recordEntityName: "mantle.work.effort.WorkEffort",
+            recordId: interview,
+            message: JSON.parse(asked.messageJson)
+        })
+        const afterApproval = roomBooking(interview).statusId
+        // Bob holds the room later that day: a change into it is refused, the clash named Busy (the recheck runs as the system)
+        const bobLater = event(state.bob, "Bob vendor demo", at(4, 6), at(5, 6))
+        as(state.bob, E + "book#Resource", {workEffortId: bobLater, facilityId: room})
+        const I = "mantle.humanres.RecruitingServices."
+        const clash = as(state.recruiter, I + "change#Interview", {
+            workEffortId: interview,
+            startDate: at(4.5, 6),
+            durationMinutes: 60
+        })
+        const keptAt = ms(
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", interview).disableAuthz().one()
+                .estimatedStartDate
+        )
+        const moved = as(state.recruiter, I + "change#Interview", {
+            workEffortId: interview,
+            startDate: at(7, 6),
+            durationMinutes: 60
+        })
+        const afterMove = roomBooking(interview).statusId
+        const movedNotice = noticeFor(state.first, interview)
+        const cancelled = as(state.recruiter, I + "cancel#Interview", {workEffortId: interview, reason: "Position filled"})
+        return {
+            access,
+            panelBooks,
+            booked,
+            approved,
+            afterApproval,
+            clash,
+            keptAt,
+            moved,
+            afterMove,
+            movedFrom: movedNotice ? JSON.parse(movedNotice.messageJson).fromMs : null,
+            cancelled,
+            afterCancel: roomBooking(interview),
+            left: [noticeFor(state.first, interview), noticeFor(state.second, interview)]
+        }
+    },
+    then(r) {
+        r.access.canEdit == false
+        r.access.canBook == true
+        r.access.managedBy != null
+        r.panelBooks.error.includes("Only the organizer of Interview: decision analyst books its rooms and equipment")
+        r.booked.error == ""
+        r.booked.statusId == "WefRequested"
+        r.approved.error == ""
+        r.afterApproval == "WefAssigned"
+        r.clash.error.includes("Decision room is booked then: Busy")
+        !r.clash.error.includes("Bob vendor demo")
+        r.keptAt == at(1, 6).getTime()
+        r.moved.error == ""
+        r.afterMove == "WefRequested"
+        r.movedFrom == at(7, 6).getTime()
+        r.cancelled.error == ""
+        r.afterCancel == null
+        r.left == [null, null]
     }
 })

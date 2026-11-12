@@ -28,6 +28,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
+// the interview's room and equipment bookings kept right when it moves or is cancelled (impl-maintenance F356)
+const bookings = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
 const {find, one, rows, denied, call, dateText, ms} = lib
 
 const OPENING = "mantle.humanres.recruitment.JobOpening",
@@ -1183,6 +1185,7 @@ function changeInterview(p) {
     if (p.location != null && !interview.callLinkId) changes.location = text(p.location) || null
     if (p.note != null) changes.description = text(p.note) || null
     call("update#" + WORK, changes)
+    if (startMs !== oldStartMs || endMs !== oldEndMs) bookings().keptEventMoved(workEffortId)
     if (interview.callLinkId) {
         const link = one("moqui.call.CallLink", {callLinkId: interview.callLinkId})
         const wantMs = Math.min(nowMs() + 90 * 24 * hourMs, endMs + 24 * hourMs)
@@ -1201,6 +1204,7 @@ function cancelInterview(p) {
         statusId: "WeCancelled",
         statusId_changeReason: text(p.reason) || "Interview cancelled"
     })
+    bookings().keptEventCancelled(workEffortId)
     closeCallLink(interview.callLinkId)
     return {workEffortId}
 }

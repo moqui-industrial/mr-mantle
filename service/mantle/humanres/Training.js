@@ -33,6 +33,8 @@ const people = ec.resource.script("component://mr-mantle/service/mantle/humanres
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const development = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Development.js")
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
+// the session's room and equipment bookings kept right when it moves or is cancelled (impl-maintenance F356)
+const bookings = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -735,6 +737,8 @@ function storeTraining(p) {
         location,
         description
     })
+    if (startMs !== ms(found.event.estimatedStartDate) || endMs !== ms(found.event.estimatedCompletionDate))
+        bookings().keptEventMoved(id)
     const previousTrainer = found.session.trainerPartyId
     call("update#" + SESSION, {workEffortId: id, trainerPartyId, capacity, assessmentFormId: formId})
     if (previousTrainer !== trainerPartyId) {
@@ -748,6 +752,7 @@ function storeTraining(p) {
 function cancelSession(found, reason) {
     const workEffortId = found.session.workEffortId
     call("update#" + WORK, {workEffortId, statusId: "WeCancelled"})
+    bookings().keptEventCancelled(workEffortId)
     for (const row of rows(ENROLLMENT, {workEffortId}).filter(item => [REQUESTED, ENROLLED].includes(item.statusEnumId))) {
         call("update#" + ENROLLMENT, {
             personTrainingId: row.personTrainingId,
@@ -1247,4 +1252,48 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown training operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+// sessionHours: each person's hours in training sessions from fromMs to thruMs, the sessions they are enrolled in or train, not
+// cancelled; sessions that overlap counted once. For Maintenance's dispatch (find#MaintenanceCandidates' free hours,
+// impl-maintenance F360), which checked its own caller; nothing of a session but its time is answered.
+function sessionHours(partyIds, fromMs, thruMs) {
+    const ids = unique(Array.from(partyIds || []).filter(Boolean))
+    const hours = {}
+    if (!ids.length || !(thruMs > fromMs)) return hours
+    const sessionsOf = new Map()
+    const add = (partyId, workEffortId) => sessionsOf.set(partyId, (sessionsOf.get(partyId) || []).concat([workEffortId]))
+    for (const row of Array.from(find(ENROLLMENT).condition("partyId", "in", ids).condition("statusEnumId", ENROLLED).list()))
+        add(row.partyId, row.workEffortId)
+    for (const row of Array.from(find(SESSION).condition("trainerPartyId", "in", ids).list()))
+        add(row.trainerPartyId, row.workEffortId)
+    const eventIds = unique([].concat(...Array.from(sessionsOf.values())))
+    if (!eventIds.length) return hours
+    const spans = new Map()
+    for (const event of Array.from(
+        find(WORK)
+            .condition("workEffortId", "in", eventIds)
+            .condition("statusId", "not-equals", "WeCancelled")
+            .condition("estimatedStartDate", "less", stamp(thruMs))
+            .condition("estimatedCompletionDate", "greater", stamp(fromMs))
+            .list()
+    ))
+        spans.set(event.workEffortId, [
+            Math.max(fromMs, ms(event.estimatedStartDate)),
+            Math.min(thruMs, ms(event.estimatedCompletionDate))
+        ])
+    for (const [partyId, sessions] of sessionsOf) {
+        const own = unique(sessions)
+            .map(id => spans.get(id))
+            .filter(Boolean)
+            .sort((a, b) => a[0] - b[0])
+        let total = 0
+        let end = -Infinity
+        for (const [start, stop] of own) {
+            if (stop <= end) continue
+            total += stop - Math.max(start, end)
+            end = stop
+        }
+        if (total > 0) hours[partyId] = total / (60 * 60 * 1000)
+    }
+    return hours
+}
+;({execute: run, sessionHours})
