@@ -6,7 +6,9 @@
 // reader's dates and ids are of their own employers' employments only, not of a report's elsewhere; a caller asking checkOnly is
 // answered no access for a person outside the scope; the person corrects only the permitted fields and HR the rest, a stale revision
 // refused; the history is HR's and the person's; and the employment content host opens to an HR reader of its employer only,
-// through get#RecordLinkInfo too. Standalone: spec-local organizations, people, employments, groups and users, with artifact
+// through get#RecordLinkInfo too. P8: an emergency contact is added by the person, changed by HR of their employer at its revision
+// and ended, never deleted; a reader may change none and reads none; its party is found by no one in a party search or a record
+// link. Standalone: spec-local organizations, people, employments, groups and users, with artifact
 // authorization disabled (the rules are the services' own permission and scope checks).
 // Run: ./moq test mr-mantle --spec PeopleDirectory
 const prefix = "PEOPLE_DIR_SPEC"
@@ -416,6 +418,92 @@ feature(
             code(otherEmployer) == "RECORD_UNAVAILABLE"
             info.contentEntity.entityName == "mantle.humanres.employment.EmploymentContent"
             info.contentEntity.keyField == "partyRelationshipId"
+        }
+    }
+)
+
+feature(
+    "an emergency contact is the person's and HR's: added, changed at its revision and ended; a reader reads and changes none, and no one finds its party",
+    {
+        when() {
+            const store = (user, parameters) =>
+                run(user, S + "store#EmergencyContact", Object.assign({partyId: state.REPORT}, parameters))
+            const contactsAs = user => run(user, S + "get#Employee360", {partyId: state.REPORT}).personalInfo?.emergencyContacts
+            const added = store(state.self, {firstName: "Sam", lastName: "Rivera", relationshipName: "Spouse", phone: "555 0101"})
+            const noPhone = store(state.self, {firstName: "Ann", lastName: "Other"})
+            const first = (contactsAs(state.hr) || [])[0] || {}
+            // HR of A changes the phone at the revision read; the same revision again is stale
+            const changed = store(state.hr, {
+                contactPartyId: added.contactPartyId,
+                expectedRevision: first.revision,
+                firstName: "Sam",
+                lastName: "Rivera",
+                relationshipName: "Spouse",
+                phone: "555 0199"
+            })
+            const stale = store(state.hr, {
+                contactPartyId: added.contactPartyId,
+                expectedRevision: first.revision,
+                firstName: "Sam",
+                lastName: "Rivera",
+                phone: "555 0100"
+            })
+            const reader = store(state.reader, {firstName: "Not", lastName: "Added", phone: "555 0102"})
+            const readerSees = contactsAs(state.reader)
+            const afterChange = contactsAs(state.self) || []
+            // the contact's party: found by no one in a party search, and no one's record link
+            const searched = run(state.hr, "mantle.party.PartyServices.find#Party", {lastName: "Rivera"}).partyIdList || []
+            const linked = run(state.hr, "mantle.party.CommunicationServices.get#RecordLinkInfo", {
+                recordEntityName: "mantle.party.Party",
+                recordId: added.contactPartyId,
+                checkOnly: true
+            }).recordVisible
+            const party = ec.entity.find("mantle.party.Party").condition("partyId", added.contactPartyId).disableAuthz().one()
+            const ended = store(state.self, {
+                contactPartyId: added.contactPartyId,
+                expectedRevision: afterChange[0]?.revision,
+                end: true
+            })
+            const afterEnd = contactsAs(state.self) || []
+            const kept = ec.entity
+                .find("mantle.party.PartyRelationship")
+                .condition({relationshipTypeEnumId: "PrtEmergencyContact", toPartyId: added.contactPartyId})
+                .disableAuthz()
+                .list()
+            const shown = afterChange.map(row => [row.name, row.relationshipName, row.phone].join(" | "))
+            return {
+                added,
+                noPhone,
+                changed,
+                stale,
+                reader,
+                readerSees,
+                shown,
+                afterChange,
+                searched,
+                linked,
+                party,
+                ended,
+                afterEnd,
+                kept
+            }
+        },
+        then({added, noPhone, changed, stale, reader, readerSees, shown, searched, linked, party, ended, afterEnd, kept}) {
+            added.error == ""
+            code(noPhone) == "PHONE_REQUIRED"
+            changed.error == ""
+            code(stale) == "REVISION_CHANGED"
+            code(reader) == "PERMISSION_DENIED"
+            readerSees == null
+            shown == ["Sam Rivera | Spouse | 555-0199"]
+            !searched.includes(added.contactPartyId)
+            linked == false
+            party.privateOwnerUserId == "_PEOPLE_PRIVATE_"
+            ended.error == ""
+            ended.ended == true
+            afterEnd == []
+            kept.size() == 1
+            kept[0].thruDate != null
         }
     }
 )

@@ -25,7 +25,10 @@ along with this software (see the LICENSE.md file). If not, see
     checklists over mantle.work.ProcessServices (find#, store#Checklist, store#ChecklistStep, start#Checklists after commit,
     get#ChecklistTask; Checklists.js), the equipment held and its return (get#AssignedEquipment, get#EquipmentCustody,
     return#Equipment, complete#ReturnTasks on a holding's end), the access request's failure note and the employees import's row
-    services (PeopleImport.js). -->
+    services (PeopleImport.js). P8 adds self-service and the manager's team: get#SelfService (the caller's own party alone),
+    find#MyRequests, get#Team, find#DueWork (decisions waiting on the caller, HR's due work, the caller's own People tasks), an
+    employee's emergency contacts (store#EmergencyContact; read with the personal information) and the PeopleTaskAssigned notice
+    (notify#PeopleTaskAssigned). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="get" noun="Scope" allow-remote="false">
@@ -80,7 +83,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="Home" allow-remote="false">
         <description>People Home's summary for a staff reader, over the employers in scope or the one asked for (refused outside
             the scope, ORGANIZATION_DENIED), as of asOfDate (now when empty): headcount (distinct people) and employments for a
-            staff reader, the joins and exits of the last 30 days for an HR reader, each count of a later phase absent; and the
+            staff reader, the joins and exits of the last 30 days for an HR reader, the vacant seats in effect for a position reader
+            (HR, recruiting, payroll, the administrator; P8) and the People decisions waiting on the caller (PEOPLE_REQUEST_APPROVE;
+            P8), each count of a later phase absent (one that cannot be counted is logged and left out); and the
             due work an HR reader clears (employees with no manager, by name, the first 20 of dueWorkCount). Pay is never
             counted. Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
         <in-parameters>
@@ -91,8 +96,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="organizationPartyIds" type="List"/>
             <parameter name="organizationPartyId"/>
             <parameter name="asOfDate" type="Timestamp"/>
-            <parameter name="counts" type="Map"><description>headcount, employments, joins and exits, each present only for a
-                caller who may read it</description></parameter>
+            <parameter name="counts" type="Map"><description>headcount, employments, joins, exits, vacancies and decisions, each
+                present only for a caller who may read it</description></parameter>
             <parameter name="hasEmployees" type="Boolean"/>
             <parameter name="dueWork" type="List"><description>dueKind, dueText, partyId, personName, organizationPartyId,
                 organizationName</description></parameter>
@@ -185,7 +190,7 @@ along with this software (see the LICENSE.md file). If not, see
             one they may not read absent from the answer. Overview (any reader the scope admits): the public work identity and
             the employments the scope shows of the person (an HR reader's with their dates). EmploymentHistory and PersonalInfo
             (the person, and an HR reader of an employer of theirs): personalInfo holds the private contacts, birth date, gender
-            and the revision store#PersonalInfo checks, and for HR the identifications other than tax ones, values masked.
+            and the revision store#PersonalInfo checks, the emergency contacts (P8, each with its own revision), and for HR the identifications other than tax ones, values masked.
             FilesAndActivity (an HR reader of the employer of the employment opened): hostEmploymentId, the employment content
             host. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
             one, then the newest. A person outside the scope is refused as a missing one (RECORD_UNAVAILABLE). Never pay, review,
@@ -1113,5 +1118,196 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The employers an import of employees may be for and whose imports the caller may read: those in the caller's
             People scope, for an HR reader (PEOPLE_HR_VIEW). None otherwise.</description>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('findScopes', context))</script></actions>
+    </service>
+
+    <!-- ===== P8: self-service, the manager's team, due work and emergency contacts (design §3 Home, MyTeam, SelfService; §4
+        PersonalInfo) ===== -->
+    <service verb="get" noun="SelfService" allow-remote="false">
+        <description>The caller's own self-service summary (design §3 SelfService MySummary), with PEOPLE_SELF_SERVICE: their own
+            party alone (the service takes no party: a supplied one is dropped and changes nothing), their current and coming
+            employments (employer, job title, department, manager, work location, dates and state), their emergency contacts, and
+            how many of their own People requests wait (find#MyRequests) and People tasks are theirs to do (find#DueWork's myTask,
+            a protected task about them left out). Never pay. Refuses a caller without PEOPLE_SELF_SERVICE or a party
+            (PERMISSION_DENIED), or with checkOnly answers available false. The cards of later phases (balances, the clock,
+            payslips) join here.</description>
+        <in-parameters>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller that shows a card only when the
+                user has self-service (Commons Home): answers available false instead of refusing</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="available" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="preferredName"/>
+            <parameter name="employments" type="List"><description>partyRelationshipId, organizationPartyId, organizationName,
+                jobTitle, departmentName, managerName, workLocation, state, stateText, fromDateText, thruDateText, onLeave</description></parameter>
+            <parameter name="emergencyContacts" type="List"><description>contactPartyId, firstName, lastName, name,
+                relationshipName, phone, fromDateText, revision</description></parameter>
+            <parameter name="openRequestCount" type="Integer"/>
+            <parameter name="openTaskCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('selfService', context)"/>
+            <set field="available" from="!!found.available"/>
+            <set field="partyId" from="found.partyId || null"/>
+            <set field="personName" from="found.personName || null"/>
+            <set field="preferredName" from="found.preferredName || null"/>
+            <set field="employments" from="found.employments || []"/>
+            <set field="emergencyContacts" from="found.emergencyContacts || []"/>
+            <set field="openRequestCount" from="found.openRequestCount || 0"/>
+            <set field="openTaskCount" from="found.openTaskCount || 0"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="MyRequests" allow-remote="false">
+        <description>The People requests the caller made (design §3 SelfService MyRequests), newest first, or with openOnly those
+            waiting: kind, what it is about (no pay), the dates, the state, who decides the step waiting (or that no one may yet)
+            and a refusal's reason. The caller's own only: the service takes no user or party. Later phases' requests (leave,
+            expense claims) join with their kinds. Paged. Refuses a call with no user (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="openOnly" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requests" type="List"><description>peopleApprovalId, approvalKindEnumId, kindText, summary,
+                sourceEntityName, sourceId, subjectPartyId, requestedDateText, effectiveDateText, statusId, statusText,
+                nextApproverText, returnReason</description></parameter>
+            <parameter name="requestsCount" type="Integer"/>
+            <parameter name="requestsPageIndex" type="Integer"/>
+            <parameter name="requestsPageSize" type="Integer"/>
+            <parameter name="requestsPageMaxIndex" type="Integer"/>
+            <parameter name="requestsPageRangeLow" type="Integer"/>
+            <parameter name="requestsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('findMyRequests', context)"/>
+            <set field="requests" from="found.requests"/>
+            <set field="requestsCount" from="found.requestsCount"/>
+            <set field="requestsPageIndex" from="found.requestsPageIndex"/>
+            <set field="requestsPageSize" from="found.requestsPageSize"/>
+            <set field="requestsPageMaxIndex" from="found.requestsPageMaxIndex"/>
+            <set field="requestsPageRangeLow" from="found.requestsPageRangeLow"/>
+            <set field="requestsPageRangeHigh" from="found.requestsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Team" allow-remote="false">
+        <description>The caller's current reports (design §3 MyTeam Team), with PEOPLE_TEAM_VIEW: the people of their live
+            reporting lines, one row per employment at an employer the line is at (never a report's employment at another
+            employer), as the public work identity with the department, work location and whether they work or are on a leave of
+            absence now; no employment id, private contact or pay. The caller's own lines only: the service takes no manager or
+            party. Refuses a caller without PEOPLE_TEAM_VIEW (PERMISSION_DENIED). The schedule, who is out and missing time join
+            with P9, P12 and P10.</description>
+        <out-parameters>
+            <parameter name="team" type="List"><description>partyId, personName, preferredName, organizationPartyId,
+                organizationName, jobTitle, departmentName, workLocation, workEmail, workPhone, state, stateText, availability,
+                availabilityText</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="team" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('team', context).team"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="DueWork" allow-remote="false">
+        <description>The due work the caller clears (design §3 Home DueWork, MyTeam Decisions, SelfService), of the kinds asked
+            (every kind they may read when none is): decision, the People decisions waiting on them now (PEOPLE_REQUEST_APPROVE: a
+            request whose step waiting they may decide); noManager, an HR reader's employees with no manager at an employer in
+            scope; checklistTask, the open lifecycle tasks (checklist steps, equipment returns) of those employers, an HR reader's;
+            myTask, the caller's own open People tasks. A protected task about the caller (their own offboarding) is never in it,
+            as HR or as its assignee, unless its step is the employee's to see. Overdue first, then by due date. Paged. Refuses an
+            unknown kind (KIND_INVALID), a caller who may read none of the kinds asked (PERMISSION_DENIED) and an employer outside
+            the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="kinds"><description>decision, noManager, checklistTask, myTask: a comma list</description></parameter>
+            <parameter name="organizationPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueWork" type="List"><description>dueKind, dueText, title, partyId, personName, organizationPartyId,
+                organizationName, whenText, overdue, assigneeText, workEffortId (a task's), peopleApprovalId, approvalKindEnumId and
+                sourceId (a decision's)</description></parameter>
+            <parameter name="kinds" type="List"><description>The kinds read</description></parameter>
+            <parameter name="dueWorkCount" type="Integer"/>
+            <parameter name="dueWorkPageIndex" type="Integer"/>
+            <parameter name="dueWorkPageSize" type="Integer"/>
+            <parameter name="dueWorkPageMaxIndex" type="Integer"/>
+            <parameter name="dueWorkPageRangeLow" type="Integer"/>
+            <parameter name="dueWorkPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/People.js').execute('dueWork', context)"/>
+            <set field="dueWork" from="found.dueWork"/>
+            <set field="kinds" from="found.kinds"/>
+            <set field="dueWorkCount" from="found.dueWorkCount"/>
+            <set field="dueWorkPageIndex" from="found.dueWorkPageIndex"/>
+            <set field="dueWorkPageSize" from="found.dueWorkPageSize"/>
+            <set field="dueWorkPageMaxIndex" from="found.dueWorkPageMaxIndex"/>
+            <set field="dueWorkPageRangeLow" from="found.dueWorkPageRangeLow"/>
+            <set field="dueWorkPageRangeHigh" from="found.dueWorkPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="EmergencyContact" allow-remote="false">
+        <description>Add, change or end one of a person's emergency contacts (design §4 PersonalInfo; the user's call on F80): a
+            Person party of its own with its names and phone, linked from the person by a dated PrtEmergencyContact relationship
+            (relationshipName: spouse, parent, ...), held as private contact data (Party.privateOwnerUserId _PEOPLE_PRIVATE_, so
+            no directory, contact book, palette, contact list or search shows it to anyone). The person themselves
+            (PEOPLE_SELF_SERVICE) or an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer of theirs, as
+            store#PersonalInfo. Without contactPartyId a contact is added; with it, changed at the revision read, or ended with end
+            (never deleted). Refuses a person outside the scope and a contact not theirs (RECORD_UNAVAILABLE), a caller who may
+            change nothing of the person (PERMISSION_DENIED), a stale revision (REVISION_CHANGED), no name (NAME_REQUIRED), no phone
+            (PHONE_REQUIRED) and a sixth contact (CONTACT_LIMIT).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"><description>The employee</description></parameter>
+            <parameter name="contactPartyId"><description>A current emergency contact of theirs, to change or end</description></parameter>
+            <parameter name="expectedRevision"><description>The contact's revision read (get#Employee360's or get#SelfService's)</description></parameter>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="relationshipName"/>
+            <parameter name="phone"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactPartyId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('storeEmergencyContact', context)"/>
+            <set field="contactPartyId" from="stored.contactPartyId"/>
+            <set field="ended" from="!!stored.ended"/>
+        </actions>
+    </service>
+
+    <service verb="notify" noun="PeopleTaskAssigned" allow-remote="false">
+        <description>Tells the users of a party newly assigned to a task of People's lifecycle work (a checklist step, an equipment
+            return; mantle.work.TaskServices.notify#TaskAssigned hands such a task here) on the topic PeopleTaskAssigned, whose
+            title names who assigned it and when it is due and nothing of the person or the change: workEffortId, assignedByName,
+            dueDateText, and the task as the record. Not the user who assigned it. A failure is logged, not the
+            assignment's.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="partyId" required="true"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            try {
+                const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).disableAuthz().one()
+                if (task == null) return
+                const userIds = Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).selectField('userId')
+                        .disableAuthz().list()).map((account) => account.userId).filter((userId) => userId !== ec.user.userId)
+                if (!userIds.length) return
+                const me = ec.user.userAccount?.partyId ? ec.entity.find('mantle.party.Person').condition('partyId', ec.user.userAccount.partyId)
+                        .disableAuthz().one() : null
+                const assignedByName = (me ? [me.firstName, me.lastName].filter((part) => part).join(' ') : '') || ec.user.username || 'People'
+                const due = task.estimatedCompletionDate
+                const dueDateText = due ? ec.l10n.format(new Date(Number(String(due)) || Date.parse(String(due))), 'MMM d') : 'when you can'
+                ec.makeNotificationMessage().topic('PeopleTaskAssigned').userIds(userIds)
+                        .message({workEffortId: workEffortId, assignedByName: assignedByName, dueDateText: dueDateText})
+                        .record('mantle.work.effort.WorkEffort', workEffortId).send()
+            } catch (err) {
+                ec.logger.error(`People task ${workEffortId} assigned to ${partyId}: notification not sent: ${err && err.message ? err.message : err}`)
+            }
+        ]]></script></actions>
     </service>
 </services>

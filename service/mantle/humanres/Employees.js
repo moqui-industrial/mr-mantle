@@ -407,6 +407,8 @@ function personalOf(partyId, hr) {
         homeAddressFields: contacts.homeAddressFields || Object.fromEntries(addressFields.map(field => [field, null]))
     }
     info.revision = hash(info)
+    // P8: the emergency contacts, each with a revision of its own (store#EmergencyContact); not part of the revision above
+    info.emergencyContacts = emergencyContactsOf(partyId)
     if (hr) {
         const identifications = Array.from(
             find("mantle.party.PartyIdentification")
@@ -646,7 +648,266 @@ function contentAccess(p) {
     return access
 }
 
-const operations = {findEmployees, employee360, employmentHistory, storePersonalInfo, employmentAccess, contentAccess}
+// ===== emergency contacts (P8; the user's call on F80, Nov 11) =====
+// An emergency contact is a Person party of its own (its names and its own phone), linked from the employee by a dated
+// PrtEmergencyContact relationship (the kind of relation, such as spouse or parent, in relationshipName). It is private contact
+// data: read with the personal information (the person and HR of their employer), changed by the person and an HR editor, ended
+// and never deleted. The contact party is held by the _PEOPLE_PRIVATE_ account (Party.privateOwnerUserId) and owned by the
+// employee (ownerPartyId), so every reader of parties that hides a personal contact from everyone but its owner (the entity
+// filters, the party finds, contact books, Commons' contacts, the palette, search, record links) shows it to no one.
+const EMERGENCY = "PrtEmergencyContact"
+const privateHolder = "_PEOPLE_PRIVATE_"
+const contactPurposes = {phone: "PhonePrimary"}
+// the most current emergency contacts a person keeps
+const emergencyContactCap = 5
+const text = value => String(value ?? "").trim()
+function emergencyLinks(partyId) {
+    return Array.from(
+        people
+            .current(
+                find("mantle.party.PartyRelationship").condition({relationshipTypeEnumId: EMERGENCY, fromPartyId: partyId}),
+                null
+            )
+            .orderBy("fromDate")
+            .list()
+    )
+}
+// The person's current emergency contacts: contactPartyId, the names, the relation, the phone, since when, and the revision a
+// change names.
+function emergencyContactsOf(partyId) {
+    const links = emergencyLinks(partyId)
+    if (!links.length) return []
+    const contactIds = people.unique(links.map(row => row.toPartyId))
+    const persons = new Map(
+        Array.from(find("mantle.party.Person").condition("partyId", "in", contactIds).list()).map(row => [row.partyId, row])
+    )
+    const phones = contactsOf(contactIds, contactPurposes)
+    return links.map(link => {
+        const person = persons.get(link.toPartyId) || {}
+        const row = {
+            contactPartyId: link.toPartyId,
+            firstName: person.firstName || "",
+            lastName: person.lastName || "",
+            name: nameOf(person) || link.toPartyId,
+            relationshipName: link.relationshipName || "",
+            phone: phones[link.toPartyId]?.phone || "",
+            fromDateText: dateText(link.fromDate)
+        }
+        row.revision = hash([row.firstName, row.lastName, row.relationshipName, row.phone, lib.ms(link.lastUpdatedStamp)])
+        return row
+    })
+}
+// Add, change or end one of the person's emergency contacts: the person themselves (PEOPLE_SELF_SERVICE) or an HR editor of an
+// employer of theirs, as store#PersonalInfo. A change or an end names the contact's revision read (REVISION_CHANGED); a contact
+// needs a name (NAME_REQUIRED) and a phone (PHONE_REQUIRED); a contact that is not one of the person's is refused as missing
+// (RECORD_UNAVAILABLE); more than emergencyContactCap is CONTACT_LIMIT.
+function storeEmergencyContact(p) {
+    const access = personAccess(p.partyId, people.asOfMillis(null))
+    if (!access.self && !access.hrEdit) denied("PERMISSION_DENIED", "Emergency contacts of " + p.partyId + " may not be changed")
+    const contactPartyId = text(p.contactPartyId)
+    const now = ec.user.nowTimestamp
+    let link = null
+    if (contactPartyId) {
+        link = emergencyLinks(p.partyId).find(row => row.toPartyId === contactPartyId) || null
+        if (!link) denied("RECORD_UNAVAILABLE", "Emergency contact " + contactPartyId + " is not available")
+        const shown = emergencyContactsOf(p.partyId).find(row => row.contactPartyId === contactPartyId)
+        if (text(p.expectedRevision) !== shown.revision)
+            denied(
+                "REVISION_CHANGED",
+                "This emergency contact changed since you read it; open it again (revision " + shown.revision + ")"
+            )
+        if (truthy(p.end)) {
+            call("update#mantle.party.PartyRelationship", {partyRelationshipId: link.partyRelationshipId, thruDate: now})
+            return {contactPartyId, ended: true}
+        }
+    }
+    const firstName = text(p.firstName)
+    const lastName = text(p.lastName)
+    const phone = text(p.phone).replace(/[()+]/g, "").trim()
+    if (!firstName && !lastName) denied("NAME_REQUIRED", "An emergency contact needs a name")
+    if (!phone) denied("PHONE_REQUIRED", "An emergency contact needs a phone number")
+    const relationshipName = text(p.relationshipName) || null
+    let partyId = contactPartyId
+    if (!link) {
+        if (emergencyLinks(p.partyId).length >= emergencyContactCap)
+            denied("CONTACT_LIMIT", "A person keeps at most " + emergencyContactCap + " emergency contacts; end one first")
+        partyId = call("create#mantle.party.Party", {
+            partyTypeEnumId: "PtyPerson",
+            privateOwnerUserId: privateHolder,
+            ownerPartyId: p.partyId
+        }).partyId
+        call("create#mantle.party.Person", {partyId, firstName: firstName || null, lastName: lastName || null})
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: EMERGENCY,
+            fromPartyId: p.partyId,
+            fromRoleTypeId: "_NA_",
+            toPartyId: partyId,
+            toRoleTypeId: "_NA_",
+            fromDate: now,
+            relationshipName
+        })
+    } else {
+        call("update#mantle.party.Person", {partyId, firstName: firstName || null, lastName: lastName || null})
+        if ((link.relationshipName || null) !== relationshipName)
+            call("update#mantle.party.PartyRelationship", {partyRelationshipId: link.partyRelationshipId, relationshipName})
+    }
+    const shownPhone = contactsOf([partyId], contactPurposes)[partyId]?.phone || ""
+    // the same number in another layout ("555 0101", "555-0101") is no change
+    if (shownPhone.replace(/\D/g, "") !== phone.replace(/\D/g, ""))
+        call("mantle.party.ContactServices.store#PartyContactInfo", {
+            partyId,
+            replaceByPurpose: true,
+            telecomContactMechPurposeId: contactPurposes.phone,
+            contactNumber: phone
+        })
+    return {contactPartyId: partyId, ended: false}
+}
+
+// ===== get#SelfService (P8; design §3 SelfService) =====
+// The caller's own self-service summary: their party alone (no supplied party is read; the service takes none), with
+// PEOPLE_SELF_SERVICE. Their current and coming employments (the employer, job title, department, manager and work location, the
+// dates), their emergency contacts, and how many of their own People requests are open and People tasks are theirs to do (each
+// projection's own rule: find#MyRequests, find#DueWork's myTask). The cards of later phases (balances, clock, payslips) join here.
+function selfService(p) {
+    const userScope = people.scopeOf()
+    if (!userScope.capabilities.self || !userScope.partyId) {
+        if (truthy(p.checkOnly)) return {available: false}
+        denied("PERMISSION_DENIED", "Self-service is not available")
+    }
+    const partyId = userScope.partyId
+    const asOf = people.asOfMillis(null)
+    const found = Array.from(
+        people
+            .employmentFind()
+            .condition("fromPartyId", partyId)
+            .condition(
+                ec.entity.conditionFactory.makeCondition(
+                    ec.entity.conditionFactory.makeCondition("thruDate", "is-null", null),
+                    "or",
+                    ec.entity.conditionFactory.makeCondition("thruDate", ">", people.stamp(asOf))
+                )
+            )
+            .orderBy("fromDate")
+            .list()
+    ).map(row => ({
+        partyRelationshipId: row.partyRelationshipId,
+        partyId: row.fromPartyId,
+        organizationPartyId: row.toPartyId,
+        fromDate: row.fromDate,
+        thruDate: row.thruDate
+    }))
+    const shown = employmentRows(found, asOf, true)
+    const managed = people.managersByEmployment([partyId], asOf)
+    const managerNames = people.personNames(people.unique([].concat(...Object.values(managed))))
+    const locations = workLocationsOf(found, asOf)
+    const employments = found.map((row, index) =>
+        Object.assign({}, shown[index], {
+            managerName: (managed[row.organizationPartyId + "/" + partyId] || []).map(id => managerNames[id] || id).join(", "),
+            workLocation: locations[row.partyRelationshipId] || ""
+        })
+    )
+    const person = one("mantle.party.Person", {partyId}) || {}
+    const approvals = ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
+    return {
+        available: true,
+        partyId,
+        personName: nameOf(person) || partyId,
+        preferredName: person.nickname || "",
+        employments,
+        emergencyContacts: emergencyContactsOf(partyId),
+        openRequestCount: approvals.openRequestCount(),
+        openTaskCount: people.myTaskCount()
+    }
+}
+// The work location of each employment on the date: its assignment's facility (P6), else the person's PostalWork city.
+function workLocationsOf(employments, asOf) {
+    const found = {}
+    if (!employments.length) return found
+    const assigned = people.assignmentsAt(people.unique(employments.map(row => row.partyId)), asOf)
+    const facilityIds = people.unique(
+        Object.values(assigned)
+            .map(row => row.facilityId)
+            .filter(Boolean)
+    )
+    const facilities = facilityIds.length
+        ? new Map(
+              Array.from(find("mantle.facility.Facility").condition("facilityId", "in", facilityIds).list()).map(row => [
+                  row.facilityId,
+                  row.facilityName || row.facilityId
+              ])
+          )
+        : new Map()
+    const cities = contactsOf(people.unique(employments.map(row => row.partyId)), {workAddress: workPurposes.workAddress})
+    for (const row of employments) {
+        const assignment = assigned[row.organizationPartyId + "/" + row.partyId]
+        const facilityId = assignment && assignment.partyRelationshipId === row.partyRelationshipId ? assignment.facilityId : null
+        found[row.partyRelationshipId] = (facilityId && facilities.get(facilityId)) || cities[row.partyId]?.workAddressCity || ""
+    }
+    return found
+}
+
+// ===== get#Team (P8; design §3 MyTeam) =====
+// The caller's current reports (PEOPLE_TEAM_VIEW): the people of their live reporting lines, each employment at the employers a
+// line is at (People.js linesOf: never a report's employment at another employer), as the public work identity with the
+// department, work location and whether they work or are on a leave of absence now. No supplied manager or party is read (the
+// service takes none). The schedule, who is out and missing time join with their phases (P9, P12, P10).
+function team(p) {
+    const userScope = people.scopeOf()
+    if (!userScope.capabilities.team) denied("PERMISSION_DENIED", "Your team is not available")
+    const asOf = people.asOfMillis(null)
+    const lines = userScope.reportLines || {}
+    const reportIds = Object.keys(lines)
+    if (!reportIds.length) return {team: []}
+    const found = Array.from(people.current(people.employmentFind().condition("fromPartyId", "in", reportIds), asOf).list())
+        .filter(row => (lines[row.fromPartyId] || []).includes(row.toPartyId))
+        .map(row => ({
+            partyRelationshipId: row.partyRelationshipId,
+            partyId: row.fromPartyId,
+            organizationPartyId: row.toPartyId,
+            fromDate: row.fromDate,
+            thruDate: row.thruDate
+        }))
+    const shown = employmentRows(found, asOf, false)
+    const persons = new Map(
+        Array.from(find("mantle.party.Person").condition("partyId", "in", reportIds).list()).map(row => [row.partyId, row])
+    )
+    const contacts = contactsOf(reportIds, workPurposes)
+    const locations = workLocationsOf(found, asOf)
+    const assigned = people.assignmentsAt(reportIds, asOf)
+    const rows = found.map((row, index) => {
+        const person = persons.get(row.partyId) || {}
+        const assignment = assigned[row.organizationPartyId + "/" + row.partyId]
+        const onLeave =
+            !!assignment && assignment.partyRelationshipId === row.partyRelationshipId && assignment.stateEnumId === "EasLeave"
+        const out = Object.assign({}, shown[index], {
+            partyId: row.partyId,
+            personName: nameOf(person) || row.partyId,
+            preferredName: person.nickname || "",
+            workEmail: contacts[row.partyId]?.workEmail || "",
+            workPhone: contacts[row.partyId]?.workPhone || "",
+            workLocation: locations[row.partyRelationshipId] || "",
+            availability: onLeave ? "leave" : "working",
+            availabilityText: onLeave ? "On leave" : "Working"
+        })
+        // a team reader gets the work identity, not the employment's id (an HR host's)
+        delete out.partyRelationshipId
+        return out
+    })
+    rows.sort((a, b) => a.personName.localeCompare(b.personName) || a.organizationName.localeCompare(b.organizationName))
+    return {team: rows}
+}
+
+const operations = {
+    findEmployees,
+    employee360,
+    employmentHistory,
+    storePersonalInfo,
+    employmentAccess,
+    contentAccess,
+    storeEmergencyContact,
+    selfService,
+    team
+}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown employee operation " + op)
     return operations[op](p || {})

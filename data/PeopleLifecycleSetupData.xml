@@ -44,4 +44,25 @@ along with this software (see the LICENSE.md file). If not, see
             nameIsPattern="Y" artifactName="mantle\.humanres\.PeopleServices\.(validate#EmployeeImportRow|apply#EmployeeImportRow|find#EmployeeImportScopes)"/>
     <moqui.security.ArtifactAuthz artifactAuthzId="MantlePeopleImportServicesALL" userGroupId="ALL_USERS"
             artifactGroupId="MantlePeopleImportServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- impl-people P8: a People lifecycle task assigned (a checklist step, an equipment return), told on a topic of its own rather
+        than the generic WorkItemAssigned, whose title names the task and its root ("Offboarding: <person>", "Return … from
+        <person>"): this title names nothing of the person or the change, only who assigned it and when it is due, so a lock screen
+        shows nothing private. Sent by its owning service, mantle.humanres.PeopleServices.notify#PeopleTaskAssigned, which
+        mantle.work.TaskServices.notify#TaskAssigned hands People's work to. The message holds workEffortId, assignedByName and
+        dueDateText, and the task as its record; the app that shows it sets the link (IronStone: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleTaskAssigned" inboxEnumId="NinNotifications"
+            description="People task assigned to you" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${assignedByName} assigned you a People task, due ${dueDateText}"/>
+
+    <!-- impl-people P8 (the user's call on F80, Nov 11): an employee's emergency contact is a Person party of its own, linked from
+        the employee by a dated relationship of this type (from the employee to the contact; the kind of relation, such as spouse or
+        parent, in relationshipName), with the contact's own phone. It is private contact data (People design §1.1): read and
+        changed only through mantle.humanres.PeopleServices (the person and HR of their employer), never in a directory, a contact
+        book, the palette, a contact list or search. Every such reader hides a personal contact (Party.privateOwnerUserId) from
+        everyone but its owner, so the contact party is held by this account, which no one signs in as and which belongs to no group:
+        no user is its owner, and no reader shows it. -->
+    <moqui.basic.Enumeration enumId="PrtEmergencyContact" description="Emergency Contact" enumTypeId="PartyRelationshipType"/>
+    <moqui.security.UserAccount userId="_PEOPLE_PRIVATE_" username="_people_private_" userFullName="People private contacts"
+            disabled="Y"/>
 </entity-facade-xml>
