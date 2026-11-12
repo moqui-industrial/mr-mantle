@@ -26,4 +26,27 @@ along with this software (see the LICENSE.md file). If not, see
             enumTypeId="ResourceUnavailabilityReason"/>
     <moqui.basic.Enumeration enumId="RurOffline" description="Planned offline (production)" sequenceNum="8" optionIndicator="Y"
             enumTypeId="ResourceUnavailabilityReason"/>
+
+    <!-- Booking decisions (impl-maintenance P16; design §7.1, BookingRequests; design-drawers-commons' ResourceBooking approval kind):
+        ResourceBooking puts a booking waiting for approval in its approvers' approvals inbox (Commons' card), sent by book#Resource and
+        by a move that asks again (check#ResourceBookings; ResourceBookingDecisions.js notifyRequested), with the span it asks for;
+        approve#NotificationMessage and refuse#NotificationMessage call ResourceBookingServices approve#ResourceBooking and
+        refuse#ResourceBooking as the user deciding, which decide the booking on that span and state through decide#ResourceBooking
+        (a moved meeting is refused SPAN_CHANGED: its new notice decides it). The message holds the event, the resource, the span, its
+        words and the requester's name; no title or attendee. ResourceBookingNotice tells an organizer what became of a booking
+        (approved, denied) or that an outage or blackout now covers it: no approval topic, since every message of a topic with an
+        approve service is an approval in the inbox. Both registered for Admin's Topics (impl-maintenance F52). -->
+    <moqui.security.user.NotificationTopic topic="ResourceBooking" inboxEnumId="NinNotifications" description="Room or equipment booking to approve"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ResourceBookingServices.approve#ResourceBooking"
+            refuseServiceName="mantle.work.ResourceBookingServices.refuse#ResourceBooking" refuseReasonRequired="Y"
+            titleTemplate="Approve booking of ${resourceName}: ${whenText}"/>
+    <moqui.server.TopicRegistration topic="ResourceBooking" ownerApp="Maintenance" purpose="A room or equipment booking waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="RESOURCE_BOOKING_APPROVE" sequenceNum="30"/>
+    <moqui.security.user.NotificationTopic topic="ResourceBookingNotice" inboxEnumId="NinNotifications" description="Room or equipment booking update"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${resourceName}: ${outcomeText}"/>
+    <moqui.server.TopicRegistration topic="ResourceBookingNotice" ownerApp="Maintenance" purpose="What became of the user's room or equipment booking"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault" sequenceNum="31"/>
 </entity-facade-xml>

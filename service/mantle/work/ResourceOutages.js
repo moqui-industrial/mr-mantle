@@ -11,7 +11,7 @@
 //   Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a resource of the user's maintenance scope, or
 //   MAINTENANCE_EXECUTE on work assigned to the user that targets the resource (workEffortId, with its step). A work order names
 //   the outage it recorded or linked (MaintenanceWorkOrder.resourceUnavailabilityId). A fault is recorded although bookings of the
-//   resource exist: they are kept and answered (affectedBookingIds) for their owners; the notices are P16's.
+//   resource exist: they are kept and answered (affectedBookingIds), and their organizers are told (P16, ResourceBookingNotice).
 // - correct: a supervisor's or resource administrator's correction, with its reason: a new row with the corrected interval, reason
 //   and note, and the row it corrects kept with its values, superseded by the new one (the work orders' links move to it). A
 //   superseded row is history: every read of current availability leaves it out.
@@ -31,11 +31,15 @@
 // method engineer (PRODUCTION_SCHEDULE or METHOD_RESOURCES) of a work center of an organization they work for. correct# supersedes a
 // planned block with a new row (either entry point; ProductionSchedule's withdraw ends the row in force of the block it names), and
 // end# ends one now, or withdraws one not begun (its end set to its start), keeping the row. Bookings over a block are kept and
-// counted (affectedBookingIds), never cancelled: an approved booking a new blackout covers is flagged for review.
+// counted (affectedBookingIds), never cancelled: an approved booking a new blackout covers is flagged for review, and its organizer
+// told (P16). Manufacturing's entry locks its work center row (P16, F171): a booking of the center or of a facility inside it locks
+// it first, and the offline call's operation moves, which run in transactions of their own, never write it.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const {find, one, call, denied, ms} = lib
+const policies = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourcePolicy.js")
+const decisions = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
 
 const OUTAGE = "mantle.work.effort.ResourceUnavailability"
 const ORDER = "mantle.work.maintenance.MaintenanceWorkOrder"
@@ -300,7 +304,10 @@ function record(p) {
     })
     const row = one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId})
     if (work && !ended) linkWork(work.order.workEffortId, row.resourceUnavailabilityId)
-    return answerOf(row, false, resource)
+    const answer = answerOf(row, false, resource)
+    // the bookings it covers are kept; their organizers are told it is out of service (P16)
+    decisions().tellAffected(answer.affectedBookingIds, resource.name, "out of service")
+    return answer
 }
 function answerOf(row, linked, resource) {
     const bookings = row.thruDate == null ? affectedBookings(resource, row.fromDate, null) : []
@@ -519,6 +526,9 @@ function recordBlock(p) {
     // Manufacturing's offline time does not, since it moves the center's operations in transactions of their own after it
     // (store#WorkCenterOffline), which would wait on the lock
     if (authority.maintenance) lockCovered(resourceOf(p, true))
+    // Manufacturing's locks its work center row instead, which the moves never write and a booking of the center (or of a facility
+    // inside it) locks first (P16, F171; ResourcePolicy.js lockCenters), so a booking cannot land under the new block unseen
+    else policies().lockCenters(resource.facilityId)
     const reason = requireReason(text(p.unavailabilityReasonEnumId) || (authority.maintenance ? "RurClosure" : "RurOffline"))
     const fromDate = p.fromDate || ec.user.nowTimestamp
     const thruDate = p.thruDate || null
@@ -542,7 +552,14 @@ function recordBlock(p) {
         createdByUserId: ec.user.userId,
         createdDate: ec.user.nowTimestamp
     })
-    return blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
+    const answer = blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
+    // the bookings it covers are kept, flagged for review; their organizers are told why (P16)
+    decisions().tellAffected(
+        answer.affectedBookingIds,
+        resource.name,
+        "not available then (" + String(reason.description || "a planned block").toLowerCase() + ")"
+    )
+    return answer
 }
 // A planned block in force the caller may change, locked, with its resource.
 function blockFor(p) {
@@ -566,6 +583,8 @@ function correctBlock(p) {
     const {row, resource, authority} = blockFor(p)
     // a correction may widen the block: locked as record#'s (Maintenance's entry)
     if (authority.maintenance) lockCovered(resourceOf({assetId: row.assetId, facilityId: row.facilityId}, true))
+    else policies().lockCenters(row.facilityId)
+    const before = new Set(affectedBookings(resource, row.fromDate, row.thruDate))
     const changeReason = text(p.changeReason)
     if (!changeReason) denied("REASON_REQUIRED", "A correction needs its reason")
     const fromDate = p.fromDate || row.fromDate
@@ -599,6 +618,12 @@ function correctBlock(p) {
         revision: Number(row.revision || 0) + 1
     })
     const answer = blockAnswer(one(OUTAGE, {resourceUnavailabilityId: created.resourceUnavailabilityId}), resource, false)
+    // the organizers of the bookings the correction newly covers are told (P16)
+    decisions().tellAffected(
+        answer.affectedBookingIds.filter(id => !before.has(id)),
+        resource.name,
+        "not available then (" + String(reason.description || "a planned block").toLowerCase() + ")"
+    )
     return Object.assign(answer, {correctedUnavailabilityId: row.resourceUnavailabilityId})
 }
 // end#: the block ended now, or withdrawn when it has not begun (its end set to its start); the row is kept.
