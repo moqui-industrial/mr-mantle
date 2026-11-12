@@ -11,7 +11,8 @@
 // - The technicians of a work order (find#MaintenanceCandidates): the organization's people now (employees and agents, those
 //   schedule#MaintenanceWorkOrder admits), ranked by Projects' find#StaffingCandidates over the work's skills, each with the least
 //   level its steps ask (WorkEffortSkillStandard.minimumSkillLevel), and the free hours of its planned window from
-//   get#PartyCapacity (People's schedules, shifts, holidays and approved leave): the team's members first, and in each group those
+//   get#PartyCapacity (People's schedules, shifts, holidays and approved leave), less the People training sessions they are
+//   enrolled in or train on the window's days (Training.js sessionHours, F360): the team's members first, and in each group those
 //   with the hours first, then those whose qualifications meet the work, the team's default assignee, then by skill and free hours. Each with the state People's staffing answer
 //   gives (Development.js staffingAnswer, check#Qualifications' projection: qualified, expiring, missing or expired, never a
 //   certificate's number, issuer or file).
@@ -24,6 +25,7 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const work = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
 const development = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Development.js")
+const training = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Training.js")
 const {find, one, denied, call, ms} = lib
 
 const WORK = "mantle.work.effort.WorkEffort"
@@ -442,6 +444,12 @@ function findCandidates(p) {
           }).candidateList || []
         : []
     const candidateIds = Array.from(staffing).map(row => row.partyId)
+    // the training sessions on the window's days, which capacity does not take off (F360): as freeHours counts whole days
+    const dayStart = millis =>
+        ms(ec.l10n.parseTimestamp(ec.l10n.format(new Date(millis), "yyyy-MM-dd") + " 00:00:00.000", "yyyy-MM-dd HH:mm:ss.SSS"))
+    const inTraining = candidateIds.length
+        ? training().sessionHours(candidateIds, dayStart(fromMs), dayStart(thruMs) + 24 * hourMs)
+        : {}
     const qualifications = qualificationsOf(candidateIds, requirements, new Date(fromMs))
     const blocks = !!work().policyOf(organizationPartyId).qualificationBlocks
     const skillNames = Object.fromEntries(skillAsks.map(ask => [ask.skillTypeEnumId, enumText(ask.skillTypeEnumId)]))
@@ -454,7 +462,10 @@ function findCandidates(p) {
             meets: !!one.meets,
             selfDeclared: !!one.selfDeclared
         }))
-        const freeText = round(Number(row.freeHours) || 0) + " h free"
+        const freeHours = Math.max(0, (Number(row.freeHours) || 0) - (inTraining[row.partyId] || 0))
+        const needHours = Number(row.needHours) || 0
+        const fits = inTraining[row.partyId] ? needHours > 0 && freeHours + 0.01 >= needHours : !!row.fits
+        const freeText = round(freeHours) + " h free"
         const warning = !!qualification && warns(qualification.state)
         return {
             partyId: row.partyId,
@@ -462,9 +473,9 @@ function findCandidates(p) {
             onTeam: members.has(row.partyId),
             isDefault: !!defaults && defaults.defaultAssigneePartyId === row.partyId,
             assigned: assigned.has(row.partyId),
-            fits: !!row.fits,
-            freeHours: Number(row.freeHours) || 0,
-            needHours: Number(row.needHours) || 0,
+            fits,
+            freeHours: round(freeHours),
+            needHours,
             skills,
             qualificationState: qualification?.state || null,
             qualificationText: qualification
@@ -475,7 +486,7 @@ function findCandidates(p) {
             order: index,
             label: [
                 row.name,
-                freeText + (row.fits ? "" : " (needs " + round(Number(row.needHours) || 0) + ")"),
+                freeText + (fits ? "" : " (needs " + round(needHours) + ")"),
                 skills
                     .map(
                         one =>

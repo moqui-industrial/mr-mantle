@@ -1295,6 +1295,8 @@ function notifyApprovers(found, workEffortApprovalId) {
             .record(WORK, found.root.workEffortId)
             .actorUserId(ec.user.userId)
             .userIds(userIds)
+            // to the approvers alone (F359): a subscription to every WorkProcessApproval message gets no card it cannot decide
+            .directOnly()
             .send()
         return userIds.length
     } catch (error) {

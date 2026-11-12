@@ -1619,6 +1619,8 @@ const WORK_EFFORT = "mantle.work.effort.WorkEffort"
 const leaveKind = "PakLeave"
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+// a leave segment holds no booking, but its person organizes it: one booked on it is withdrawn with it (impl-maintenance F356)
+const bookings = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js")
 const requestStatusTexts = {
     LrsRequested: "Waiting for approval",
     LrsApproved: "Approved",
@@ -2379,8 +2381,10 @@ function cancelTaken(request, values = {}) {
     for (const segment of segmentsOf(request.leaveRequestId)) {
         if (!segment.workEffortId) continue
         const effort = one(WORK_EFFORT, {workEffortId: segment.workEffortId})
-        if (effort && effort.statusId !== "WeCancelled")
+        if (effort && effort.statusId !== "WeCancelled") {
             call("update#" + WORK_EFFORT, {workEffortId: segment.workEffortId, statusId: "WeCancelled"})
+            bookings().keptEventCancelled(segment.workEffortId)
+        }
     }
 }
 // Approved leave as the person's WetTimeOff work efforts, one a segment ("Out of office": no type, no reason), which capacity

@@ -20,7 +20,11 @@
 //   approvers on ResourceBooking, with the span it asks for; an older notice of the same booking leaves their inboxes.
 // - tellAffected: an outage or a planned block recorded over bookings tells their organizers (ResourceBookingNotice), with the
 //   resource's name and a safe reason only.
-// Notices are failure tolerant: one that cannot be sent is logged and the decision stands.
+// - keptEventMoved, keptEventCancelled: an application's own event (People's interview, training session, leave) moved or cancelled
+//   by its service: its bookings rechecked, or withdrawn with their notices (F356).
+// Notices are failure tolerant: one that cannot be sent is logged and the decision stands. Each goes to the users it names alone
+// (directOnly, F359): a subscription to every message of ResourceBooking or ResourceBookingNotice receives no card it cannot decide
+// and no other organizer's outcome.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const policies = () => ec.resource.script("component://mr-mantle/service/mantle/work/ResourcePolicy.js")
@@ -173,6 +177,7 @@ function notifyRequested(p) {
             .record(WORK, workEffortId)
             .actorUserId(ec.user.userId)
             .userIds(userIds)
+            .directOnly()
             .send()
         return userIds.length
     }, 0)
@@ -198,6 +203,7 @@ function tellOrganizer(workEffortId, resourceName, outcome, outcomeText, detail)
             .record(WORK, workEffortId)
             .actorUserId(ec.user.userId)
             .userIds(userIds)
+            .directOnly()
             .send()
         return userIds.length
     }, 0)
@@ -217,6 +223,56 @@ function withdrawn(workEffortId, p = null) {
     if (!text(workEffortId)) return
     clearNotices(text(workEffortId), p && (text(p.facilityId) || text(p.assetId)) ? keyOf(p) : null)
 }
+
+// ===== an application's own event moved or cancelled (F356) =====
+// People's training sessions, interviews and leave are kept events (EventServices.get#ManagedEvents): their services check their own
+// rules and write the WorkEffort with update#WorkEffort, which no booking rule sees. They call these after that write. Each runs the
+// booking services as the system (check#EventAccess's contract for an application's call), so a recruiter or development editor who
+// is not the organizer gets the same rules: no user is an approver (a booking needing approval is asked again) and a clash is named
+// Busy (eventVisibility, F358).
+// keptEventMoved: the event's new time rechecked (check#ResourceBookings: a clash, an outage or block, a managed resource's rules
+// refuse the move by an error the caller's write rolls back with; an assigned booking needing approval is asked again and its
+// approvers told). Call it only when the start or end changed: a recheck asks an approved booking again.
+function keptEventMoved(workEffortId) {
+    const id = text(workEffortId)
+    if (!id || !hasBookings(id)) return {checked: false}
+    ec.artifactExecution.runAsSystem(() => call("mantle.work.EventServices.check#ResourceBookings", {workEffortId: id}))
+    return {checked: true}
+}
+// keptEventCancelled: the event's requested and assigned bookings withdrawn (cancel#ResourceBooking: a room's row removed,
+// equipment's ended now), and every approval notice of the event leaves the inboxes.
+function keptEventCancelled(workEffortId) {
+    const id = text(workEffortId)
+    if (!id) return {withdrawnCount: 0}
+    let withdrawnCount = 0
+    const current = currentBookings(id)
+    ec.artifactExecution.runAsSystem(() => {
+        for (const key of current)
+            withdrawnCount +=
+                Number(
+                    call("mantle.work.EventServices.cancel#ResourceBooking", Object.assign({workEffortId: id}, key))
+                        .cancelledCount
+                ) || 0
+    })
+    withdrawn(id)
+    return {withdrawnCount}
+}
+// The event's current bookings, requested or assigned: [{facilityId} or {assetId}].
+function currentBookings(workEffortId) {
+    const now = nowMs()
+    const rooms = Array.from(find(ROOM_BOOKING, {workEffortId}).list())
+        .filter(row => [statuses.facility.requested, statuses.facility.assigned].includes(row.statusId))
+        .map(row => ({facilityId: row.facilityId}))
+    const assets = Array.from(find(ASSET_BOOKING, {workEffortId}).list())
+        .filter(
+            row =>
+                [statuses.asset.requested, statuses.asset.assigned].includes(row.statusId) &&
+                (row.thruDate == null || ms(row.thruDate) > now)
+        )
+        .map(row => row.assetId)
+    return rooms.concat(Array.from(new Set(assets)).map(assetId => ({assetId})))
+}
+const hasBookings = workEffortId => currentBookings(workEffortId).length > 0
 
 // ===== who decides =====
 // Whether the user is a current approver of the resource.
@@ -589,6 +645,8 @@ function findRequests(p) {
     tellAffected,
     tellOrganizer,
     withdrawn,
+    keptEventMoved,
+    keptEventCancelled,
     execute: (op, p) => {
         const operations = {
             find: findRequests,

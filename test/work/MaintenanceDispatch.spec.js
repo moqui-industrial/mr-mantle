@@ -3,7 +3,8 @@
 // AssignSchedule and BulkWork, §9 Teams, review Y4 and Y8; impl-maintenance P8): the ranked technicians of a work order (a person
 // on leave in its window ranks below a free one, the expired qualification is named), the expired qualification warning on
 // assignment and refused under the block policy, Start rechecking its assignees, team membership granting no permission and the
-// team's defaults the settings editor's, and one refused order in a bulk assignment naming itself while the rest go on.
+// team's defaults the settings editor's, and one refused order in a bulk assignment naming itself while the rest go on; and People's
+// training sessions taken off the free hours, one enrolled in or trained, never a cancelled one (F360).
 // Standalone: spec-local organizations, equipment, a skill and a certificate type, three employed technicians (one with an
 // expired certificate, one on leave the day of the work), a team, groups and users; the services called as each user with the
 // artifact check aside (their own permission and scope checks decide).
@@ -428,5 +429,57 @@ feature("one refused work order in a bulk assignment names itself and the others
         bulk.results.find(row => row.workEffortId == state.compressor).message.includes("Qualification warning")
         nothing == "VALUE_REQUIRED"
         scheduled.results[0].resultCode == "SCHEDULED"
+    }
+})
+
+feature("People's training sessions on the work's day are taken off the free hours; a cancelled one is not", {
+    when() {
+        const before = as(state.planner, S + "find#MaintenanceCandidates", {workEffortId: state.compressor})
+        const startOf = hours => new Date(state.from.getTime() + hours * 3600000)
+        // a session of the work's day (People's records as Training.js writes them): the qualified technician enrolled for six
+        // hours, the expired one its trainer; a cancelled session the expired one trains is not counted
+        const session = (name, from, thru, statusId, trainerPartyId) => {
+            const workEffortId = call("create#mantle.work.effort.WorkEffort", {
+                workEffortTypeEnumId: "WetEvent",
+                purposeEnumId: "WepTraining",
+                workEffortName: name,
+                statusId,
+                estimatedStartDate: from,
+                estimatedCompletionDate: thru
+            }).workEffortId
+            call("create#mantle.humanres.ability.TrainingSession", {
+                workEffortId,
+                organizationPartyId: orgA,
+                trainerPartyId,
+                capacity: 4
+            })
+            return workEffortId
+        }
+        const live = session("Training: lockout", startOf(1), startOf(7), "WeInPlanning", state.expired)
+        session("Training: cancelled", startOf(-6), startOf(-1), "WeCancelled", state.expired)
+        call("create#mantle.humanres.ability.PersonTraining", {
+            personTrainingId: prefix + "_ENROLLED",
+            partyId: state.qualified,
+            organizationPartyId: orgA,
+            workEffortId: live,
+            statusEnumId: "PtsEnrolled"
+        })
+        const after = as(state.planner, S + "find#MaintenanceCandidates", {workEffortId: state.compressor})
+        const of = (found, partyId) => found.candidateList.find(row => row.partyId == partyId)
+        return {
+            qualified: [
+                of(before, state.qualified).freeHours,
+                of(after, state.qualified).freeHours,
+                of(after, state.qualified).fits
+            ],
+            expired: [of(before, state.expired).freeHours, of(after, state.expired).freeHours],
+            label: of(after, state.qualified).label
+        }
+    },
+    then({qualified, expired, label}) {
+        qualified[1] == qualified[0] - 6
+        qualified[2] == false
+        expired[1] == expired[0] - 6
+        label.includes(qualified[1] + " h free (needs 3)")
     }
 })
