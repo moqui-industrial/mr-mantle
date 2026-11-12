@@ -37,6 +37,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const maintenanceAccess = ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceAccess.js")
 const procedures = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceProcedures.js")
+// P14: a preventive plan's generation, completion credit and Home's counts (MaintenancePlans.js)
+const plans = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePlans.js")
 const outages = ec.resource.script("component://mr-mantle/service/mantle/work/ResourceOutages.js")
 // P10: CompleteWork's outside-service line (MaintenancePurchases.js)
 const purchases = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenancePurchases.js")
@@ -53,6 +55,7 @@ const ORDER_VIEW = "mantle.work.maintenance.MaintenanceWorkOrderDetail"
 const POLICY = "mantle.work.maintenance.MaintenancePolicy"
 const MAINTENANCE = "mantle.product.maintenance.AssetMaintenance"
 const PARTY = "mantle.work.effort.WorkEffortParty"
+const REMINDER = "mantle.work.effort.WorkEffortReminder"
 const TIME = "mantle.work.time.TimeEntry"
 const ASSET = "mantle.product.asset.Asset"
 const FACILITY = "mantle.facility.Facility"
@@ -64,6 +67,8 @@ const stockTypes = ["AstTpInventory", "AstTpSupplies"]
 const highPriority = 3
 const teamRole = "OrgTeam"
 const assigneeRole = "Assignee"
+// a plan's work reminds its assignees a day before its due date (P14 review)
+const dueReminderMinutes = 1440
 // the relationships that make a person one of an organization's people for assignment
 const memberRelationships = ["PrtEmployee", "PrtAgent"]
 const facilityDepth = 12
@@ -196,7 +201,18 @@ const policyFields = {
     // P6
     procedureSelfApproval: flagField("procedureSelfApproval"),
     // P7 review
-    voiceNoteTranscription: flagField("voiceNoteTranscription")
+    voiceNoteTranscription: flagField("voiceNoteTranscription"),
+    // P14: the days before a due date a plan's work is made when its terms name none (empty: on the day)
+    pmLeadDays: {
+        none: null,
+        read: row => number(row.pmLeadDays),
+        store: value => {
+            const days = blank(value) ? null : Number(String(value))
+            if (days != null && (!Number.isInteger(days) || days < 0 || days > 365))
+                denied("VALUE_INVALID", "Enter the days ahead as a whole number from 0 to 365")
+            return days
+        }
+    }
 }
 const defaultPolicy = Object.fromEntries(Object.entries(policyFields).map(([name, field]) => [name, field.none]))
 // A policy row's values, or the defaults (fromDate null).
@@ -613,7 +629,7 @@ function makeOrder(userScope, target, p, options) {
             const partyId = text(named[roleTypeId])
             if (partyId) roleParties[roleTypeId] = requireMember(target.organizationPartyId, partyId)
         }
-        instantiatedId = procedures().execute("instantiateProcedure", {
+        instantiatedId = procedures().instantiateWith(userScope, {
             templateWorkEffortId: templateId,
             assetId: target.assetId,
             facilityId: target.assetId ? null : target.facilityId,
@@ -681,6 +697,8 @@ function makeOrder(userScope, target, p, options) {
         procedureDate: instantiatedId ? ec.user.nowTimestamp : null,
         revision: 1,
         offlineIntent: flag(p.offlineIntent) ? "Y" : null,
+        // P14: the plan generated work executes, set by its generation alone (MaintenancePlans.js), never from a caller
+        maintenanceScheduleId: options.maintenanceScheduleId || null,
         operationKey: options.operationKey || null,
         operationHash: options.operationHash || null
     })
@@ -955,7 +973,28 @@ function scheduleWorkOrder(p) {
     const revision = bump(order)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     if (added.length) notifyAssigned(root.workEffortId, added)
+    // P14 review: a plan's work reminds the people assigned to it a day before its due date
+    if (order.maintenanceScheduleId) remindAssignees(root.workEffortId, added, removed)
     return {workEffortId: root.workEffortId, revision, addedPartyIds: added, removedPartyIds: removed}
+}
+// The due reminders of a plan's work order (design §5.1, impl-maintenance P14 review): each person newly assigned to its root gets
+// a reminder a day before its due date (the root's planned finish; the reminder job, EventServices send#DueReminders, sends it on
+// the WorkEffortReminder topic) unless they have one on it already, and a person taken off it keeps none. Written here for the
+// assignee, as People's leave writes the person's (store#WorkEffortReminders sets only the caller's own).
+function remindAssignees(workEffortId, added, removed) {
+    for (const partyId of new Set(removed))
+        if (!added.includes(partyId))
+            for (const row of Array.from(find(REMINDER, {workEffortId, partyId}).list()))
+                call("delete#" + REMINDER, {workEffortId, partyId, reminderSeqId: row.reminderSeqId})
+    for (const partyId of new Set(added))
+        if (!removed.includes(partyId) && find(REMINDER, {workEffortId, partyId}).count() === 0)
+            call("create#" + REMINDER, {
+                workEffortId,
+                partyId,
+                reminderSeqId: "01",
+                offsetMinutes: dueReminderMinutes,
+                methodEnumId: "WermNotification"
+            })
 }
 // The new assignees are told on MaintenanceWork (the work order and its target, never a cost); a failure is logged.
 function notifyAssigned(workEffortId, partyIds) {
@@ -1102,6 +1141,8 @@ function actionsFor(userScope, ctx) {
                 needsOffline: action === "start",
                 offlineIntent: ctx.order.offlineIntent === "Y",
                 needsFollowUp: action === "complete",
+                // P14 (F187): a meter plan's work asks for the reading it took when it has none
+                readingMeterName: action === "complete" ? plans().readingNeeded(ctx.order)?.meterName || null : null,
                 // P10: the outside-service lines the caller may accept at completion, with the work's files as evidence
                 ...(action === "complete" && !refused
                     ? purchases().completionLines(userScope, ctx)
@@ -1158,6 +1199,8 @@ function transitionWorkOrder(p) {
             if (ms(finished) > nowMs() + minuteMs) denied("DATE_FUTURE", "The finish is now or earlier")
             if (root.actualStartDate && ms(finished) < ms(root.actualStartDate))
                 denied("DATES_INVALID", "The finish is before the work started")
+            // P14 (F187): a meter plan's work records the reading it took before it completes
+            plans().requireCompletionReading(order, root, p, finished)
             workFields.statusId = "WeComplete"
             workFields.actualCompletionDate = finished
             Object.assign(orderFields, {
@@ -1197,9 +1240,12 @@ function transitionWorkOrder(p) {
         checks().closeExecution(root.workEffortId, resultCode === "CLOSED" ? "WeClosed" : "WeCancelled")
     const revision = bump(order, orderFields)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
+    const statusAfter = one(WORK, {workEffortId: root.workEffortId}).statusId
+    // P14: the plan's obligation completed once, or open again after a cancellation
+    plans().creditCompletion(order, statusAfter)
     return {
         workEffortId: root.workEffortId,
-        statusId: one(WORK, {workEffortId: root.workEffortId}).statusId,
+        statusId: statusAfter,
         revision,
         resultCode,
         resourceUnavailabilityId: downtime.resourceUnavailabilityId || null,
@@ -1676,8 +1722,8 @@ function findWorkOrders(p) {
 
 // ===== get#MaintenanceHome =====
 // Home's counters, the caller's work and the teams' (design §3 Home): over the scope (a chosen organization or facility), read
-// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The counts of plans,
-// meters and downtime are not configured until their phases (null, never zero).
+// in a few queries (F96). A technician's counters are over their own work and they get no team totals. The overdue plans and
+// unknown meter readings (P14) are a reader of work's, null for anyone else (never zero); downtime is P5's.
 function home(p) {
     const userScope = scopeWithAny(["workRead"])
     const filters = {organizationPartyId: p.organizationPartyId, facilityId: p.facilityId, statusId: null}
@@ -1705,8 +1751,8 @@ function home(p) {
         unassignedCount: openRows.filter(row => !assignedIds.has(row.workEffortId)).length,
         highPriorityCount: openRows.filter(row => row.priority != null && Number(row.priority) <= highPriority).length,
         overdueCount: openRows.filter(overdue).length,
-        overduePmCount: null,
-        unknownMeterCount: null,
+        // P14: the active plans overdue and those whose meter reading is unknown (a reader of work's; null for another)
+        ...plans().homeCounts(userScope, filters),
         downResourceCount: outages.downCount(userScope, filters),
         capped: openRows.length >= homeLimit
     }
@@ -1779,5 +1825,12 @@ const operations = {
     },
     // P4: for Mantle's own callers only (MaintenanceIntake.js), never a service's parameters
     adoptForOwner,
+    // P14: a plan's work order, for its generation alone (MaintenancePlans.js): the scope it resolved and the plan
+    createForPlan: (userScope, p, options) =>
+        makeOrder(userScope, targetOf(userScope, p), p, {
+            maintenanceScheduleId: options.maintenanceScheduleId,
+            operationKey: null,
+            operationHash: null
+        }),
     policyOf
 })
