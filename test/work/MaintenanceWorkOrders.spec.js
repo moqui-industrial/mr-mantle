@@ -168,6 +168,7 @@ feature("a planner's corrective order is approved on create; planned work over t
             maintenanceKindEnumId: "MkPreventive"
         })
         state.room = within.workEffortId
+        state.survey = noEstimate.workEffortId
         const read = as(state.supervisor, "mantle.work.MaintenanceSettingsServices.get#MaintenancePolicy", {
             organizationPartyId: orgA
         })
@@ -225,9 +226,12 @@ feature(
             })
             const missing = as(state.planner, S + "get#MaintenanceWorkOrder", {workEffortId: prefix + "_NONE"})
             const listed = as(state.otherPlanner, S + "find#MaintenanceWorkOrders", {statusId: "all"})
-            return {retry, changed, stale, stored, otherReads, otherTarget, missing, listed}
+            // History shows the priority's change and who made it (WorkEffort does not audit it; the service does)
+            const history = as(state.planner, S + "get#MaintenanceWorkOrder", {workEffortId: state.corrective}).historyList
+            return {retry, changed, stale, stored, otherReads, otherTarget, missing, listed, history}
         },
-        then({retry, changed, stale, stored, otherReads, otherTarget, missing, listed}) {
+        then({retry, changed, stale, stored, otherReads, otherTarget, missing, listed, history}) {
+            history.some(row => row.fieldText == "Priority" && row.oldText == "5" && row.newText == "2" && !!row.changedByName)
             retry.workEffortId == state.corrective
             retry.repeated == true
             changed == "OPERATION_KEY_CONFLICT"
@@ -427,7 +431,7 @@ feature("Cancel keeps the work's time and files; a planner may not cancel starte
     }
 })
 
-feature("approved work is held by a supervisor with a reason and resumes where it was; a planner may not hold it", {
+feature("approved work is held by a supervisor with a reason and resumes where it was; a planner may not hold it; planned work is a planner's or a supervisor's to hold", {
     when() {
         const plannerHolds = as(state.planner, S + "transition#MaintenanceWorkOrder", {
             workEffortId: state.room,
@@ -442,9 +446,21 @@ feature("approved work is held by a supervisor with a reason and resumes where i
         })
         const heldFrom = order(state.room).holdFromStatusId
         const resumed = as(state.supervisor, S + "transition#MaintenanceWorkOrder", {workEffortId: state.room, action: "resume"})
-        return {plannerHolds, noReason, held, heldFrom, resumed}
+        // planned work: a planner and a supervisor each hold it and resume it in planning (the flow's rows, one permission each)
+        const planned = []
+        for (const username of [state.planner, state.supervisor])
+            for (const action of ["hold", "resume"])
+                planned.push(
+                    as(username, S + "transition#MaintenanceWorkOrder", {
+                        workEffortId: state.survey,
+                        action,
+                        holdReasonEnumId: action === "hold" ? "MhrParts" : null
+                    }).statusId
+                )
+        return {plannerHolds, noReason, held, heldFrom, resumed, planned}
     },
-    then({plannerHolds, noReason, held, heldFrom, resumed}) {
+    then({plannerHolds, noReason, held, heldFrom, resumed, planned}) {
+        planned == ["WeOnHold", "WeInPlanning", "WeOnHold", "WeInPlanning"]
         plannerHolds == "PERMISSION_DENIED"
         noReason == "REASON_REQUIRED"
         held.statusId == "WeOnHold"

@@ -74,10 +74,14 @@ along with this software (see the LICENSE.md file). If not, see
         (impl-maintenance F65), so the flow gates nothing: transition#MaintenanceWorkOrder is the gate. A transition's permission
         refuses only when every flow's row of the same move needs one the user lacks: Manufacturing's WeApproved and WeOnHold rows
         need PRODUCTION_SUPERVISE, so this flow's need MAINTENANCE_SUPERVISE (a supervisor holds approved work and resumes it as
-        approved), and a user with neither is still refused the move on its own. -->
+        approved), and a user with neither is still refused the move on its own. A move no other flow has (In Planning to and
+        from On Hold) would otherwise be open to every user on every work effort, a production run or a project task among them,
+        through a raw update#WorkEffort: its rows need MAINTENANCE_PLAN here and MAINTENANCE_SUPERVISE in the second flow below
+        (one permission a row; a planner or a supervisor holds and resumes planned work; impl-maintenance P3 review). -->
     <moqui.basic.StatusFlow statusFlowId="WorkEffortMaintenance" statusTypeId="WorkEffort" description="Maintenance work order"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeApproved" transitionName="Approve"/>
-    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_PLAN"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInPlanning" toStatusId="WeCancelled" transitionName="Cancel"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeInProgress" transitionName="Start"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeApproved" toStatusId="WeOnHold" transitionName="Hold"
@@ -86,12 +90,19 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeOnHold" transitionName="Hold"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeComplete" transitionName="Complete"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeInProgress" toStatusId="WeCancelled" transitionName="Cancel"/>
-    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"
+            userPermissionId="MAINTENANCE_PLAN"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeApproved" transitionName="Resume"
             userPermissionId="MAINTENANCE_SUPERVISE"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeInProgress" transitionName="Resume"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeOnHold" toStatusId="WeCancelled" transitionName="Cancel"/>
     <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenance" statusId="WeComplete" toStatusId="WeClosed" transitionName="Close"/>
+    <!-- the supervisor's rows of the moves a planner also makes (above); no work order names this flow -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortMaintenanceSupervise" statusTypeId="WorkEffort" description="Maintenance work order (a supervisor's moves)"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenanceSupervise" statusId="WeInPlanning" toStatusId="WeOnHold" transitionName="Hold"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortMaintenanceSupervise" statusId="WeOnHold" toStatusId="WeInPlanning" transitionName="Resume"
+            userPermissionId="MAINTENANCE_SUPERVISE"/>
 
     <!-- the AssetMaintenance transitions the synchronization with its root needs and the Default flow lacks (impl-maintenance
         F10): in process to cancelled, completed back to in process, scheduled back to created -->

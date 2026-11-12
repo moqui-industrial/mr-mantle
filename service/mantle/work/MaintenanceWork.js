@@ -660,9 +660,31 @@ function storeWorkOrder(p) {
         workFields.facilityId = target.facilityId
     }
     call("update#" + WORK, workFields)
+    auditWork(root, workFields)
     const revision = bump(order, orderFields)
     syncMaintenance(one(ORDER, {workEffortId: root.workEffortId}))
     return {workEffortId: root.workEffortId, revision}
+}
+// The work order's own audit rows for the header fields WorkEffort does not audit (its priority, estimate and facility), so
+// History shows each change with who made it, as the audited status and organization are (P3 review).
+const auditedHere = ["priority", "estimatedWorkTime", "facilityId"]
+function auditWork(root, fields) {
+    for (const field of auditedHere) {
+        if (!Object.hasOwn(fields, field)) continue
+        const numeric = field !== "facilityId"
+        const before = numeric ? number(root[field]) : text(root[field])
+        const after = numeric ? number(fields[field]) : text(fields[field])
+        if (before === after) continue
+        call("create#moqui.entity.EntityAuditLog", {
+            changedEntityName: WORK,
+            changedFieldName: field,
+            pkPrimaryValue: root.workEffortId,
+            oldValueText: before == null ? null : String(before),
+            newValueText: after == null ? null : String(after),
+            changedDate: ec.user.nowTimestamp,
+            changedByUserId: ec.user.userId || null
+        })
+    }
 }
 
 // ===== schedule#MaintenanceWorkOrder =====
@@ -1100,7 +1122,13 @@ function getWorkOrder(p) {
 // The work order's history: the audit log of its status, priority, estimate and target, and of its row's key fields, newest
 // first, with names for the statuses and users (the time entries and files have their own tabs).
 const historyFields = {
-    [WORK]: {statusId: "Status", priority: "Priority", estimatedWorkTime: "Estimated hours", ownerPartyId: "Organization"},
+    [WORK]: {
+        statusId: "Status",
+        priority: "Priority",
+        estimatedWorkTime: "Estimated hours",
+        facilityId: "Facility",
+        ownerPartyId: "Organization"
+    },
     [ORDER]: {assetId: "Equipment", maintenanceKindEnumId: "Kind", costCenterId: "Cost centre", projectWorkEffortId: "Project"}
 }
 function historyOf(workEffortId) {
@@ -1202,15 +1230,31 @@ function scopedQuery(userScope, p) {
     if (text(p.teamPartyId))
         query = query.condition("workEffortId", "in", assignedRootIds(text(p.teamPartyId), teamRole).concat(["_NA_"]))
     if (flag(p.unassigned)) {
-        const assigned = Array.from(
-            find(PARTY, {roleTypeId: assigneeRole})
-                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        // the work orders of the other filters (to homeLimit, as Home counts them) less those with a current technician: the
+        // assignee rows are read for those work orders only, not every assignment of every work effort (P3 review)
+        const candidates = Array.from(
+            scopedQuery(userScope, Object.assign({}, p, {unassigned: null}))
                 .selectField("workEffortId")
-                .distinct(true)
-                .limit(5000)
+                .limit(homeLimit)
                 .list()
         ).map(row => row.workEffortId)
-        if (assigned.length) query = query.condition("workEffortId", "not-in", assigned)
+        const assigned = new Set(
+            candidates.length
+                ? Array.from(
+                      find(PARTY, {roleTypeId: assigneeRole})
+                          .condition("workEffortId", "in", candidates)
+                          .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                          .condition(factory().makeCondition("statusId", "not-in", ["WeptDeclined", "WeptUnassigned"], true))
+                          .selectField("workEffortId")
+                          .list()
+                  ).map(row => row.workEffortId)
+                : []
+        )
+        query = query.condition(
+            "workEffortId",
+            "in",
+            candidates.filter(id => !assigned.has(id)).concat(["_NA_"])
+        )
     }
     if (p.fromDate)
         query = query.condition(

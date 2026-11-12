@@ -2284,21 +2284,8 @@ along with this software (see the LICENSE.md file). If not, see
             // admits them, in every app: a maintenance reader of its service organization, a technician it is assigned to, or a
             // party of the work (mantle/work/MaintenanceAccess.js requireWork; impl-maintenance P3, F69), beside People's
             // protected tasks; an organization role alone does not open it
-            const maintenanceHidden = (workEffort, partyId) => {
-                if (!ec.entity.isEntityDefined('mantle.work.maintenance.MaintenanceWorkOrder')) return false
-                const rootId = workEffort.rootWorkEffortId || workEffort.workEffortId
-                if (ec.entity.find('mantle.work.maintenance.MaintenanceWorkOrder').condition('workEffortId', rootId).disableAuthz().count() === 0)
-                    return false
-                if (partyId && ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', [rootId, workEffort.workEffortId])
-                        .condition('partyId', partyId).condition(current()).disableAuthz().count() > 0) return false
-                const maintenanceAccess = ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
-                try {
-                    maintenanceAccess.requireWork(maintenanceAccess.scope(), workEffort.workEffortId)
-                    return false
-                } catch (err) {
-                    return true
-                }
-            }
+            const maintenanceHidden = (workEffort, partyId) => ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
+                    .workHidden(workEffort.workEffortId, partyId)
             const workEffortVisible = (workEffort, s) => {
                 if (s.partyIds.length === 0) return false
                 const ids = [workEffort.workEffortId]

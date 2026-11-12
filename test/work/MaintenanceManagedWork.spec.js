@@ -122,12 +122,19 @@ spec({
             assigneePartyIds: [state.TECH_PARTY]
         })
         ec.artifactExecution.disableAuthz()
-        // the record check's service opened to the spec's users, filtered by their organizations (as PeopleChecklists does)
+        // the record check's and the search's services opened to the spec's users, filtered by their organizations (as PeopleChecklists does)
         call("create#moqui.security.ArtifactGroup", {artifactGroupId: prefix + "_RLI", description: "Managed work record links"})
         call("create#moqui.security.ArtifactGroupMember", {
             artifactGroupId: prefix + "_RLI",
             artifactTypeEnumId: "AT_SERVICE",
             artifactName: "mantle.party.CommunicationServices.get#RecordLinkInfo",
+            nameIsPattern: "N",
+            inheritAuthz: "Y"
+        })
+        call("create#moqui.security.ArtifactGroupMember", {
+            artifactGroupId: prefix + "_RLI",
+            artifactTypeEnumId: "AT_SERVICE",
+            artifactName: "mantle.search.UniversalSearchServices.search#Universal",
             nameIsPattern: "N",
             inheritAuthz: "Y"
         })
@@ -167,10 +174,18 @@ feature("the generic task and work-effort services refuse a work order and its s
                 partyId: state.MEMBER_PARTY,
                 roleTypeId: "Assignee"
             }),
-            plainStatus: as(state.tech, T + "set#TaskStatus", {workEffortId: state.plain, statusId: "WeInProgress"})
+            plainStatus: as(state.tech, T + "set#TaskStatus", {workEffortId: state.plain, statusId: "WeInProgress"}),
+            // the maintenance flow's planned-work hold opens no move on other work: an ordinary task in planning is not held by
+            // a raw update of a user without the maintenance permission (P3 review)
+            rawHold: as(state.member, "update#mantle.work.effort.WorkEffort", {
+                workEffortId: task("RAW", {ownerPartyId: state.MEMBER_PARTY}),
+                statusId: "WeOnHold"
+            })
         }
     },
     then(out) {
+        String(out.rawHold).startsWith("ERROR")
+        work(prefix + "_W_RAW").statusId == "WeInPlanning"
         out.rootStatus == "MANAGED_WORK"
         out.stepStatus == "MANAGED_WORK"
         out.rootUpdate == "MANAGED_WORK"
@@ -254,3 +269,39 @@ feature(
         }
     }
 )
+
+feature("search#Universal finds a work order and its steps only for whom Maintenance admits, not for everyone of its organization", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        for (const workEffortId of [state.root, state.step])
+            ec.search.indexDocuments(ec.entity.getDataDocuments("MantleTask", {workEffortId}))
+        const found = username => {
+            const ids = []
+            for (const q of ["lamps", "Managed"]) {
+                const out = as(
+                    username,
+                    "mantle.search.UniversalSearchServices.search#Universal",
+                    {q, entityType: "MantleTask", limit: 100, highlight: false},
+                    true
+                )
+                if (typeof out === "string") return out
+                ids.push(...Array.from(out.results || []).map(result => result.id))
+            }
+            return [state.root, state.step].filter(id => ids.includes(id))
+        }
+        return {
+            available: ec.search.isAvailable(),
+            member: found(state.member),
+            planner: found(state.planner),
+            tech: found(state.tech)
+        }
+    },
+    then({available, member, planner, tech}) {
+        available
+        // the organization's member reaches neither by the organization's search limit alone
+        member == []
+        planner == [state.root]
+        // the technician is a party of both
+        tech == [state.root, state.step]
+    }
+})
