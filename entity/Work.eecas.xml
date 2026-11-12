@@ -55,4 +55,23 @@ along with this software (see the LICENSE.md file). If not, see
                 {eecaOperation:eecaOperation, originalValue:originalValue, entityValue:contentValue})</script>
         </actions>
     </eeca>
+    <!-- IronStone Maintenance (impl-maintenance P7 review, design-maintenance §4.3): a check's evidence and a stored completed
+        checklist are never updated or deleted, and closed or cancelled managed work takes no new file, whatever writes the row (the
+        content services, RecordFiles, entity-auto, the entity REST); a check's link to its evidence is never changed
+        (ProcessChecks.js guardEvidence, guardEvidenceLink) -->
+    <eeca id="WorkEffortEvidenceProtected" entity="mantle.work.effort.WorkEffortContent"
+            on-create="true" on-update="true" on-delete="true" run-before="true" run-on-error="false"
+            get-entire-entity="true" get-original-value="true">
+        <actions>
+            <set field="contentValue" from="{workEffortContentId:workEffortContentId, workEffortId:workEffortId, contentTypeEnumId:contentTypeEnumId}"/>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('guardEvidence',
+                {eecaOperation:eecaOperation, originalValue:originalValue, entityValue:contentValue})</script>
+        </actions>
+    </eeca>
+    <eeca id="WorkEffortEvidenceLinkKept" entity="mantle.work.effort.WorkEffortCheckEvidence"
+            on-update="true" on-delete="true" run-before="true" run-on-error="false">
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('guardEvidenceLink', {})</script>
+        </actions>
+    </eeca>
 </eecas>

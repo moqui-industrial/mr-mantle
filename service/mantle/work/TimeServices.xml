@@ -40,6 +40,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeEntryId"/>
         </out-parameters>
         <actions>
+            <!-- no new time on managed work, nor an entry moved onto it (a maintenance work order and its steps, a procedure;
+                impl-maintenance P7, F159): Maintenance's own time entry points check their caller and pass it through
+                (WorkProcesses.js asManagedOwner); an entry already on the work keeps its timesheet rules, so a running timer stops -->
+            <if condition="context.workEffortId">
+                <set field="storedTimeWorkEffortId" from="context.timeEntryId ? ec.entity.find('mantle.work.time.TimeEntry')
+                        .condition('timeEntryId', context.timeEntryId).disableAuthz().one()?.workEffortId : null"/>
+                <if condition="storedTimeWorkEffortId != context.workEffortId">
+                    <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:context.workEffortId}"/>
+                    <if condition="ec.message.hasError()"><return/></if>
+                </if>
+            </if>
             <if condition="partyId">
                 <entity-find-one entity-name="mantle.party.Party" value-field="party"/>
                 <if condition="party.disabled == 'Y'"><return error="true" message="Time Entry not created, ${party.pseudoId} is not active."/></if>
@@ -399,6 +410,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="timeEntryId"/></out-parameters>
         <actions>
+            <!-- no clock-in on managed work but through its owner's entry point (impl-maintenance P7, F159; store#TimeEntry's rule) -->
+            <if condition="context.workEffortId">
+                <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:context.workEffortId}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <!-- on the person's timesheet of the week, which must not be submitted (check#TimeEntryTimesheet) -->
             <service-call name="mantle.work.TimeServices.check#TimeEntryTimesheet" out-map="sheetCheck"
                     in-map="{timesheetId:timesheetId, partyId:partyId, fromDate:fromDate, workEffortId:workEffortId}"/>

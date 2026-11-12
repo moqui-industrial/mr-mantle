@@ -20,7 +20,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="MaintenancePolicy" allow-remote="false">
         <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
             read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
-            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed.
+            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
+            self-approval and no voice note transcription.
             planned: the policies set to start later (P18), in their order; ended: the last ten that ended, newest first (a
             withdrawn plan, ended at its own start, is in neither). canEdit says whether the user may change it.</description>
         <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
@@ -44,8 +45,9 @@ along with this software (see the LICENSE.md file). If not, see
             to start later is withdrawn (ended at its own start) and one planned for that very time is changed in place. Each
             field not given is kept from the policy in effect at fromDate, so a call changes only what it names (P18). The approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
             default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
-            requests and warranty repairs become managed work, and whether a procedure's last author may approve it
-            (procedureSelfApproval, off by default; impl-maintenance P6).</description>
+            requests and warranty repairs become managed work, whether a procedure's last author may approve it
+            (procedureSelfApproval, off by default; impl-maintenance P6), and whether a checklist step's voice note is transcribed
+            (voiceNoteTranscription, off by default; impl-maintenance P7 review).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
@@ -56,6 +58,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productionRequestsManaged"/>
             <parameter name="warrantyRepairsManaged"/>
             <parameter name="procedureSelfApproval"/>
+            <parameter name="voiceNoteTranscription"/>
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>

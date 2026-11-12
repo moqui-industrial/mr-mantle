@@ -264,7 +264,10 @@ along with this software (see the LICENSE.md file). If not, see
             order's, or offlineIntent) records the target's outage as planned maintenance (unavailabilityReasonEnumId), or links
             the one open; complete with equipment still unavailable (MdispUnavailable) records its outage when none is open, and
             followUpName makes a follow-up corrective work order on the same target, caused by this one and linked to its open
-            outage; completion and cancel restore nothing (end#ResourceUnavailability does).</description>
+            outage; completion and cancel restore nothing (end#ResourceUnavailability does). P10: complete with an outside-service
+            line (serviceOrderId, serviceOrderItemSeqId, serviceAcceptedQuantity, the evidence serviceEvidenceContentId and
+            serviceOperationKey) accepts it in the same transaction as accept#MaintenanceService does, under Purchasing's check;
+            completing the work completes no order line.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="action" required="true"><description>approve, start, hold, resume, complete, close or cancel</description></parameter>
@@ -279,6 +282,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="offlineIntent"/>
             <parameter name="unavailabilityReasonEnumId"/>
             <parameter name="followUpName"/>
+            <parameter name="serviceOrderId"/>
+            <parameter name="serviceOrderItemSeqId"/>
+            <parameter name="serviceAcceptedQuantity" type="BigDecimal"/>
+            <parameter name="serviceEvidenceContentId"/>
+            <parameter name="serviceComments"/>
+            <parameter name="serviceOperationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="workEffortId"/>
@@ -287,6 +296,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="resultCode"/>
             <parameter name="resourceUnavailabilityId"/>
             <parameter name="followUpWorkEffortId"/>
+            <parameter name="serviceAcceptanceId"/>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('transitionWorkOrder', context)"/>
@@ -296,6 +306,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="resultCode" from="answer.resultCode"/>
             <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
             <set field="followUpWorkEffortId" from="answer.followUpWorkEffortId"/>
+            <set field="serviceAcceptanceId" from="answer.serviceAcceptanceId"/>
         </actions>
     </service>
     <service verb="act" noun="MaintenanceWorkOrders" allow-remote="false">
@@ -553,6 +564,159 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="requestId" from="answer.requestId"/>
             <set field="created" from="!!answer.created"/>
             <set field="joined" from="!!answer.joined"/>
+        </actions>
+    </service>
+
+    <!-- ===== P10: purchasing and outside service (design §3 PurchaseLinks, CompleteWork, the OrderDetail mount row; MT-10;
+        MaintenancePurchases.js). Purchasing owns sourcing, placing, approving, receiving and the money. ===== -->
+    <service verb="link" noun="MaintenancePurchase" allow-remote="false">
+        <description>A purchase for a work order (MAINTENANCE_PLAN or _SUPERVISE in its organization). Without an order line: a
+            purchase request (RqtPurchase) of the work's organization through Purchasing's create#PurchaseRequest and
+            store#PurchaseRequestItem, the user its requester, linked to the work order by RequestWorkEffort and submitted to
+            Purchasing's approvers unless submit is false; it places and approves nothing (an open work order, WORK_CLOSED;
+            NAME_REQUIRED; Purchasing's refusals of the line). With an order line (orderId, orderItemSeqId): an
+            AssetMaintenanceOrderItem between the work's primary AssetMaintenance and a purchase order line of its organization,
+            never an OrderItemWorkEffort, so maintenance status completes no order line; a line sourced from one of the work's
+            requests is the work's, another is linked only by a buyer (PURCHASE_ORDER_EDIT, else PERMISSION_DENIED); facility work
+            has no AssetMaintenance (LINK_UNAVAILABLE). A retry with operationKey answers the first request (repeated).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="maximumAmount" type="BigDecimal"/>
+            <parameter name="submit" default-value="true"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="requestId"/>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="resultCode"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('link', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="requestId" from="answer.requestId"/>
+            <set field="requestItemSeqId" from="answer.requestItemSeqId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="orderId" from="answer.orderId"/>
+            <set field="orderItemSeqId" from="answer.orderItemSeqId"/>
+            <set field="resultCode" from="answer.resultCode"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="link" noun="SourcedMaintenancePurchase" allow-remote="false">
+        <description>Internal to the RequestItemOrder entity ECA MaintenancePurchaseSourced: when Purchasing sources a line of a
+            purchase request linked to managed equipment work, the work's primary AssetMaintenance is linked to the order line
+            (AssetMaintenanceOrderItem). Only a RequestItemOrder that exists is followed; nothing else changes. It never fails the
+            sourcing it runs in: what it cannot link is logged with the request, the order line and the work, and the rest goes
+            on (P10 review R2).</description>
+        <in-parameters>
+            <parameter name="requestId"/>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+        </in-parameters>
+        <out-parameters><parameter name="linkedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="linkedCount" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('linkSourced', context).linkedCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenancePurchases" allow-remote="false" read-only="true">
+        <description>A work order's purchases for its reader: its purchase requests with their lines and state, and the purchase
+            order lines that fulfil it (linked, or sourced from its requests), each with its supplier, order state, quantity and,
+            for a service line, what was accepted and is left; prices only for a buyer, a price reader or a maintenance cost
+            reader. Whether the user may request (a planner or supervisor, the work open), link a line (a buyer, equipment work)
+            and accept outside service (the assigned technician or a supervisor with Purchasing's PURCHASE_ORDER_EDIT or
+            STOCK_RECEIVE, the work in progress, held or complete), with the work's files as evidence.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="requestList" type="List"/>
+            <parameter name="orderLines" type="List"/>
+            <parameter name="canRequest" type="Boolean"/>
+            <parameter name="canLink" type="Boolean"/>
+            <parameter name="canAccept" type="Boolean"/>
+            <parameter name="acceptMessage"/>
+            <parameter name="priceRead" type="Boolean"/>
+            <parameter name="evidenceFiles" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('getPurchases', context)"/>
+            <set field="requestList" from="answer.requestList"/>
+            <set field="orderLines" from="answer.orderLines"/>
+            <set field="canRequest" from="answer.canRequest"/>
+            <set field="canLink" from="answer.canLink"/>
+            <set field="canAccept" from="answer.canAccept"/>
+            <set field="acceptMessage" from="answer.acceptMessage"/>
+            <set field="priceRead" from="answer.priceRead"/>
+            <set field="evidenceFiles" from="answer.evidenceFiles"/>
+        </actions>
+    </service>
+    <service verb="accept" noun="MaintenanceService" allow-remote="false">
+        <description>Accept outside service of a work order (CompleteWork's "Accept outside service", also open from the Purchasing
+            tab): a service line of the work (LINE_UNLINKED otherwise), by its assigned technician or a supervisor (NOT_ASSIGNED),
+            the work in progress, held or complete (STATUS_INVALID), through Purchasing's mantle.order.OrderServices.accept#ServiceItem
+            under its own check (PURCHASE_ORDER_EDIT or STOCK_RECEIVE, PERMISSION_DENIED; the buying organization; at most as
+            ordered; once under operationKey) with the work order and its evidence: a file of the work (workEffortContentId;
+            EVIDENCE_INVALID) attached to the order line as OrderContent once. The line is linked to the work's primary
+            AssetMaintenance.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+            <parameter name="acceptedQuantity" type="BigDecimal" required="true"/>
+            <parameter name="acceptedDate" type="Timestamp"/>
+            <parameter name="workEffortContentId"/>
+            <parameter name="comments"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="serviceAcceptanceId"/>
+            <parameter name="acceptedQuantity"/>
+            <parameter name="totalAccepted"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+            <parameter name="orderContentId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('acceptService', context)"/>
+            <set field="serviceAcceptanceId" from="answer.serviceAcceptanceId"/>
+            <set field="acceptedQuantity" from="answer.acceptedQuantity"/>
+            <set field="totalAccepted" from="answer.totalAccepted"/>
+            <set field="alreadyApplied" from="answer.alreadyApplied"/>
+            <set field="orderContentId" from="answer.orderContentId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MaintenanceOrder" allow-remote="false" read-only="true">
+        <description>A purchase order as Maintenance reads it (OrderDetail at Maintenance/WorkOrders/OrderDetail; crosscut §3.6):
+            read only, for a maintenance work reader, its lines that fulfil work orders the user reads (linked to a work's
+            AssetMaintenance or sourced from its purchase request), each with its work orders, quantity, required date and what
+            was accepted; prices only for a price reader. An order linked to none of the user's work is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="maintenanceOrder" type="Map"/></out-parameters>
+        <actions>
+            <set field="maintenanceOrder" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('getOrder', context).maintenanceOrder"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PurchaseRequestWork" allow-remote="false" read-only="true">
+        <description>Purchasing's RequestDetail's originating work (design-purchasing "Maintenance purchases"): for a user who reads
+            the purchase request under Purchasing's rule (its people, or PURCHASE_ORDER_EDIT, PURCHASE_APPROVE, SUPPLY_PLAN_VIEW or
+            SUPPLY_PLAN_RUN in its organization), the work orders it was raised from: id, target, status and need date, and
+            whether Maintenance opens it for them (canOpen); the work order's name only when it does (P10 review R3); never its
+            notes, time or people.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="workList" type="List"/></out-parameters>
+        <actions>
+            <set field="workList" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePurchases.js').execute('requestWork', context).workList"/>
         </actions>
     </service>
 </services>

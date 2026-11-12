@@ -12,7 +12,10 @@
 //   the policy allows an override, for a holder of RESOURCE_BOOKING_OVERRIDE who works for its organization, with a reason
 //   (OVERRIDE_DENIED), and approval follows
 //   its mode: automatic, or by its approvers, none of them blocking (APPROVER_REQUIRED). A resource with no policy keeps the
-//   approver fallback (EventServices). A conflict with an event the user may not see is named Busy, with no id or title.
+//   approver fallback (EventServices), and a recurring booking of it is checked against outages and blocks over its whole range up
+//   to 365 days, its conflicts on the first meeting as before (P16, F165). An inventory or supplies asset is booked as before P15:
+//   no policy or block applies (F172). A write locks the work centers above a facility before the resource (F171, lockResource).
+//   A conflict with an event the user may not see is named Busy, with no id or title.
 // - availability (get#ResourceAvailability, get#FreeBusy, get#FullCalendarData): the intervals of a resource in a range, kept
 //   apart: requested and assigned bookings, planned blocks and actual outages, each with a safe label.
 // - the policy's services: find#BookableResources, get#, store# and preview#ResourceBookingPolicy and store#ResourceApprover, each
@@ -28,6 +31,7 @@ const POLICY = "mantle.work.effort.ResourceBookingPolicy"
 const OUTAGE = "mantle.work.effort.ResourceUnavailability"
 const ASSET = "mantle.product.asset.Asset"
 const FACILITY = "mantle.facility.Facility"
+const CENTER = "mantle.work.production.WorkCenter"
 const dayMs = 24 * 60 * 60 * 1000
 // a recurring booking of a resource with no horizon is checked this far ahead, and a range past it is refused
 const defaultRecurringDays = 365
@@ -49,16 +53,18 @@ const ids = list => Array.from(new Set(list.filter(Boolean)))
 const minutesText = minutes => (minutes % 60 === 0 ? minutes / 60 + (minutes === 60 ? " hour" : " hours") : minutes + " minutes")
 
 // ===== the resource =====
-// Exactly one resource, equipment (an asset that is not stock) or a facility, locked when asked.
-function resourceOf(p, lock = false) {
+// Exactly one resource, equipment (an asset that is not stock) or a facility, locked when asked. With allowStock an inventory or
+// supplies asset is answered too (stock true): the booking guard lets it be booked as before P15 (F172), the policy's services
+// refuse it.
+function resourceOf(p, lock = false, allowStock = false) {
     const assetId = text(p.assetId)
     const facilityId = text(p.facilityId)
     if (!!assetId === !!facilityId) denied("RESOURCE_REQUIRED", "Name the equipment or the facility, one of them")
     if (assetId) {
         const asset = find(ASSET, {assetId}).forUpdate(lock).one()
-        if (!asset || stockTypes.includes(asset.assetTypeEnumId))
-            denied("RECORD_UNAVAILABLE", "Equipment " + assetId + " is not available")
-        return {assetId, facilityId: null, row: asset, name: asset.assetName || assetId}
+        const stock = !!asset && stockTypes.includes(asset.assetTypeEnumId)
+        if (!asset || (stock && !allowStock)) denied("RECORD_UNAVAILABLE", "Equipment " + assetId + " is not available")
+        return {assetId, facilityId: null, row: asset, name: asset.assetName || assetId, stock}
     }
     const facility = find(FACILITY, {facilityId}).forUpdate(lock).one()
     if (!facility) denied("RECORD_UNAVAILABLE", "Facility " + facilityId + " is not available")
@@ -74,6 +80,20 @@ function facilityAndAbove(facilityId) {
         id = one(FACILITY, {facilityId: id})?.parentFacilityId || null
     }
     return found
+}
+// The work centers a booking of the facility could land under (Manufacturing's offline time of the center or of one above it), locked
+// in their id order (impl-maintenance P16, F171). A booking locks them before its own row, and store#WorkCenterOffline's record#
+// locks its center's: its operation moves run in transactions of their own and write no WorkCenter row (they reference the
+// facility, whose lock they would wait on), so the two are decided one after the other and nothing waits in a cycle.
+function lockCenters(facilityId) {
+    const id = text(facilityId)
+    if (!id || !ec.entity.isEntityDefined(CENTER)) return
+    find(CENTER).condition("facilityId", "in", facilityAndAbove(id)).orderBy("facilityId").forUpdate(true).list()
+}
+// The resource locked for a booking's write: the work centers first, then its own row.
+function lockResource(p) {
+    lockCenters(p.facilityId)
+    return resourceOf(p, true, true)
 }
 const organizationOf = resource =>
     resource.assetId
@@ -311,7 +331,8 @@ function availability(p) {
 }
 // The intervals get#FreeBusy and get#FullCalendarData add for a resource: its blocks only, with a safe label.
 function unavailableOver(p) {
-    const resource = resourceOf(p)
+    const resource = resourceOf(p, false, true)
+    if (resource.stock) return []
     const fromMs = ms(p.fromDate)
     const thruMs = ms(p.thruDate)
     return blocksOver(resource, fromMs, thruMs).map(row => ({
@@ -353,14 +374,16 @@ function seriesInstances(workEffortId, startMs, endMs, boundMs) {
         recurring: true
     }
 }
-// The other bookings of the resource over the instances (the event's own series left out), each a conflict.
-function conflictsOver(resource, instances, own) {
+// The other bookings of the resource over the instances (the event's own series left out), each a conflict; with assignedOnly the
+// assigned ones alone (a decision: a request waiting holds nothing against the one decided).
+function conflictsOver(resource, instances, own, assignedOnly = false) {
     if (!instances.length) return []
     const first = Math.min(...instances.map(([from]) => from))
     const last = Math.max(...instances.map(([, to]) => to))
     const conflicts = []
     for (const event of bookingsOver(resource, first, last)) {
         if (own.has(event.workEffortId) || own.has(event.recurringEventId)) continue
+        if (assignedOnly && requestedStatuses.includes(event.bookingStatusId)) continue
         if (instances.some(([from, to]) => event.fromMs < to && event.thruMs > from))
             conflicts.push({
                 workEffortId: event.workEffortId,
@@ -389,12 +412,28 @@ function overrideCovers(resource) {
         : maintenanceAccess.ownOrganizations().organizationPartyIds
     return organizations.includes(organizationOf(resource))
 }
+// The first outage or planned block in force over any of the meetings, or null.
+function blockOverAny(resource, instances) {
+    const first = Math.min(...instances.map(([from]) => from))
+    const last = Math.max(...instances.map(([, to]) => to))
+    return (
+        blocksOver(resource, first, last).find(row => {
+            const from = ms(row.fromDate)
+            const to = row.thruDate == null ? Infinity : ms(row.thruDate)
+            return instances.some(([start, end]) => from < end && to > start)
+        }) || null
+    )
+}
 // guard: what a booking of the resource for the event at startMs to endMs is allowed. p: facilityId or assetId, workEffortId,
 // startMs, endMs, conflicts (the caller's, for one interval), allowConflicts, overrideReason, lock (a write: the resource locked),
 // own (the ids of the event and its series). Answers {managed, refusal {code, message, hard} or null, conflicts (safe), approval
 // {requiresApproval, approverPartyIdList} or null (the caller's approver fallback), overridden}.
 function guard(p) {
-    const resource = resourceOf(p, !!p.lock)
+    // a write locks the work centers above a facility and then the resource (F171); stock is answered (F172)
+    const resource = p.lock ? lockResource(p) : resourceOf(p, false, true)
+    // an inventory or supplies asset is no bookable resource: booked as before P15, with no policy or block (F172)
+    if (resource.stock)
+        return {managed: false, refusal: null, conflicts: safeConflicts(p.conflicts), approval: null, overridden: false}
     const startMs = ms(p.startMs)
     const endMs = ms(p.endMs)
     const own = new Set(Array.from(p.own || [p.workEffortId]).filter(Boolean))
@@ -407,25 +446,42 @@ function guard(p) {
     })
     const policy = policyAt(resource)
     const now = nowMs()
-    // a recurring booking of a managed resource is checked over its whole range within the bound
+    // a recurring booking is checked over its whole range within the bound: a managed resource's against everything, up to its
+    // horizon; any other resource's against its outages and blocks only, up to 365 days, its conflicts on the first meeting as
+    // before (F165)
     const horizonDays = policy?.bookingHorizonDays == null ? null : Number(policy.bookingHorizonDays)
     const boundMs = now + (horizonDays ?? defaultRecurringDays) * dayMs
-    const series = policy && p.workEffortId ? seriesInstances(p.workEffortId, startMs, endMs, boundMs) : null
-    const instances = series ? series.instances : [[startMs, endMs]]
-    // an outage or a planned block is never overridden, for any resource
-    for (const [from, to] of instances) {
-        const block = blocksOver(resource, from, to)[0]
-        if (block)
-            return refuse(
-                "RESOURCE_UNAVAILABLE",
-                resource.name +
-                    (block.unavailabilityKindEnumId === "RukPlanned"
-                        ? " is not available then (" + blockLabel(block, resource).replace(/^Not available: /, "") + ")"
-                        : " is out of service then"),
-                true
-            )
-    }
-    if (!policy) return {managed: false, refusal: null, conflicts: safeConflicts(p.conflicts), approval: null, overridden: false}
+    const series = p.workEffortId ? seriesInstances(p.workEffortId, startMs, endMs, boundMs) : null
+    const instances = series?.instances.length ? series.instances : [[startMs, endMs]]
+    // an outage or a planned block is never overridden, for any resource: one read over the range, matched to each meeting
+    // (the time asked for too, when it is not the stored one yet and not over: a phone's move of a series, checked before it is stored)
+    const block = blockOverAny(
+        resource,
+        series?.recurring && endMs > now && !instances.some(([from, to]) => from === startMs && to === endMs)
+            ? instances.concat([[startMs, endMs]])
+            : instances
+    )
+    if (block)
+        return refuse(
+            "RESOURCE_UNAVAILABLE",
+            resource.name +
+                (block.unavailabilityKindEnumId === "RukPlanned"
+                    ? " is not available then (" + blockLabel(block, resource).replace(/^Not available: /, "") + ")"
+                    : " is out of service then"),
+            true
+        )
+    if (!policy)
+        return {
+            managed: false,
+            refusal: null,
+            conflicts: safeConflicts(
+                p.assignedOnly
+                    ? Array.from(p.conflicts || []).filter(row => !requestedStatuses.includes(row.bookingStatusId))
+                    : p.conflicts
+            ),
+            approval: null,
+            overridden: false
+        }
     if (policy.bookable === "N") return refuse("NOT_BOOKABLE", resource.name + " is not bookable now", true)
     const maximum = policy.maximumDurationMinutes == null ? null : Number(policy.maximumDurationMinutes)
     if (maximum && instances.some(([from, to]) => to - from > maximum * 60000))
@@ -443,7 +499,13 @@ function guard(p) {
     const sorted = instances.slice().sort((a, b) => a[0] - b[0])
     if (sorted.some(([from], index) => index > 0 && from < sorted[index - 1][1]))
         return refuse("SERIES_OVERLAP", "The meetings of this series overlap each other on " + resource.name, true)
-    const conflicts = safeConflicts(series?.recurring ? conflictsOver(resource, instances, own) : p.conflicts)
+    const conflicts = safeConflicts(
+        series?.recurring
+            ? conflictsOver(resource, instances, own, !!p.assignedOnly)
+            : p.assignedOnly
+              ? Array.from(p.conflicts || []).filter(row => !requestedStatuses.includes(row.bookingStatusId))
+              : p.conflicts
+    )
     let overridden = false
     if (conflicts.length && yes(p.allowConflicts)) {
         if (policy.softConflictOverride !== "Y")
@@ -885,6 +947,13 @@ function findBookable(p) {
     approversOf,
     blocksOver,
     guard,
+    lockCenters,
+    lockResource,
+    resourceOf,
+    policyText,
+    partyName,
+    eventVisibility,
+    bookingsOver,
     availability,
     unavailableOver,
     execute: (op, p) => {

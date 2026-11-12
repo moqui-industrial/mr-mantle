@@ -432,4 +432,208 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="message" from="answer.message"/>
         </actions>
     </service>
+    <!-- ===== Executing a process's steps (impl-maintenance P7; design-maintenance §4.3, §3 ProcedureSteps, StepResponse and
+        ExecutionAmendment, §12), ProcessChecks.js. A step's status moves only through these, the root's close or cancel; each checks
+        the work order's scope (MaintenanceAccess.js requireWork) and the caller's maintenance permission. ===== -->
+    <service verb="get" noun="ProcessExecution" allow-remote="false">
+        <description>A work order's checklist for a reader of it (MAINTENANCE_VIEW in its organization, or its assigned technician):
+            each step in order with its depth, group flag, state, policy (required, response kind, reading and bounds, evidence,
+            comment, waiver), blockers (the dependencies not done), assignees, instruction, current check (outcome, reading,
+            findings, notes, evidence), failures and waiver, and what the caller may do (start, respond, skip, waive, correct); the
+            checks newest first, the waivers and the amendments; the next actionable step, the required steps open (the gate of
+            the work order's Complete) and the stored completed checklist. workEffortId is the root or one of its steps.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="execution" type="Map"/>
+            <parameter name="stepList" type="List"/>
+            <parameter name="checkList" type="List"/>
+            <parameter name="waiverList" type="List"/>
+            <parameter name="amendmentList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('getExecution', context)"/>
+            <set field="execution" from="answer.execution"/>
+            <set field="stepList" from="answer.stepList"/>
+            <set field="checkList" from="answer.checkList"/>
+            <set field="waiverList" from="answer.waiverList"/>
+            <set field="amendmentList" from="answer.amendmentList"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ProcessStep" allow-remote="false">
+        <description>A step of a work order in progress (STATUS_INVALID otherwise), by its assigned technician (MAINTENANCE_EXECUTE,
+            assigned to the step or its root; NOT_ASSIGNED) or a supervisor; a leaf (GROUP_NO_RESPONSE), its dependencies and its
+            groups' done (DEPENDENCY_OPEN). action start: the step in progress. action skip: an optional step (SKIP_NOT_ALLOWED)
+            cancelled with the reason (comments; REASON_REQUIRED). action respond (design §4.3): outcome (pass or fail) for a pass
+            or fail step (OUTCOME_REQUIRED), measurementValue (VALUE_REQUIRED) and measurementUomId for a reading, observedDate (now
+            when empty; DATE_FUTURE), comments, evidence (evidenceContentIds, files of the work order; contentFile, files uploaded
+            with it, stored on the root named for the step; voiceFile, a voice note), supersededCheckId and correctionReason for
+            a correction of a check (REASON_REQUIRED), operationKey (a retry answers the first check; changed input
+            OPERATION_KEY_CONFLICT). The policy, bounds, organization and actor are the execution's and the caller's, never given.
+            A missing file or comment, a wrong unit, an out-of-range reading or a failure is saved as an unresolved check (its
+            findings) and leaves the step open; an accepted check completes it. A reading is a Measurement of the step; a counter
+            reading also goes through MaintenanceResourceServices.record#MaintenanceMeter with the Measurement linked. A step's
+            response is never a group's: groups follow their steps.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action"><description>start, respond (the default) or skip</description></parameter>
+            <parameter name="outcome"><description>pass or fail</description></parameter>
+            <parameter name="measurementValue"/>
+            <parameter name="measurementUomId"/>
+            <parameter name="observedDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="evidenceContentIds" type="List"/>
+            <parameter name="contentFile" type="Object"/>
+            <parameter name="voiceFile" type="Object"/>
+            <parameter name="supersededCheckId"/>
+            <parameter name="correctionReason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortCheckId"/>
+            <parameter name="statusId"/>
+            <parameter name="accepted" type="Boolean"/>
+            <parameter name="findingList" type="List"/>
+            <parameter name="measurementId"/>
+            <parameter name="voiceContentId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('recordStep', context)"/>
+            <set field="workEffortCheckId" from="answer.workEffortCheckId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="accepted" from="!!answer.accepted"/>
+            <set field="findingList" from="answer.findingList || []"/>
+            <set field="measurementId" from="answer.measurementId"/>
+            <set field="voiceContentId" from="answer.voiceContentId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="transcribe" noun="CheckVoiceNote" allow-remote="false">
+        <description>The voice note of a check (its recorder or a supervisor) as text, through SpeechServices.transcribe#Audio,
+            added to the check's transcript, only when the work order's organization turns transcription on (MaintenancePolicy
+            voiceNoteTranscription, off by default; otherwise reasonCode TRANSCRIPTION_OFF and nothing is sent). A transcription
+            that does not work is an answer (reasonCode); the audio stays the evidence either way. Called in a transaction of its
+            own after record#ProcessStep.</description>
+        <in-parameters><parameter name="workEffortCheckId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="transcribed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="transcript"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('transcribeVoiceNote', context)"/>
+            <set field="transcribed" from="!!answer.transcribed"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="transcript" from="answer.transcript"/>
+        </actions>
+    </service>
+    <service verb="waive" noun="ProcessStep" allow-remote="false">
+        <description>A supervisor's waiver of a step (MAINTENANCE_SUPERVISE in its organization; a technician is refused,
+            PERMISSION_DENIED) while the work is in progress or held: a leaf not done (STEP_DONE) whose execution policy allows it
+            (WAIVER_NOT_ALLOWED), with the reason (REASON_REQUIRED). The step is complete; the failed check it answers
+            (workEffortCheckId, else the step's latest unresolved one) stays.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="workEffortCheckId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortWaiverId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('waiveStep', context)"/>
+            <set field="workEffortWaiverId" from="answer.workEffortWaiverId"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="amend" noun="ProcessExecution" allow-remote="false">
+        <description>A supervisor's change of an open work order's execution (MAINTENANCE_SUPERVISE; completed, closed or cancelled
+            work is corrected, not amended, WORK_CLOSED). Each change of changeList has an action (the user's call of Nov 12, P7
+            review): add (workEffortName, parentWorkEffortId the root or a group, GROUP_REQUIRED otherwise, sequenceNum, description,
+            estimatedWorkTime, the policy fields, dependsOnIds: a new step not started; a complete group it joins reopens, named
+            among the invalidations); remove (workEffortId: a step, or a group with its steps, not yet started and with no check,
+            STEP_STARTED otherwise; it is cancelled and named in the amendment, and what waited for it no longer does); or change (the
+            default): it names steps of it and their new step policy fields
+            (isRequired, responseKindEnumId, measurementTypeId, measurementUomId, minimumValue, maximumValue, evidenceRequired,
+            commentRequired, waiverAllowed) or dependencies (dependsOnIds, steps of the same tree, no loop: DEPENDENCY_INVALID).
+            With preview, the changes, the acceptances they invalidate (a complete step whose requirement changed, or that now waits
+            for work not done) and the findings (complete steps waiting for a reopened one), and nothing written. Else, with the
+            reason (REASON_REQUIRED): the step policies from now, the dependencies, the amendment record, and each invalidated step
+            back in progress with its accepted checks invalidated and its waiver ended (both kept). operationKey: a retry answers
+            the first.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="changeList" type="List"/>
+            <parameter name="reason"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="executionAmendmentId"/>
+            <parameter name="changeList" type="List"/>
+            <parameter name="invalidatedList" type="List"/>
+            <parameter name="findingList" type="List"/>
+            <parameter name="addedList" type="List"/>
+            <parameter name="removedList" type="List"/>
+            <parameter name="addedIds" type="List"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('amendExecution', context)"/>
+            <set field="addedList" from="answer.addedList || []"/>
+            <set field="removedList" from="answer.removedList || []"/>
+            <set field="addedIds" from="answer.addedIds || []"/>
+            <set field="executionAmendmentId" from="answer.executionAmendmentId"/>
+            <set field="changeList" from="answer.changeList"/>
+            <set field="invalidatedList" from="answer.invalidatedList"/>
+            <set field="findingList" from="answer.findingList"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProcessChecklist" allow-remote="false">
+        <description>A work order's completed checklist and exception record as a PDF (a reader of it; design §12): the one stored at
+            close (contentLocation), else made now (pdfBytes). No cost.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="pdfBytes" type="Object"/>
+            <parameter name="contentLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="stored" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('getChecklist', context)"/>
+            <set field="pdfBytes" from="answer.pdfBytes"/>
+            <set field="contentLocation" from="answer.contentLocation"/>
+            <set field="fileName" from="answer.fileName"/>
+            <set field="stored" from="!!answer.stored"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EvidencePolicy" allow-remote="false">
+        <description>The evidence policy of a work effort's files (RecordFiles' get#ContentType, impl-maintenance F69): for managed
+            work, whether files may be added or changed (not on closed or cancelled work; a procedure's are its authors') and the
+            files a check names as evidence or the stored checklist, which are never removed, replaced or given a new version;
+            ordinary work answers managed false. A data check; the caller checks who reads the record.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="managed" type="Boolean"/>
+            <parameter name="canChange" type="Boolean"/>
+            <parameter name="protectedContentIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('evidencePolicy', context)"/>
+            <set field="managed" from="!!answer.managed"/>
+            <set field="canChange" from="!!answer.canChange"/>
+            <set field="protectedContentIds" from="answer.protectedContentIds || []"/>
+        </actions>
+    </service>
+    <service verb="check" noun="EvidenceChange" allow-remote="false">
+        <description>A work effort's file a check names as evidence is not changed (EVIDENCE_PROTECTED): update#WorkEffortContent
+            calls it. A data check.</description>
+        <in-parameters><parameter name="workEffortContentId"/></in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('checkEvidenceChange', context)</script>
+        </actions>
+    </service>
 </services>
