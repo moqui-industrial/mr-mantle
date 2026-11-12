@@ -586,12 +586,15 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             What the current user may do with an event (or another work effort): edit as its organizer (the owner,
             WorkEffort.ownerPartyId, is the user's party) or with edit permission on a calendar it is in (not a
-            subscription calendar, whose events come from the feed); view as well as an attendee (a current
-            WorkEffortParty), with view permission on a calendar it is in, or when it is visible to all users (WevAllUsers).
-            An event another service keeps (managedBy: People's training session, a WepTraining event with its TrainingSession,
-            changed by mantle.humanres.DevelopmentServices.store#Training; impl-people P19 review) is viewed as any other but
-            changed by no one here. With permission view or edit, an error when the user may not; an event the user may not view
-            is "not found".
+            subscription calendar, whose events come from the feed, and not a calendar it was only put in to be seen,
+            CalendarWorkEffort.viewOnly: an attendee who adds an invitation to a calendar of their own sees it there and changes
+            nothing, nor do that calendar's editors); view as well as an attendee (a current WorkEffortParty), with view
+            permission on a calendar it is in, or when it is visible to all users (WevAllUsers). An event an application keeps
+            (get#ManagedEvents: People's training session, People's interview, or another EventManager) is viewed as any other
+            but changed by no user here (managedBy names where it is changed; impl-people P19 review, Commons calendar editors of
+            Nov 12, 2026); that application's services check their own rules and write it, or call these services as the
+            system (runAsSystem: no user and authorization off), which may view and change any event. With permission view or
+            edit, an error when the user may not; an event the user may not view is "not found".
         </description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
@@ -602,20 +605,34 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canEdit" type="Boolean"/>
             <parameter name="isOrganizer" type="Boolean"/>
             <parameter name="isAttendee" type="Boolean"/>
-            <parameter name="managedBy"><description>What keeps the event, when another service does: it is changed there</description></parameter>
+            <parameter name="managedBy"><description>Where the event is changed, when an application keeps it</description></parameter>
+            <parameter name="eventManagerId"><description>The EventManager that keeps it</description></parameter>
             <parameter name="workEffort" type="Map"/>
         </out-parameters>
         <actions><script><![CDATA[
-            canView = false; canEdit = false; isOrganizer = false; isAttendee = false; workEffort = null; managedBy = null
+            canView = false; canEdit = false; isOrganizer = false; isAttendee = false; workEffort = null; managedBy = null; eventManagerId = null
             const cf = ec.entity.conditionFactory
             const row = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
+            if (row != null) {
+                const managed = ec.service.sync().name('mantle.work.EventServices.get#ManagedEvents').parameters({workEffortIdList: [workEffortId]})
+                        .call()?.managedMap?.[workEffortId]
+                managedBy = managed?.managedBy || null
+                eventManagerId = managed?.eventManagerId || null
+            }
             const partyId = ec.user.userAccount?.partyId || null
-            if (row != null && ec.user.userId) {
+            if (row != null && !ec.user.userId && ec.artifactExecution.authzDisabled()) {
+                // the system scope (runAsSystem, a job): the service's own code checked its caller
+                canView = true; canEdit = true
+                workEffort = row.getMap()
+            } else if (row != null && ec.user.userId) {
                 isOrganizer = !!partyId && row.ownerPartyId === partyId
                 isAttendee = !!partyId && ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', workEffortId)
                         .condition('partyId', partyId).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).count() > 0
-                const calendarIds = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('workEffortId', workEffortId)
-                        .selectField('calendarId').list()).map((link) => link.calendarId)
+                const links = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('workEffortId', workEffortId)
+                        .selectField('calendarId,viewOnly').list())
+                const calendarIds = links.map((link) => link.calendarId)
+                // a calendar the event was put in only to be seen gives no edit (CalendarWorkEffort.viewOnly)
+                const editLinks = new Set(links.filter((link) => link.viewOnly !== 'Y').map((link) => link.calendarId))
                 let viewByCalendar = false
                 let editByCalendar = false
                 if (calendarIds.length) {
@@ -625,21 +642,55 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const id of calendarIds) {
                         const permissionId = access.permissionMap?.[id]
                         if (['CalpView', 'CalpEdit', 'CalpManage'].includes(permissionId)) viewByCalendar = true
-                        if (['CalpEdit', 'CalpManage'].includes(permissionId) && kinds.get(id) !== 'CalkSubscription') editByCalendar = true
+                        if (['CalpEdit', 'CalpManage'].includes(permissionId) && kinds.get(id) !== 'CalkSubscription' && editLinks.has(id)) editByCalendar = true
                     }
                 }
-                // a People training session's event is changed on the session (store#Training checks its dates, trainer and
-                // revision), never by its organizer or a calendar here
-                if (row.purposeEnumId === 'WepTraining' && ec.entity.find('mantle.humanres.ability.TrainingSession')
-                        .condition('workEffortId', workEffortId).disableAuthz().count() > 0) managedBy = 'its People training session'
+                // an event an application keeps is changed there (its own checks), never by its organizer or a calendar here
                 canEdit = !managedBy && (isOrganizer || editByCalendar)
                 canView = isOrganizer || editByCalendar || isAttendee || viewByCalendar || row.visibilityEnumId === 'WevAllUsers'
                 if (canView) workEffort = row.getMap()
             }
             if (permission !== 'view' && permission !== 'edit') return
             if (!canView) { ec.message.addError(`Event ${workEffortId} not found`); return }
-            if (permission === 'edit' && managedBy) { ec.message.addError(`${row.workEffortName || workEffortId} is changed on ${managedBy}`); return }
+            if (permission === 'edit' && !canEdit && managedBy) { ec.message.addError(`${row.workEffortName || workEffortId} is changed on ${managedBy}`); return }
             if (permission === 'edit' && !canEdit) ec.message.addError(`Only the organizer of ${row.workEffortName || workEffortId} or an editor of its calendar may change it`)
+        ]]></script></actions>
+    </service>
+    <service verb="get" noun="ManagedEvents">
+        <description>The events of workEffortIdList an application keeps (the EventManager rows not disabled: an event with a row of
+            the manager's entity naming it, of the manager's purpose when it has one), each with where it is changed. Reads no
+            more of the application's record than that the row exists; no access check (the callers check the event).</description>
+        <in-parameters>
+            <parameter name="workEffortIdList" type="List" required="true"><parameter name="workEffortId"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="managedMap" type="Map"><description>By workEffortId, {eventManagerId, managedBy} of a kept event only</description></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            managedMap = {}
+            const cf = ec.entity.conditionFactory
+            const ids = Array.from(new Set(Array.from(workEffortIdList || []).filter((id) => id)))
+            if (!ids.length) return
+            const managers = Array.from(ec.entity.find('mantle.work.calendar.EventManager').useCache(true).disableAuthz().list())
+                    .filter((manager) => manager.disabled !== 'Y' && manager.entityName)
+                    .sort((a, b) => String(a.eventManagerId).localeCompare(String(b.eventManagerId)))
+            if (!managers.length) return
+            const purposes = managers.some((manager) => manager.purposeEnumId) ? new Map(Array.from(ec.entity.find('mantle.work.effort.WorkEffort')
+                    .condition(cf.makeCondition('workEffortId', 'in', ids)).selectField('workEffortId,purposeEnumId').disableAuthz().list())
+                    .map((row) => [row.workEffortId, row.purposeEnumId])) : new Map()
+            for (const manager of managers) {
+                const candidates = ids.filter((id) => !managedMap[id] && (!manager.purposeEnumId || purposes.get(id) === manager.purposeEnumId))
+                if (!candidates.length) continue
+                const field = manager.fieldName || 'workEffortId'
+                // one manager that cannot be read (a component not loaded) is logged and leaves the others standing
+                try {
+                    for (const row of Array.from(ec.entity.find(manager.entityName).condition(cf.makeCondition(field, 'in', candidates))
+                            .selectField(field).disableAuthz().list()))
+                        managedMap[row[field]] = {eventManagerId: manager.eventManagerId, managedBy: manager.managedByText || manager.eventManagerId}
+                } catch (err) {
+                    ec.logger.error(`Event manager ${manager.eventManagerId} (${manager.entityName}) not read: ${err && err.message ? err.message : err}`)
+                }
+            }
         ]]></script></actions>
     </service>
 
@@ -920,7 +971,8 @@ along with this software (see the LICENSE.md file). If not, see
                     call('create#mantle.work.effort.WorkEffortParty', fields)
                 }
                 for (const calendar of ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('workEffortId', fromId).list())
-                    call('create#mantle.work.calendar.CalendarWorkEffort', {calendarId: calendar.calendarId, workEffortId: toId, addedDate: now})
+                    call('create#mantle.work.calendar.CalendarWorkEffort', {calendarId: calendar.calendarId, workEffortId: toId, addedDate: now,
+                        viewOnly: calendar.viewOnly || null})
                 for (const room of ec.entity.find('mantle.work.effort.WorkEffortFacility').condition('workEffortId', fromId).list()) {
                     if (!room.statusId) continue
                     call('create#mantle.work.effort.WorkEffortFacility', {workEffortId: toId, facilityId: room.facilityId, statusId: room.statusId, comments: room.comments})

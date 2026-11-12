@@ -659,3 +659,143 @@ feature(
         }
     }
 )
+
+// Commons calendar editors (Nov 12, 2026): an interview's event is People's (the EventManager PeopleInterview). Its recruiter,
+// the event's organizer, sees it on Commons' screens and changes it only here (change#Interview, cancel#Interview); a panel
+// member puts it in no calendar of their own, whose editors and CalDAV would change it there
+feature("an interview's event changes only through recruiting: the organizer refused on Commons, the panel refused a calendar", {
+    when() {
+        const E = "mantle.work.EventServices."
+        const scheduled = run(state.recruiter.userId, R + "schedule#Interview", {
+            employmentApplicationId: state.cara,
+            startDate: nextWeek(),
+            durationMinutes: 45,
+            panelPartyIds: state.ana.partyId,
+            location: "Room 4"
+        })
+        const workEffortId = scheduled.workEffortId
+        const event = () =>
+            ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", workEffortId).disableAuthz().one()
+        const anaCalendarId = call("create#mantle.work.calendar.Calendar", {
+            calendarName: "Recruit spec Ana's",
+            calendarKindEnumId: "CalkPersonal",
+            ownerPartyId: state.ana.partyId
+        }).calendarId
+        const startMs = Number(String(event().estimatedStartDate))
+        const out = {
+            scheduled,
+            access: run(state.recruiter.userId, E + "check#EventAccess", {workEffortId}),
+            moved: run(state.recruiter.userId, E + "update#EventOccurrence", {
+                workEffortId,
+                start: ec.l10n.format(new Date(startMs + 3600000), "yyyy-MM-dd HH:mm"),
+                end: ec.l10n.format(new Date(startMs + 7200000), "yyyy-MM-dd HH:mm")
+            }).error,
+            cancelledOnCommons: run(state.recruiter.userId, E + "cancel#EventOccurrence", {workEffortId}).error,
+            anaAdd: run(state.ana.userId, "mantle.work.CalendarServices.add#CalendarEvent", {
+                calendarId: anaCalendarId,
+                workEffortId
+            }).error,
+            readerChange: code(run(state.reader.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            otherChange: code(run(state.recruiterB.userId, R + "change#Interview", {workEffortId, durationMinutes: 30})),
+            before: event()
+        }
+        out.changed = run(state.recruiter.userId, R + "change#Interview", {
+            workEffortId,
+            startDate: new Date(startMs + 3600000),
+            durationMinutes: 30,
+            location: "Room 5"
+        })
+        out.after = event()
+        out.cancelled = run(state.recruiter.userId, R + "cancel#Interview", {workEffortId, reason: "The candidate asked"})
+        out.afterCancel = event()
+        out.again = code(run(state.recruiter.userId, R + "cancel#Interview", {workEffortId}))
+        out.startMs = startMs
+        return out
+    },
+    then(r) {
+        r.scheduled.error == "" && r.scheduled.invitationsSent == true
+        r.access.canView && !r.access.canEdit && r.access.isOrganizer
+        r.access.managedBy == "its application's interviews in People"
+        r.moved.includes("is changed on its application's interviews in People")
+        r.cancelledOnCommons.includes("is changed on its application's interviews in People")
+        r.anaAdd.includes("not put in a calendar")
+        r.readerChange == "PERMISSION_DENIED"
+        r.otherChange == "RECORD_UNAVAILABLE"
+        Number(String(r.before.estimatedStartDate)) == r.startMs && r.before.location == "Room 4"
+        r.changed.error == "" && r.changed.invitationsSent == true
+        Number(String(r.after.estimatedStartDate)) == r.startMs + 3600000
+        Number(String(r.after.estimatedCompletionDate)) == r.startMs + 3600000 + 30 * 60000
+        r.after.location == "Room 5"
+        r.cancelled.error == "" && r.cancelled.invitationsSent == true
+        r.afterCancel.statusId == "WeCancelled"
+        r.again == "INTERVIEW_CANCELLED"
+    }
+})
+
+// Commons calendar review (Nov 12, 2026): a cancelled interview's video call link takes no one more. The recruiter who scheduled
+// it revokes it with the framework's revoke#CallLink (its guests removed at once); another recruiter of the employer closes it as
+// the system (the link revoked, so its token and its guests are refused, and its guests' credentials ended for the call's minute
+// job)
+feature("a cancelled interview's video call link is closed, by the recruiter who made it or another of the employer", {
+    when() {
+        const schedule = () =>
+            run(state.recruiter.userId, R + "schedule#Interview", {
+                employmentApplicationId: state.cara,
+                startDate: nextWeek(),
+                durationMinutes: 30,
+                panelPartyIds: state.ana.partyId,
+                videoCall: true
+            })
+        const linkIdOf = workEffortId =>
+            ec.entity
+                .find("mantle.humanres.recruitment.ApplicationInterview")
+                .condition("workEffortId", workEffortId)
+                .disableAuthz()
+                .one().callLinkId
+        const guestOf = callLinkId =>
+            call("create#moqui.call.CallGuest", {
+                callLinkId,
+                displayName: "Recruit spec candidate",
+                credentialHash: "recruit-spec-" + callLinkId,
+                credentialExpiry: new Date(Number(String(ec.user.nowTimestamp)) + 4 * 3600000),
+                createdDate: ec.user.nowTimestamp
+            }).callGuestId
+        const tokenValid = scheduled =>
+            call("org.moqui.call.CallServices.check#CallLinkToken", {token: String(scheduled.callPath).split("/").pop()}).valid
+        const row = (entity, field, id) => ec.entity.find(entity).condition(field, id).disableAuthz().one()
+        const out = {}
+        const colleague = user("RECRUITER_2", orgA, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
+        for (const [key, canceller] of [
+            ["mine", state.recruiter],
+            ["other", colleague]
+        ]) {
+            const scheduled = schedule()
+            const callLinkId = linkIdOf(scheduled.workEffortId)
+            const callGuestId = guestOf(callLinkId)
+            const validBefore = tokenValid(scheduled)
+            const cancelled = run(canceller.userId, R + "cancel#Interview", {workEffortId: scheduled.workEffortId})
+            out[key] = {
+                scheduled,
+                validBefore,
+                cancelled,
+                validAfter: tokenValid(scheduled),
+                link: row("moqui.call.CallLink", "callLinkId", callLinkId),
+                guest: row("moqui.call.CallGuest", "callGuestId", callGuestId),
+                nowMs: Number(String(ec.user.nowTimestamp))
+            }
+        }
+        return out
+    },
+    then({mine, other}) {
+        mine.scheduled.error == "" && mine.validBefore == true
+        mine.cancelled.error == ""
+        mine.link.revokedDate != null
+        mine.guest.revokedDate != null
+        mine.validAfter == false
+        other.scheduled.error == "" && other.validBefore == true
+        other.cancelled.error == ""
+        other.link.revokedDate != null
+        Number(String(other.guest.credentialExpiry)) <= other.nowMs
+        other.validAfter == false
+    }
+})

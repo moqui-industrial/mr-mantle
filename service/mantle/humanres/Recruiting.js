@@ -12,6 +12,8 @@
 //   (mantle.work.EventServices.send#EventInvitations); each panel member is assigned the interview's scorecard, a form of the
 //   interview scorecard purpose (mantle.party.FormDefinitions), as a FormInvitation naming them and the application, with no link:
 //   they answer it once, here (submit#Scorecard), and read their own answer only;
+//   the event is People's (the EventManager PeopleInterview): changed and cancelled only here (change#Interview,
+//   cancel#Interview), never on Commons' EventDetail, the calendar or CalDAV (Commons calendar editors, Nov 12, 2026);
 // - mail intake (create#ApplicationFromEmail, the createApplication mail rule action): runs with authorization off, so it checks
 //   itself that the rule may file into the opening and answers a message once.
 // Who reads what: a recruiter (PEOPLE_RECRUIT_VIEW) of the employer, in People's scope (People.js scopeOf), reads its openings
@@ -1078,24 +1080,120 @@ function scheduleInterview(p) {
             statusId: "EaInterview",
             statusId_changeReason: "Interview scheduled"
         })
-    let invitationsSent = true
-    let invitationProblem = null
+    const invitationProblem = tellAttendees(workEffortId)
+    return {workEffortId, invitationIds, callPath, invitationsSent: !invitationProblem, invitationProblem}
+}
+// The interview's attendees told of it (send#EventInvitations: the new or changed ones, a cancel when it is cancelled), as the
+// system, since the event is People's (the EventManager PeopleInterview: no user changes it on Commons' screens); the caller was
+// checked. A failure is named and logged, and what was done stays.
+function tellAttendees(workEffortId) {
+    let problem = null
     ec.message.pushErrors()
     try {
-        call("mantle.work.EventServices.send#EventInvitations", {
-            workEffortId,
-            // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
-            eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
-        })
+        ec.artifactExecution.runAsSystem(() =>
+            call("mantle.work.EventServices.send#EventInvitations", {
+                workEffortId,
+                // Commons' event screen, which every attendee opens (an interviewer with self-service only too; P16 review)
+                eventUrl: "/qapps/Commons/Calendar/EventDetail?workEffortId=" + encodeURIComponent(workEffortId)
+            })
+        )
+        if (ec.message.hasError()) problem = ec.message.getErrorsString()
     } catch (error) {
-        invitationsSent = false
-        invitationProblem = String(error.message || error)
-        ec.logger.error("Interview " + workEffortId + ": the invitations were not sent: " + invitationProblem)
+        problem = String(error.message || error)
     } finally {
         ec.message.clearErrors()
         ec.message.popErrors()
     }
-    return {workEffortId, invitationIds, callPath, invitationsSent, invitationProblem}
+    if (problem) ec.logger.error("Interview " + workEffortId + ": the invitations were not sent: " + problem)
+    return problem
+}
+// change#Interview and cancel#Interview: a recruiter of the employer changes or cancels a scheduled interview here, the only
+// place its event changes (Commons calendar editors, Nov 12, 2026: the EventManager PeopleInterview keeps it from Commons'
+// EventDetail, the calendar and CalDAV). A cancelled interview is not changed (INTERVIEW_CANCELLED).
+function interviewToChange(p) {
+    const userScope = recruiterScope(true)
+    const interview = blank(p.workEffortId) ? null : one(INTERVIEW, {workEffortId: text(p.workEffortId)})
+    const application = interview ? one(APPLICATION, {employmentApplicationId: interview.employmentApplicationId}) : null
+    const event = interview ? one(WORK, {workEffortId: interview.workEffortId}) : null
+    if (!interview || !application || !event || !recruitEdits(userScope, application.organizationPartyId))
+        unavailable("Interview", p.workEffortId)
+    if (event.statusId === "WeCancelled") denied("INTERVIEW_CANCELLED", "This interview was cancelled; schedule another")
+    return {interview, event}
+}
+// change#Interview: a new start (from now on), length (10 minutes to 8 hours), place (not of a video interview, whose place is
+// its call link, kept open until a day after the new end) or note; what is not given stays. The attendees are told.
+function changeInterview(p) {
+    const {interview, event} = interviewToChange(p)
+    const workEffortId = interview.workEffortId
+    const oldStartMs = ms(event.estimatedStartDate)
+    const oldEndMs = ms(event.estimatedCompletionDate)
+    const startMs = blank(p.startDate) ? oldStartMs : Number(ms(p.startDate))
+    if (startMs == null || !Number.isFinite(startMs)) denied("START_REQUIRED", "Choose when the interview starts")
+    if (startMs !== oldStartMs && startMs < nowMs() - 5 * 60 * 1000)
+        denied("DATE_PAST", "An interview is moved to a time from now on")
+    const minutes = blank(p.durationMinutes)
+        ? oldStartMs != null && oldEndMs != null
+            ? Math.round((oldEndMs - oldStartMs) / 60000)
+            : 60
+        : Number(p.durationMinutes)
+    if (!Number.isInteger(minutes) || minutes < 10 || minutes > 480)
+        denied("DURATION_INVALID", "An interview lasts 10 minutes to 8 hours")
+    const endMs = startMs + minutes * 60 * 1000
+    const changes = {workEffortId, estimatedStartDate: stamp(startMs), estimatedCompletionDate: stamp(endMs)}
+    if (p.location != null && !interview.callLinkId) changes.location = text(p.location) || null
+    if (p.note != null) changes.description = text(p.note) || null
+    call("update#" + WORK, changes)
+    if (interview.callLinkId) {
+        const link = one("moqui.call.CallLink", {callLinkId: interview.callLinkId})
+        const wantMs = Math.min(nowMs() + 90 * 24 * hourMs, endMs + 24 * hourMs)
+        if (link && (ms(link.expiryDate) ?? Infinity) < wantMs)
+            call("update#moqui.call.CallLink", {callLinkId: interview.callLinkId, expiryDate: stamp(wantMs)})
+    }
+    const invitationProblem = tellAttendees(workEffortId)
+    return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
+}
+// cancel#Interview: the interview's event cancelled (its scorecards stay as they are), its video call's link closed (closeCallLink)
+// and the attendees told.
+function cancelInterview(p) {
+    const {interview} = interviewToChange(p)
+    const workEffortId = interview.workEffortId
+    call("update#" + WORK, {
+        workEffortId,
+        statusId: "WeCancelled",
+        statusId_changeReason: text(p.reason) || "Interview cancelled"
+    })
+    closeCallLink(interview.callLinkId)
+    const invitationProblem = tellAttendees(workEffortId)
+    return {workEffortId, invitationsSent: !invitationProblem, invitationProblem}
+}
+// The video call link of a cancelled interview takes no one more (Commons calendar editors review, Nov 12, 2026). The framework's
+// revoke#CallLink is its owner's (the recruiter who scheduled it): it revokes the link and removes its guests at once. Another
+// recruiter of the employer (checked by cancel#Interview) closes it as the system: the link is revoked, so its token and its
+// guests' credentials are refused, and the guests' credentials end now, so the call's minute job (expire#Calls) takes any still in
+// the meeting out and ends it. Nothing here may add an error, which would roll the cancel back: the preconditions of revoke#CallLink
+// are checked first.
+function closeCallLink(callLinkId) {
+    if (!callLinkId) return
+    const link = one("moqui.call.CallLink", {callLinkId})
+    if (!link || link.revokedDate) return
+    if (ec.user.userId && link.ownerUserId === ec.user.userId) {
+        call("org.moqui.call.CallServices.revoke#CallLink", {callLinkId})
+        return
+    }
+    ec.artifactExecution.runAsSystem(() => {
+        const now = ec.user.nowTimestamp
+        const row = ec.entity.find("moqui.call.CallLink").condition("callLinkId", callLinkId).forUpdate(true).one()
+        if (!row || row.revokedDate) return
+        row.set("revokedDate", now)
+        row.update()
+        for (const guest of Array.from(
+            ec.entity.find("moqui.call.CallGuest").condition("callLinkId", callLinkId).condition("revokedDate", null).list()
+        )) {
+            if ((ms(guest.credentialExpiry) ?? Infinity) <= nowMs()) continue
+            guest.set("credentialExpiry", now)
+            guest.update()
+        }
+    })
 }
 // submit#Scorecard: a panel member answers the scorecard assigned to them (the invitation's party is the caller's: another's is
 // not available), once (ALREADY_ANSWERED), the values checked against the form as of now (FORM_VALUES_INVALID).
@@ -1664,6 +1762,8 @@ const operations = {
     storeApplication,
     changeApplicationStage,
     scheduleInterview,
+    changeInterview,
+    cancelInterview,
     submitScorecard,
     findInterviews,
     getInterviewProjection,
