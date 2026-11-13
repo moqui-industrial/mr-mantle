@@ -447,8 +447,8 @@ const days = Array.from(dayList || []).map(String)
         <description>What the user may do with a timesheet (timesheetId), or with a person's week that has none yet (partyId and
             date): canView (its person, an approver, ADMIN), canEdit (its entries: the person or an approver while In-Process, or
             any time when the policy does not lock), canSubmit (only the person, In-Process), canApprove and canReturn (an
-            approver or ADMIN, not the person, Completed), canReopen (as approve, Approved, with no invoiced entry). Never an
-            error: a timesheet not found answers all false.</description>
+            approver or ADMIN, not the person, Completed), canReopen (as approve, Approved, with no invoiced entry and none a
+            finalized pay input paid: payrollPaid, impl-people P24). Never an error: a timesheet not found answers all false.</description>
         <in-parameters>
             <parameter name="timesheetId"/>
             <parameter name="partyId"/>
@@ -466,13 +466,15 @@ const days = Array.from(dayList || []).map(String)
             <parameter name="canReturn" type="Boolean"/>
             <parameter name="canReopen" type="Boolean"/>
             <parameter name="invoiced" type="Boolean"/>
+            <parameter name="payrollPaid" type="Boolean"><description>An entry of it is paid by a finalized pay input (impl-people
+                P24): it stays approved</description></parameter>
             <parameter name="locked" type="Boolean"/>
             <parameter name="policy" type="Map"/>
             <parameter name="approverPartyIds" type="List"/>
         </out-parameters>
         <actions><script><![CDATA[
             isOwner = false; isApprover = false; canView = false; canEdit = false; canSubmit = false; canApprove = false; canReturn = false
-            canReopen = false; invoiced = false; locked = false; timesheet = null; statusId = null; approverPartyIds = []
+            canReopen = false; invoiced = false; payrollPaid = false; locked = false; timesheet = null; statusId = null; approverPartyIds = []
             const me = ec.user.userAccount?.partyId || null
             const isAdmin = !!ec.user.userId && ec.user.isInGroup('ADMIN')
             const wasDisabled = ec.artifactExecution.disableAuthz()
@@ -488,6 +490,13 @@ const days = Array.from(dayList || []).map(String)
                     invoiced = ec.entity.find('mantle.work.time.TimeEntry').condition('timesheetId', timesheetId)
                             .condition(ec.entity.conditionFactory.makeCondition([ec.entity.conditionFactory.makeCondition('invoiceId', 'is-not-null', null),
                                 ec.entity.conditionFactory.makeCondition('vendorInvoiceId', 'is-not-null', null)], 'or')).count() > 0
+                    // a week a finalized pay input paid is not reopened (impl-people P24, F44; owner contract with payroll)
+                    if (sheet.statusId === 'TmshApproved') {
+                        const entryIds = Array.from(ec.entity.find('mantle.work.time.TimeEntry').condition('timesheetId', timesheetId)
+                                .selectField('timeEntryId').list()).map((row) => row.timeEntryId)
+                        payrollPaid = entryIds.length > 0 && Array.from(ec.service.sync().name('mantle.humanres.PayrollInputServices.check#SourceUse')
+                                .parameters({sourceEntityName: 'mantle.work.time.TimeEntry', sourceIdList: entryIds}).call()?.finalizedIdList || []).length > 0
+                    }
                 } else {
                     if (!person) return
                     const pol = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').parameters({partyId: person}).call()?.policy || {}
@@ -506,7 +515,7 @@ const days = Array.from(dayList || []).map(String)
                 canSubmit = isOwner && statusId === 'TmshInProcess'
                 canApprove = isApprover && statusId === 'TmshCompleted'
                 canReturn = canApprove
-                canReopen = isApprover && statusId === 'TmshApproved' && !invoiced
+                canReopen = isApprover && statusId === 'TmshApproved' && !invoiced && !payrollPaid
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
         ]]></script></actions>
     </service>
@@ -612,8 +621,10 @@ const days = Array.from(dayList || []).map(String)
     </service>
 
     <service verb="reopen" noun="Timesheet">
-        <description>Reopens an approved timesheet (Approved to In-Process) for an approver, until any of its entries is invoiced;
-            the reason as for return#Timesheet, and the person gets TimesheetReturned.</description>
+        <description>Reopens an approved timesheet (Approved to In-Process) for an approver, until any of its entries is invoiced
+            or paid by a finalized pay input (refused: "it stays approved"); the reason as for return#Timesheet, and the person
+            gets TimesheetReturned. A pay input not finalized that consumed its entries is voided, so payroll prepares the week
+            again once it is approved (impl-people P24, F44).</description>
         <in-parameters>
             <parameter name="timesheetId" required="true"/>
             <parameter name="reason"/>
@@ -624,7 +635,8 @@ const days = Array.from(dayList || []).map(String)
             const access = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetAccess').parameters({timesheetId: timesheetId}).call() || {}
             if (!access.timesheet) { ec.message.addError(ec.resource.expand('Timesheet ${timesheetId} not found', '', {timesheetId})); return }
             if (!access.canReopen) {
-                ec.message.addError(access.invoiced ? L('Some of this week is invoiced: it stays approved') : access.statusId !== 'TmshApproved'
+                ec.message.addError(access.invoiced ? L('Some of this week is invoiced: it stays approved') : access.payrollPaid
+                        ? L('Payroll has paid this week: it stays approved; a correction pays a difference') : access.statusId !== 'TmshApproved'
                         ? L('Only an approved week is reopened') : L('You are not an approver of this week'))
                 return
             }
@@ -639,6 +651,13 @@ const days = Array.from(dayList || []).map(String)
             // and its production labor cost events reversed (laborCostSync)
             ec.service.sync().name('mantle.work.ProductionServices.sync#ProductionLaborCost')
                     .parameters({timesheetId: timesheetId}).disableAuthz().call()
+            if (ec.message.hasError()) return
+            // and the pay inputs not finalized that its entries made voided, prepared again once the week is approved (impl-people P24)
+            const reopenedEntryIds = Array.from(ec.entity.find('mantle.work.time.TimeEntry').condition('timesheetId', timesheetId)
+                    .selectField('timeEntryId').disableAuthz().list()).map((row) => row.timeEntryId)
+            if (reopenedEntryIds.length) ec.service.sync().name('mantle.humanres.PayrollInputServices.release#Sources')
+                    .parameters({sourceEntityName: 'mantle.work.time.TimeEntry', sourceIdList: reopenedEntryIds, reason: L('Its week was reopened')})
+                    .disableAuthz().call()
             if (ec.message.hasError()) return
             ec.service.sync().name('mantle.work.TimesheetServices.note#TimesheetDecision').parameters({timesheetId: timesheetId, subject: L('Reopened'), body: text}).call()
             ec.service.sync().name('mantle.work.TimesheetServices.notify#Timesheet').parameters({timesheetId: timesheetId, change: 'reopened', reason: text}).call()
@@ -904,7 +923,8 @@ const days = Array.from(dayList || []).map(String)
                         returned: statusId === 'TmshInProcess' && !!sheet?.comments, reason: sheet?.comments || null, submittedDate: submittedDate,
                         approvedByName: approvedByName, approvedDate: approvedDate},
                     access: {canView: !!access.canView, canEdit: !!access.canEdit, canSubmit: !!access.canSubmit, canApprove: !!access.canApprove,
-                        canReturn: !!access.canReturn, canReopen: !!access.canReopen, isOwner: !!access.isOwner, isApprover: !!access.isApprover, locked: !!access.locked},
+                        canReturn: !!access.canReturn, canReopen: !!access.canReopen, isOwner: !!access.isOwner, isApprover: !!access.isApprover, locked: !!access.locked,
+                        payrollPaid: !!access.payrollPaid},
                     policy: policy}
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
         ]]></script></actions>

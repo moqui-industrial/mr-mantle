@@ -51,6 +51,8 @@ const PAY_EXAMPLE = "mantle.humanres.payroll.PayrollComponentExample"
 const PAY_COMPONENT = "mantle.humanres.payroll.PayrollComponent"
 const PAY_STRUCTURE = "mantle.humanres.payroll.PayrollStructure"
 const PAY_LINE = "mantle.humanres.payroll.PayrollStructureComponent"
+// P24: a pay adjustment (PayrollInputServices)
+const PAY_INPUT = "mantle.humanres.payroll.PayrollInput"
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -485,6 +487,53 @@ const kinds = {
                     sourceText: "the pay component " + componentText,
                     subjectText: "publishing the pay component " + componentText,
                     organizationName: names[component.organizationPartyId] || component.organizationPartyId || ""
+                }
+            }
+        }
+    },
+    // P24: a payroll editor's adjustment of an employment (PayrollInputServices store#Adjustment and decide#Adjustment): its first
+    // input, bound to every input of its series, so a change of any supersedes the request. With no rule the employer's payroll
+    // approvers decide (PAYROLL_APPROVE, reading payroll); never one who made or changed it, nor the person it pays. The notice
+    // names no person and no amount (a lock-screen-safe title, design §1.4), only that a pay adjustment of the employer waits.
+    PakPayAdjustment: {
+        topic: "PeoplePayAdjustmentApproval",
+        sourceEntityName: PAY_INPUT,
+        sourceField: "payrollInputId",
+        defaultRole: "ParHr",
+        defaultBasis: "defaultPayApprover",
+        defaultRoleText: "Payroll approver",
+        defaultCandidates: (request, at) => holdersOf("PAYROLL_APPROVE", request.organizationPartyId, at),
+        decidePermissions: ["PAYROLL_APPROVE"],
+        requiredPermissions: ["PAYROLL_VIEW"],
+        revision(sourceId) {
+            const lead = one(PAY_INPUT, {payrollInputId: sourceId})
+            if (!lead) return "0"
+            const series = lead.seriesInputId ? rows(PAY_INPUT, {seriesInputId: lead.seriesInputId}) : [lead]
+            return String(Math.max(0, ...series.map(stampOf)))
+        },
+        selfPartyIds(sourceId) {
+            const lead = one(PAY_INPUT, {payrollInputId: sourceId})
+            const userIds = String(lead?.changedByUserIds || lead?.createdByUserId || "")
+                .split(",")
+                .map(value => value.trim())
+                .filter(Boolean)
+            if (!userIds.length) return []
+            return unique(
+                Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
+                    .map(account => account.partyId)
+                    .filter(Boolean)
+            )
+        },
+        describe(sourceId) {
+            const lead = one(PAY_INPUT, {payrollInputId: sourceId})
+            if (!lead) return {label: "pay adjustment " + sourceId}
+            const names = people.organizationNames([lead.organizationPartyId])
+            return {
+                label: "pay adjustment " + sourceId,
+                message: {
+                    payrollInputId: sourceId,
+                    subjectText: "a pay adjustment",
+                    organizationName: names[lead.organizationPartyId] || lead.organizationPartyId || ""
                 }
             }
         }

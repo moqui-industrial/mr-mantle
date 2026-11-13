@@ -984,6 +984,13 @@ function reserveClaimSettlement(p) {
             denied("CLAIM_RESERVED", "This claim is not reserved for " + routeTexts[routeEnumId].toLowerCase())
         if (!["InvoiceIncoming", "InvoiceReceived"].includes(invoice.statusId))
             denied("CLAIM_SETTLED", "This claim is approved for payment; it is reallocated through its owner's reversal")
+        // P24: a payroll reservation released frees the pay input not finalized that took the claim; a finalized one keeps it
+        if (routeEnumId === "EcrPayroll")
+            call("mantle.humanres.PayrollInputServices.release#Sources", {
+                sourceEntityName: CLAIM,
+                sourceIdList: [claim.invoiceId],
+                reason: "Its payroll reservation was released"
+            })
         call("update#" + CLAIM, {
             invoiceId: claim.invoiceId,
             reservedRouteEnumId: null,
@@ -1631,4 +1638,5 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown expense operation " + op)
     return operations[op](p || {})
 }
-;({execute: run, financeApproval, payrollReserved})
+// advanceMoney (P24): what an advance has outstanding, which a payroll recovery may not pass (PayInputs.js)
+;({execute: run, financeApproval, payrollReserved, advanceMoney})

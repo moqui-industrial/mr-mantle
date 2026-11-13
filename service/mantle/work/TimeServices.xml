@@ -22,7 +22,9 @@ along with this software (see the LICENSE.md file). If not, see
             time (a person with a PrtEmployee relationship on the entry's date or now, mantle.humanres.EmploymentServices
             get#PayRateAccess) are the employee's pay: setting or changing them (vendorHourRate, vendorPieceRate, vendorRateAmountId,
             vendorPieceRateAmountId, the vendor increments) also needs PAYROLL_EDIT, and is refused without it; left empty, they
-            stay as stored.</description>
+            stay as stored. An entry a finalized pay input paid is not changed (PAY_FINALIZED); a change of the hours, rates or
+            pieces of one a pay input not finalized consumed voids that input, so payroll prepares it again (impl-people P24,
+            mantle.humanres.PayrollInputServices release#Sources).</description>
         <in-parameters>
             <parameter name="timeEntryId"><description>If specified updates the record, if not creates a new one</description></parameter>
             <auto-parameters entity-name="mantle.work.time.TimeEntry" include="nonpk"/>
@@ -71,6 +73,18 @@ along with this software (see the LICENSE.md file). If not, see
                         }
                     ]]></script>
                 </if>
+            </if>
+            <!-- time payroll consumed (impl-people P24, F44; owner contract): a finalized pay input's entry is not changed; the
+                fields it read are kept to compare after the store -->
+            <set field="payConsumed" from="false"/>
+            <if condition="timeEntry != null">
+                <service-call name="mantle.humanres.PayrollInputServices.check#SourceUse" out-map="payUse" disable-authz="true"
+                        in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId]}"/>
+                <if condition="payUse.finalizedIdList?.length">
+                    <return error="true" message="PAY_FINALIZED: Payroll has paid time entry ${timeEntryId}: it is not changed"/></if>
+                <set field="payConsumed" from="!!payUse.consumedIdList?.length"/>
+                <set field="payReadBefore" from="[timeEntry.hours, timeEntry.vendorHourRate, timeEntry.vendorPieceRate, timeEntry.pieceCount,
+                        timeEntry.fromDate, timeEntry.partyId, timeEntry.timesheetId].map((value) => value == null ? '' : String(value)).join('|')"/>
             </if>
             <if condition="teamPartyId">
                 <entity-find-one entity-name="mantle.party.PartyDetailAndRole" value-field="teamPartyDetail">
@@ -360,6 +374,19 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="timeEntry.hasModifiedRates" value="Y"/>
                 <entity-update value-field="timeEntry"/>
             </if>
+            <!-- an authorized change of what payroll read (hours, rates, pieces, day, person, week) voids the pay input not finalized
+                that consumed it, so a payroll approval of what it read no longer stands (impl-people P24) -->
+            <if condition="payConsumed">
+                <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="payEntryAfter" disable-authz="true"/>
+                <set field="payReadAfter" from="[payEntryAfter.hours, payEntryAfter.vendorHourRate, payEntryAfter.vendorPieceRate,
+                        payEntryAfter.pieceCount, payEntryAfter.fromDate, payEntryAfter.partyId, payEntryAfter.timesheetId]
+                        .map((value) => value == null ? '' : String(value)).join('|')"/>
+                <if condition="payReadAfter != payReadBefore">
+                    <service-call name="mantle.humanres.PayrollInputServices.release#Sources" disable-authz="true"
+                            in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId], reason:'Its time entry changed'}"/>
+                    <if condition="ec.message.hasError()"><return/></if>
+                </if>
+            </if>
 
             <if condition="workEffortId">
                 <!-- WorkEffort specific: handle remainingWorkTime -->
@@ -502,6 +529,12 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="timeEntry.invoiceId || timeEntry.vendorInvoiceId">
                 <return error="true" message="Cannot delete time entry ${timeEntryId}. It has already been invoiced."/></if>
+            <!-- time payroll consumed (impl-people P24): a finalized pay input's entry is not removed; one not finalized is voided
+                when the entry goes -->
+            <service-call name="mantle.humanres.PayrollInputServices.check#SourceUse" out-map="payUse" disable-authz="true"
+                    in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId]}"/>
+            <if condition="payUse.finalizedIdList?.length">
+                <return error="true" message="PAY_FINALIZED: Payroll has paid time entry ${timeEntryId}: it is not removed"/></if>
             <!-- an entry of a submitted or approved week is locked (mantle.work.TimesheetServices, the policy's lock) -->
             <if condition="timeEntry.timesheetId">
                 <service-call name="mantle.work.TimeServices.check#TimeEntryTimesheet" in-map="{timeEntry:timeEntry.getMap(), timesheetId:timeEntry.timesheetId,
@@ -535,6 +568,11 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- a production entry's labor cost event reversed (sync#ProductionLaborCost, laborCostSync) -->
             <service-call name="mantle.work.ProductionServices.sync#ProductionLaborCost" disable-authz="true"
                     in-map="{timeEntryIdList:[timeEntryId], deleting:true}"/>
+            <if condition="payUse.consumedIdList?.length">
+                <service-call name="mantle.humanres.PayrollInputServices.release#Sources" disable-authz="true"
+                        in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId], reason:'Its time entry was removed'}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <service-call name="delete#mantle.work.time.TimeEntry" in-map="context"/>
         </actions>
     </service>

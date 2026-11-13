@@ -64,7 +64,18 @@ function approved(p, ids) {
               ).map(row => row.timesheetId)
           )
         : new Set()
-    return list.filter(row => approvedIds.has(row.timesheetId))
+    const ready = list.filter(row => approvedIds.has(row.timesheetId))
+    if (p.direction !== "payable" || !ready.length) return ready
+    // a worker invoice and payroll never both take a time entry (impl-people P24, F44): time a pay input consumed is payroll's
+    const consumed = new Set(
+        Array.from(
+            call("mantle.humanres.PayrollInputServices.check#SourceUse", {
+                sourceEntityName: "mantle.work.time.TimeEntry",
+                sourceIdList: ready.map(row => row.timeEntryId)
+            }).consumedIdList || []
+        )
+    )
+    return consumed.size ? ready.filter(row => !consumed.has(row.timeEntryId)) : ready
 }
 function expenses(p, ids) {
     if (!ids.length || p.direction === "payable") return []

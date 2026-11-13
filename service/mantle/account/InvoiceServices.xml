@@ -2031,6 +2031,19 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
                 <set field="timeEntryList" from="Array.from(timeEntryList).filter((te) => te.timesheetId &amp;&amp; approvedSheetIds.includes(te.timesheetId))"/>
             </if>
+            <!-- a worker invoice and payroll never both take a time entry (impl-people P24, F44; owner contract): an entry a pay
+                input consumed (mantle.humanres.PayrollInputServices) is refused when named, and left out when found by the other
+                parameters, as an entry already on a worker invoice is -->
+            <if condition="ratePurposeEnumId == 'RaprVendor' &amp;&amp; Array.from(timeEntryList).length">
+                <service-call name="mantle.humanres.PayrollInputServices.check#SourceUse" out-map="payUse" disable-authz="true"
+                        in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:Array.from(timeEntryList).map((te) => te.timeEntryId)}"/>
+                <if condition="payUse.consumedIdList?.length">
+                    <if condition="timeEntryIdsGiven">
+                        <return error="true" message="PAY_SOURCE_CONSUMED: Payroll pays time entry ${Array.from(payUse.consumedIdList).join(', ')}: a worker invoice cannot take it"/>
+                    </if>
+                    <set field="timeEntryList" from="Array.from(timeEntryList).filter((te) => !Array.from(payUse.consumedIdList).includes(te.timeEntryId))"/>
+                </if>
+            </if>
 
             <if condition="createSingleItem"><then>
                 <set field="amountTotal" from="toDecimal(0)"/>
