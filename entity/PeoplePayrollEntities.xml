@@ -542,6 +542,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="cancelReason" type="text-long"><description>Why a payroll editor cancelled it (cancel#Run, a run not approved;
             impl-people P25 review): its inputs released and its activeRunKey freed</description></field>
         <field name="calculatedDate" type="date-time"/>
+        <field name="correctsPayslipId" type="id"><description>A correction run's original slip (impl-people P26,
+            create#Correction): the run recalculates that slip's employment and pays the change</description></field>
+        <field name="correctionReason" type="text-long"><description>Why the slip is corrected (the changed source or rule)</description></field>
         <field name="operationKey" type="text-medium"/>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>
@@ -555,6 +558,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="PAY_RUN_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
         <index name="PAY_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
         <index name="PAY_RUN_ACTIVE" unique="true"><index-field name="activeRunKey"/></index>
+        <index name="PAY_RUN_CORRECTS"><index-field name="correctsPayslipId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Payroll Run Kind" enumTypeId="PayrollRunKind"/>
             <moqui.basic.Enumeration enumId="PrkRegular" description="Regular" sequenceNum="1" enumTypeId="PayrollRunKind"/>
@@ -661,9 +665,145 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="inTotals" type="text-indicator"/>
         <field name="sequenceNum" type="number-integer"/>
         <field name="explanation" type="text-long" ai-opt-out="true"/>
+        <field name="previousAmount" type="number-decimal" ai-opt-out="true"><description>A correction run's line: what the original
+            slip and the corrections before it paid (impl-people P26); its amount is the change</description></field>
+        <field name="payrollComponentTermId" type="id"><description>The component term the line was calculated by (impl-people P26: a
+            payslip line names its rule); none for a localization's item or an adjustment of a component outside the structure</description></field>
         <relationship type="one" related="mantle.humanres.payroll.PayrollRunEmployment" short-alias="unit"/>
         <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
         <index name="PAY_RUN_RES_UNIT"><index-field name="payrollRunEmploymentId"/></index>
         <index name="PAY_RUN_RES_RUN"><index-field name="payrollRunId"/></index>
+    </entity>
+    <!-- impl-people P26 (design-people §8.1 Payslip and PayslipItem, §8.2 corrections, Payslips, PayslipDetail, §15 the payslip; PE-10,
+        PE-17): pay results with identities of their own (Payslip: a run's employment, never keyed by employment and pay date, so a
+        regular, an off-cycle and a correction slip of one day are three; PayslipItem: its lines, each explained from its rule and
+        sources), made from a run's calculated employments when the run is approved. In preview mode (every pay group of this build)
+        they are preview slips, payroll's alone, never issued and never an obligation (§5 Q3); a final slip is P27's finalization's,
+        issued once (issue#Payslip: its statement stored and the person told, PayslipIssued, with no amount). A correction is a new
+        slip linked to the one it corrects (correctsPayslipId), its lines the change; the original stays as it was. Year-to-date
+        accumulators are derived on read from final and issued slips (PayrollResults.js), never stored. Written only by
+        mantle.humanres.PayrollRunServices and PayrollResultServices (PayrollRuns.js, PayrollResults.js), which check PAYROLL_VIEW
+        (PAYROLL_EDIT to issue or correct) and the employer; the person reads their own issued slips alone. Amounts and explanations are
+        opted out of AI. -->
+    <entity entity-name="Payslip" package="mantle.humanres.payroll" cache="never">
+        <description>A pay result of one employment of an approved pay run, with its own identity: the employer, the employment and
+            person, the group, period, pay date, currency and the run's kind; its totals (gross, deductions, employer contributions,
+            the localization's employee and employer amounts, net, employer cost) and how its period was split; the fingerprint of
+            the sources it came from (sourceRevision). Its state: a preview (preview mode: payroll's alone, never issued), withdrawn
+            (its run's approval was taken back before it was approved again), final (P27's finalization) or issued (its statement
+            rendered once and stored, the person told). A correction names the slip it corrects (correctsPayslipId, the original:
+            its lines and totals are the change, and the original stays). One slip a run's employment.</description>
+        <field name="payslipId" type="id" is-pk="true"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="payrollRunEmploymentId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="payDate" type="date"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="runKindEnumId" type="id"><description>PayrollRunKind: regular, off-cycle or correction</description></field>
+        <field name="correctsPayslipId" type="id"><description>The original slip a correction corrects</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>Payslip</description></field>
+        <field name="isPreview" type="text-indicator"><description>Y for a preview slip (preview mode): never issued as pay</description></field>
+        <field name="grossAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="deductionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="contributionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployeeAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployerAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="netAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="employerCostAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="splitText" type="text-long" ai-opt-out="true"/>
+        <field name="sourceRevision" type="text-medium"><description>The fingerprint of the sources and rules the slip came from (the
+            run employment's when its run was approved)</description></field>
+        <field name="approvedDate" type="date-time"><description>When its run was approved for these results</description></field>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="contentLocation" type="text-medium"><description>The issued statement, rendered once and stored (its PDF, or its
+            html-print page where the server has no PDF engine)</description></field>
+        <field name="contentType" type="text-short"/>
+        <field name="fileName" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRun" short-alias="run"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRunEmployment" short-alias="unit"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Corrects" related="mantle.humanres.payroll.Payslip" short-alias="corrects">
+            <key-map field-name="correctsPayslipId" related="payslipId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayslipItem" short-alias="items">
+            <key-map field-name="payslipId"/></relationship>
+        <index name="PAYSLIP_UNIT" unique="true"><index-field name="payrollRunEmploymentId"/></index>
+        <index name="PAYSLIP_RUN"><index-field name="payrollRunId"/></index>
+        <index name="PAYSLIP_EMPL"><index-field name="partyRelationshipId"/><index-field name="payDate"/></index>
+        <index name="PAYSLIP_PARTY"><index-field name="partyId"/><index-field name="statusId"/></index>
+        <index name="PAYSLIP_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAYSLIP_CORRECTS"><index-field name="correctsPayslipId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Payslip" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssPreview" description="Preview" sequenceNum="1" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssWithdrawn" description="Withdrawn" sequenceNum="2" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssFinal" description="Final" sequenceNum="3" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssIssued" description="Issued" sequenceNum="4" statusTypeId="Payslip"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssPreview" toStatusId="PssWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssWithdrawn" toStatusId="PssPreview" transitionName="Approve again"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssFinal" toStatusId="PssIssued" transitionName="Issue"/>
+            <!-- a payslip's notes and messages are told to their named users alone (People follow-up 1's rule) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.payroll.Payslip" ownerText="IronStone People: a payslip"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayslipItem" package="mantle.humanres.payroll" cache="never">
+        <description>A line of a payslip: a component's amount (an earning, a deduction, an employer contribution; a statistical value
+            in its unit, in no total) or a localization's item (employee or employer), the term it was calculated by
+            (payrollComponentTermId, the dated rule) and its explanation (each part's formula and values, the adjustments, the
+            rounding). On a correction slip the amount is the change and previousAmount what the original and the corrections before
+            it paid. payslipVisible N (the term's setting) keeps a line from the person's own view, never from the totals.</description>
+        <field name="payslipItemId" type="id" is-pk="true"/>
+        <field name="payslipId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="payrollComponentTermId" type="id"/>
+        <field name="componentCode" type="text-short"/>
+        <field name="itemName" type="text-medium"/>
+        <field name="componentKindEnumId" type="id"/>
+        <field name="localizationParty" type="text-short"><description>employee or employer, for a localization's item</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"/>
+        <field name="previousAmount" type="number-decimal" ai-opt-out="true"><description>On a correction slip: the line as paid
+            before</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="inTotals" type="text-indicator"/>
+        <field name="payslipVisible" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="explanation" type="text-long" ai-opt-out="true"/>
+        <relationship type="one" related="mantle.humanres.payroll.Payslip" short-alias="payslip"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
+        <index name="PAYSLIP_ITEM_SLIP"><index-field name="payslipId"/></index>
+    </entity>
+    <entity entity-name="PayslipContent" package="mantle.humanres.payroll" cache="never">
+        <description>A file of a payslip (IronStone People PE-01, the payslip content host): evidence payroll keeps with a result (a
+            signed statement, a calculation sheet). The payslip is People's content host, so the file is never on the person's
+            broadly visible Party record; get#RecordLinkInfo and RecordFiles admit it only to a payroll reader of the slip's
+            employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person reads their issued slip, never these
+            files); no Records-drive folder maps it. Written through PayrollResultServices.create#PayslipContent (a payroll editor's).</description>
+        <field name="payslipContentId" type="id" is-pk="true"/>
+        <field name="payslipId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.payroll.Payslip"/>
+        <relationship type="one" title="PayslipContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <index name="PAYSLIP_CNT_SLIP"><index-field name="payslipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payslip Content Type" enumTypeId="PayslipContentType"/>
+            <moqui.basic.Enumeration description="Evidence" enumId="PsctEvidence" enumTypeId="PayslipContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Other" enumId="PsctOther" enumTypeId="PayslipContentType" sequenceNum="2"/>
+        </seed-data>
     </entity>
 </entities>

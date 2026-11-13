@@ -545,7 +545,8 @@ const kinds = {
     // amounts and source revisions (PayrollRuns.js runRevision: a changed input, salary, rate, assignment or rule since makes it
     // another revision, so a waiting request is superseded and an approval no longer holds). With no rule the employer's payroll
     // approvers decide (PAYROLL_APPROVE, reading payroll); never one who selected the population or calculated it, nor who asked.
-    // The notice names the group and the period, never a person or an amount.
+    // The notice names the group and the period, never a person or an amount. P26 (P25 review's finding): nor anyone whose own pay
+    // the run holds (an employee of its population not excluded, a payroll approver employed in the group among them).
     PakPayrollRun: {
         topic: "PayrollRunApproval",
         sourceEntityName: PAY_RUN,
@@ -565,12 +566,22 @@ const kinds = {
                 .split(",")
                 .map(value => value.trim())
                 .filter(Boolean)
-            if (!userIds.length) return []
-            return unique(
-                Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
-                    .map(account => account.partyId)
-                    .filter(Boolean)
-            )
+            const preparers = userIds.length
+                ? Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
+                      .map(account => account.partyId)
+                      .filter(Boolean)
+                : []
+            // the people whose pay the run holds
+            const paid = run
+                ? Array.from(
+                      find("mantle.humanres.payroll.PayrollRunEmployment")
+                          .condition("payrollRunId", run.payrollRunId)
+                          .condition("statusId", "not-equals", "PruExcluded")
+                          .selectField("partyId")
+                          .list()
+                  ).map(row => row.partyId)
+                : []
+            return unique(preparers.concat(paid).filter(Boolean))
         },
         describe(sourceId) {
             const run = one(PAY_RUN, {payrollRunId: sourceId})

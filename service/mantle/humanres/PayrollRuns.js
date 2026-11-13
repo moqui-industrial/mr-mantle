@@ -38,6 +38,18 @@
 //   negative net blocks the employment (NEGATIVE_NET).
 // A blocking finding (missing setup, a missing input, a cycle, a currency mismatch) leaves that employment in error with its reason
 // code while the others are calculated.
+//
+// impl-people P26 (design §8.2 corrections, §8.1 Payslip; PE-10): the kinds of run and the slips.
+// - A regular run is one a group and period (activeRunKey). An off-cycle run (any number a period, any pay date: a slip of the same
+//   day keeps its own identity) pays the approved adjustments of the period no live run took, for the employments that have them
+//   or those named, with no salary or structure line. A correction run (create#Correction, one at a time a slip) recalculates the
+//   original slip's employment as it is now, with the inputs the original and its corrections took and those approved since, and
+//   pays the change: its lines are the difference from what the original and the corrections before it paid (a negative change is
+//   to recover), and the original stays.
+// - Inputs a live run of another kind took are that run's: a run does not pay them again and is not blocked by them.
+// - When a run is approved its calculated employments become slips (PayrollResults.js makeSlips: preview slips in preview mode);
+//   when its approval is taken back (selected or calculated again) its preview slips are withdrawn. Calculating an approved run
+//   with nothing to calculate leaves its approval as it is (P25 review's finding).
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
@@ -45,6 +57,7 @@ const configuration = () => ec.resource.script("component://mr-mantle/service/ma
 const inputs = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayInputs.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
+const slips = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollResults.js")
 
 const RUN = "mantle.humanres.payroll.PayrollRun"
 const UNIT = "mantle.humanres.payroll.PayrollRunEmployment"
@@ -62,6 +75,7 @@ const SALARY = "mantle.humanres.employment.EmploymentSalary"
 const RATE = "mantle.humanres.rate.RateAmount"
 const RELATIONSHIP = "mantle.party.PartyRelationship"
 const PERIOD = "mantle.party.time.TimePeriod"
+const SLIP = "mantle.humanres.payroll.Payslip"
 const KIND = "PakPayrollRun"
 
 const day = 24 * 60 * 60 * 1000
@@ -165,6 +179,20 @@ function withPreparer(run) {
     if (ec.user.userId && !userIds.includes(ec.user.userId)) userIds.push(ec.user.userId)
     return userIds.join(",") || null
 }
+// P26 review: an approved run one of whose slips a correction run (not cancelled) corrects keeps its approval: its slips stand as
+// the originals the corrections pay the change from, so a later change is corrected too, never recalculated into the original.
+function checkUncorrected(run) {
+    if (run.statusId !== "PrnApproved") return
+    const slipIds = rows(SLIP, {payrollRunId: run.payrollRunId}).map(row => row.payslipId)
+    const correcting = rowsIn(RUN, "correctsPayslipId", slipIds).find(row => row.statusId !== "PrnCancelled")
+    if (correcting)
+        denied(
+            "RUN_CORRECTED",
+            "Pay run " +
+                correcting.payrollRunId +
+                " corrects a payslip of this approved run, so the run stays as approved: correct its payslips instead"
+        )
+}
 function checkChangeable(run) {
     if (!changeableStatuses.includes(run.statusId))
         denied(
@@ -205,29 +233,44 @@ function createRun(p) {
         denied("GROUP_ENDED", "This pay group ended before the period")
     const runKindEnumId = text(p.runKindEnumId) || "PrkRegular"
     if (!kindTexts[runKindEnumId]) denied("KIND_INVALID", "Choose the kind of run")
-    if (runKindEnumId !== "PrkRegular")
-        denied(
-            "KIND_NOT_AVAILABLE",
-            "Only a regular run is made here; off-cycle and correction runs come with payslip corrections"
+    // P26: a correction run is made from the slip it corrects (create#Correction)
+    if (runKindEnumId === "PrkCorrection")
+        denied("KIND_NOT_AVAILABLE", "A correction run is made from the payslip it corrects: Correct pay on the payslip")
+    const regular = runKindEnumId === "PrkRegular"
+    let activeRunKey = null
+    let initialIds = null
+    if (regular) {
+        // the period's inputs a live regular run took are not paid again by another
+        const taken = Array.from(
+            find(INPUT)
+                .condition({payrollGroupId: group.payrollGroupId, timePeriodId: period.timePeriodId})
+                .condition("payrollRunId", "is-not-null", null)
+                .selectField("payrollRunId")
+                .distinct(true)
+                .list()
+        ).map(row => row.payrollRunId)
+        const takenBy = rowsIn(RUN, "payrollRunId", taken).filter(
+            row => row.statusId !== "PrnCancelled" && row.runKindEnumId === "PrkRegular"
         )
-    // the period's inputs a live run took are not paid again by another
-    const taken = Array.from(
-        find(INPUT)
-            .condition({payrollGroupId: group.payrollGroupId, timePeriodId: period.timePeriodId})
-            .condition("payrollRunId", "is-not-null", null)
-            .selectField("payrollRunId")
-            .distinct(true)
-            .list()
-    ).map(row => row.payrollRunId)
-    const takenBy = rowsIn(RUN, "payrollRunId", taken).filter(row => row.statusId !== "PrnCancelled")
-    if (takenBy.length)
-        denied(
-            "INPUTS_CONSUMED",
-            "The pay inputs of " + period.text + " are taken by pay run " + takenBy[0].payrollRunId + "; they are not paid twice"
-        )
-    const activeRunKey = group.payrollGroupId + ":" + period.timePeriodId + ":" + runKindEnumId
-    const existing = one(RUN, {activeRunKey})
-    if (existing) denied("RUN_EXISTS", "Pay run " + existing.payrollRunId + " is this period's regular run already")
+        if (takenBy.length)
+            denied(
+                "INPUTS_CONSUMED",
+                "The pay inputs of " +
+                    period.text +
+                    " are taken by pay run " +
+                    takenBy[0].payrollRunId +
+                    "; they are not paid twice"
+            )
+        activeRunKey = group.payrollGroupId + ":" + period.timePeriodId + ":" + runKindEnumId
+        const existing = one(RUN, {activeRunKey})
+        if (existing) denied("RUN_EXISTS", "Pay run " + existing.payrollRunId + " is this period's regular run already")
+    } else {
+        // P26: an off-cycle run pays the approved adjustments of the period no run took, for the employments that have them (or
+        // those named)
+        initialIds = unpaidAdjustmentOwners(group, period, splitIds(p.partyRelationshipIds))
+        if (!initialIds.length)
+            denied("NOTHING_TO_PAY", "No approved adjustment of the period waits to be paid: an off-cycle run pays those alone")
+    }
     const payDay = blank(p.payDate) ? period.payDate : dayOf(p.payDate)
     const created = call("create#" + RUN, {
         organizationPartyId: group.organizationPartyId,
@@ -246,8 +289,22 @@ function createRun(p) {
         createdDate: ec.user.nowTimestamp
     })
     const run = one(RUN, {payrollRunId: created.payrollRunId})
-    const selected = syncPopulation(run, group, period, zone)
+    const selected = syncPopulation(run, group, period, zone, initialIds)
     return {payrollRunId: run.payrollRunId, repeated: false, selectedCount: selected.addedCount}
+}
+// The employments of a group's period with an approved adjustment (an input to a component) no run took: an off-cycle run's
+// population; wanted narrows it.
+function unpaidAdjustmentOwners(group, period, wanted) {
+    const query = find(INPUT)
+        .condition({payrollGroupId: group.payrollGroupId, timePeriodId: period.timePeriodId, statusId: "PinApproved"})
+        .condition("payrollComponentId", "is-not-null", null)
+        .condition("payrollRunId", "is-null", null)
+    if (wanted.length) query.condition("partyRelationshipId", "in", wanted)
+    return unique(
+        Array.from(query.selectField("partyRelationshipId").distinct(true).limit(populationCap).list()).map(
+            row => row.partyRelationshipId
+        )
+    )
 }
 const dayOf = value => {
     const found = text(value)
@@ -259,8 +316,14 @@ const dayOf = value => {
 // The population kept in step with the group: an employment the group pays on a day of the period joins as pending, one it no
 // longer pays (and has not been excluded) leaves; excluded employments stay with their reason. A unit leaving or changing state
 // releases the inputs its calculation took.
-function syncPopulation(run, group, period, zone) {
-    const members = inputs().groupMembers(group, period, zone, null, populationCap)
+// P26: an off-cycle or a correction run keeps the population it was made with (initialIds when made): its employments leave when the
+// group no longer pays them in the period, and none joins.
+function syncPopulation(run, group, period, zone, initialIds = null) {
+    const regular = run.runKindEnumId === "PrkRegular"
+    const wanted = regular
+        ? null
+        : initialIds || rows(UNIT, {payrollRunId: run.payrollRunId}).map(unit => unit.partyRelationshipId)
+    const members = inputs().groupMembers(group, period, zone, wanted, populationCap)
     if (members.truncated)
         denied(
             "POPULATION_TOO_LARGE",
@@ -300,6 +363,8 @@ function clearUnit(run, unit) {
 // A changed run (population, pay date, a calculation) is reviewed again: an approval it had no longer holds and a request waiting
 // is superseded.
 function reopenForChange(run, statusId) {
+    // P26: an approval taken back withdraws the run's preview slips
+    if (run.statusId === "PrnApproved") slips().withdrawSlips(run.payrollRunId, "The run's approval was taken back")
     call("update#" + RUN, {
         payrollRunId: run.payrollRunId,
         statusId,
@@ -322,6 +387,8 @@ function selectEmployments(p) {
     const includeIds = splitIds(p.includeIds)
     const reason = text(p.exclusionReason)
     if (excludeIds.length && !reason) denied("REASON_REQUIRED", "Say why the employees are left out of this run")
+    // P26 review: selecting an approved run takes its approval back, which a corrected one keeps
+    checkUncorrected(run)
     const synced = syncPopulation(run, group, period, zone)
     const units = Object.fromEntries(rows(UNIT, {payrollRunId: run.payrollRunId}).map(unit => [unit.partyRelationshipId, unit]))
     let excludedCount = 0
@@ -478,7 +545,20 @@ function factsOf(run, facts, units) {
             .filter(row => row.statusId !== "PrnCancelled")
             .map(row => row.payrollRunId)
     )
-    const shared = {structures, lines, terms, liveOthers}
+    // P26: the runs whose inputs this run's calculation counts as its own: itself, and for a correction the original's and its
+    // corrections' (what was paid); an off-cycle run pays adjustments alone
+    const before = run.correctsPayslipId ? correctionBase(run) : null
+    const ownRunIds = new Set([run.payrollRunId].concat(before ? before.runIds : []))
+    const shared = {
+        structures,
+        lines,
+        terms,
+        liveOthers,
+        ownRunIds,
+        before,
+        // P26 review: a correction of an off-cycle slip pays the change of its adjustments alone, never a salary or structure line
+        adjustmentsOnly: run.runKindEnumId === "PrkOffCycle" || before?.original?.runKindEnumId === "PrkOffCycle"
+    }
     return {
         members,
         forUnit(unitRow) {
@@ -497,17 +577,26 @@ function factsOf(run, facts, units) {
         }
     }
 }
-// the inputs a run takes: approved, not finalized, not taken by another live run
+// the inputs a run takes: approved, not finalized, not taken by another live run (P26: a correction counts the inputs its original
+// and that original's corrections took as its own; an off-cycle run takes adjustments alone)
 function takenInputs(run, found) {
-    const liveOthers = found.shared.liveOthers
+    const {liveOthers, ownRunIds, adjustmentsOnly} = found.shared
     const periodInputs = found.periodInputs
-    const approved = periodInputs.filter(row => row.statusId === "PinApproved")
-    const elsewhere = row => row.payrollRunId && row.payrollRunId !== run.payrollRunId && liveOthers.has(row.payrollRunId)
+    const approved = periodInputs.filter(
+        row => row.statusId === "PinApproved" && (!adjustmentsOnly || (row.payrollComponentId && row.amount != null))
+    )
+    const elsewhere = row => row.payrollRunId && !ownRunIds.has(row.payrollRunId) && liveOthers.has(row.payrollRunId)
     return {
         taken: approved.filter(row => !elsewhere(row)),
         elsewhere: approved.filter(elsewhere),
         waiting: periodInputs.filter(row => row.statusId === "PinProposed")
     }
+}
+// A correction run's base: what its original slip and the corrections before it paid, and their runs (PayrollResults.js).
+function correctionBase(run) {
+    const original = one(SLIP, {payslipId: run.correctsPayslipId})
+    if (!original) return {missing: true, runIds: [], lines: {}, totals: {}, key: "missing"}
+    return Object.assign({original}, slips().paidBefore(original, run.payrollRunId))
 }
 // A structure's lines in effect at a moment for an assignment: published, within their dates (a line's own, else the
 // structure's), an elective one only when the assignment elects it; and a component's published term then.
@@ -610,7 +699,9 @@ function fingerprintsOf(run, facts, units, loaded = null) {
             lines: lines.map(row => row.payrollStructureComponentId + ":" + stamp(row)).sort(),
             terms: terms.map(row => row.payrollComponentTermId + ":" + stamp(row)).sort(),
             profiles: found.profiles.map(row => row.payrollTaxProfileId + ":" + stamp(row)).sort(),
-            schedule: scheduled ? periodDays.map(dayText => String(scheduled[dayText]?.hours ?? "")).join(",") : ""
+            schedule: scheduled ? periodDays.map(dayText => String(scheduled[dayText]?.hours ?? "")).join(",") : "",
+            // P26: a correction's base, the slips it pays the change from
+            corrects: found.shared.before ? found.shared.before.key : ""
         }
         out.set(unit.payrollRunEmploymentId, revisionText(value))
     })
@@ -781,9 +872,8 @@ function readsSegment(code, lines, seen = new Set()) {
 // The calculation of one employment of a run: its segments, each computed, the lines combined, its adjustments, rounding,
 // the localization and the totals. Reads and computes only; answers {ok, results, totals, ...} or a blocking failure.
 function computeEmployment(run, group, period, zone, periodDays, member, found) {
-    const {taken, elsewhere, waiting} = takenInputs(run, found)
-    if (elsewhere.length)
-        return failure("INPUTS_CONSUMED", "Some of this employee's inputs are taken by pay run " + elsewhere[0].payrollRunId)
+    // P26: inputs another live run took (an off-cycle run's adjustments) are that run's, paid there and not here
+    const {taken, waiting} = takenInputs(run, found)
     const segments = segmentsOf(member, found, zone)
     if (!segments.length || segments.some(segment => !segment.assignment))
         return failure("NO_ASSIGNMENT", "The employee has no primary pay assignment in this group on a day of the period")
@@ -809,7 +899,6 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
             )
         segmentInputs[index].push(input)
     }
-    const results = []
     const segmentResults = []
     const splitParts = []
     for (const [index, segment] of segments.entries()) {
@@ -890,6 +979,18 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
             explanation
         }
     }
+    return finishEmployment(run, group, period, zone, member, byCode, taken, waiting, {
+        ownRunIds: found.shared.ownRunIds,
+        assignment: last && segments[segments.length - 1].assignment,
+        segmentCount: segments.length,
+        splitText: splitParts.join("; ")
+    })
+}
+// An employment's lines finished (P26: shared by a regular or correction run's calculation and an off-cycle run's): the approved
+// adjustments and advance recoveries added to their components' lines, each money line rounded to the currency once, the totals,
+// the localization once over the period's lines, net (a negative one blocks) and employer cost.
+function finishEmployment(run, group, period, zone, member, byCode, taken, waiting, extra) {
+    const results = []
     // approved adjustments and advance recoveries: each adds to its component's line
     for (const input of taken) {
         if (!input.payrollComponentId || input.amount == null) continue
@@ -969,7 +1070,8 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
             quantityUomId: line.term?.quantityUomId || null,
             inTotals: line.component.componentKindEnumId !== "PckStatistical",
             sequenceNum: line.sequenceNum ?? null,
-            explanation: line.explanation
+            explanation: line.explanation,
+            payrollComponentTermId: line.term?.payrollComponentTermId || null
         })
     for (const item of localItems)
         results.push({
@@ -987,11 +1089,14 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
     return {
         ok: true,
         results,
-        takenIds: taken.map(row => row.payrollInputId),
+        // the inputs this run marks: not those its correction's base runs took (theirs, paid there)
+        takenIds: taken
+            .filter(row => !row.payrollRunId || row.payrollRunId === run.payrollRunId || !extra.ownRunIds?.has(row.payrollRunId))
+            .map(row => row.payrollInputId),
         waitingCount: waiting.length,
-        assignment: last && segments[segments.length - 1].assignment,
-        segmentCount: segments.length,
-        splitText: splitParts.join("; "),
+        assignment: extra.assignment || null,
+        segmentCount: extra.segmentCount ?? null,
+        splitText: extra.splitText || null,
         totals: {
             gross,
             deductions,
@@ -1002,6 +1107,85 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
             employerCost: gross.add(contributions).add(localSum("employer"))
         }
     }
+}
+// P26: an off-cycle run's employment: the approved adjustments of the period no live run took (each to its component's line), with
+// no salary or structure line, then rounded, localized and totalled as any employment.
+// P26 review: a correction of an off-cycle slip (forCorrection) is calculated the same way, and with nothing left to pay its lines
+// are none, so the adjustments paid before are recovered.
+function computeOffCycle(run, group, period, zone, member, found, forCorrection = false) {
+    const {taken, waiting} = takenInputs(run, found)
+    if (!taken.length && !forCorrection)
+        return failure("NOTHING_TO_PAY", "No approved adjustment of this employee waits to be paid in the period")
+    return finishEmployment(run, group, period, zone, member, {}, taken, waiting, {
+        ownRunIds: found.shared.ownRunIds,
+        splitText: "Off-cycle: the period's approved adjustments"
+    })
+}
+const resultKey = row => (row.componentCode || "") + "|" + (row.localizationParty || "")
+// P26: a correction run's employment: calculated as it is now (computeEmployment over the original's inputs, its corrections' and
+// those approved since), less what the original slip and the corrections before this one paid, line by line (a line no longer paid
+// is recovered whole); its totals are the changes. Nothing changed answers NO_CHANGE; a withdrawn original ORIGINAL_WITHDRAWN.
+function correctionOf(run, now, found) {
+    const before = found.shared.before
+    if (!before || before.missing || before.original.statusId === "PssWithdrawn")
+        return failure(
+            "ORIGINAL_WITHDRAWN",
+            "The slip this run corrects was withdrawn when its run's approval was taken back; cancel this run"
+        )
+    const nowLines = Object.fromEntries(now.results.map(row => [resultKey(row), row]))
+    const keys = unique(Object.keys(nowLines).concat(Object.keys(before.lines)))
+    const changed = []
+    for (const key of keys) {
+        const current = nowLines[key]
+        const paid = before.lines[key]
+        const nowAmount = decimalOf(current?.amount)
+        const paidAmount = decimalOf(paid?.amount)
+        const change = nowAmount.subtract(paidAmount)
+        if (change.isZero()) continue
+        const base = current || {
+            payrollComponentId: paid.payrollComponentId || null,
+            componentCode: paid.componentCode,
+            resultName: paid.itemName,
+            componentKindEnumId: paid.componentKindEnumId || null,
+            localizationParty: paid.localizationParty || null,
+            currencyUomId: paid.currencyUomId || null,
+            quantityUomId: paid.quantityUomId || null,
+            inTotals: paid.inTotals !== "N",
+            sequenceNum: paid.sequenceNum ?? null,
+            payrollComponentTermId: paid.payrollComponentTermId || null
+        }
+        const amountText = value =>
+            base.currencyUomId
+                ? moneyText(value, base.currencyUomId)
+                : String(value) + (base.quantityUomId ? " " + base.quantityUomId : "")
+        changed.push(
+            Object.assign({}, base, {
+                amount: change,
+                previousAmount: paidAmount,
+                explanation:
+                    "Now " +
+                    amountText(nowAmount) +
+                    ", paid " +
+                    amountText(paidAmount) +
+                    (current ? ": " + current.explanation : ": no longer paid")
+            })
+        )
+    }
+    if (!changed.length) return failure("NO_CHANGE", "Nothing changed since the original slip: there is nothing to correct")
+    const minus = (field, beforeField) => decimalOf(now.totals[field]).subtract(decimalOf(before.totals[beforeField || field]))
+    return Object.assign({}, now, {
+        results: changed,
+        splitText: "Correction of payslip " + before.original.payslipId + (now.splitText ? "; now " + now.splitText : ""),
+        totals: {
+            gross: minus("gross"),
+            deductions: minus("deductions"),
+            contributions: minus("contributions"),
+            localEmployee: minus("localEmployee"),
+            localEmployer: minus("localEmployer"),
+            net: minus("net"),
+            employerCost: minus("employerCost")
+        }
+    })
 }
 // One unit calculated and written, in the caller's transaction (calculateRun gives each its own): the employment locked, its results
 // replaced, the inputs it takes marked with the run and those it no longer takes released; a blocking finding leaves it in error.
@@ -1017,9 +1201,15 @@ function calculateUnit(run, facts, unitId) {
         return "unchanged"
     const found = loaded.forUnit(unit)
     const member = found.member
-    const outcome = member
-        ? computeEmployment(run, group, period, zone, periodDays, member, found)
-        : failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
+    // P26 review: a correction of an off-cycle slip recalculates its adjustments alone (as the off-cycle run did), not the period's
+    // salary and structure lines, which its original never paid
+    const offCycleBase = found.shared.before?.original?.runKindEnumId === "PrkOffCycle"
+    let outcome = !member
+        ? failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
+        : run.runKindEnumId === "PrkOffCycle" || offCycleBase
+          ? computeOffCycle(run, group, period, zone, member, found, offCycleBase)
+          : computeEmployment(run, group, period, zone, periodDays, member, found)
+    if (outcome.ok && run.runKindEnumId === "PrkCorrection") outcome = correctionOf(run, outcome, found)
     clearUnit(run, unit)
     const base = {
         payrollRunEmploymentId: unitId,
@@ -1052,7 +1242,7 @@ function calculateUnit(run, facts, unitId) {
         call(
             "create#" + RESULT,
             Object.assign({payrollRunEmploymentId: unitId, payrollRunId: run.payrollRunId}, result, {
-                inTotals: result.inTotals ? "Y" : "N"
+                inTotals: result.inTotals === false || result.inTotals === "N" ? "N" : "Y"
             })
         )
     const totals = outcome.totals
@@ -1107,6 +1297,18 @@ function calculateRun(p) {
             unit.statusId === "PruError" ||
             (unit.statusId === "PruCalculated" && unit.sourceRevision !== prints.get(unit.payrollRunEmploymentId))
     )
+    // P25 review's finding: an approved run with nothing to calculate keeps its approval (and its slips); one with work whose slips
+    // are corrected is not recalculated (P26 review)
+    if (work.length) checkUncorrected(run)
+    if (run.statusId === "PrnApproved" && !work.length)
+        return {
+            payrollRunId: run.payrollRunId,
+            processedCount: 0,
+            calculatedCount: 0,
+            errorCount: 0,
+            remainingCount: 0,
+            statusId: run.statusId
+        }
     const startedMs = Date.now()
     let calculatedCount = 0
     let errorCount = 0
@@ -1162,6 +1364,14 @@ function calculateRun(p) {
         remainingCount,
         statusId
     }
+}
+
+// P26: whether a run's employment is still calculated from the sources it was (its fingerprint now against sourceRevision), for a
+// preview slip's reader.
+function unitHolds(run, payrollRunEmploymentId, sourceRevision) {
+    const unit = one(UNIT, {payrollRunEmploymentId})
+    if (!unit || unit.statusId !== "PruCalculated") return false
+    return fingerprintsOf(run, periodFacts(run), [unit]).get(payrollRunEmploymentId) === (sourceRevision || unit.sourceRevision)
 }
 
 // ===== the run's revision =====
@@ -1267,7 +1477,7 @@ function decideRun(p, decision) {
         operationKey: text(p.operationKey) || null
     })
     if (!decided.repeated) {
-        if (decided.complete)
+        if (decided.complete) {
             call("update#" + RUN, {
                 payrollRunId: run.payrollRunId,
                 statusId: "PrnApproved",
@@ -1275,7 +1485,9 @@ function decideRun(p, decision) {
                 approvedDate: ec.user.nowTimestamp,
                 returnedReason: null
             })
-        else if (decided.statusId === "PapRefused")
+            // P26: the approved results become slips (preview slips in preview mode)
+            slips().makeSlips(one(RUN, {payrollRunId: run.payrollRunId}))
+        } else if (decided.statusId === "PapRefused")
             call("update#" + RUN, {payrollRunId: run.payrollRunId, returnedReason: text(p.reason) || null})
     }
     const after = one(RUN, {payrollRunId: run.payrollRunId})
@@ -1285,6 +1497,65 @@ function decideRun(p, decision) {
         approved: after.statusId === "PrnApproved",
         repeated: !!decided.repeated
     }
+}
+
+// ===== create#Correction =====
+// P26 (design §8.2): a correction of a slip, a run of its own (kind correction) for the slip's group, period and employment, with the
+// reason (the changed source or rule) and a pay date (the original's when empty: a slip of the same day keeps its own identity).
+// A correction of a correction corrects its original. Calculated, approved and slipped as any run; its slip names the original,
+// which stays. Refused: a slip outside the payroll scope (RECORD_UNAVAILABLE), a withdrawn original (SLIP_WITHDRAWN), no reason
+// (REASON_REQUIRED), a correction of the slip already open (CORRECTION_EXISTS) and an employment the group no longer pays in the
+// period (NOT_IN_GROUP). An operation key answers a retry with the first run. No invoice or payment is made.
+function createCorrection(p) {
+    const userScope = editorScope()
+    const id = text(p.payslipId)
+    const slip = id ? one(SLIP, {payslipId: id}) : null
+    if (!slip || !userScope.organizationPartyIds.includes(slip.organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Payslip " + id + " is not available")
+    const operationKey = text(p.operationKey) || null
+    if (operationKey) {
+        const first = one(RUN, {operationKey, createdByUserId: ec.user.userId})
+        if (first) return {payrollRunId: first.payrollRunId, originalPayslipId: first.correctsPayslipId, repeated: true}
+    }
+    const original = slips().originalOf(slip)
+    if (!original || original.statusId === "PssWithdrawn")
+        denied(
+            "SLIP_WITHDRAWN",
+            "This slip was withdrawn when its run's approval was taken back; correct the slip of the run approved again"
+        )
+    const reason = text(p.reason)
+    if (!reason) denied("REASON_REQUIRED", "Say what changed: the source or rule the correction follows")
+    // P26 review: the original locked, so two corrections made at once are not both open
+    find(SLIP).condition("payslipId", original.payslipId).forUpdate(true).one()
+    const open = rows(RUN, {correctsPayslipId: original.payslipId}).find(row =>
+        ["PrnDraft", "PrnCalculating", "PrnReview"].includes(row.statusId)
+    )
+    if (open)
+        denied("CORRECTION_EXISTS", "Pay run " + open.payrollRunId + " corrects this slip already; finish or cancel it first")
+    const group = one(GROUP, {payrollGroupId: original.payrollGroupId})
+    const period = inputs().periodOf(group, original.timePeriodId)
+    const zone = inputs().zoneOf(group)
+    const created = call("create#" + RUN, {
+        organizationPartyId: original.organizationPartyId,
+        payrollGroupId: original.payrollGroupId,
+        timePeriodId: original.timePeriodId,
+        currencyUomId: original.currencyUomId,
+        payDate: blank(p.payDate) ? lib.calendarDateText(original.payDate) : dayOf(p.payDate),
+        runKindEnumId: "PrkCorrection",
+        statusId: "PrnDraft",
+        correctsPayslipId: original.payslipId,
+        correctionReason: reason,
+        description: text(p.description) || null,
+        preparedByUserIds: ec.user.userId || null,
+        operationKey,
+        createdByUserId: ec.user.userId,
+        createdDate: ec.user.nowTimestamp
+    })
+    const run = one(RUN, {payrollRunId: created.payrollRunId})
+    const selected = syncPopulation(run, group, period, zone, [original.partyRelationshipId])
+    if (!selected.addedCount)
+        denied("NOT_IN_GROUP", "The pay group no longer pays this employee in the slip's period; nothing is recalculated")
+    return {payrollRunId: run.payrollRunId, originalPayslipId: original.payslipId, repeated: false}
 }
 
 // ===== cancel#Run =====
@@ -1483,6 +1754,15 @@ function getRun(p) {
                 stateText,
                 returnedReason: run.returnedReason || "",
                 cancelReason: run.cancelReason || "",
+                // P26: a correction run's original slip and reason, and the run's slips
+                correctsPayslipId: run.correctsPayslipId || null,
+                correctionReason: run.correctionReason || "",
+                payslipCount: Array.from(
+                    find(SLIP)
+                        .condition("payrollRunId", run.payrollRunId)
+                        .condition("statusId", "not-equals", "PssWithdrawn")
+                        .list()
+                ).length,
                 approvedDateText: dateText(run.approvedDate),
                 calculatedDateText: dateText(run.calculatedDate),
                 readinessText: configuration().groupReadiness(
@@ -1597,6 +1877,7 @@ const operations = {
     getRun,
     submitRun,
     cancelRun,
+    createCorrection,
     approveRun: p => decideRun(p, "approve"),
     returnRun: p => decideRun(p, "refuse")
 }
@@ -1608,5 +1889,7 @@ function run(op, p) {
     execute: run,
     // for Approvals.js (PakPayrollRun): the revision an approval binds, and the run's group and period as a notice names them
     runRevision,
-    runLabel
+    runLabel,
+    // for PayrollResults.js (P26): whether a slip's employment is still as its run calculated it
+    unitHolds
 })

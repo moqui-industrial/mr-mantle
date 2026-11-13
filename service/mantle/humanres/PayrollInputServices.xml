@@ -90,7 +90,8 @@ along with this software (see the LICENSE.md file). If not, see
             source another input holds; each is named and the rest go on. With cutoffDate, an entitlement whose sources changed
             after it waits for the next preparation. A retry, or preparing again, makes nothing twice. Refuses a caller without
             PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED), another employer's group (RECORD_UNAVAILABLE), a period not of the
-            group (PERIOD_UNAVAILABLE) and a group ended before the period (GROUP_ENDED). Changes no money.</description>
+            group (PERIOD_UNAVAILABLE), a group ended before the period (GROUP_ENDED) and a group paying more than 10,000 employees in
+            the period (POPULATION_TOO_LARGE: every employment is prepared, never some in silence). Changes no money.</description>
         <in-parameters>
             <parameter name="payrollGroupId" required="true"/>
             <parameter name="timePeriodId" required="true"/>

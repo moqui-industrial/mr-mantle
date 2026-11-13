@@ -2115,6 +2115,11 @@ along with this software (see the LICENSE.md file). If not, see
             once released (mantle.humanres.ReviewServices.check#ReviewAccess); a goal (a WorkEffort of the WetGoal type) only by
             its person, their manager, the reviewer of its review and a development reader of its employer (Reviews.js
             goalVisible); both for every caller, authorization disabled or not; a call with no user sees none.
+
+            A payslip (mantle.humanres.payroll.Payslip, IronStone People's payslip content host, P26) and its files (PayslipContent)
+            are seen only by a payroll reader of its employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person
+            reads their own issued slip through get#MyPayslip), for every caller, authorization disabled or not; a call with no user
+            sees none.
         </description>
         <in-parameters>
             <parameter name="recordEntityName" required="true"/>
@@ -2198,7 +2203,9 @@ along with this software (see the LICENSE.md file). If not, see
                 // People's review content host (IronStone People PE-01, impl-people P20): a review's files, its reviewer's,
                 // development's and, once released, its person's
                 'mantle.humanres.ability.PerformanceReview': content('mantle.humanres.ability.PerformanceReviewContent',
-                        'performanceReviewId', 'contentTypeEnumId')}
+                        'performanceReviewId', 'contentTypeEnumId'),
+                // People's payslip content host (IronStone People PE-01, impl-people P26): a payslip's files, payroll's alone
+                'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2663,6 +2670,11 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.humanres.ability.PerformanceReview' || entityName === 'mantle.humanres.ability.PerformanceReviewContent')
                     return !!ec.service.sync().name('mantle.humanres.ReviewServices.check#ReviewAccess')
                             .parameter('performanceReviewId', value.performanceReviewId).disableAuthz().call()?.recordVisible
+                // P26: a payslip and its files, a payroll reader's of its employer alone
+                // (mantle.humanres.PayrollResultServices.check#PayslipAccess), whatever the entity filters and authorization
+                if (entityName === 'mantle.humanres.payroll.Payslip' || entityName === 'mantle.humanres.payroll.PayslipContent')
+                    return !!ec.service.sync().name('mantle.humanres.PayrollResultServices.check#PayslipAccess')
+                            .parameter('payslipId', value.payslipId).disableAuthz().call()?.recordVisible
                 // P20: a goal (a WetGoal work effort: by its type, which no task takes, not its purpose, which a work item may
                 // name), its person's, their manager's, its review's reviewer's and a development reader's of its employer
                 // (Reviews.js goalVisible), whatever the entity filters and authorization
