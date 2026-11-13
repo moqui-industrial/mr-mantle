@@ -165,7 +165,8 @@ function writeSalary(partyRelationshipId, values, reason) {
 // P24 review (the user's call of Nov 12, 2026): a first salary asked here by a payroll editor waits for approval like any pay
 // change: it is asked as one (PeopleServices.apply#EmploymentChange, changeKind pay; PakPayChange, the employer's payroll approvers)
 // and written when approved. Only a repair writes at once; a hire from an accepted offer records the offer's approved pay itself
-// (Employment.js hireEmployee), and the employees import sets no pay (its target refuses pay columns).
+// (Employment.js hireEmployee), and the employees import writes a first salary at once for an importer who holds PAYROLL_EDIT
+// (PeopleImport.js, through writeSalary and checkPayTerms; the user's call of Nov 12, 2026).
 function salaryAccess(p) {
     const userScope = people.scopeOf()
     if (!userScope.capabilities.payrollEdit) denied("PERMISSION_DENIED", "Setting a salary needs PAYROLL_EDIT")

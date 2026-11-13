@@ -1669,4 +1669,13 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown pay input operation " + op)
     return operations[op](p || {})
 }
-;({execute: run})
+;({
+    execute: run,
+    // P25 (PayrollRuns.js): a run's population is the group's employments of the period, read as preparation reads them
+    groupMembers,
+    periodOf,
+    zoneOf,
+    dayStart,
+    addDays,
+    daysFrom
+})

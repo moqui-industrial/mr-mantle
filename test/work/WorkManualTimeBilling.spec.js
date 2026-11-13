@@ -1,5 +1,6 @@
 // Regression: grouped client invoice lines retain rated sources, including manual hourly, zero and piece rates and a
-// referenced rate (rateAmountId, no hourly rate on the entry).
+// referenced rate (rateAmountId, no hourly rate on the entry); a worker invoice (RaprVendor) is for contractors: an employee's
+// entry named is refused (EMPLOYEE_TIME) and one found left out, a contractor's invoiced (the user's call of Nov 12, 2026).
 const INVOICE = "mantle.account.InvoiceServices"
 const made = {projects: [], invoices: []}
 const one = (entity, fields) => ec.entity.find(entity).condition(fields).one()
@@ -230,5 +231,96 @@ feature("#grouping grouping links manual-rate sources exactly once and releases 
         relinked.every(row => row.invoiceId === created.invoiceId && row.seq)
         unratedAfterRebuild.invoiceId == null && unratedAfterRebuild.seq == null
         cancelled.every(row => row.invoiceId == null && row.seq == null)
+    }
+})
+
+feature("a worker invoice refuses an employee's time when named and leaves it out when found; a contractor's time is invoiced", {
+    when() {
+        const projectId = "TMBV"
+        made.projects.push(projectId)
+        call("mantle.work.ProjectServices.create#Project", {workEffortId: projectId, workEffortName: "Worker invoice"})
+        call("create#mantle.work.effort.WorkEffortParty", {
+            workEffortId: projectId,
+            partyId: "ORG_ZIZI_SERVICES",
+            roleTypeId: "Vendor",
+            fromDate: stamp("2026-10-01 00:00:00"),
+            statusId: "WeptAssigned"
+        })
+        const taskId = call("mantle.work.TaskServices.create#Task", {
+            rootWorkEffortId: projectId,
+            workEffortName: "Worker invoice sources"
+        }).workEffortId
+        // an employee and a contractor (an agent) of the organization, made here
+        const worker = (partyId, relationshipTypeEnumId) => {
+            call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
+            call("create#mantle.party.Person", {partyId, firstName: "Worker", lastName: partyId})
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId,
+                fromPartyId: partyId,
+                toPartyId: "ORG_ZIZI_SERVICES",
+                fromDate: stamp("2026-01-01 00:00:00")
+            })
+            const timesheetId = call("create#mantle.work.time.Timesheet", {
+                partyId,
+                statusId: "TmshApproved",
+                fromDate: stamp("2026-10-12 00:00:00"),
+                thruDate: stamp("2026-10-19 00:00:00")
+            }).timesheetId
+            const timeEntryId = call("create#mantle.work.time.TimeEntry", {
+                partyId,
+                vendorPartyId: "ORG_ZIZI_SERVICES",
+                workEffortId: taskId,
+                timesheetId,
+                fromDate: stamp("2026-10-12 09:00:00"),
+                thruDate: stamp("2026-10-12 11:00:00"),
+                hours: 2,
+                vendorHourRate: 40,
+                rateTypeEnumId: "RatpStandard",
+                hasModifiedRates: "Y"
+            }).timeEntryId
+            const invoiceId = call("create#mantle.account.invoice.Invoice", {
+                invoiceTypeEnumId: "InvoiceSales",
+                fromPartyId: partyId,
+                toPartyId: "ORG_ZIZI_SERVICES",
+                statusId: "InvoiceIncoming",
+                currencyUomId: "USD",
+                invoiceDate: stamp("2026-10-20 10:00:00")
+            }).invoiceId
+            made.invoices.push(invoiceId)
+            return {timeEntryId, invoiceId}
+        }
+        const employee = worker("TMB_EMPLOYEE", "PrtEmployee")
+        const contractor = worker("TMB_CONTRACTOR", "PrtAgent")
+        const bill = (invoiceId, extra) => {
+            ec.message.pushErrors()
+            try {
+                const out = ec.service
+                    .sync()
+                    .name(INVOICE + ".create#TimeEntryInvoiceItems")
+                    .parameters(Object.assign({invoiceId, ratePurposeEnumId: "RaprVendor", currencyUomId: "USD"}, extra))
+                    .call()
+                return ec.message.hasError()
+                    ? /[A-Z][A-Z_]{3,}(?=:)/.exec(ec.message.getErrorsString())?.[0] || ec.message.getErrorsString()
+                    : Number(out.invoiceItemCreatedCount)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        const vendorInvoiceOf = timeEntryId => one("mantle.work.time.TimeEntry", {timeEntryId}).vendorInvoiceId || null
+        return {
+            named: bill(employee.invoiceId, {timeEntryIdList: [employee.timeEntryId]}),
+            found: bill(employee.invoiceId, {workEffortId: projectId, workerPartyId: "TMB_EMPLOYEE"}),
+            employeeInvoiced: vendorInvoiceOf(employee.timeEntryId),
+            contractor: bill(contractor.invoiceId, {timeEntryIdList: [contractor.timeEntryId]}),
+            contractorInvoiced: vendorInvoiceOf(contractor.timeEntryId) === contractor.invoiceId
+        }
+    },
+    then({named, found, employeeInvoiced, contractor, contractorInvoiced}) {
+        named == "EMPLOYEE_TIME"
+        found == 0
+        employeeInvoiced == null
+        contractor == 1
+        contractorInvoiced
     }
 })

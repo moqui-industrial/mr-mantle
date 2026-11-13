@@ -2085,5 +2085,12 @@ function run(op, p) {
     execute: run,
     groupReadiness,
     // P23 (PayrollAssignments.js): an assignment's input values are read as a structure's parameter values are
-    valuesOf
+    valuesOf,
+    // P25 (PayrollRuns.js): a run calculates a structure's lines as a preview does, from published terms alone
+    computeTerm,
+    calculationOrder,
+    componentsById,
+    storedValues,
+    termAt,
+    splitNames
 })

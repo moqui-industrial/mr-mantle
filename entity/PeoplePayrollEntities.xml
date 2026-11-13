@@ -433,6 +433,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="createdDate" type="date-time"/>
         <field name="changedByUserIds" type="text-medium"><description>Each user who made or changed an adjustment, comma separated:
             none of them decides it</description></field>
+        <field name="payrollRunId" type="id"><description>The pay run whose calculation took the input (impl-people P25): another run
+            does not take it while that run is live, and a change of it invalidates that run's approval</description></field>
         <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
         <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
         <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
@@ -446,6 +448,7 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="PAY_INPUT_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
         <index name="PAY_INPUT_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
         <index name="PAY_INPUT_SERIES"><index-field name="seriesInputId"/></index>
+        <index name="PAY_INPUT_RUN"><index-field name="payrollRunId"/></index>
         <index name="PAY_INPUT_ENTITLE" unique="true"><index-field name="activeEntitlementKey"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Payroll Input Type" enumTypeId="PayrollInputType"/>
@@ -499,5 +502,160 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="PAY_INSRC_INPUT"><index-field name="payrollInputId"/></index>
         <index name="PAY_INSRC_SOURCE"><index-field name="sourceEntityName"/><index-field name="sourceId"/></index>
         <index name="PAY_INSRC_ACTIVE" unique="true"><index-field name="activeSourceKey"/></index>
+    </entity>
+    <!-- impl-people P25 (design-people §8.1 PayrollRun and PayrollRunEmployment, §8.2 steps 1 to 5, PayRuns, PayRunDetail; PE-10): a
+        pay group's run for one of its prepared periods (PayrollRun: one employer and currency, its pay date and kind), its population
+        employment by employment (PayrollRunEmployment: selected, calculated, in error or excluded with a reason, each its own unit of
+        work with its outcome, totals and the fingerprint of the sources and rules it was calculated from) and each unit's draft
+        results (PayrollRunResult: a component's line or a localization's item, with its explanation). Written only by
+        mantle.humanres.PayrollRunServices (PayrollRuns.js), which checks PAYROLL_VIEW and PAYROLL_EDIT (PAYROLL_APPROVE to decide)
+        and the employer first. Calculation and approval create no invoice or payment (design §2, §8.3); a run's results are drafts
+        until P27's finalization, and the approval (a People approval of kind PakPayrollRun) is bound to the exact population,
+        amounts and source revisions. -->
+    <entity entity-name="PayrollRun" package="mantle.humanres.payroll" cache="never">
+        <description>A pay run of a pay group for one of its prepared periods: the employer and currency (the group's), the pay date,
+            its kind (regular, off-cycle, correction), the source cutoff, its state (draft, calculating, review, approved, and
+            P27's finalizing and finalized; cancelled), who prepared it (selected or calculated: none of them approves it) and the
+            approval it took (approvedRevision: the population, amounts and sources approved). A group's period has one live
+            regular run (activeRunKey, unique), so its inputs are not paid twice.</description>
+        <field name="payrollRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="payDate" type="date" enable-audit-log="update"/>
+        <field name="runKindEnumId" type="id"><description>PayrollRunKind</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollRun</description></field>
+        <field name="cutoffDate" type="date-time"/>
+        <field name="activeRunKey" type="text-medium"><description>group:period:kind of a live regular run; unique</description></field>
+        <field name="description" type="text-medium"/>
+        <field name="preparedByUserIds" type="text-long"><description>Each user who selected the population or calculated, comma
+            separated: none of them approves the run</description></field>
+        <field name="approvedRevision" type="text-medium"><description>The revision the approval was made at</description></field>
+        <field name="approvedDate" type="date-time"/>
+        <field name="returnedReason" type="text-long"><description>Why the approver returned it, when they did</description></field>
+        <field name="calculatedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
+        <relationship type="one" title="PayrollRunKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="runKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_RUN_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
+        <index name="PAY_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAY_RUN_ACTIVE" unique="true"><index-field name="activeRunKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Run Kind" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkRegular" description="Regular" sequenceNum="1" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkOffCycle" description="Off-cycle" sequenceNum="2" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkCorrection" description="Correction" sequenceNum="3" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.StatusType description="Payroll Run" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnDraft" description="Draft" sequenceNum="1" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnCalculating" description="Calculating" sequenceNum="2" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnReview" description="Review" sequenceNum="3" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnApproved" description="Approved" sequenceNum="4" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnFinalizing" description="Finalizing" sequenceNum="5" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnFinalized" description="Finalized" sequenceNum="6" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnCancelled" description="Cancelled" sequenceNum="7" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnReview" transitionName="Review"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnReview" transitionName="Review"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnReview" transitionName="Return"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnFinalizing" transitionName="Finalize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnFinalizing" toStatusId="PrnFinalized" transitionName="Finalized"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnCancelled" transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollRunEmployment" package="mantle.humanres.payroll" cache="never">
+        <description>An employment of a run's population, its own unit of work: pending (selected, not calculated yet or changed
+            since), calculated, in error (its reason code and message persisted, the other units going on) or excluded (with the
+            reason, its totals kept out but the exclusion shown in the approval); the primary pay assignment and structure it was
+            calculated with, its totals (gross, deductions, employer contributions, the localization's employee and employer
+            amounts, net, employer cost), how its period was split (salary, rate or assignment changes), the fingerprint of the
+            sources and rules its results were calculated from (sourceRevision: a change since makes the results stale and the
+            approval invalid), and the attempts made. One a run and employment.</description>
+        <field name="payrollRunEmploymentId" type="id" is-pk="true"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollRunUnit</description></field>
+        <field name="exclusionReason" type="text-medium"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="message" type="text-long"/>
+        <field name="payrollAssignmentId" type="id"/>
+        <field name="payrollStructureId" type="id"/>
+        <field name="grossAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="deductionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="contributionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployeeAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployerAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="netAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="employerCostAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="segmentCount" type="number-integer"/>
+        <field name="splitText" type="text-long" ai-opt-out="true"><description>How the period was split and prorated</description></field>
+        <field name="sourceRevision" type="text-medium"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="calculatedDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRun" short-alias="run"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_RUN_EMPL_RUN" unique="true"><index-field name="payrollRunId"/><index-field name="partyRelationshipId"/></index>
+        <index name="PAY_RUN_EMPL_REL"><index-field name="partyRelationshipId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Payroll Run Unit" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruPending" description="Pending" sequenceNum="1" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruCalculated" description="Calculated" sequenceNum="2" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruError" description="Error" sequenceNum="3" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruExcluded" description="Excluded" sequenceNum="4" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruFinalized" description="Finalized" sequenceNum="5" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruFinalized" transitionName="Finalize"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollRunResult" package="mantle.humanres.payroll" cache="never">
+        <description>A draft result line of a run's employment: a component's amount for the period (its segments summed or taken
+            once, its adjustments added, rounded to the currency; a statistical value in its unit, entering no total) or a
+            localization's item (employee or employer), with its explanation (each segment's formula and values, the rounding).
+            Replaced when the employment is calculated again; P26's payslips and P27's finalization make the lasting facts.</description>
+        <field name="payrollRunResultId" type="id" is-pk="true"/>
+        <field name="payrollRunEmploymentId" type="id"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="componentCode" type="text-short"/>
+        <field name="resultName" type="text-medium"/>
+        <field name="componentKindEnumId" type="id"/>
+        <field name="localizationParty" type="text-short"><description>employee or employer, for a localization's item</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="inTotals" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="explanation" type="text-long" ai-opt-out="true"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRunEmployment" short-alias="unit"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <index name="PAY_RUN_RES_UNIT"><index-field name="payrollRunEmploymentId"/></index>
+        <index name="PAY_RUN_RES_RUN"><index-field name="payrollRunId"/></index>
     </entity>
 </entities>

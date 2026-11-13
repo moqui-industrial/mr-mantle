@@ -1378,7 +1378,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="rateAmountId" type="id"><description>Client/customer hourly RateAmount reference</description></field>
         <field name="clientHourRate" type="number-decimal"/>
         <field name="vendorRateAmountId" type="id"><description>Vendor/worker hourly RateAmount reference</description></field>
-        <field name="vendorHourRate" type="number-decimal"/>
+        <field name="vendorHourRate" type="number-decimal" ai-opt-out="true"><description>The worker's rate, an employee's pay
+            rate copied on the entry: opted out of AI (IronStone People PE-21, the user's call of Nov 12, 2026), as a view's alias of
+            it is</description></field>
         <field name="fromDate" type="date-time"/>
         <field name="thruDate" type="date-time"/>
         <field name="hours" type="number-decimal"/>
@@ -1388,7 +1390,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="pieceRateAmountId" type="id"><description>Client/customer piece RateAmount reference</description></field>
         <field name="clientPieceRate" type="number-decimal"/>
         <field name="vendorPieceRateAmountId" type="id"><description>Vendor/worker piece RateAmount reference</description></field>
-        <field name="vendorPieceRate" type="number-decimal"/>
+        <field name="vendorPieceRate" type="number-decimal" ai-opt-out="true"><description>The worker's piece rate: opted out of
+            AI as vendorHourRate is</description></field>
         <field name="comments" type="text-long"/>
         <field name="facilityId" type="id"><description>Where the work was done; if null and workEffortId is set get from WorkEffort.facilityId</description></field>
         <field name="workEffortId" type="id"/>

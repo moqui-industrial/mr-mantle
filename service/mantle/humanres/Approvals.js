@@ -53,6 +53,9 @@ const PAY_STRUCTURE = "mantle.humanres.payroll.PayrollStructure"
 const PAY_LINE = "mantle.humanres.payroll.PayrollStructureComponent"
 // P24: a pay adjustment (PayrollInputServices)
 const PAY_INPUT = "mantle.humanres.payroll.PayrollInput"
+// P25: a pay run's approval reads the run's revision from its module
+const PAY_RUN = "mantle.humanres.payroll.PayrollRun"
+const payRuns = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollRuns.js")
 const MESSAGE = "moqui.security.user.NotificationMessage"
 const MESSAGE_USER = "moqui.security.user.NotificationMessageUser"
 const decideRoles = ["ParDepartmentHead", "ParManager", "ParPerson", "ParHr"]
@@ -534,6 +537,54 @@ const kinds = {
                     payrollInputId: sourceId,
                     subjectText: "a pay adjustment",
                     organizationName: names[lead.organizationPartyId] || lead.organizationPartyId || ""
+                }
+            }
+        }
+    },
+    // P25: a calculated pay run (PayrollRunServices submit#Run, approve#Run and return#Run): bound to the run's exact population,
+    // amounts and source revisions (PayrollRuns.js runRevision: a changed input, salary, rate, assignment or rule since makes it
+    // another revision, so a waiting request is superseded and an approval no longer holds). With no rule the employer's payroll
+    // approvers decide (PAYROLL_APPROVE, reading payroll); never one who selected the population or calculated it, nor who asked.
+    // The notice names the group and the period, never a person or an amount.
+    PakPayrollRun: {
+        topic: "PayrollRunApproval",
+        sourceEntityName: PAY_RUN,
+        sourceField: "payrollRunId",
+        defaultRole: "ParHr",
+        defaultBasis: "defaultPayApprover",
+        defaultRoleText: "Payroll approver",
+        defaultCandidates: (request, at) => holdersOf("PAYROLL_APPROVE", request.organizationPartyId, at),
+        decidePermissions: ["PAYROLL_APPROVE"],
+        requiredPermissions: ["PAYROLL_VIEW"],
+        revision(sourceId) {
+            return payRuns().runRevision(sourceId)
+        },
+        selfPartyIds(sourceId) {
+            const run = one(PAY_RUN, {payrollRunId: sourceId})
+            const userIds = String(run?.preparedByUserIds || "")
+                .split(",")
+                .map(value => value.trim())
+                .filter(Boolean)
+            if (!userIds.length) return []
+            return unique(
+                Array.from(find("moqui.security.UserAccount").condition("userId", "in", userIds).list())
+                    .map(account => account.partyId)
+                    .filter(Boolean)
+            )
+        },
+        describe(sourceId) {
+            const run = one(PAY_RUN, {payrollRunId: sourceId})
+            if (!run) return {label: "pay run " + sourceId}
+            const described = payRuns().runLabel(run)
+            const names = people.organizationNames([run.organizationPartyId])
+            return {
+                label: "pay run " + described.groupName + " " + described.periodText,
+                message: {
+                    payrollRunId: sourceId,
+                    subjectText: "a pay run",
+                    groupName: described.groupName,
+                    periodText: described.periodText,
+                    organizationName: names[run.organizationPartyId] || run.organizationPartyId || ""
                 }
             }
         }
