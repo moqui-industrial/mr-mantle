@@ -5,7 +5,10 @@
 // with the net effect; the person reads their own issued slips alone (a line kept off the payslip left out of their view), told
 // on PayslipIssued with no amount; the legacy pay history is read by its own key, never recalculated. With P25 review's
 // carry-overs: a payroll approver employed in the group does not approve a run holding their own pay, and calculating an approved
-// run with nothing changed keeps its approval. No invoice or payment is made. Standalone: spec-local organizations, people,
+// run with nothing changed keeps its approval. P26 review: a corrected run keeps its approval (RUN_CORRECTED), a correction of an
+// off-cycle slip pays its adjustments' change alone, the self-only service names no stored statement's location and refuses a
+// preview, the person reads their own legacy pay history, and an issued correction shows them no original not issued to them. No
+// invoice or payment is made. Standalone: spec-local organizations, people,
 // employments, pay configuration (published as data), salaries, inputs and users; a final slip is made as data where P27's
 // finalization would make it. Run: ./moq test mr-mantle --spec Payslips
 const prefix = "PAYSLIP_SPEC"
@@ -327,7 +330,7 @@ feature("an approved run's results become preview slips, payroll's alone, never 
         detail.yearToDate.basisText.includes("preview")
         detail.canIssue == false
         detail.canCorrect == true
-        mine.payslips.length == 0
+        mine.payslips.filter(row => !row.historical).length == 0
         code(ownPreview) == "RECORD_UNAVAILABLE"
         code(issuePreview) == "PREVIEW_ONLY"
         code(otherEmployer) == "RECORD_UNAVAILABLE"
@@ -417,6 +420,19 @@ feature("a correction is a new slip linked to the original, which stays, with th
         const approved = run(state.approver, R + "approve#Run", {payrollRunId: state.correction})
         const slip = slipOf(state.correction, state.SALEmp)
         state.slipC = slip?.payslipId
+        // P26 review: the corrected run keeps its approval, so the original never changes (its sources changed: it has work)
+        const recalculated = run(state.payroll, R + "calculate#Run", {payrollRunId: state.regular})
+        const reselected = run(state.payroll, R + "select#Employments", {payrollRunId: state.regular})
+        // P26 review: a correction of the off-cycle slip (the bonus was 350) pays the bonus's change alone, never the salary again
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        call("update#" + INPUT, {payrollInputId: state.bonusInput, amount: "350"})
+        const offCycleCorrection = run(state.payroll, R + "create#Correction", {payslipId: state.slipB, reason: "Bonus was 350"})
+        const offCycleCalculated = run(state.payroll, R + "calculate#Run", {payrollRunId: offCycleCorrection.payrollRunId})
+        run(state.payroll, R + "submit#Run", {payrollRunId: offCycleCorrection.payrollRunId})
+        run(state.approver, R + "approve#Run", {payrollRunId: offCycleCorrection.payrollRunId})
+        const offCycleSlip = slipOf(offCycleCorrection.payrollRunId, state.SALEmp)
+        state.slipD = offCycleSlip?.payslipId
         const originalAfter = rows(ITEM, {payslipId: state.slipA})
             .map(row => row.componentCode + "=" + money(row.amount))
             .sort()
@@ -437,7 +453,11 @@ feature("a correction is a new slip linked to the original, which stays, with th
             originalAfter,
             original,
             correction,
-            corrections
+            corrections,
+            recalculated,
+            reselected,
+            offCycleCalculated,
+            offCycleSlip
         }
     },
     then({
@@ -453,7 +473,11 @@ feature("a correction is a new slip linked to the original, which stays, with th
         originalAfter,
         original,
         correction,
-        corrections
+        corrections,
+        recalculated,
+        reselected,
+        offCycleCalculated,
+        offCycleSlip
     }) {
         staleOriginal.payslip.state == "stale"
         code(noReason) == "REASON_REQUIRED"
@@ -481,6 +505,15 @@ feature("a correction is a new slip linked to the original, which stays, with th
         correction.payslip.correctionReason == "Salary recorded wrong"
         correction.items.find(item => item.componentCode == "SALARY").nowText.includes("6,000.00")
         corrections.payslips.some(row => row.payslipId == state.slipC)
+        code(recalculated) == "RUN_CORRECTED"
+        code(reselected) == "RUN_CORRECTED"
+        offCycleCalculated.calculatedCount == 1
+        offCycleSlip.correctsPayslipId == state.slipB
+        money(lineOf(state.slipD, "BONUS").amount) == "50.00"
+        money(lineOf(state.slipD, "BONUS").previousAmount) == "300.00"
+        lineOf(state.slipD, "SALARY") == null
+        money(offCycleSlip.netAmount) == "49.00"
+        money(one(SLIP, {payslipId: state.slipB}).netAmount) == "294.00"
         rows("mantle.account.invoice.Invoice", {toPartyId: orgA}).length == state.invoicesBefore
     }
 })
@@ -513,15 +546,27 @@ feature("the person reads their own issued slips alone, told with no amount; the
         const mine = run(state.employee, P + "find#Payslips", {partyId: state.OTHER})
         const own = run(state.employee, P + "get#Payslip", {payslipId: state.slipA})
         const ownOffCycle = run(state.employee, P + "get#Payslip", {payslipId: state.slipB})
-        const latest = run(state.employee, P + "get#MyPayslip", {forTool: true})
+        // the Assistant's tool's service: no argument names a statement's location, another's slip or a preview (the user's call)
+        const latest = run(state.employee, P + "get#MyPayslip", {})
+        const toolPreview = run(state.employee, P + "get#MyPayslip", {payslipId: state.slipC})
+        const statement = run(state.employee, P + "get#MyPayslipStatement", {payslipId: state.slipA})
+        const statementByOther = run(state.other, P + "get#MyPayslipStatement", {payslipId: state.slipA})
         const byOther = run(state.other, P + "get#Payslip", {payslipId: state.slipA})
         // a payroll reader with self-service of their own reads only their own slip through the self-only service
         const payrollAsSelf = run(state.employedApprover, P + "get#MyPayslip", {payslipId: state.slipA})
         const history = run(state.payroll, P + "find#Payslips", {partyRelationshipId: state.SALEmp})
         const legacyKey = history.payslips?.find(row => row.historical)?.legacyKey
         const legacy = run(state.payroll, P + "get#Payslip", {legacyKey})
-        const legacyAsSelf = run(state.employee, P + "get#Payslip", {legacyKey})
+        // their own legacy pay history, historical and read only (the user's call); another's refused
+        const legacyAsSelf = run(state.employee, P + "get#MyPayslip", {legacyKey})
+        const legacyByOther = run(state.other, P + "get#MyPayslip", {legacyKey})
+        const otherList = run(state.other, P + "find#Payslips", {})
         return {
+            toolPreview,
+            statement,
+            statementByOther,
+            legacyByOther,
+            otherList,
             beforeIssue,
             myBefore,
             byHr,
@@ -556,9 +601,14 @@ feature("the person reads their own issued slips alone, told with no amount; the
         payrollAsSelf,
         history,
         legacy,
-        legacyAsSelf
+        legacyAsSelf,
+        toolPreview,
+        statement,
+        statementByOther,
+        legacyByOther,
+        otherList
     }) {
-        beforeIssue.payslips.length == 0
+        beforeIssue.payslips.filter(row => !row.historical).length == 0
         code(myBefore) == "RECORD_UNAVAILABLE"
         code(byHr) == "PERMISSION_DENIED"
         issued.statusId == "PssIssued"
@@ -568,8 +618,9 @@ feature("the person reads their own issued slips alone, told with no amount; the
         noticeUsers[0] == state.employee
         noticeText.includes("Payslips Spec A") && !noticeText.includes("4900") && !noticeText.includes("4,900")
         // their own issued slip alone: not the off-cycle or correction previews, not another person's whatever they ask
-        mine.payslips.length == 1
+        mine.payslips.filter(row => !row.historical).length == 1
         mine.payslips[0].payslipId == state.slipA
+        mine.payslips.some(row => row.historical && row.legacyKey && row.netText.includes("3,600.00"))
         own.payslip.payslipId == state.slipA
         own.payslip.payrollRunId == null
         own.items.some(item => item.componentCode == "SALARY")
@@ -579,14 +630,50 @@ feature("the person reads their own issued slips alone, told with no amount; the
         own.corrections.chain.length == 1
         code(ownOffCycle) == "RECORD_UNAVAILABLE"
         latest.payslip.payslipId == state.slipA
-        latest.file == null
+        latest.file.fileName != null
+        latest.file.location == null
+        !JSON.stringify(latest).includes("dbresource")
+        code(toolPreview) == "RECORD_UNAVAILABLE"
+        statement.location == one(SLIP, {payslipId: state.slipA}).contentLocation
+        code(statementByOther) == "RECORD_UNAVAILABLE"
         code(byOther) == "RECORD_UNAVAILABLE"
         code(payrollAsSelf) == "RECORD_UNAVAILABLE"
         history.payslips.some(row => row.historical && row.netText.includes("3,600.00"))
         legacy.payslip.historical == true
         legacy.totalsText.taxableYearToDate.includes("54,000.00")
-        code(legacyAsSelf) == "RECORD_UNAVAILABLE"
+        legacyAsSelf.payslip.historical == true
+        legacyAsSelf.totalsText.net.includes("3,600.00")
+        code(legacyByOther) == "RECORD_UNAVAILABLE"
+        otherList.payslips.length == 0
         rows("mantle.humanres.employment.EmploymentPayHistory", {partyRelationshipId: state.SALEmp}).length ==
             state.historiesBefore
+    }
+})
+
+feature("an issued correction shows the person its issued slips alone, not an original not issued to them", {
+    when() {
+        // the off-cycle slip's correction made final and issued while the off-cycle slip itself stays a preview
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        ec.entity
+            .find(SLIP)
+            .condition("payslipId", state.slipD)
+            .disableAuthz()
+            .one()
+            .setAll({statusId: "PssFinal", isPreview: "N"})
+            .update()
+        const issued = run(state.payroll, P + "issue#Payslip", {payslipId: state.slipD})
+        const own = run(state.employee, P + "get#MyPayslip", {payslipId: state.slipD})
+        const asPayroll = run(state.payroll, P + "get#Payslip", {payslipId: state.slipD})
+        return {issued, own, asPayroll}
+    },
+    then({issued, own, asPayroll}) {
+        issued.statusId == "PssIssued"
+        own.payslip.correctsPayslipId == state.slipB
+        own.corrections.chain.length == 1
+        own.corrections.chain[0].payslipId == state.slipD
+        own.corrections.originalNetText == ""
+        !JSON.stringify(own.corrections).includes("294.00")
+        asPayroll.corrections.chain.length == 2
     }
 })

@@ -101,7 +101,8 @@ along with this software (see the LICENSE.md file). If not, see
             now pays joins pending, one it no longer pays leaves), employments excluded with a reason (excludeIds, exclusionReason:
             REASON_REQUIRED; kept in the run and the approval, out of its totals) or included again (includeIds), and the pay date
             changed. Each change is reviewed again: an approval no longer holds and a request waiting is superseded. Refuses a run
-            finalizing, finalized or cancelled (RUN_CLOSED) and an employment not in the run (RECORD_UNAVAILABLE).</description>
+            finalizing, finalized or cancelled (RUN_CLOSED), an approved run whose slip a correction corrects (RUN_CORRECTED, P26
+            review) and an employment not in the run (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="payrollRunId" required="true"/>
             <parameter name="excludeIds"/>
@@ -139,7 +140,7 @@ along with this software (see the LICENSE.md file). If not, see
             is pending. P26: an off-cycle run's employment pays its adjustments alone (NOTHING_TO_PAY when none is left); a
             correction run's pays the change from what its original slip and the corrections before it paid (NO_CHANGE when
             nothing changed, ORIGINAL_WITHDRAWN when the original was withdrawn); an approved run with nothing to calculate keeps
-            its approval and slips.</description>
+            its approval and slips, and one whose slip a correction corrects is not recalculated (RUN_CORRECTED).</description>
         <in-parameters>
             <parameter name="payrollRunId" required="true"/>
             <parameter name="batchSize" type="Integer"/>
@@ -259,7 +260,9 @@ along with this software (see the LICENSE.md file). If not, see
             asked, approved and slipped as any run; its slip names the original, which stays as it was. Refuses a slip outside the
             payroll scope (RECORD_UNAVAILABLE), a withdrawn original (SLIP_WITHDRAWN), no reason (REASON_REQUIRED), a correction of
             the slip already open (CORRECTION_EXISTS) and an employment the group no longer pays in the period (NOT_IN_GROUP). An
-            operation key answers a retry with the first run. No invoice or payment is made.</description>
+            operation key answers a retry with the first run. A correction of an off-cycle slip recalculates its adjustments alone.
+            Once a correction (not cancelled) corrects a slip, the slip's run keeps its approval: calculating it with work to do or
+            selecting it is refused (RUN_CORRECTED), so the original never changes. No invoice or payment is made.</description>
         <in-parameters>
             <parameter name="payslipId" required="true"/>
             <parameter name="reason"/>

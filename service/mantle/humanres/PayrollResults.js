@@ -18,7 +18,10 @@
 //   nothing): the person's slips of the employer in the same year (the employer's fiscal year holding the pay date, else the
 //   calendar year) up to the slip's pay date, by line, with this slip added. Nothing is stored.
 // - The legacy pay history (EmploymentPayHistory and EmploymentPayDetail, design §8.4, §5 Q8) is read only, by its own key
-//   (partyRelationshipId and payDate), labelled historical and never recalculated; payroll's alone.
+//   (partyRelationshipId and payDate), labelled historical and never recalculated: payroll's, and the person's own (P26 review, the
+//   user's call of Nov 12, 2026: their own employments' records in SelfService's payslips).
+// - No answer to the person names where a statement is stored (P26 review, the user's call): get#MyPayslip, the Assistant's tool,
+//   says whether one is stored and its name; the screen's download asks get#MyPayslipStatement, which is no tool.
 // Amounts never leave pay's lane (design §1.1, §2): no notice, title or list for anyone else names one.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -329,9 +332,10 @@ function findPayslips(p) {
         if (row.statusId !== "PssWithdrawn" && (!mine || row.statusId === "PssIssued"))
             corrections[row.correctsPayslipId] = (corrections[row.correctsPayslipId] || 0) + 1
     let list = found.map(slip => slipRow(slip, names, orgNames, groupNames, corrections, mine ? "self" : "payroll"))
-    // the legacy pay history, payroll's alone, unless the list is of a run, a state or corrections
-    if (
-        !mine &&
+    // the legacy pay history, unless the list is of a run, a state or corrections: payroll's of the employers in scope, or the
+    // person's own (P26 review, the user's call), historical
+    if (mine) list = list.concat(legacyRows(scope, {organizationPartyId: p.organizationPartyId}, true))
+    else if (
         !text(p.payrollRunId) &&
         !text(p.payrollGroupId) &&
         !text(p.statusId) &&
@@ -342,10 +346,20 @@ function findPayslips(p) {
     list.sort((a, b) => b.payDate.localeCompare(a.payDate) || String(b.payslipId || "").localeCompare(String(a.payslipId || "")))
     return Object.assign({canIssue: scope.edit && !mine}, lib.pageList(list, p, "payslips", {noLimitCap: listCap}))
 }
-// The legacy pay history of the employments at the employers in scope (by person or employment when asked), read by its own key.
-function legacyRows(scope, p) {
+// The legacy pay history of the employments at the employers in scope (by person or employment when asked), read by its own key;
+// self: the caller's own employments' alone, whatever their payroll scope.
+function legacyRows(scope, p, self = false) {
     const query = find(HISTORY)
-    if (text(p.partyRelationshipId)) query.condition("partyRelationshipId", text(p.partyRelationshipId))
+    if (self) {
+        const own = Array.from(
+            find(RELATIONSHIP)
+                .condition({fromPartyId: scope.partyId, relationshipTypeEnumId: "PrtEmployee"})
+                .selectField("partyRelationshipId")
+                .list()
+        ).map(row => row.partyRelationshipId)
+        if (!own.length) return []
+        query.condition("partyRelationshipId", "in", own)
+    } else if (text(p.partyRelationshipId)) query.condition("partyRelationshipId", text(p.partyRelationshipId))
     const histories = Array.from(query.orderBy("-payDate").limit(listCap).list())
     if (!histories.length) return []
     const relationships = Object.fromEntries(
@@ -356,7 +370,8 @@ function legacyRows(scope, p) {
     )
     const kept = histories.filter(row => {
         const relationship = relationships[row.partyRelationshipId]
-        if (!relationship || !inScope(scope, relationship.toPartyId)) return false
+        if (!relationship) return false
+        if (self ? relationship.fromPartyId !== scope.partyId : !inScope(scope, relationship.toPartyId)) return false
         if (text(p.organizationPartyId) && relationship.toPartyId !== text(p.organizationPartyId)) return false
         if (text(p.partyId) && relationship.fromPartyId !== text(p.partyId)) return false
         return true
@@ -411,13 +426,13 @@ function yearOf(slip) {
 // The derived accumulators of a slip: the person's final and issued slips of the employer in the slip's currency and year, up to
 // its pay date, by line and in totals, with this slip added (a preview counts nothing for another slip, but its own lines are
 // shown with what it would add). keep: the lines the reader is shown.
-function accumulatorsOf(slip, items, keep) {
+function accumulatorsOf(slip, items, keep, self = false) {
     const year = yearOf(slip)
     const payDay = calendarDateText(slip.payDate)
     const counted = Array.from(
         find(SLIP)
             .condition({partyId: slip.partyId, organizationPartyId: slip.organizationPartyId, currencyUomId: slip.currencyUomId})
-            .condition("statusId", "in", factStatuses)
+            .condition("statusId", "in", self ? ["PssIssued"] : factStatuses)
             .condition("payslipId", "not-equals", slip.payslipId)
             .limit(listCap)
             .list()
@@ -443,7 +458,7 @@ function accumulatorsOf(slip, items, keep) {
         basisText:
             "Year to date, " +
             year.text +
-            ": final and issued pay up to " +
+            (self ? ": issued pay up to " : ": final and issued pay up to ") +
             payDay +
             (slip.statusId === "PssPreview" || slip.statusId === "PssWithdrawn"
                 ? ", with this preview slip added (a preview counts for no other slip)"
@@ -552,7 +567,7 @@ function itemRows(items, currencyUomId, correction) {
 }
 // A slip whole as the reader may read it (how: payroll or self): its header, lines, totals, year to date, the correction chain
 // with the net effect, the inputs taken, the stored statement and what the reader may do.
-function slipView(scope, slip, how, forTool = false) {
+function slipView(scope, slip, how) {
     const self = how === "self"
     const allItems = rows(ITEM, {payslipId: slip.payslipId})
     const keep = item => !self || item.payslipVisible !== "N"
@@ -564,13 +579,16 @@ function slipView(scope, slip, how, forTool = false) {
     const orgNames = people.organizationNames([slip.organizationPartyId])
     const correction = !!slip.correctsPayslipId
     const original = originalOf(slip)
-    // the chain: the original and its corrections (a person sees the issued ones alone), with the net effect of those standing
+    // the chain: the original and its corrections (a person sees the issued ones alone, the original too: P26 review), with the net
+    // effect of those standing
     const chainRows = rows(SLIP, {correctsPayslipId: original.payslipId})
         .filter(row => (self ? row.statusId === "PssIssued" : true))
         .sort((a, b) => String(a.payslipId).localeCompare(String(b.payslipId)))
-    const standing = [original].concat(chainRows).filter(row => liveStatuses.includes(row.statusId))
+    const originalShown = !self || original.statusId === "PssIssued"
+    const chainSlips = (originalShown ? [original] : []).concat(chainRows)
+    const standing = chainSlips.filter(row => liveStatuses.includes(row.statusId))
     const netEffect = standing.reduce((sum, row) => sum.add(decimalOf(row.netAmount)), zero())
-    const chain = [original].concat(chainRows).map(row => ({
+    const chain = chainSlips.map(row => ({
         payslipId: row.payslipId,
         original: row.payslipId === original.payslipId,
         current: row.payslipId === slip.payslipId,
@@ -639,58 +657,82 @@ function slipView(scope, slip, how, forTool = false) {
             net: sum("netAmount"),
             employerCost: sum("employerCostAmount")
         },
-        yearToDate: correction ? null : accumulatorsOf(slip, allItems, keep),
+        yearToDate: correction ? null : accumulatorsOf(slip, allItems, keep, self),
         corrections: {
             chain,
             hasCorrections: chainRows.length > 0,
             netEffectText: moneyText(netEffect, currencyUomId),
-            originalNetText: moneyText(original.netAmount, original.currencyUomId)
+            originalNetText: originalShown ? moneyText(original.netAmount, original.currencyUomId) : ""
         },
         inputs: inputsOf(slip),
         canIssue: !self && scope.edit && slip.statusId === "PssFinal",
         canCorrect: !self && scope.edit && liveStatuses.includes(original.statusId) && !openCorrection,
         openCorrectionRunId: openCorrection?.payrollRunId || null,
-        file:
-            slip.contentLocation && !forTool
-                ? {
-                      location: slip.contentLocation,
-                      fileName: slip.fileName,
-                      contentType: slip.contentType,
-                      issuedDateText: dateText(slip.issuedDate)
-                  }
-                : null
+        // the stored statement: where it is stored for payroll alone (P26 review: no answer to the person, the Assistant's tool's
+        // among them, names its location)
+        file: slip.contentLocation
+            ? {
+                  location: self ? null : slip.contentLocation,
+                  fileName: slip.fileName,
+                  contentType: slip.contentType,
+                  issuedDateText: dateText(slip.issuedDate)
+              }
+            : null
     }
     return view
 }
 function getPayslip(p) {
     const scope = scopes()
-    if (!blank(p.legacyKey)) return legacyView(scope, text(p.legacyKey))
+    if (!blank(p.legacyKey)) return legacyView(scope, text(p.legacyKey), "any")
     const id = text(p.payslipId)
     const slip = id ? one(SLIP, {payslipId: id}) : null
     const how = howRead(scope, slip)
     if (!how) unavailable(id)
     return slipView(scope, slip, how)
 }
-// The Assistant's tool and the person's own slip screen: the caller's own issued slip alone (the latest when none is named), never
-// another person's, a preview or one not issued, whatever the caller's payroll rights; no file location. The amounts are the
-// person's own (impl-people P26 Built note: the user's call on the self-only tool and pay's AI opt-out).
+// The Assistant's tool and the person's own slip screen: the caller's own issued slip alone (the latest when none is named), or
+// their own legacy pay record by its key, never another person's, a preview or one not issued, whatever the caller's payroll
+// rights; never the stored statement's location. The amounts are the person's own (the user's call of Nov 12, 2026: the self-only
+// tool returns them to the person's own session; screens and generic data reads stay opted out).
 function getMyPayslip(p) {
     const scope = scopes()
     if (!scope.self) denied("PERMISSION_DENIED", "Your payslips need PEOPLE_SELF_SERVICE and a person")
-    const id = text(p.payslipId)
+    if (!blank(p.legacyKey)) return legacyView(scope, text(p.legacyKey), "self")
+    return slipView(scope, ownIssued(scope, text(p.payslipId)), "self")
+}
+// The caller's own issued slip (payslipId's, else the latest), else RECORD_UNAVAILABLE.
+function ownIssued(scope, id) {
     const slip = id
         ? one(SLIP, {payslipId: id})
         : find(SLIP).condition({partyId: scope.partyId, statusId: "PssIssued"}).orderBy(["-payDate", "-issuedDate"]).one()
     if (!slip || slip.partyId !== scope.partyId || slip.statusId !== "PssIssued")
         denied("RECORD_UNAVAILABLE", id ? "Payslip " + id + " is not available" : "You have no issued payslip yet")
-    return slipView(scope, slip, "self", truthy(p.forTool))
+    return slip
 }
-// A legacy pay record by its own key (partyRelationshipId|payDate), payroll's alone, as recorded: its details and the year-to-date
-// figures it stored, never recalculated.
-function legacyView(scope, legacyKey) {
+// The stored statement of the caller's own issued slip, for the screen's download alone (no Assistant tool calls it): its location,
+// name and type.
+function getMyPayslipStatement(p) {
+    const scope = scopes()
+    if (!scope.self) denied("PERMISSION_DENIED", "Your payslips need PEOPLE_SELF_SERVICE and a person")
+    const id = text(p.payslipId)
+    if (!id) unavailable(id)
+    const slip = ownIssued(scope, id)
+    if (!slip.contentLocation) denied("RECORD_UNAVAILABLE", "This payslip has no statement")
+    return {location: slip.contentLocation, fileName: slip.fileName, contentType: slip.contentType}
+}
+// A legacy pay record by its own key (partyRelationshipId|payDate), as recorded: its details and the year-to-date figures it
+// stored, never recalculated. Read by a payroll reader of its employer, or by its own person (P26 review, the user's call of Nov 12,
+// 2026): who "self" (get#MyPayslip) the person alone, "any" (get#Payslip) either.
+function legacyView(scope, legacyKey, who) {
     const [partyRelationshipId, payDay] = legacyKey.split("|")
     const relationship = partyRelationshipId ? one(RELATIONSHIP, {partyRelationshipId}) : null
-    if (!scope.payroll || !relationship || !inScope(scope, relationship.toPartyId) || !payDay)
+    const payroll = who !== "self" && scope.payroll && !!relationship && inScope(scope, relationship.toPartyId)
+    const own =
+        scope.self &&
+        !!relationship &&
+        relationship.relationshipTypeEnumId === "PrtEmployee" &&
+        relationship.fromPartyId === scope.partyId
+    if (!relationship || !payDay || !(payroll || own))
         denied("RECORD_UNAVAILABLE", "Pay record " + legacyKey + " is not available")
     const history = rows(HISTORY, {partyRelationshipId}).find(row => calendarDateText(row.payDate) === payDay)
     if (!history) denied("RECORD_UNAVAILABLE", "Pay record " + legacyKey + " is not available")
@@ -935,7 +977,7 @@ function contentAccess(p) {
     return found
 }
 
-const operations = {findPayslips, getPayslip, getMyPayslip, issuePayslip, payslipAccess, contentAccess}
+const operations = {findPayslips, getPayslip, getMyPayslip, getMyPayslipStatement, issuePayslip, payslipAccess, contentAccess}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown payslip operation " + op)
     // each operation checks its caller first; the statement's storage is written as the service, not the caller

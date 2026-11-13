@@ -26,7 +26,8 @@ along with this software (see the LICENSE.md file). If not, see
             employer, group, person, employment, run, period, state (withdrawn ones left out unless asked) or kind, or show
             corrections or historical; with the legacy pay history (historical, by its own key) unless the list is of a run, a
             group, a state, a kind or corrections. For a caller without PAYROLL_VIEW, or with mine: the caller's own issued slips alone (PEOPLE_SELF_SERVICE;
-            a supplied party never widens it). Each: the person, employer, group, period, pay date, kind, state, gross and net, the
+            a supplied party never widens it) and their own employments' legacy pay history, historical (P26 review, the user's
+            call of Nov 12, 2026). Each: the person, employer, group, period, pay date, kind, state, gross and net, the
             slip it corrects and its count of corrections. Refuses a caller with neither (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
@@ -76,7 +77,8 @@ along with this software (see the LICENSE.md file). If not, see
             totals; the year to date derived from final and issued slips (the employer's fiscal or the calendar year, this slip
             added); the correction chain (the original and its corrections, each standing or not) with the net effect; the inputs
             its run took with their sources; the stored statement; and what the caller may do (issue a final slip, correct). With
-            legacyKey (partyRelationshipId|payDate), a payroll reader's legacy pay record as recorded, never recalculated. Refuses
+            legacyKey (partyRelationshipId|payDate), a legacy pay record as recorded, never recalculated (a payroll reader's of its
+            employer, or its own person's). Refuses
             another's slip and a missing one alike (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="payslipId"/>
@@ -109,16 +111,18 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="MyPayslip" allow-remote="false">
-        <description>The caller's own issued payslip (PEOPLE_SELF_SERVICE; no party is taken): payslipId's, else the latest issued.
-            Its header, the lines the payslip shows with their explanations, the totals, the year to date, its corrections that are
-            issued with the net effect, and the inputs its run took. Never another person's slip, a preview, a withdrawn slip or one
-            not issued, whatever the caller's payroll rights (RECORD_UNAVAILABLE). The person's own SelfService slip and the
-            Assistant's tool (BOSS's AgentToolExposure people_my_payslip, never MCP): the amounts are the person's own, returned
-            to their own session (impl-people P26, the user's call on pay's AI opt-out); forTool leaves out the stored file's
-            location.</description>
+        <description>The caller's own issued payslip (PEOPLE_SELF_SERVICE; no party is taken): payslipId's, else the latest issued;
+            or, with legacyKey (partyRelationshipId|payDate), their own employment's legacy pay record as recorded, historical and
+            never recalculated. Its header, the lines the payslip shows with their explanations, the totals, the year to date (issued
+            pay), its issued corrections (and its original once issued) with the net effect, and the inputs its run took. Never
+            another person's slip or record, a preview, a withdrawn slip or one not issued, whatever the caller's payroll rights or
+            parameters (RECORD_UNAVAILABLE). The person's own SelfService slip and the Assistant's tool (BOSS's AgentToolExposure
+            people_my_payslip, never MCP): the amounts are the person's own, returned to their own session (the user's call of Nov
+            12, 2026). The stored statement is named (file: its name, type and issue date), never where it is stored: the download
+            reads get#MyPayslipStatement.</description>
         <in-parameters>
             <parameter name="payslipId"/>
-            <parameter name="forTool" type="Boolean"/>
+            <parameter name="legacyKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="payslip" type="Map"/>
@@ -138,6 +142,23 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="corrections" from="found.corrections"/>
             <set field="inputs" from="found.inputs"/>
             <set field="file" from="found.file"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyPayslipStatement" allow-remote="false">
+        <description>The stored statement of the caller's own issued payslip (PEOPLE_SELF_SERVICE), for its screen's download: its
+            location, file name and type. Another person's slip, one not issued and one with no statement are missing ones
+            (RECORD_UNAVAILABLE). Exposed to no Assistant or MCP tool (impl-people P26 review).</description>
+        <in-parameters><parameter name="payslipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="location"/>
+            <parameter name="fileName"/>
+            <parameter name="contentType"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('getMyPayslipStatement', context)"/>
+            <set field="location" from="found.location"/>
+            <set field="fileName" from="found.fileName"/>
+            <set field="contentType" from="found.contentType"/>
         </actions>
     </service>
     <service verb="issue" noun="Payslip" allow-remote="false">

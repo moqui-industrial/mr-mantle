@@ -179,6 +179,20 @@ function withPreparer(run) {
     if (ec.user.userId && !userIds.includes(ec.user.userId)) userIds.push(ec.user.userId)
     return userIds.join(",") || null
 }
+// P26 review: an approved run one of whose slips a correction run (not cancelled) corrects keeps its approval: its slips stand as
+// the originals the corrections pay the change from, so a later change is corrected too, never recalculated into the original.
+function checkUncorrected(run) {
+    if (run.statusId !== "PrnApproved") return
+    const slipIds = rows(SLIP, {payrollRunId: run.payrollRunId}).map(row => row.payslipId)
+    const correcting = rowsIn(RUN, "correctsPayslipId", slipIds).find(row => row.statusId !== "PrnCancelled")
+    if (correcting)
+        denied(
+            "RUN_CORRECTED",
+            "Pay run " +
+                correcting.payrollRunId +
+                " corrects a payslip of this approved run, so the run stays as approved: correct its payslips instead"
+        )
+}
 function checkChangeable(run) {
     if (!changeableStatuses.includes(run.statusId))
         denied(
@@ -373,6 +387,8 @@ function selectEmployments(p) {
     const includeIds = splitIds(p.includeIds)
     const reason = text(p.exclusionReason)
     if (excludeIds.length && !reason) denied("REASON_REQUIRED", "Say why the employees are left out of this run")
+    // P26 review: selecting an approved run takes its approval back, which a corrected one keeps
+    checkUncorrected(run)
     const synced = syncPopulation(run, group, period, zone)
     const units = Object.fromEntries(rows(UNIT, {payrollRunId: run.payrollRunId}).map(unit => [unit.partyRelationshipId, unit]))
     let excludedCount = 0
@@ -540,7 +556,8 @@ function factsOf(run, facts, units) {
         liveOthers,
         ownRunIds,
         before,
-        adjustmentsOnly: run.runKindEnumId === "PrkOffCycle"
+        // P26 review: a correction of an off-cycle slip pays the change of its adjustments alone, never a salary or structure line
+        adjustmentsOnly: run.runKindEnumId === "PrkOffCycle" || before?.original?.runKindEnumId === "PrkOffCycle"
     }
     return {
         members,
@@ -963,6 +980,7 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
         }
     }
     return finishEmployment(run, group, period, zone, member, byCode, taken, waiting, {
+        ownRunIds: found.shared.ownRunIds,
         assignment: last && segments[segments.length - 1].assignment,
         segmentCount: segments.length,
         splitText: splitParts.join("; ")
@@ -1071,7 +1089,10 @@ function finishEmployment(run, group, period, zone, member, byCode, taken, waiti
     return {
         ok: true,
         results,
-        takenIds: taken.filter(row => !row.payrollRunId || row.payrollRunId === run.payrollRunId).map(row => row.payrollInputId),
+        // the inputs this run marks: not those its correction's base runs took (theirs, paid there)
+        takenIds: taken
+            .filter(row => !row.payrollRunId || row.payrollRunId === run.payrollRunId || !extra.ownRunIds?.has(row.payrollRunId))
+            .map(row => row.payrollInputId),
         waitingCount: waiting.length,
         assignment: extra.assignment || null,
         segmentCount: extra.segmentCount ?? null,
@@ -1089,10 +1110,14 @@ function finishEmployment(run, group, period, zone, member, byCode, taken, waiti
 }
 // P26: an off-cycle run's employment: the approved adjustments of the period no live run took (each to its component's line), with
 // no salary or structure line, then rounded, localized and totalled as any employment.
-function computeOffCycle(run, group, period, zone, member, found) {
+// P26 review: a correction of an off-cycle slip (forCorrection) is calculated the same way, and with nothing left to pay its lines
+// are none, so the adjustments paid before are recovered.
+function computeOffCycle(run, group, period, zone, member, found, forCorrection = false) {
     const {taken, waiting} = takenInputs(run, found)
-    if (!taken.length) return failure("NOTHING_TO_PAY", "No approved adjustment of this employee waits to be paid in the period")
+    if (!taken.length && !forCorrection)
+        return failure("NOTHING_TO_PAY", "No approved adjustment of this employee waits to be paid in the period")
     return finishEmployment(run, group, period, zone, member, {}, taken, waiting, {
+        ownRunIds: found.shared.ownRunIds,
         splitText: "Off-cycle: the period's approved adjustments"
     })
 }
@@ -1176,10 +1201,13 @@ function calculateUnit(run, facts, unitId) {
         return "unchanged"
     const found = loaded.forUnit(unit)
     const member = found.member
+    // P26 review: a correction of an off-cycle slip recalculates its adjustments alone (as the off-cycle run did), not the period's
+    // salary and structure lines, which its original never paid
+    const offCycleBase = found.shared.before?.original?.runKindEnumId === "PrkOffCycle"
     let outcome = !member
         ? failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
-        : run.runKindEnumId === "PrkOffCycle"
-          ? computeOffCycle(run, group, period, zone, member, found)
+        : run.runKindEnumId === "PrkOffCycle" || offCycleBase
+          ? computeOffCycle(run, group, period, zone, member, found, offCycleBase)
           : computeEmployment(run, group, period, zone, periodDays, member, found)
     if (outcome.ok && run.runKindEnumId === "PrkCorrection") outcome = correctionOf(run, outcome, found)
     clearUnit(run, unit)
@@ -1269,7 +1297,9 @@ function calculateRun(p) {
             unit.statusId === "PruError" ||
             (unit.statusId === "PruCalculated" && unit.sourceRevision !== prints.get(unit.payrollRunEmploymentId))
     )
-    // P25 review's finding: an approved run with nothing to calculate keeps its approval (and its slips)
+    // P25 review's finding: an approved run with nothing to calculate keeps its approval (and its slips); one with work whose slips
+    // are corrected is not recalculated (P26 review)
+    if (work.length) checkUncorrected(run)
     if (run.statusId === "PrnApproved" && !work.length)
         return {
             payrollRunId: run.payrollRunId,
@@ -1495,6 +1525,8 @@ function createCorrection(p) {
         )
     const reason = text(p.reason)
     if (!reason) denied("REASON_REQUIRED", "Say what changed: the source or rule the correction follows")
+    // P26 review: the original locked, so two corrections made at once are not both open
+    find(SLIP).condition("payslipId", original.payslipId).forUpdate(true).one()
     const open = rows(RUN, {correctsPayslipId: original.payslipId}).find(row =>
         ["PrnDraft", "PrnCalculating", "PrnReview"].includes(row.statusId)
     )
