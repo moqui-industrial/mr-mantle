@@ -115,6 +115,78 @@ function reportOrganizations(named = []) {
     }
 }
 
+// ===== accounts (P3) =====
+// An account (design §4 Accounts; impl-sales P3) is a party with a Sales account role (Account, Customer or Prospect) that is not
+// an internal organization, not disabled or merged, and not another user's personal contact; it belongs to the organization that
+// owns it (Party.ownerPartyId, the same field the organization filters read) or, owned by none (_NA_), is shared and seen by every
+// organization, as Customer Service's shared customers are. A Sales reader sees the accounts of the organizations of their scope
+// and the shared ones; a contact is a person with a current PrtContact relationship to such an account, and is seen through it.
+// A refused account answers as a missing one (RECORD_UNAVAILABLE).
+const accountRoles = ["Account", "Customer", "Prospect"]
+const sharedOwner = "_NA_"
+function isInternal(partyId) {
+    return !!lib.one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
+}
+function hasAccountRole(partyId) {
+    return (
+        lib.find("mantle.party.PartyRole").condition("partyId", partyId).condition("roleTypeId", "in", accountRoles).count() > 0
+    )
+}
+// The party as a party the caller may see: not disabled, not another user's personal contact, owned by an organization of the
+// scope or by none (_NA_).
+function visibleParty(userScope, partyId) {
+    if (!partyId || !userScope.capabilities.anyRead) return null
+    const party = lib.one("mantle.party.Party", {partyId})
+    if (!party || party.disabled === "Y" || party.mergedToPartyId) return null
+    if (party.privateOwnerUserId && party.privateOwnerUserId !== ec.user.userId) return null
+    const ownerPartyId = party.ownerPartyId || sharedOwner
+    if (ownerPartyId !== sharedOwner && !covers(userScope, ownerPartyId)) return null
+    return party
+}
+// The account, or null: {party, organizationPartyId (its owner, null when shared), shared}.
+function accountOf(userScope, partyId) {
+    const party = visibleParty(userScope, partyId)
+    if (!party || !hasAccountRole(partyId) || isInternal(partyId)) return null
+    const ownerPartyId = party.ownerPartyId || sharedOwner
+    return {party, organizationPartyId: ownerPartyId === sharedOwner ? null : ownerPartyId, shared: ownerPartyId === sharedOwner}
+}
+function requireAccount(userScope, partyId) {
+    const account = accountOf(userScope, partyId)
+    if (!account) denied("RECORD_UNAVAILABLE", "Account " + (partyId || "") + " is not available")
+    return account
+}
+// The accounts of the scope a person is a current contact of (PrtContact from the person to the account).
+function contactAccounts(userScope, partyId) {
+    if (!visibleParty(userScope, partyId)) return []
+    const accounts = []
+    for (const row of lib.rows("mantle.party.PartyRelationship", {fromPartyId: partyId, relationshipTypeEnumId: "PrtContact"})) {
+        if (!lib.active(row)) continue
+        const account = accountOf(userScope, row.toPartyId)
+        if (account && !accounts.some(found => found.party.partyId === row.toPartyId))
+            accounts.push(Object.assign({partyRelationshipId: row.partyRelationshipId}, account))
+    }
+    return accounts
+}
+// The organization an account write is for: the one named, which must be in the scope, else the active one, else the scope's
+// only one. Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
+// (ORGANIZATION_DENIED).
+function accountOrganization(userScope, organizationPartyId) {
+    requireCapability(userScope, "accountEdit")
+    let chosen = organizationPartyId || userScope.activeOrganizationPartyId
+    if (!chosen && userScope.organizationPartyIds?.length === 1) chosen = userScope.organizationPartyIds[0]
+    if (!chosen) denied("ORGANIZATION_DENIED", "Choose the organization the account belongs to")
+    if (!isInternal(chosen)) denied("ORGANIZATION_DENIED", "Organization " + chosen + " is not available")
+    return requireOrganization(userScope, chosen)
+}
+// Whether the caller may merge accounts of an organization (design §4 MergeAccounts, impl-sales §4 F45): a Sales manager or
+// administrator, SALES_ACCOUNT_EDIT with SALES_TEAM_MANAGE or SALES_CONFIGURE, for an organization of their scope.
+function mergesFor(userScope, organizationPartyId) {
+    const caps = userScope.capabilities
+    return (
+        !!organizationPartyId && caps.accountEdit && (caps.teamManage || caps.configure) && covers(userScope, organizationPartyId)
+    )
+}
+
 // ===== P2: sales teams (impl-sales P2; design-sales §9 Teams) =====
 // A sales team is an Organization party with the SalesTeam role, owned by its organization; its dated PrtSalesTeamOf row to the
 // organization is its effective interval, and its members are dated PrtSalesTeamMember rows from the person (a
@@ -154,6 +226,15 @@ function memberTeams(partyId, at = ec.user.nowTimestamp) {
     requireCapability,
     requireOrganization,
     reportOrganizations,
+    // P3: accounts and contacts
+    accountRoles,
+    isInternal,
+    visibleParty,
+    accountOf,
+    requireAccount,
+    contactAccounts,
+    accountOrganization,
+    mergesFor,
     // P2: sales teams
     teamRelationships,
     teamOrganization,
