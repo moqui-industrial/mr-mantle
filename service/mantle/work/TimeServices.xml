@@ -930,7 +930,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="resetAndGet" noun="TimeEntryRates">
-        <description>Reset and get the various RateAmount fields for TimeEntry records matching constraints and with no invoiceId and no vendorInvoiceId.</description>
+        <description>Reset and get the various RateAmount fields for TimeEntry records matching constraints and with no invoiceId and no vendorInvoiceId. A worker rate payroll read changes only as get#TimeEntryRate allows (impl-people P24 review).</description>
         <in-parameters>
             <parameter name="timePeriodId"/>
             <parameter name="workEffortId"/>
@@ -962,7 +962,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="resetAndGet" noun="ProjectTimeEntryRates">
-        <description>Reset and get the various RateAmount fields for TimeEntry records matching constraints and with no invoiceId and no vendorInvoiceId.</description>
+        <description>Reset and get the various RateAmount fields for TimeEntry records matching constraints and with no invoiceId and no vendorInvoiceId. A worker rate payroll read changes only as get#TimeEntryRate allows (impl-people P24 review).</description>
         <in-parameters>
             <parameter name="rootWorkEffortId"/>
         </in-parameters>
@@ -979,7 +979,11 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="TimeEntryRate">
-        <description>Find the RateAmount records for a TimeEntry and if not set already then set TimeEntry hour and piece rates from these.</description>
+        <description>Find the RateAmount records for a TimeEntry and if not set already then set TimeEntry hour and piece rates from these.
+            A worker rate (vendorHourRate, vendorPieceRate) payroll read is changed only as payroll allows (impl-people P24 review,
+            owner contract): one a finalized pay input paid stays as it was paid (the client rates still found again), and a change of
+            one a pay input not finalized consumed voids that input (mantle.humanres.PayrollInputServices release#Sources), so payroll
+            prepares it again. resetAndGet#TimeEntryRates and resetAndGet#ProjectTimeEntryRates reach it.</description>
         <in-parameters>
             <parameter name="timeEntryId" required="true"/>
             <!-- TODO: where to get currency... project setting? client or internal org setting? -->
@@ -998,6 +1002,9 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.work.time.TimeEntry" value-field="timeEntry" for-update="true"/>
+            <!-- the worker rates payroll may have read (impl-people P24 review), compared before the update -->
+            <set field="payRatesBefore" from="{vendorRateAmountId:timeEntry.vendorRateAmountId, vendorPieceRateAmountId:timeEntry.vendorPieceRateAmountId,
+                    vendorHourRate:timeEntry.vendorHourRate, vendorPieceRate:timeEntry.vendorPieceRate}"/>
 
             <if condition="resetRates">
                 <set field="timeEntry.rateAmountId" from="null"/>
@@ -1068,6 +1075,26 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="timeEntry.hasModifiedRates != 'Y'"><set field="timeEntry.vendorPieceRate" from="vendorPieceRateAmount"/></if>
             </else></if>
 
+            <!-- a worker rate payroll read: kept as paid by a finalized pay input, else its pay input voided when it changes -->
+            <if condition="String(timeEntry.vendorHourRate ?? '') != String(payRatesBefore.vendorHourRate ?? '') ||
+                    String(timeEntry.vendorPieceRate ?? '') != String(payRatesBefore.vendorPieceRate ?? '')">
+                <service-call name="mantle.humanres.PayrollInputServices.check#SourceUse" out-map="payUse" disable-authz="true"
+                        in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId]}"/>
+                <if condition="payUse.finalizedIdList?.length"><then>
+                    <set field="timeEntry.vendorRateAmountId" from="payRatesBefore.vendorRateAmountId"/>
+                    <set field="timeEntry.vendorPieceRateAmountId" from="payRatesBefore.vendorPieceRateAmountId"/>
+                    <set field="timeEntry.vendorHourRate" from="payRatesBefore.vendorHourRate"/>
+                    <set field="timeEntry.vendorPieceRate" from="payRatesBefore.vendorPieceRate"/>
+                    <set field="vendorRateAmountId" from="payRatesBefore.vendorRateAmountId"/>
+                    <set field="vendorRateAmount" from="payRatesBefore.vendorHourRate"/>
+                    <set field="vendorPieceRateAmountId" from="payRatesBefore.vendorPieceRateAmountId"/>
+                    <set field="vendorPieceRateAmount" from="payRatesBefore.vendorPieceRate"/>
+                </then><else-if condition="payUse.consumedIdList?.length">
+                    <service-call name="mantle.humanres.PayrollInputServices.release#Sources" disable-authz="true"
+                            in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:[timeEntryId], reason:'Its worker rate changed'}"/>
+                    <if condition="ec.message.hasError()"><return/></if>
+                </else-if></if>
+            </if>
             <entity-update value-field="timeEntry"/>
             <!-- <log level="warn" message="=============== rateAmountId=${rateAmountId}, rateAmount=${rateAmount}, vendorRateAmountId=${vendorRateAmountId}, vendorRateAmount=${vendorRateAmount}, pieceRateAmountId=${pieceRateAmountId}, pieceRateAmount=${pieceRateAmount}, vendorPieceRateAmountId=${vendorPieceRateAmountId}, vendorPieceRateAmount=${vendorPieceRateAmount}"/> -->
         </actions>

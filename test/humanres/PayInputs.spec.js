@@ -6,7 +6,9 @@
 // payroll resolution); a time entry on a worker invoice is refused as a pay source and a worker invoice refuses a consumed one;
 // an authorized rate change voids an input not finalized, and a finalized one refuses the change and the week's reopening; an
 // adjustment waits for a payroll approver, never its maker, recurs one input a period, is refused with a reason, and a
-// recovery never passes the advance's outstanding amount. The reconciliation carries no amount; a manager reads their reports'.
+// recovery never passes the advance's outstanding amount, when made or approved. The reconciliation carries no amount; a manager
+// reads their reports' time inputs alone. P24 review: pieces are payroll's on any basis; Projects' bulk rate reset keeps a paid
+// worker rate and voids an input it changes.
 // Standalone: spec-local organizations, people, employments, pay configuration, time, attendance, leave, a claim and users, made
 // as data (the time, leave and configuration flows are their own specs'). Run: ./moq test mr-mantle --spec PayInputs
 const prefix = "PAY_IN_SPEC"
@@ -50,6 +52,7 @@ const summary = partyRelationshipId =>
             ].join(" ")
         )
         .sort()
+const unique = values => Array.from(new Set(values))
 const outcomes = out =>
     out.error
         ? code(out)
@@ -454,6 +457,17 @@ feature("a time entry on a worker invoice is refused as a pay source, and a work
             workerPartyId: state.ana,
             timesheetId: state.anaWeek
         })
+        // P24 review: an entry's pieces are payroll's on any basis: on the attendance basis a week of pieces not approved blocks
+        // Cy, and an approved one whose entry is on a worker invoice blocks him rather than paying its pieces
+        const cySheet = sheet(state.cy, "2026-03-05", "TmshCompleted")
+        const cyPieces = entry(state.cy, cySheet, "2026-03-05", 2, {pieceCount: "5", vendorPieceRate: "1"})
+        const prepareCy = () =>
+            outcomes(run(state.payroll, S + "prepare#Inputs", {payrollGroupId: state.attendanceGroup, timePeriodId: state.march}))
+        const piecesUnapproved = prepareCy()
+        call("update#mantle.work.time.Timesheet", {timesheetId: cySheet, statusId: "TmshApproved"})
+        invoice(prefix + "_WINV3", state.cy, "InvoiceIncoming", "5")
+        call("update#mantle.work.time.TimeEntry", {timeEntryId: cyPieces, vendorInvoiceId: prefix + "_WINV3"})
+        const piecesInvoiced = prepareCy()
         return {
             dee: outcomes(
                 run(state.payroll, S + "prepare#Inputs", {
@@ -464,14 +478,20 @@ feature("a time entry on a worker invoice is refused as a pay source, and a work
             ),
             named: code(named),
             found: found.error || Number(found.invoiceItemCreatedCount),
-            vendorInvoiced: rows("mantle.work.time.TimeEntry", {vendorInvoiceId: prefix + "_WINV2"}).length
+            vendorInvoiced: rows("mantle.work.time.TimeEntry", {vendorInvoiceId: prefix + "_WINV2"}).length,
+            cyPieces: [
+                piecesUnapproved,
+                piecesInvoiced,
+                live(state.cyEmp).filter(row => row.inputTypeEnumId === "PitPieces").length
+            ]
         }
     },
-    then({dee, named, found, vendorInvoiced}) {
+    then({dee, named, found, vendorInvoiced, cyPieces}) {
         dee == {DEE: "WORKER_INVOICED"}
         named == "PAY_SOURCE_CONSUMED"
         found == 0
         vendorInvoiced == 0
+        cyPieces == [{CY: "WEEK_NOT_APPROVED"}, {CY: "WORKER_INVOICED"}, 0]
     }
 })
 
@@ -502,7 +522,24 @@ feature("an authorized rate change voids an input not finalized; a finalized one
         // Tuesday's hours are finalized (the pay run's finalization, made here as data)
         call("update#" + INPUT, {payrollInputId: workedOn("03-03").payrollInputId, statusId: "PinFinalized"})
         const access = run("john.doe", "mantle.work.TimesheetServices.get#TimesheetAccess", {timesheetId: state.anaWeek})
+        // P24 review: Projects' bulk rate reset keeps the worker rates a finalized input paid (Tuesday's, set with no RateAmount, which
+        // a reset cleared) and voids an input not finalized whose entry's worker rate it changes (Wednesday's)
+        entry(state.ana, state.anaWeek, "2026-03-04", 6)
+        run(state.payroll, S + "prepare#Inputs", {
+            payrollGroupId: state.sheets,
+            timePeriodId: state.march,
+            partyRelationshipIds: state.anaEmp
+        })
+        const wednesday = workedOn("03-04")?.payrollInputId || "-"
+        const reset = run("john.doe", "mantle.work.TimeServices.resetAndGet#TimeEntryRates", {partyId: state.ana})
+        const tuesday = one("mantle.work.time.TimeEntry", {timeEntryId: state.anaTue})
         return {
+            reset: [
+                reset.error,
+                String(tuesday.vendorHourRate),
+                String(Number(String(tuesday.vendorPieceRate))),
+                one(INPUT, {payrollInputId: wednesday})?.statusId
+            ],
             changed: changed.error,
             voided: [voided.statusId, voided.activeEntitlementKey == null],
             ready: [anaRow.state, anaRow.toPrepareCount],
@@ -519,7 +556,8 @@ feature("an authorized rate change voids an input not finalized; a finalized one
             removePaid: code(run("john.doe", "mantle.work.TimeServices.delete#TimeEntry", {timeEntryId: state.anaTue}))
         }
     },
-    then({changed, voided, ready, again, mondayAfter, rateOnPaid, canReopen, payrollPaid, reopen, removePaid}) {
+    then({reset, changed, voided, ready, again, mondayAfter, rateOnPaid, canReopen, payrollPaid, reopen, removePaid}) {
+        reset[0] == "" && Number(reset[1]) == 20 && reset[2] == "0.5" && reset[3] == "PinVoided"
         changed == ""
         voided == ["PinVoided", true]
         ready == ["ready", 1]
@@ -678,3 +716,89 @@ feature(
         }
     }
 )
+
+feature("a recovery of a paid advance passes neither what it has left when made nor when it is approved", {
+    when() {
+        // P24 review: Ana's advance paid out (a delivered payment of 300 on its bill), then partly repaid while a recovery waits
+        const ADV = prefix + "_ADV"
+        invoice(prefix + "_ADVBILL", state.ana, "InvoiceReceived", "300")
+        call("create#mantle.account.payment.Payment", {
+            paymentId: prefix + "_ADVPAY",
+            statusId: "PmntDelivered",
+            fromPartyId: orgA,
+            toPartyId: state.ana,
+            amount: "300",
+            amountUomId: "USD"
+        })
+        call("create#mantle.account.payment.PaymentApplication", {
+            paymentApplicationId: prefix + "_ADVAPP",
+            paymentId: prefix + "_ADVPAY",
+            invoiceId: prefix + "_ADVBILL",
+            amountApplied: "300"
+        })
+        call("update#mantle.humanres.expense.EmployeeAdvance", {employeeAdvanceId: ADV, invoiceId: prefix + "_ADVBILL"})
+        const recover = amount =>
+            run(state.payroll, S + "store#Adjustment", {
+                partyRelationshipId: state.anaEmp,
+                employeeAdvanceId: ADV,
+                payrollComponentId: state.recover,
+                inputDate: "2026-03-21",
+                amount,
+                reason: "Recover the advance"
+            })
+        const first = recover("100")
+        const over = code(recover("250"))
+        // 250 repaid by a credit applied to a claim: 50 left, less than the recovery waiting
+        invoice(prefix + "_ADVCRED", state.ana, "InvoiceReceived", "250")
+        call("create#mantle.humanres.expense.EmployeeAdvanceApplication", {
+            employeeAdvanceId: ADV,
+            creditInvoiceId: prefix + "_ADVCRED",
+            invoiceId: prefix + "_CLAIM"
+        })
+        call("create#mantle.account.payment.Payment", {
+            paymentId: prefix + "_ADVCREDPAY",
+            statusId: "PmntDelivered",
+            fromPartyId: state.ana,
+            toPartyId: orgA,
+            amount: "250",
+            amountUomId: "USD"
+        })
+        call("create#mantle.account.payment.PaymentApplication", {
+            paymentApplicationId: prefix + "_ADVCREDAPP",
+            paymentId: prefix + "_ADVCREDPAY",
+            invoiceId: prefix + "_ADVCRED",
+            toInvoiceId: prefix + "_CLAIM",
+            amountApplied: "250"
+        })
+        const approve = code(run(state.approver, S + "decide#Adjustment", {payrollInputId: first.payrollInputId}))
+        // Ana's employment opened in hours for pay: payroll reads its pay inputs, her manager its time inputs alone
+        const opened = username =>
+            unique(
+                Array.from(
+                    run(username, S + "get#Reconciliation", {
+                        payrollGroupId: state.sheets,
+                        timePeriodId: state.march,
+                        partyRelationshipId: state.anaEmp
+                    }).employment?.inputs || []
+                ).map(row => row.inputTypeEnumId)
+            ).sort()
+        return {
+            first: first.error || first.statusId,
+            over,
+            approve,
+            after: one(INPUT, {payrollInputId: first.payrollInputId}).statusId,
+            payrollReads: opened(state.payroll),
+            managerReads: opened(state.manager)
+        }
+    },
+    then({first, over, approve, after, payrollReads, managerReads}) {
+        first == "PinProposed"
+        over == "AMOUNT_OVER_OUTSTANDING"
+        approve == "AMOUNT_OVER_OUTSTANDING"
+        after == "PinProposed"
+        payrollReads.includes("PitAdvanceRecovery") &&
+            payrollReads.includes("PitAdjustment") &&
+            payrollReads.includes("PitReimbursement")
+        managerReads == ["PitPaidLeave", "PitPieces", "PitUnpaidLeave", "PitWorked"]
+    }
+})

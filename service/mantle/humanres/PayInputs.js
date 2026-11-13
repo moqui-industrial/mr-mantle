@@ -269,6 +269,7 @@ const fingerprintOf = {
 }
 
 // ===== evidence =====
+const hasPieces = entry => entry.pieceCount != null && decimalOf(entry.pieceCount).compare(0) > 0
 // The person's employments (PrtEmployee) that settle which employment a time entry of a day belongs to.
 function personEmployments(partyId) {
     return Array.from(find(RELATIONSHIP).condition({fromPartyId: partyId, relationshipTypeEnumId: "PrtEmployee"}).list())
@@ -329,15 +330,17 @@ function timesheetEvidence(member, zone) {
             const week = (out.unapproved[key] ||= {
                 timesheetId: entry.timesheetId || null,
                 statusId: sheet?.statusId || null,
-                days: []
+                days: [],
+                pieces: false
             })
             if (!week.days.includes(entryDay)) week.days.push(entryDay)
+            if (hasPieces(entry)) week.pieces = true
             continue
         }
         out.approved = out.approved.add(hours)
         ;(out.byDay[entryDay] ||= []).push(entry)
         if (entry.vendorInvoiceId) out.invoiced.push({entry, day: entryDay})
-        if (entry.pieceCount != null && decimalOf(entry.pieceCount).compare(0) > 0) out.pieces.push({entry, day: entryDay})
+        if (hasPieces(entry)) out.pieces.push({entry, day: entryDay})
     }
     return out
 }
@@ -476,11 +479,15 @@ function planOf(group, period, zone, member, cutoffMs = null) {
     const planned = []
     const prid = member.partyRelationshipId
     const after = stamp => cutoffMs != null && stamp > cutoffMs
-    // the timesheet weeks that block: every unapproved week on the timesheet basis, a week with pieces on any; a day payroll
-    // resolved blocks nothing
+    // the timesheet weeks that block: every unapproved week on the timesheet basis (a day payroll resolved blocks nothing), a week
+    // with pieces on any basis (P24 review: pieces are paid from approved weeks alone, so one not approved waited unseen)
     const blockingWeeks = Object.values(sheets.unapproved)
-        .map(week => Object.assign({}, week, {days: week.days.filter(dayText => !resolved.has(dayText))}))
-        .filter(week => week.days.length && basis === "PtbTimesheets")
+        .map(week =>
+            Object.assign({}, week, {
+                days: basis === "PtbTimesheets" ? week.days.filter(dayText => !resolved.has(dayText)) : week.days
+            })
+        )
+        .filter(week => week.days.length && (basis === "PtbTimesheets" || week.pieces))
     if (blockingWeeks.length)
         problems.push({
             code: "WEEK_NOT_APPROVED",
@@ -490,7 +497,11 @@ function planOf(group, period, zone, member, cutoffMs = null) {
                     .map(week => week.days.sort()[0] + (week.days.length > 1 ? " and " + (week.days.length - 1) + " more" : ""))
                     .join(", ")
         })
-    const invoiced = sheets.invoiced.filter(found => basis === "PtbTimesheets" && !resolved.has(found.day))
+    // an entry on a worker invoice whose hours the basis would pay, or whose pieces payroll pays on any basis (P24 review: on the
+    // attendance basis an invoiced entry's pieces were paid too)
+    const invoiced = sheets.invoiced.filter(
+        found => (basis === "PtbTimesheets" && !resolved.has(found.day)) || hasPieces(found.entry)
+    )
     if (invoiced.length)
         problems.push({
             code: "WORKER_INVOICED",
@@ -763,6 +774,30 @@ function releaseInput(input, statusId, reason) {
             call("update#" + SOURCE, {payrollInputSourceId: source.payrollInputSourceId, activeSourceKey: null})
 }
 const lockEmployment = partyRelationshipId => find(RELATIONSHIP, {partyRelationshipId}).forUpdate(true).one()
+// The time entries new inputs take, locked and read again before they are consumed (P24 review): a worker invoice locks the
+// entries it bills before it checks what payroll consumed (InvoiceServices create#TimeEntryInvoiceItems), so whichever commits
+// first the other sees; one invoiced or changed since it was read refuses this employment's preparation, to be prepared again.
+function lockEntries(changes) {
+    const wanted = changes.create.flatMap(row => row.sources.filter(source => source.sourceEntityName === TIME_ENTRY))
+    const ids = unique(wanted.map(source => source.sourceId))
+    if (!ids.length) return
+    const locked = Object.fromEntries(
+        Array.from(find(TIME_ENTRY).condition("timeEntryId", "in", ids).forUpdate(true).list()).map(entry => [
+            entry.timeEntryId,
+            entry
+        ])
+    )
+    const invoiced = ids.filter(id => locked[id]?.vendorInvoiceId)
+    if (invoiced.length) denied("WORKER_INVOICED", "Time entries on a worker invoice: " + invoiced.join(", "))
+    const changed = wanted.filter(
+        source => !locked[source.sourceId] || fingerprintOf[TIME_ENTRY](locked[source.sourceId]) !== source.sourceRevision
+    )
+    if (changed.length)
+        denied(
+            "SOURCE_CHANGED",
+            "Time entry " + unique(changed.map(source => source.sourceId)).join(", ") + " changed; prepare again"
+        )
+}
 
 // ===== get#Reconciliation =====
 // The group's period, employment by employment: the basis, hours scheduled, present (attendance), submitted and approved
@@ -802,7 +837,7 @@ function getReconciliation(p) {
         if (state && row.state !== state) continue
         found.push(row)
         if (text(p.partyRelationshipId) === member.partyRelationshipId)
-            opened = employmentDetail(group, period, member, personName, changes)
+            opened = employmentDetail(group, period, member, personName, changes, access.payroll)
     }
     found.sort((a, b) => String(a.personName).localeCompare(String(b.personName)))
     const counts = {ready: 0, blocked: 0, prepared: 0, changed: 0}
@@ -898,9 +933,10 @@ function reconciliationRow(group, member, personName, changes, zone) {
 }
 // An employment's days (scheduled, present, submitted and approved time, leave, what is prepared), the sources behind them
 // (the timesheets with their state, the attendance days to resolve, the leave requests) and its live inputs (no amount).
-function employmentDetail(group, period, member, personName, changes) {
+// A manager reads its time inputs alone (P24 review): an adjustment, an advance recovery or a reimbursement is pay, payroll's.
+function employmentDetail(group, period, member, personName, changes, payroll) {
     const plan = changes.plan
-    const live = liveInputs(member, group, period)
+    const live = liveInputs(member, group, period).filter(row => payroll || resolutionTypes.includes(row.input.inputTypeEnumId))
     const inputsByDay = {}
     for (const row of live) (inputsByDay[lib.calendarDateText(row.input.inputDate)] ||= []).push(row.input)
     const days = member.days
@@ -1018,6 +1054,7 @@ function prepareInputs(p) {
             row.voidedCount = changes.void.length
             row.message = changes.plan.notes.map(note => note.text).join("; ")
             if (preview) return
+            lockEntries(changes)
             for (const found of changes.void) releaseInput(found.input, "PinVoided", found.reason)
             for (const plannedInput of changes.create) createInput(member, group, period, plannedInput, operationKey)
             row.outcome = changes.create.length || changes.void.length ? "done" : "repeated"
@@ -1150,6 +1187,8 @@ function storeAdjustment(p) {
     const {userScope} = editorScope()
     if (text(p.payrollInputId)) return changeAdjustment(userScope, p)
     const employment = employmentIn(userScope, p.partyRelationshipId)
+    // locked before its checks (P24 review): two recoveries of one advance at once cannot both pass its outstanding
+    lockEmployment(employment.partyRelationshipId)
     const inputTypeEnumId = text(p.inputTypeEnumId) || (text(p.employeeAdvanceId) ? "PitAdvanceRecovery" : "PitAdjustment")
     if (!typeTexts[inputTypeEnumId] || inputTypeEnumId === "PitReimbursement")
         denied("TYPE_INVALID", "Choose an adjustment, an advance recovery or the hours of a day")
@@ -1252,7 +1291,6 @@ function storeAdjustment(p) {
         )[0]
         if (first) return adjustmentAnswer(leadOf(first), true)
     }
-    lockEmployment(employment.partyRelationshipId)
     let leadId = null
     for (const value of values) {
         const payrollInputId = createInput(
@@ -1322,9 +1360,9 @@ const adjustmentAnswer = (lead, repeated) => ({
 function changeAdjustment(userScope, p) {
     const found = readableInput(userScope, p.payrollInputId)
     if (found.isAdjustment !== "Y") denied("NOT_ADJUSTMENT", "A prepared input changes with its source, not here")
+    lockEmployment(found.partyRelationshipId)
     const lead = leadOf(found)
     const series = seriesOf(lead)
-    lockEmployment(lead.partyRelationshipId)
     if (!blank(p.expectedRevision) && text(p.expectedRevision) !== seriesRevision(lead))
         denied("REVISION_CHANGED", "This adjustment changed since it was read; open it again")
     const reason = shortText(p.reason)
@@ -1530,6 +1568,17 @@ function decideAdjustment(p) {
     })
     if (!decided.repeated) {
         const series = seriesOf(lead).filter(input => input.statusId === "PinProposed")
+        // a recovery approved only within what its advance has left then (P24 review: the advance may have been repaid since)
+        const advanceSource =
+            decided.complete && lead.inputTypeEnumId === "PitAdvanceRecovery"
+                ? rows(SOURCE, {payrollInputId: lead.payrollInputId}).find(row => row.sourceEntityName === ADVANCE)
+                : null
+        if (advanceSource) {
+            const advance = one(ADVANCE, {employeeAdvanceId: advanceSource.sourceId})
+            const left = advance ? advanceLeft(advance, lead.seriesInputId || lead.payrollInputId) : zero()
+            if (decimalOf(lead.amount).compare(left) > 0)
+                denied("AMOUNT_OVER_OUTSTANDING", "The advance has " + ec.l10n.format(left, "#,##0.00") + " left to recover")
+        }
         if (decided.complete)
             for (const input of series) call("update#" + INPUT, {payrollInputId: input.payrollInputId, statusId: "PinApproved"})
         else if (decided.statusId === "PapRefused") for (const input of series) releaseInput(input, "PinRefused", text(p.reason))
