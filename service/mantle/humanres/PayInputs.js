@@ -66,6 +66,9 @@ const day = 24 * 60 * 60 * 1000
 // the most employments a preparation or reconciliation reads, the time entries of one employment's period, and the periods a
 // recurring adjustment makes
 const memberCap = 500
+// P26 (P25 review's finding): a preparation takes every employment of the group's period, as a run does, up to this many, and
+// refuses a group with more (POPULATION_TOO_LARGE) instead of preparing some in silence
+const preparationCap = 10000
 const entryCap = 5000
 const recurrenceCap = 24
 const listCap = 2000
@@ -1032,7 +1035,9 @@ function employmentDetail(group, period, member, personName, changes, payroll) {
 // ===== prepare#Inputs =====
 // A group's period prepared (or previewed): for each employment of it (or of partyRelationshipIds), in its own transaction under
 // its lock, the inputs its approved sources pay made once, those whose sources changed voided and made again, nothing for an
-// employment something blocks (named, the rest going on). A retry, or preparing again, makes nothing twice.
+// employment something blocks (named, the rest going on). A retry, or preparing again, makes nothing twice. P26: every employment of
+// the period (found by date in the database, in employment order), never a silent first 500; a group paying more than 10,000 in
+// the period is refused (POPULATION_TOO_LARGE).
 function prepareInputs(p) {
     const preview = truthy(p.preview)
     const access = preview ? readerScope(false) : editorScope()
@@ -1042,7 +1047,12 @@ function prepareInputs(p) {
         denied("GROUP_ENDED", "This pay group ended before the period")
     const zone = zoneOf(group)
     const wanted = splitIds(p.partyRelationshipIds)
-    const members = groupMembers(group, period, zone, wanted.length ? wanted : null)
+    const members = groupMembers(group, period, zone, wanted.length ? wanted : null, preparationCap)
+    if (members.truncated)
+        denied(
+            "POPULATION_TOO_LARGE",
+            "The pay group pays more than " + preparationCap + " employees in the period; split it into smaller groups"
+        )
     const cutoffMs = blank(p.cutoffDate) ? null : ec.user.timestampMillis(p.cutoffDate)
     const operationKey = text(p.operationKey) || null
     const names = people.personNames(unique(members.map(member => member.partyId)))

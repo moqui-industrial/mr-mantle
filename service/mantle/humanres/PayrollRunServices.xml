@@ -18,7 +18,10 @@ along with this software (see the LICENSE.md file). If not, see
     approval by a distinct payroll approver (a People approval of kind PakPayrollRun, the PayrollRunApproval topic) bound to the
     exact population, amounts and source revisions. Read with PAYROLL_VIEW, prepared with PAYROLL_VIEW and PAYROLL_EDIT, decided with
     PAYROLL_APPROVE; another employer's run is a missing one. No invoice or payment is made (design §2): P27's finalize#Run makes
-    the obligations. The legacy payroll services and PayrollAdjustment rows are not read. -->
+    the obligations. The legacy payroll services and PayrollAdjustment rows are not read. impl-people P26 (design §8.2 corrections):
+    off-cycle runs (the period's approved adjustments no run took) and correction runs (create#Correction: a slip's employment
+    recalculated, its change paid on a new slip linked to the original, which stays); an approved run's calculated employments
+    become payslips (PayrollResults.js: preview slips in preview mode), withdrawn when its approval is taken back. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="Runs" allow-remote="false">
         <description>The pay runs of the employers in the caller's payroll scope (PAYROLL_VIEW), newest period first, filtered by
@@ -60,18 +63,23 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="Run" allow-remote="false">
-        <description>A regular run of a pay group in the caller's payroll scope for one of its prepared periods (PAYROLL_VIEW and
+        <description>A run of a pay group in the caller's payroll scope for one of its prepared periods (PAYROLL_VIEW and
             PAYROLL_EDIT): the group's employer and currency, the period's pay date unless another is given, an optional source
-            cutoff and description; its population selected at once (the employments the group pays on a day of the period, each
-            pending). Refuses: another employer's group (RECORD_UNAVAILABLE), a period not prepared for it (PERIOD_UNAVAILABLE), an
-            ended group (GROUP_ENDED), a kind other than regular (KIND_NOT_AVAILABLE: off-cycle and correction runs come with
-            payslip corrections), a period whose inputs a live run took (INPUTS_CONSUMED) or with a live regular run already
-            (RUN_EXISTS). An operation key answers a retry with the first run.</description>
+            cutoff and description. A regular run (the default) selects its population at once (the employments the group pays on a
+            day of the period, each pending), one live a group and period. An off-cycle run (P26; any number a period, any pay date)
+            pays the period's approved adjustments no run took: its population is the employments that have them (or those of
+            partyRelationshipIds), with no salary or structure line. Refuses: another employer's group (RECORD_UNAVAILABLE), a
+            period not prepared for it (PERIOD_UNAVAILABLE), an ended group (GROUP_ENDED), a correction (KIND_NOT_AVAILABLE: made
+            from its slip, create#Correction), a regular run of a period whose inputs a live regular run took (INPUTS_CONSUMED) or
+            with a live regular run already (RUN_EXISTS), an off-cycle run with no adjustment to pay (NOTHING_TO_PAY). An operation
+            key answers a retry with the first run.</description>
         <in-parameters>
             <parameter name="payrollGroupId" required="true"/>
             <parameter name="timePeriodId" required="true"/>
             <parameter name="payDate"/>
             <parameter name="runKindEnumId"/>
+            <parameter name="partyRelationshipIds"><description>An off-cycle run's employments (those with an adjustment to pay
+                when empty)</description></parameter>
             <parameter name="cutoffDate" type="Timestamp"/>
             <parameter name="description"/>
             <parameter name="operationKey"/>
@@ -128,7 +136,10 @@ along with this software (see the LICENSE.md file). If not, see
             segment prorated by the group's policy and computed from the structure's published terms, the lines summed or taken
             once, adjustments added, each money line rounded to the currency, the localization once, net and employer cost. The
             inputs a calculation takes are marked with the run. No invoice or payment is made. The run is in review once nothing
-            is pending.</description>
+            is pending. P26: an off-cycle run's employment pays its adjustments alone (NOTHING_TO_PAY when none is left); a
+            correction run's pays the change from what its original slip and the corrections before it paid (NO_CHANGE when
+            nothing changed, ORIGINAL_WITHDRAWN when the original was withdrawn); an approved run with nothing to calculate keeps
+            its approval and slips.</description>
         <in-parameters>
             <parameter name="payrollRunId" required="true"/>
             <parameter name="batchSize" type="Integer"/>
@@ -240,6 +251,34 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="waitingText" from="out.waitingText"/>
         </actions>
     </service>
+    <service verb="create" noun="Correction" allow-remote="false">
+        <description>A correction of a payslip (PAYROLL_VIEW and PAYROLL_EDIT; impl-people P26, design §8.2): a run of its own, kind
+            correction, for the slip's group, period and employment, with the reason (the changed source or rule) and a pay date
+            (the original's when empty: a slip of the same day keeps its own identity). A correction of a correction corrects its
+            original. It is calculated (the employment as it is now, less what the original and the corrections before it paid),
+            asked, approved and slipped as any run; its slip names the original, which stays as it was. Refuses a slip outside the
+            payroll scope (RECORD_UNAVAILABLE), a withdrawn original (SLIP_WITHDRAWN), no reason (REASON_REQUIRED), a correction of
+            the slip already open (CORRECTION_EXISTS) and an employment the group no longer pays in the period (NOT_IN_GROUP). An
+            operation key answers a retry with the first run. No invoice or payment is made.</description>
+        <in-parameters>
+            <parameter name="payslipId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="payDate"/>
+            <parameter name="description"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="originalPayslipId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('createCorrection', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="originalPayslipId" from="out.originalPayslipId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
     <service verb="cancel" noun="Run" allow-remote="false">
         <description>A run not approved cancelled with the reason (PAYROLL_VIEW and PAYROLL_EDIT; impl-people P25 review): a draft,
             calculating or in review, a request waiting for its approval superseded. The inputs its calculation took are released
@@ -271,7 +310,8 @@ along with this software (see the LICENSE.md file). If not, see
             read (the notice's sourceRevision): through PeopleApprovalServices.record#Decision, the last approval approves the run at
             that revision. Refuses who selected, calculated or asked (SELF_APPROVAL), anyone not the step's approver (NOT_APPROVER),
             a run changed since the request (SOURCE_CHANGED), a notice of another record (SOURCE_INVALID) and another employer's
-            run (RECORD_UNAVAILABLE). No invoice or payment is made.</description>
+            run (RECORD_UNAVAILABLE). P26: the approval makes the run's calculated employments payslips (preview slips in preview
+            mode), and nobody whose own pay the run holds decides it (SELF_APPROVAL). No invoice or payment is made.</description>
         <in-parameters>
             <parameter name="payrollRunId"/>
             <parameter name="peopleApprovalId"/>

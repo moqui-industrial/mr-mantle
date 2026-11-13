@@ -364,10 +364,11 @@ feature("one bad worker leaves the others calculated, each employee in its own u
     when() {
         const hr = run(state.hr, S + "create#Run", {payrollGroupId: state.group, timePeriodId: state.march})
         const otherEmployer = run(state.payrollB, S + "create#Run", {payrollGroupId: state.group, timePeriodId: state.march})
-        const offCycle = run(state.payroll, S + "create#Run", {
+        // P26: a correction run is made from its payslip (create#Correction), never here
+        const correctionKind = run(state.payroll, S + "create#Run", {
             payrollGroupId: state.group,
             timePeriodId: state.march,
-            runKindEnumId: "PrkOffCycle"
+            runKindEnumId: "PrkCorrection"
         })
         const created = run(state.payroll, S + "create#Run", {payrollGroupId: state.group, timePeriodId: state.march})
         state.runId = created.payrollRunId
@@ -377,12 +378,12 @@ feature("one bad worker leaves the others calculated, each employee in its own u
         const found = run(state.payroll, S + "get#Run", {payrollRunId: state.runId, partyRelationshipId: state.SALEmp})
         const otherReads = run(state.payrollB, S + "get#Run", {payrollRunId: state.runId})
         const attention = run(state.payroll, S + "find#Runs", {show: "attention"})
-        return {hr, otherEmployer, offCycle, created, calculated, bad, sal, found, otherReads, attention}
+        return {hr, otherEmployer, correctionKind, created, calculated, bad, sal, found, otherReads, attention}
     },
-    then({hr, otherEmployer, offCycle, created, calculated, bad, sal, found, otherReads, attention}) {
+    then({hr, otherEmployer, correctionKind, created, calculated, bad, sal, found, otherReads, attention}) {
         code(hr) == "PERMISSION_DENIED"
         code(otherEmployer) == "RECORD_UNAVAILABLE"
-        code(offCycle) == "KIND_NOT_AVAILABLE"
+        code(correctionKind) == "KIND_NOT_AVAILABLE"
         created.error == ""
         created.selectedCount == 5
         calculated.calculatedCount == 4
