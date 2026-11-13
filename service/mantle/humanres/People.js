@@ -549,6 +549,126 @@ const readinessChecks = [
                   }
                 : {state: "ready", message: "Every employee has a pay assignment", fixRoute: "peoplePayAssignments"}
         }
+    },
+    // P29: every phase's setup, in counts alone: positions (P4), the approval rules' HR fallback (P5), an onboarding checklist (P7),
+    // a working schedule (P9), a leave policy (P11) and the confidential case intake (P21); each opens the place that sets it up
+    {
+        checkKey: "people.positions",
+        title: "Positions",
+        run(organizationPartyId, asOf) {
+            const count = current(
+                find("mantle.humanres.position.EmplPosition").condition("organizationPartyId", organizationPartyId),
+                asOf
+            ).count()
+            return count
+                ? {state: "ready", message: count + (count === 1 ? " position" : " positions"), fixRoute: "peoplePositions"}
+                : {state: "warning", reasonCode: "NO_POSITION", message: "No position is set up", fixRoute: "peoplePositions"}
+        }
+    },
+    {
+        checkKey: "people.approvals",
+        title: "Approval rules",
+        run(organizationPartyId, asOf) {
+            const fallbacks = current(
+                find("mantle.humanres.approval.PeopleApprovalPolicy")
+                    .condition("organizationPartyId", organizationPartyId)
+                    .condition("approverRoleEnumId", "ParHrFallback"),
+                asOf
+            ).count()
+            return fallbacks
+                ? {state: "ready", message: "An HR fallback decides what no one else may", fixRoute: "peopleApprovalRules"}
+                : {
+                      state: "warning",
+                      reasonCode: "NO_HR_FALLBACK",
+                      message: "No HR fallback is named, so a request no one may decide waits",
+                      fixRoute: "peopleApprovalRules"
+                  }
+        }
+    },
+    {
+        checkKey: "people.checklists",
+        title: "Onboarding checklist",
+        run(organizationPartyId, asOf) {
+            const templates = current(
+                find("mantle.humanres.checklist.ChecklistTemplate")
+                    .condition("organizationPartyId", organizationPartyId)
+                    .condition("lifecycleKindEnumId", "ClkOnboarding"),
+                asOf
+            ).count()
+            return templates
+                ? {state: "ready", message: "A hire starts its onboarding checklist", fixRoute: "peopleChecklists"}
+                : {
+                      state: "warning",
+                      reasonCode: "NO_ONBOARDING_CHECKLIST",
+                      message: "No onboarding checklist, so a hire starts none",
+                      fixRoute: "peopleChecklists"
+                  }
+        }
+    },
+    {
+        checkKey: "people.schedules",
+        title: "Working schedules",
+        run(organizationPartyId, asOf) {
+            const schedules = current(
+                find("mantle.humanres.schedule.WorkingSchedule").condition("organizationPartyId", organizationPartyId),
+                asOf
+            ).count()
+            return schedules
+                ? {
+                      state: "ready",
+                      message: schedules + (schedules === 1 ? " working schedule" : " working schedules"),
+                      fixRoute: "peopleWorkingSchedules"
+                  }
+                : {
+                      state: "warning",
+                      reasonCode: "NO_WORKING_SCHEDULE",
+                      message: "No working schedule, so leave and capacity count every weekday",
+                      fixRoute: "peopleWorkingSchedules"
+                  }
+        }
+    },
+    {
+        checkKey: "people.leave",
+        title: "Leave policies",
+        run(organizationPartyId, asOf) {
+            const policies = current(
+                find("mantle.humanres.leave.LeavePolicy").condition("organizationPartyId", organizationPartyId),
+                asOf
+            ).count()
+            return policies
+                ? {
+                      state: "ready",
+                      message: policies + (policies === 1 ? " leave policy" : " leave policies"),
+                      fixRoute: "peopleLeavePolicies"
+                  }
+                : {
+                      state: "warning",
+                      reasonCode: "NO_LEAVE_POLICY",
+                      message: "No leave policy, so no one can request leave",
+                      fixRoute: "peopleLeavePolicies"
+                  }
+        }
+    },
+    {
+        checkKey: "people.caseIntake",
+        title: "Confidential case intake",
+        run(organizationPartyId) {
+            const handlers = ec.resource
+                .script("component://mr-mantle/service/mantle/request/PeopleCases.js")
+                .intakeHandlers(organizationPartyId).length
+            return handlers
+                ? {
+                      state: "ready",
+                      message: handlers + (handlers === 1 ? " person takes" : " people take") + " confidential cases",
+                      fixRoute: "peoplePreferences"
+                  }
+                : {
+                      state: "warning",
+                      reasonCode: "NO_CASE_HANDLER",
+                      message: "Nobody may take a confidential case, so a filing here is refused",
+                      fixRoute: "peoplePreferences"
+                  }
+        }
     }
 ]
 function readiness(p) {

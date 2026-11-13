@@ -829,7 +829,9 @@ along with this software (see the LICENSE.md file). If not, see
     <entity entity-name="PartySetting" package="mantle.party">
         <field name="partyId" type="id" is-pk="true"/>
         <field name="partySettingTypeId" type="id" is-pk="true"/>
-        <field name="settingValue" type="text-medium"/>
+        <!-- audit-logged (impl-people P29): an organization's settings, such as People's clocking default and case intake handlers,
+            keep their history and the change reason (settingValue_changeReason) -->
+        <field name="settingValue" type="text-medium" enable-audit-log="true"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
         <relationship type="one" related="mantle.party.PartySettingType" short-alias="settingType"/>
         <relationship type="one-nofk" related="moqui.basic.Enumeration">

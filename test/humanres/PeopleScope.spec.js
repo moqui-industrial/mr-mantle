@@ -288,7 +288,8 @@ feature(
             return {all: summary(all.checks || []), one: one.checks || [], hr, outside}
         },
         then({all, one, hr, outside}) {
-            all.sort() ==
+            // P29's checks (positions, approvals, checklists, schedules, leave, case intake) are PeopleReports'
+            all.filter(row => / people\.(departments|managers|payroll) /.test(row)).sort() ==
                 [
                     orgA + " people.departments ready ",
                     orgA + " people.managers warning EMPLOYEE_NO_MANAGER",
@@ -297,9 +298,12 @@ feature(
                     orgB + " people.managers warning EMPLOYEE_NO_MANAGER",
                     orgB + " people.payroll warning NO_PAY_GROUP"
                 ].sort()
-            one.length == 3
+            all.length == 18
+            one.length == 9
             one.every(row => row.fixRoute && row.subject && row.scope.organizationPartyId == orgA && row.title && row.message)
-            one.filter(row => row.checkKey != "people.payroll").every(row => row.fixRoute == "peopleSettings")
+            one.filter(row => ["people.departments", "people.managers"].includes(row.checkKey)).every(
+                row => row.fixRoute == "peopleSettings"
+            )
             one.find(row => row.checkKey == "people.payroll").fixRoute == "peoplePayGroups"
             one.find(row => row.checkKey == "people.managers").message == "4 employees have no manager"
             hr.error.includes("PERMISSION_DENIED")
