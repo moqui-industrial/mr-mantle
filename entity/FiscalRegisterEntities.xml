@@ -43,7 +43,7 @@ Grant of Patent License.
             <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" title="RegisterType" related="moqui.basic.Enumeration">
             <key-map field-name="registerTypeEnumId" related="enumId"/></relationship>
-        <relationship type="one" related="mantle.ledger.timeline.TimePeriod">
+        <relationship type="one" related="mantle.party.time.TimePeriod">
             <key-map field-name="timePeriodId"/></relationship>
     </entity>
 </entities>
