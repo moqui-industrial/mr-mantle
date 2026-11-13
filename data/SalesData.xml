@@ -39,4 +39,30 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="WORD_OF_MOUTH" description="Word of Mouth" enumTypeId="DataSourceType"/>
     <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="EMAIL" description="Email" enumTypeId="DataSourceType"/>
     <moqui.basic.Enumeration parentEnumId="LEAD_SOURCE" enumId="CAMPAIGN" description="Campaign" enumTypeId="DataSourceType"/>
+    <!-- impl-sales P2 (design-sales §9 Stages and TypesAndReasons): the editable initial setup, not demo. The instance's shared
+        default pipeline (no organization: every organization's until it sets a default of its own) with Qualified, Discovery,
+        Proposal and Negotiation; Won and Lost are outcomes (SalesOpportunity.statusId), not stages. The lost reasons and the
+        recurring plans (enumCode: months). The fixed values are SalesCrmSeedData.xml's, named to load before this file. -->
+    <mantle.sales.opportunity.SalesPipeline salesPipelineId="SalesDefault" pipelineName="Sales pipeline" defaultFlag="Y"
+            description="The default pipeline of every organization that has not set its own"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesQualified" salesPipelineId="SalesDefault"
+            description="Qualified" defaultProbability="10" sequenceNum="10"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesDiscovery" salesPipelineId="SalesDefault"
+            description="Discovery" defaultProbability="25" sequenceNum="20"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesProposal" salesPipelineId="SalesDefault"
+            description="Proposal" defaultProbability="50" sequenceNum="30"/>
+    <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SalesNegotiation" salesPipelineId="SalesDefault"
+            description="Negotiation" defaultProbability="75" sequenceNum="40"/>
+
+    <moqui.basic.Enumeration enumId="SlrPrice" enumTypeId="SalesLostReason" description="Price" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="SlrCompetitor" enumTypeId="SalesLostReason" description="Chose a competitor" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="SlrNoBudget" enumTypeId="SalesLostReason" description="No budget" sequenceNum="30"/>
+    <moqui.basic.Enumeration enumId="SlrNoDecision" enumTypeId="SalesLostReason" description="No decision" sequenceNum="40"/>
+    <moqui.basic.Enumeration enumId="SlrTiming" enumTypeId="SalesLostReason" description="Timing" sequenceNum="50"/>
+    <moqui.basic.Enumeration enumId="SlrOther" enumTypeId="SalesLostReason" description="Other" sequenceNum="90"/>
+
+    <moqui.basic.Enumeration enumId="SrpMonthly" enumTypeId="SalesRecurringPlan" description="Monthly" enumCode="1" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SrpQuarterly" enumTypeId="SalesRecurringPlan" description="Quarterly" enumCode="3" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SrpHalfYearly" enumTypeId="SalesRecurringPlan" description="Every six months" enumCode="6" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SrpYearly" enumTypeId="SalesRecurringPlan" description="Yearly" enumCode="12" sequenceNum="4"/>
 </entity-facade-xml>

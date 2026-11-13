@@ -187,6 +187,36 @@ function mergesFor(userScope, organizationPartyId) {
     )
 }
 
+// ===== P2: sales teams (impl-sales P2; design-sales §9 Teams) =====
+// A sales team is an Organization party with the SalesTeam role, owned by its organization; its dated PrtSalesTeamOf row to the
+// organization is its effective interval, and its members are dated PrtSalesTeamMember rows from the person (a
+// SalesRepresentative or a Manager) to the team (data/SalesCrmSeedData.xml; OpportunityServices store#SalesTeam and
+// store#SalesTeamMember). Reads only, no check: the organization of a team and the teams of a person, which P4's assignment
+// scope ("their dated team") reads here. Membership grants no permission.
+const teamRelationships = {of: "PrtSalesTeamOf", member: "PrtSalesTeamMember"}
+// The organization of a team (its PrtSalesTeamOf row, the latest; an ended team keeps its organization), or null for a party
+// that is no sales team.
+function teamOrganization(teamPartyId) {
+    if (!teamPartyId) return null
+    const row = Array.from(
+        lib
+            .find("mantle.party.PartyRelationship", {relationshipTypeEnumId: teamRelationships.of, fromPartyId: teamPartyId})
+            .orderBy("-fromDate")
+            .limit(1)
+            .list()
+    )[0]
+    return row?.toPartyId || null
+}
+// The teams a person is a member of at a time (now when not given), by their dated membership rows.
+function memberTeams(partyId, at = ec.user.nowTimestamp) {
+    if (!partyId) return []
+    const found = lib
+        .rows("mantle.party.PartyRelationship", {relationshipTypeEnumId: teamRelationships.member, fromPartyId: partyId})
+        .filter(row => lib.active(row, at))
+        .map(row => row.toPartyId)
+    return Array.from(new Set(found))
+}
+
 ;({
     permissions,
     reads,
@@ -204,5 +234,9 @@ function mergesFor(userScope, organizationPartyId) {
     requireAccount,
     contactAccounts,
     accountOrganization,
-    mergesFor
+    mergesFor,
+    // P2: sales teams
+    teamRelationships,
+    teamOrganization,
+    memberTeams
 })
