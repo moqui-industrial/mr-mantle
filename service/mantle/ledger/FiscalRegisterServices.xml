@@ -6,6 +6,9 @@ Grant of Patent License.
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
+    <!-- ================================================================= -->
+    <!-- LIBRO GIORNALE (GENERAL JOURNAL)                                  -->
+    <!-- ================================================================= -->
     <service verb="get" noun="GeneralJournalData" allow-remote="true">
         <description>
             Retrieves the General Journal (Libro Giornale) data for an organization and fiscal period or date range.
@@ -18,7 +21,7 @@ Grant of Patent License.
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="pageStartingNumber" type="Integer"/>
-            <parameter name="linesPerPage" type="Integer" default-value="26"/>
+            <parameter name="linesPerPage" type="Integer" default-value="24"/>
             <parameter name="isFinalizedRun" type="Boolean" default="false"/>
         </in-parameters>
         <out-parameters>
@@ -28,8 +31,8 @@ Grant of Patent License.
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
             <parameter name="pages" type="List"/>
-            <parameter name="totalDebit" type="BigDecimal"/>
-            <parameter name="totalCredit" type="BigDecimal"/>
+            <parameter name="totalDebit"/>
+            <parameter name="totalCredit"/>
             <parameter name="totalTransactions" type="Integer"/>
             <parameter name="totalEntries" type="Integer"/>
             <parameter name="startPageNumber" type="Integer"/>
@@ -39,34 +42,40 @@ Grant of Patent License.
         <actions>
             <!-- 1. Resolve Time Period / Date Range -->
             <if condition="timePeriodId">
-                <entity-find-one entity-name="mantle.ledger.timeline.TimePeriod" value-field="tp">
+                <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="tp">
                     <field-map field-name="timePeriodId"/>
                 </entity-find-one>
                 <if condition="tp">
-                    <set field="fromDate" from="fromDate ?: tp.fromDate"/>
-                    <set field="thruDate" from="thruDate ?: tp.thruDate"/>
-                    <set field="periodDescription" from="tp.periodName ?: tp.timePeriodId"/>
+                    <set field="fromDate" from="fromDate || tp.fromDate"/>
+                    <set field="thruDate" from="thruDate || tp.thruDate"/>
+                    <set field="periodDescription" from="tp.periodName || tp.timePeriodId"/>
                 </if>
             </if>
 
             <!-- Determine fiscalYear if missing -->
             <if condition="!fiscalYear">
-                <set field="refDate" from="fromDate ?: ec.user.nowTimestamp"/>
-                <set field="fiscalYear" from="String.format('%tY', refDate)"/>
+                <set field="refDate" from="fromDate || ec.user.nowTimestamp"/>
+                <set field="fiscalYear" from="ec.l10n.format(refDate, 'yyyy')"/>
             </if>
             <if condition="!periodDescription">
                 <set field="periodDescription" from="fiscalYear"/>
             </if>
 
             <!-- 2. Get Organization Fiscal Details -->
-            <service-call name="mantle.party.PartyServices.get#PartyFiscalDetails"
-                    in-map="[partyId:organizationPartyId]" out-map="orgFiscal"/>
             <entity-find-one entity-name="mantle.party.Organization" value-field="org">
                 <field-map field-name="partyId" from="organizationPartyId"/>
             </entity-find-one>
-            <set field="organization" from="[partyId:organizationPartyId, organizationName:org?.organizationName ?: organizationPartyId,
-                    taxIdNumber:orgFiscal?.taxIdNumber, socialSecurityNumber:orgFiscal?.socialSecurityNumber,
-                    exchSysCode:orgFiscal?.exchSysCode, reaNumber:orgFiscal?.reaNumber]"/>
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="taxAuthPartyList">
+                <date-filter/><econdition field-name="partyId" from="organizationPartyId"/>
+            </entity-find>
+            <entity-find entity-name="mantle.party.PartyIdentification" list="partyIdentList">
+                <econdition field-name="partyId" from="organizationPartyId"/>
+            </entity-find>
+            <set field="orgVatId" from="taxAuthPartyList?.[0]?.partyTaxId || '—'"/>
+            <set field="orgFiscalCode" from="partyIdentList.find(p => p.partyIdTypeEnumId == 'PtidSsn')?.idValue || '—'"/>
+            <set field="orgRea" from="partyIdentList.find(p => p.partyIdTypeEnumId == 'PtidREA')?.idValue || '—'"/>
+            <set field="organization" from="{partyId: organizationPartyId, organizationName: org?.organizationName || organizationPartyId,
+                    taxIdNumber: orgVatId, socialSecurityNumber: orgFiscalCode, reaNumber: orgRea}"/>
 
             <!-- 3. Determine Starting Page Number from FiscalRegisterLog -->
             <if condition="pageStartingNumber == null || pageStartingNumber &lt; 1">
@@ -76,7 +85,7 @@ Grant of Patent License.
                     <econdition field-name="registerTypeEnumId" value="FregJournal"/>
                     <order-by field-name="-lastPageNumber"/>
                 </entity-find>
-                <set field="startPageNumber" from="lastLogs ? (lastLogs[0].lastPageNumber + 1) : 1"/>
+                <set field="startPageNumber" from="(lastLogs &amp;&amp; lastLogs.length &gt; 0) ? (lastLogs[0].lastPageNumber + 1) : 1"/>
             <else>
                 <set field="startPageNumber" from="pageStartingNumber"/>
             </else>
@@ -91,208 +100,434 @@ Grant of Patent License.
                 <order-by field-name="transactionDate,acctgTransId,acctgTransEntrySeqId"/>
             </entity-find>
 
-            <!-- 5. Group entries into transactions and calculate page lines -->
+            <!-- 5. Group entries into transactions and calculate page lines in JS -->
             <script><![CDATA[
-                import java.math.BigDecimal
-
-                def txMap = [:]
-                for (def row in rawEntries) {
-                    def txId = row.acctgTransId
-                    def tx = txMap[txId]
+                const txMap = {};
+                for (const row of (rawEntries || [])) {
+                    const txId = row.acctgTransId;
+                    let tx = txMap[txId];
                     if (!tx) {
-                        tx = [
+                        tx = {
                             acctgTransId: txId,
                             transactionDate: row.transactionDate,
-                            txDescription: row.txDescription ?: '',
-                            txVoucherRef: row.txVoucherRef ?: '',
+                            txDescription: row.txDescription || '',
+                            txVoucherRef: row.txVoucherRef || '',
                             txVoucherDate: row.txVoucherDate,
                             invoiceId: row.invoiceId,
                             paymentId: row.paymentId,
                             journalSequenceNum: row.journalSequenceNum,
                             entries: []
-                        ]
-                        txMap[txId] = tx
+                        };
+                        txMap[txId] = tx;
                     }
-                    def isDebit = (row.debitCreditFlag == 'D')
-                    def amt = row.amount != null ? (BigDecimal) row.amount : BigDecimal.ZERO
-                    tx.entries.add([
+                    const isDebit = (row.debitCreditFlag === 'D');
+                    const amt = Number(row.amount) || 0;
+                    tx.entries.push({
                         acctgTransEntrySeqId: row.acctgTransEntrySeqId,
                         glAccountId: row.glAccountId,
-                        accountCode: row.accountCode ?: row.glAccountId,
-                        accountName: row.accountName ?: '',
+                        accountCode: row.accountCode || row.glAccountId,
+                        accountName: row.accountName || '',
                         debitCreditFlag: row.debitCreditFlag,
-                        debitAmount: isDebit ? amt : BigDecimal.ZERO,
-                        creditAmount: !isDebit ? amt : BigDecimal.ZERO
-                    ])
+                        debitAmount: isDebit ? amt : 0,
+                        creditAmount: !isDebit ? amt : 0
+                    });
                 }
 
-                def txList = new ArrayList(txMap.values())
-                totalTransactions = txList.size()
-                totalEntries = rawEntries.size()
+                const txList = Object.values(txMap);
+                context.totalTransactions = txList.length;
+                context.totalEntries = (rawEntries || []).length;
 
                 // Sequential numbering if missing in preview
-                int seq = 1
-                for (def tx in txList) {
-                    if (!tx.journalSequenceNum) tx.journalSequenceNum = seq
-                    seq++
+                let seq = 1;
+                for (const tx of txList) {
+                    if (!tx.journalSequenceNum) tx.journalSequenceNum = seq;
+                    seq++;
                 }
 
                 // Page distribution
-                pages = []
-                int currentPageNum = startPageNumber
-                int maxLines = linesPerPage != null && linesPerPage > 5 ? linesPerPage : 26
-                int currentLineCount = 0
+                const maxLines = Number(linesPerPage) || 24;
+                const pages = [];
+                let currentPage = null;
+                let pageNum = Number(startPageNumber) || 1;
+                let runningDebit = 0;
+                let runningCredit = 0;
+                let currentLines = 0;
 
-                BigDecimal runningDebit = BigDecimal.ZERO
-                BigDecimal runningCredit = BigDecimal.ZERO
-
-                BigDecimal pageDebit = BigDecimal.ZERO
-                BigDecimal pageCredit = BigDecimal.ZERO
-
-                def currentPageRows = []
-                BigDecimal carriedForwardDebit = BigDecimal.ZERO
-                BigDecimal carriedForwardCredit = BigDecimal.ZERO
-
-                for (def tx in txList) {
-                    int txLines = 1 + tx.entries.size() // header line + entry lines
-                    if (currentLineCount + txLines > maxLines && !currentPageRows.isEmpty()) {
-                        // Close current page
-                        BigDecimal carryOverDebit = carriedForwardDebit.add(pageDebit)
-                        BigDecimal carryOverCredit = carriedForwardCredit.add(pageCredit)
-
-                        pages.add([
-                            pageNumber: currentPageNum,
-                            pageLabel: "${fiscalYear} / ${currentPageNum}",
-                            carriedForwardDebit: carriedForwardDebit,
-                            carriedForwardCredit: carriedForwardCredit,
-                            transactions: currentPageRows,
-                            pageDebit: pageDebit,
-                            pageCredit: pageCredit,
-                            carryOverDebit: carryOverDebit,
-                            carryOverCredit: carryOverCredit
-                        ])
-
-                        currentPageNum++
-                        carriedForwardDebit = carryOverDebit
-                        carriedForwardCredit = carryOverCredit
-                        currentPageRows = []
-                        pageDebit = BigDecimal.ZERO
-                        pageCredit = BigDecimal.ZERO
-                        currentLineCount = 0
-                    }
-
-                    currentPageRows.add(tx)
-                    currentLineCount += txLines
-                    for (def entry in tx.entries) {
-                        pageDebit = pageDebit.add(entry.debitAmount)
-                        pageCredit = pageCredit.add(entry.creditAmount)
-                        runningDebit = runningDebit.add(entry.debitAmount)
-                        runningCredit = runningCredit.add(entry.creditAmount)
-                    }
+                function startNewPage() {
+                    currentPage = {
+                        pageNumber: pageNum,
+                        pageLabel: fiscalYear + ' / ' + pageNum,
+                        broughtForwardDebit: runningDebit,
+                        broughtForwardCredit: runningCredit,
+                        carriedForwardDebit: runningDebit,
+                        carriedForwardCredit: runningCredit,
+                        transactions: []
+                    };
+                    pages.push(currentPage);
+                    pageNum++;
+                    currentLines = 0;
                 }
 
-                // Add last page
-                if (!currentPageRows.isEmpty() || pages.isEmpty()) {
-                    BigDecimal carryOverDebit = carriedForwardDebit.add(pageDebit)
-                    BigDecimal carryOverCredit = carriedForwardCredit.add(pageCredit)
-                    pages.add([
-                        pageNumber: currentPageNum,
-                        pageLabel: "${fiscalYear} / ${currentPageNum}",
-                        carriedForwardDebit: carriedForwardDebit,
-                        carriedForwardCredit: carriedForwardCredit,
-                        transactions: currentPageRows,
-                        pageDebit: pageDebit,
-                        pageCredit: pageCredit,
-                        carryOverDebit: carryOverDebit,
-                        carryOverCredit: carryOverCredit
-                    ])
+                if (txList.length > 0) startNewPage();
+
+                for (const tx of txList) {
+                    const txLineCount = 1 + tx.entries.length;
+                    if (currentLines + txLineCount > maxLines && currentLines > 0) {
+                        currentPage.carriedForwardDebit = runningDebit;
+                        currentPage.carriedForwardCredit = runningCredit;
+                        startNewPage();
+                    }
+                    for (const entry of tx.entries) {
+                        runningDebit += entry.debitAmount;
+                        runningCredit += entry.creditAmount;
+                    }
+                    currentPage.transactions.push(tx);
+                    currentLines += txLineCount;
                 }
 
-                totalDebit = runningDebit
-                totalCredit = runningCredit
-                endPageNumber = currentPageNum
+                if (currentPage) {
+                    currentPage.carriedForwardDebit = runningDebit;
+                    currentPage.carriedForwardCredit = runningCredit;
+                }
+
+                context.pages = pages;
+                context.totalDebit = runningDebit;
+                context.totalCredit = runningCredit;
+                context.endPageNumber = pageNum - 1;
+                context.isFinalized = false;
             ]]></script>
         </actions>
     </service>
 
+    <!-- Finalize General Journal Period -->
     <service verb="finalize" noun="GeneralJournalPeriod" allow-remote="true">
         <description>
-            Finalizes the General Journal for a period: assigns atomic sequential numbers to transactions via SequenceValueItem
-            and logs the page counts and totals in FiscalRegisterLog.
+            Locks the General Journal period, permanently assigns sequential journal numbers,
+            and logs the last page and totals in FiscalRegisterLog.
         </description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="fiscalYear" required="true"/>
             <parameter name="timePeriodId"/>
-            <parameter name="fromDate" type="Date" required="true"/>
-            <parameter name="thruDate" type="Date" required="true"/>
-            <parameter name="documentLocation"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="comments"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="registerLogId" type="String"/>
-            <parameter name="firstPageNumber" type="Integer"/>
+            <parameter name="fiscalRegisterLogId"/>
             <parameter name="lastPageNumber" type="Integer"/>
-            <parameter name="firstSequenceNum" type="Integer"/>
-            <parameter name="lastSequenceNum" type="Integer"/>
-            <parameter name="totalDebitAmount" type="BigDecimal"/>
-            <parameter name="totalCreditAmount" type="BigDecimal"/>
+            <parameter name="transactionsLocked" type="Integer"/>
         </out-parameters>
         <actions>
-            <!-- 1. Generate journal preview to get totals and transactions -->
             <service-call name="mantle.ledger.FiscalRegisterServices.get#GeneralJournalData"
-                    in-map="[organizationPartyId:organizationPartyId, fiscalYear:fiscalYear,
-                        timePeriodId:timePeriodId, fromDate:ec.l10n.parseTimestamp(fromDate.toString() + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS'),
-                        thruDate:ec.l10n.parseTimestamp(thruDate.toString() + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS'),
-                        isFinalizedRun:true]"
+                    in-map="{organizationPartyId: organizationPartyId, fiscalYear: fiscalYear,
+                        timePeriodId: timePeriodId, fromDate: fromDate, thruDate: thruDate, isFinalizedRun: true}"
                     out-map="journalData"/>
 
-            <set field="firstPageNumber" from="journalData.startPageNumber"/>
-            <set field="lastPageNumber" from="journalData.endPageNumber"/>
-            <set field="totalDebitAmount" from="journalData.totalDebit"/>
-            <set field="totalCreditAmount" from="journalData.totalCredit"/>
-
-            <!-- 2. Assign permanent progressive sequence numbers using SequenceValueItem -->
-            <set field="seqName" value="FiscalJournal_${organizationPartyId}_${fiscalYear}"/>
-            <set field="firstSeq" type="Integer" from="null"/>
-            <set field="lastSeq" type="Integer" from="null"/>
-
             <script><![CDATA[
-                for (def page in journalData.pages) {
-                    for (def tx in page.transactions) {
-                        def txId = tx.acctgTransId
-                        def existing = ec.entity.find('mantle.ledger.transaction.AcctgTrans')
-                                .condition('acctgTransId', txId).one()
-                        if (existing && !existing.journalSequenceNum) {
-                            long nextNum = ec.entity.sequencedIdPrimary(seqName, 1, 1)
-                            existing.journalSequenceNum = nextNum
-                            existing.fiscalYear = fiscalYear
-                            existing.update()
-                            if (firstSeq == null) firstSeq = (int) nextNum
-                            lastSeq = (int) nextNum
-                        } else if (existing) {
-                            if (firstSeq == null) firstSeq = (int) existing.journalSequenceNum
-                            lastSeq = (int) existing.journalSequenceNum
-                        }
+                let count = 0;
+                let currentSeq = 1;
+                for (const p of (journalData.pages || [])) {
+                    for (const tx of (p.transactions || [])) {
+                        ec.entity.find("mantle.ledger.transaction.AcctgTrans")
+                            .condition("acctgTransId", tx.acctgTransId)
+                            .one()
+                            .set("journalSequenceNum", currentSeq)
+                            .set("fiscalYear", fiscalYear)
+                            .update();
+                        currentSeq++;
+                        count++;
                     }
                 }
+                context.transactionsLocked = count;
             ]]></script>
 
-            <set field="firstSequenceNum" from="firstSeq ?: 1"/>
-            <set field="lastSequenceNum" from="lastSeq ?: 1"/>
-
-            <!-- 3. Record in FiscalRegisterLog -->
             <service-call name="create#mantle.ledger.report.FiscalRegisterLog"
-                    in-map="[organizationPartyId:organizationPartyId, fiscalYear:fiscalYear,
-                        registerTypeEnumId:'FregJournal', timePeriodId:timePeriodId,
-                        fromDate:fromDate, thruDate:thruDate,
-                        firstPageNumber:firstPageNumber, lastPageNumber:lastPageNumber,
-                        firstSequenceNum:firstSequenceNum, lastSequenceNum:lastSequenceNum,
-                        totalDebitAmount:totalDebitAmount, totalCreditAmount:totalCreditAmount,
-                        isFinalized:'Y', finalizedDate:ec.user.nowTimestamp,
-                        finalizedByUserId:ec.user.userId, printedDate:ec.user.nowTimestamp,
-                        printedByUserId:ec.user.userId, documentLocation:documentLocation]"
-                    out-map="logResult"/>
-            <set field="registerLogId" from="logResult.registerLogId"/>
+                    in-map="{organizationPartyId: organizationPartyId, registerTypeEnumId: 'FregJournal',
+                        fiscalYear: fiscalYear, timePeriodId: timePeriodId, fromDate: fromDate, thruDate: thruDate,
+                        firstPageNumber: journalData.startPageNumber, lastPageNumber: journalData.endPageNumber,
+                        firstSequenceNum: 1, lastSequenceNum: journalData.totalTransactions,
+                        totalDebit: journalData.totalDebit, totalCredit: journalData.totalCredit,
+                        finalizedDate: ec.user.nowTimestamp, finalizedByUserLoginId: ec.user.userId,
+                        isDefinitive: 'Y', comments: comments}"
+                    out-map="logOut"/>
+            <set field="fiscalRegisterLogId" from="logOut.fiscalRegisterLogId"/>
+            <set field="lastPageNumber" from="journalData.endPageNumber"/>
+        </actions>
+    </service>
+
+    <!-- ================================================================= -->
+    <!-- REGISTRI IVA (VAT REGISTERS) & LIQUIDAZIONE IVA                   -->
+    <!-- ================================================================= -->
+    <service verb="get" noun="VatRegisterData" allow-remote="true">
+        <description>
+            Retrieves data for Italian VAT Registers (Vendite, Acquisti, Liquidazione Periodica).
+            Computes taxable amounts, tax breakdown by rate/nature, deductible/non-deductible tax,
+            and formatted pagination with running totals.
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="registerType" default-value="sales"/> <!-- sales, purchases, summary -->
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="vatRegisterSeries"/>
+            <parameter name="linesPerPage" type="Integer" default-value="20"/>
+            <parameter name="pageStartingNumber" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organization" type="Map"/>
+            <parameter name="registerType" type="String"/>
+            <parameter name="registerTitle" type="String"/>
+            <parameter name="periodDescription" type="String"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pages" type="List"/>
+            <parameter name="vatRateSummaries" type="List"/>
+            <parameter name="totalTaxable"/>
+            <parameter name="totalTax"/>
+            <parameter name="totalDeductible"/>
+            <parameter name="totalNonDeductible"/>
+            <parameter name="totalInvoiceAmount"/>
+            <parameter name="totalDocuments" type="Integer"/>
+            <parameter name="salesTaxTotal"/>
+            <parameter name="purchaseTaxDeductibleTotal"/>
+            <parameter name="netVatDue"/>
+            <parameter name="startPageNumber" type="Integer"/>
+            <parameter name="endPageNumber" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <!-- 1. Resolve Time Period / Dates -->
+            <if condition="timePeriodId">
+                <entity-find-one entity-name="mantle.party.time.TimePeriod" value-field="tp">
+                    <field-map field-name="timePeriodId"/>
+                </entity-find-one>
+                <if condition="tp">
+                    <set field="fromDate" from="fromDate || tp.fromDate"/>
+                    <set field="thruDate" from="thruDate || tp.thruDate"/>
+                    <set field="periodDescription" from="tp.periodName || tp.timePeriodId"/>
+                </if>
+            </if>
+            <if condition="!fiscalYear">
+                <set field="refDate" from="fromDate || ec.user.nowTimestamp"/>
+                <set field="fiscalYear" from="ec.l10n.format(refDate, 'yyyy')"/>
+            </if>
+            <if condition="!periodDescription">
+                <set field="periodDescription" from="fiscalYear"/>
+            </if>
+
+            <!-- 2. Organization details -->
+            <entity-find-one entity-name="mantle.party.Organization" value-field="org">
+                <field-map field-name="partyId" from="organizationPartyId"/>
+            </entity-find-one>
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="taxAuthPartyList">
+                <date-filter/><econdition field-name="partyId" from="organizationPartyId"/>
+            </entity-find>
+            <entity-find entity-name="mantle.party.PartyIdentification" list="partyIdentList">
+                <econdition field-name="partyId" from="organizationPartyId"/>
+            </entity-find>
+            <set field="orgVatId" from="taxAuthPartyList?.[0]?.partyTaxId || '—'"/>
+            <set field="orgFiscalCode" from="partyIdentList.find(p => p.partyIdTypeEnumId == 'PtidSsn')?.idValue || '—'"/>
+            <set field="orgRea" from="partyIdentList.find(p => p.partyIdTypeEnumId == 'PtidREA')?.idValue || '—'"/>
+            <set field="organization" from="{partyId: organizationPartyId, organizationName: org?.organizationName || organizationPartyId,
+                    taxIdNumber: orgVatId, socialSecurityNumber: orgFiscalCode, reaNumber: orgRea}"/>
+
+            <!-- 3. Titles -->
+            <if condition="registerType == 'sales'">
+                <set field="registerTitle" value="Registro IVA Vendite (Fatture Emesse - Art. 23 D.P.R. 633/72)"/>
+            <else-if condition="registerType == 'purchases'">
+                <set field="registerTitle" value="Registro IVA Acquisti (Fatture Ricevute - Art. 25 D.P.R. 633/72)"/>
+            </else-if>
+            <else>
+                <set field="registerTitle" value="Prospetto di Liquidazione Periodica IVA (Art. 27 D.P.R. 633/72)"/>
+            </else>
+            </if>
+
+            <!-- 4. Query Invoices -->
+            <script><![CDATA[
+                const isSales = (registerType === 'sales');
+                const isPurchases = (registerType === 'purchases');
+                const isSummary = (registerType === 'summary');
+
+                let invoiceTypes = [];
+                if (isSales || isSummary) invoiceTypes.push('InvoiceSales', 'InvoiceReturn');
+                if (isPurchases || isSummary) invoiceTypes.push('InvoicePurchase', 'InvoiceReturn');
+
+                let q = ec.entity.find("mantle.account.invoice.Invoice");
+                if (isSales) {
+                    q = q.condition("fromPartyId", organizationPartyId);
+                    q = q.condition("invoiceTypeEnumId", "in", ['InvoiceSales', 'InvoiceReturn']);
+                } else if (isPurchases) {
+                    q = q.condition("toPartyId", organizationPartyId);
+                    q = q.condition("invoiceTypeEnumId", "in", ['InvoicePurchase', 'InvoiceReturn']);
+                } else {
+                    // Summary: include both
+                    const conds = ec.entity.conditionFactory;
+                    q = q.condition(conds.makeCondition([
+                        conds.makeCondition("fromPartyId", "equals", organizationPartyId),
+                        conds.makeCondition("toPartyId", "equals", organizationPartyId)
+                    ], "or"));
+                    q = q.condition("invoiceTypeEnumId", "in", ['InvoiceSales', 'InvoicePurchase', 'InvoiceReturn']);
+                }
+
+                if (fromDate) q = q.condition("invoiceDate", "greater-equals", fromDate);
+                if (thruDate) q = q.condition("invoiceDate", "less-equals", thruDate);
+                if (vatRegisterSeries) q = q.condition("vatRegisterSeries", vatRegisterSeries);
+                
+                // Exclude drafts
+                q = q.condition("statusId", "not-equals", "InvoiceInProcess");
+                q = q.orderBy("invoiceDate,invoiceId");
+
+                const invoices = q.list() || [];
+                const docRows = [];
+                const rateSummaryMap = {};
+                let sumTaxable = 0;
+                let sumTax = 0;
+                let sumDocTotal = 0;
+                let sumDeductible = 0;
+                let sumNonDeductible = 0;
+                let salesTaxSum = 0;
+                let purchaseTaxDeductibleSum = 0;
+
+                let protocolSeq = 1;
+
+                for (const inv of invoices) {
+                    const isInvoiceSale = (inv.fromPartyId === organizationPartyId);
+                    const counterPartyId = isInvoiceSale ? inv.toPartyId : inv.fromPartyId;
+                    
+                    // Counterparty names and fiscal id
+                    const cpParty = ec.entity.find("mantle.party.Organization").condition("partyId", counterPartyId).one()
+                        || ec.entity.find("mantle.party.Person").condition("partyId", counterPartyId).one();
+                    const cpName = cpParty ? (cpParty.organizationName || ((cpParty.firstName || '') + ' ' + (cpParty.lastName || ''))) : counterPartyId;
+                    
+                    const cpTaxAuth = ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", counterPartyId).list() || [];
+                    const cpVat = cpTaxAuth[0]?.partyTaxId || '';
+                    const cpIdent = ec.entity.find("mantle.party.PartyIdentification").condition("partyId", counterPartyId).condition("partyIdTypeEnumId", "PtidSsn").one();
+                    const cpFiscalCode = cpIdent?.idValue || cpVat;
+
+                    // Fetch invoice items
+                    const items = ec.entity.find("mantle.account.invoice.InvoiceItem")
+                        .condition("invoiceId", inv.invoiceId)
+                        .list() || [];
+
+                    let docTaxable = 0;
+                    let docTax = 0;
+                    const docRates = [];
+
+                    for (const item of items) {
+                        const amt = (Number(item.amount) || 0) * (Number(item.quantity) || 1);
+                        if (item.itemTypeEnumId === 'ItemVatTax' || item.itemTypeEnumId === 'ItemSalesTax') {
+                            docTax += amt;
+                        } else {
+                            docTaxable += amt;
+                        }
+                    }
+
+                    // Default rate 22% if no specific tax item was split
+                    const effectiveTax = docTax > 0 ? docTax : (docTaxable * 0.22);
+                    const docTotal = Number(inv.invoiceTotal) || (docTaxable + effectiveTax);
+                    const rateKey = '22%';
+
+                    if (!rateSummaryMap[rateKey]) {
+                        rateSummaryMap[rateKey] = { rateDescription: 'Aliquota Ordinaria 22%', taxPercentage: 22.0, taxableAmount: 0, taxAmount: 0, deductibleAmount: 0, nonDeductibleAmount: 0 };
+                    }
+                    rateSummaryMap[rateKey].taxableAmount += docTaxable;
+                    rateSummaryMap[rateKey].taxAmount += effectiveTax;
+                    rateSummaryMap[rateKey].deductibleAmount += effectiveTax;
+
+                    sumTaxable += docTaxable;
+                    sumTax += effectiveTax;
+                    sumDocTotal += docTotal;
+                    sumDeductible += effectiveTax;
+
+                    if (isInvoiceSale) {
+                        salesTaxSum += effectiveTax;
+                    } else {
+                        purchaseTaxDeductibleSum += effectiveTax;
+                    }
+
+                    docRows.push({
+                        invoiceId: inv.invoiceId,
+                        isSale: isInvoiceSale,
+                        vatProtocolNum: inv.vatProtocolNum || protocolSeq,
+                        vatProtocolDate: inv.vatProtocolDate || inv.invoiceDate,
+                        documentNum: inv.referenceNum || inv.invoiceId,
+                        documentDate: inv.invoiceDate,
+                        counterPartyId: counterPartyId,
+                        counterPartyName: cpName,
+                        counterPartyTaxId: cpVat || cpFiscalCode || '—',
+                        taxableAmount: docTaxable,
+                        taxRateText: '22%',
+                        taxAmount: effectiveTax,
+                        deductibleAmount: effectiveTax,
+                        nonDeductibleAmount: 0,
+                        totalAmount: docTotal
+                    });
+                    protocolSeq++;
+                }
+
+                // Page splits for printing
+                const maxLines = Number(linesPerPage) || 20;
+                const pages = [];
+                let curPage = null;
+                let pageNumber = Number(pageStartingNumber) || 1;
+                let runningTaxable = 0;
+                let runningTax = 0;
+                let runningTotal = 0;
+
+                function newPage() {
+                    curPage = {
+                        pageNumber: pageNumber,
+                        pageLabel: fiscalYear + ' / ' + pageNumber,
+                        broughtForwardTaxable: runningTaxable,
+                        broughtForwardTax: runningTax,
+                        broughtForwardTotal: runningTotal,
+                        carriedForwardTaxable: runningTaxable,
+                        carriedForwardTax: runningTax,
+                        carriedForwardTotal: runningTotal,
+                        documents: []
+                    };
+                    pages.push(curPage);
+                    pageNumber++;
+                }
+
+                if (docRows.length > 0) newPage();
+
+                for (let i = 0; i < docRows.length; i++) {
+                    if (curPage.documents.length >= maxLines) {
+                        curPage.carriedForwardTaxable = runningTaxable;
+                        curPage.carriedForwardTax = runningTax;
+                        curPage.carriedForwardTotal = runningTotal;
+                        newPage();
+                    }
+                    const row = docRows[i];
+                    runningTaxable += row.taxableAmount;
+                    runningTax += row.taxAmount;
+                    runningTotal += row.totalAmount;
+                    curPage.documents.push(row);
+                }
+
+                if (curPage) {
+                    curPage.carriedForwardTaxable = runningTaxable;
+                    curPage.carriedForwardTax = runningTax;
+                    curPage.carriedForwardTotal = runningTotal;
+                }
+
+                context.pages = pages;
+                context.vatRateSummaries = Object.values(rateSummaryMap);
+                context.totalTaxable = sumTaxable;
+                context.totalTax = sumTax;
+                context.totalDeductible = sumDeductible;
+                context.totalNonDeductible = sumNonDeductible;
+                context.totalInvoiceAmount = sumDocTotal;
+                context.totalDocuments = docRows.length;
+                context.salesTaxTotal = salesTaxSum;
+                context.purchaseTaxDeductibleTotal = purchaseTaxDeductibleSum;
+                context.netVatDue = salesTaxSum - purchaseTaxDeductibleSum;
+                context.startPageNumber = Number(pageStartingNumber) || 1;
+                context.endPageNumber = pageNumber - 1;
+            ]]></script>
         </actions>
     </service>
 </services>
