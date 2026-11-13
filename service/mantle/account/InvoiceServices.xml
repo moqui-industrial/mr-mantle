@@ -3788,8 +3788,14 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="invoiceId"/>
                 <order-by field-name="invoiceItemSeqId,invoiceTermId"/>
             </entity-find>
+            <set field="rawTermArr" from="Array.from(rawTermList)"/>
+            <set field="termEnumIds" from="rawTermArr.map((t) => t.termTypeEnumId).filter((id) => id)"/>
             <entity-find entity-name="moqui.basic.Enumeration" list="termTypeList" cache="true" disable-authz="true">
-                <econdition field-name="enumTypeId" value="TermType"/></entity-find>
+                <econditions combine="or">
+                    <econdition field-name="enumTypeId" value="TermType"/>
+                    <econdition field-name="enumId" operator="in" from="termEnumIds.length ? termEnumIds : ['_NONE_']"/>
+                </econditions>
+            </entity-find>
             <set field="termTypeNames" from="Object.fromEntries(Array.from(termTypeList).map((t) => [t.enumId, t.description]))"/>
             <entity-find entity-name="mantle.account.invoice.SettlementTerm" list="allSettlementTerms" cache="true" disable-authz="true"/>
             <set field="settlementTermNames" from="Object.fromEntries(Array.from(allSettlementTerms).map((s) => [s.settlementTermId, s.description]))"/>

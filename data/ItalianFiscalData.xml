@@ -1,155 +1,177 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    ITALIAN FISCAL AND COMPLIANCE SEED DATA
-    Regime Ordinario - Fatturazione Elettronica SdI (v1.2.2 / v1.9.1),
-    Dogane (EUCDM / ADM Prospetto Contabile), Registri IVA, Libro Giornale, Ritenute.
+    ITALIAN FISCAL AND COMPLIANCE SEED DATA (ENGLISH)
+    Ordinary Regime - E-Invoicing SdI (v1.2.2 / v1.9.1),
+    Customs (EUCDM / ADM Accounting Summary Statement), VAT Registers, General Journal, Withholding.
+    All Italian descriptions are localized via mr-l10n.
 -->
 <entity-facade-xml type="seed">
     <!-- ================================================================= -->
-    <!-- SECTION 1: PARTY IDENTIFICATION TYPES (ITALIA)                    -->
+    <!-- SECTION 1: PARTY IDENTIFICATION TYPES                             -->
     <!-- ================================================================= -->
-    <moqui.basic.Enumeration enumId="PtidREA" enumTypeId="PartyIdType" description="Numero REA (Registro Imprese)" sequenceNum="10"/>
-    <moqui.basic.Enumeration enumId="PtidEORI" enumTypeId="PartyIdType" description="Codice EORI" sequenceNum="11"/>
-    <moqui.basic.Enumeration enumId="PtidExchSysCode" enumTypeId="PartyIdType" description="Codice Univoco SDI (7 car.)" sequenceNum="12"/>
-    <moqui.basic.Enumeration enumId="PtidPec" enumTypeId="PartyIdType" description="Indirizzo Posta Elettronica Certificata (PEC)" sequenceNum="13"/>
+    <moqui.basic.Enumeration enumId="PtidREA" enumTypeId="PartyIdType" description="REA Number (Business Register)" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="PtidEORI" enumTypeId="PartyIdType" description="EORI Code" sequenceNum="11"/>
+    <moqui.basic.Enumeration enumId="PtidExchSysCode" enumTypeId="PartyIdType" description="SDI Exchange System Code (7 chars)" sequenceNum="12"/>
+    <moqui.basic.Enumeration enumId="PtidPec" enumTypeId="PartyIdType" description="Certified Email Address (PEC)" sequenceNum="13"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 2: TAX AUTHORITIES (ITALIA)                               -->
+    <!-- SECTION 2: TAX AUTHORITIES                                        -->
     <!-- ================================================================= -->
-    <!-- Agenzia delle Entrate (AdE) -->
+    <!-- Italian Revenue Agency (Agenzia delle Entrate - AdE) -->
     <mantle.party.Party partyId="IT_ADE" partyTypeEnumId="PtyOrganization" disabled="N"/>
-    <mantle.party.Organization partyId="IT_ADE" organizationName="Agenzia delle Entrate"/>
+    <mantle.party.Organization partyId="IT_ADE" organizationName="Italian Revenue Agency (AdE)"/>
     <mantle.other.tax.TaxAuthority taxAuthorityId="IT_ADE" taxAuthGeoId="ITA" taxAuthPartyId="IT_ADE"
-        taxAuthorityTypeEnumId="TatFederal" description="Agenzia delle Entrate"/>
+        taxAuthorityTypeEnumId="TatFederal" description="Italian Revenue Agency (Agenzia delle Entrate)"/>
 
-    <!-- Agenzia delle Dogane e dei Monopoli (ADM) -->
+    <!-- Italian Customs and Monopolies Agency (ADM) -->
     <mantle.party.Party partyId="IT_ADM" partyTypeEnumId="PtyOrganization" disabled="N"/>
-    <mantle.party.Organization partyId="IT_ADM" organizationName="Agenzia delle Dogane e dei Monopoli"/>
+    <mantle.party.Organization partyId="IT_ADM" organizationName="Italian Customs and Monopolies Agency (ADM)"/>
     <mantle.other.tax.TaxAuthority taxAuthorityId="IT_ADM" taxAuthGeoId="ITA" taxAuthPartyId="IT_ADM"
-        taxAuthorityTypeEnumId="TatFederal" description="Agenzia delle Dogane e dei Monopoli"/>
+        taxAuthorityTypeEnumId="TatFederal" description="Italian Customs Agency (Agenzia delle Dogane)"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 3: VAT RATES (ITALIA - DPR 633/72)                       -->
+    <!-- SECTION 3: VAT RATES (ITALY - PRES. DECREE 633/72)               -->
     <!-- ================================================================= -->
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_10" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 10% Reduced" description="Products subject to 10% reduced VAT"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_5" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 5% Reduced" description="Products subject to 5% reduced VAT"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_4" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 4% Super Reduced" description="Products subject to 4% super reduced VAT"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N1" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N1" description="Excluded operations ex art. 15"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N2" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N2" description="Not subject to VAT"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N3" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N3" description="Non-taxable operations"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N4" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N4" description="Exempt operations ex art. 10"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N5" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N5" description="Margin scheme operations"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N6" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N6" description="Reverse charge operations"/>
+    <mantle.product.category.ProductCategory productCategoryId="CAT_VAT_0_N7" productCategoryTypeEnumId="PctTax"
+        categoryName="VAT 0% N7" description="VAT paid in another EU country"/>
+
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_22" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="22.0" description="IVA 22% - Aliquota Ordinaria" fromDate="2020-01-01 00:00:00"/>
+        taxPercentage="22.0" description="VAT 22% - Standard Rate" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_10" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="10.0" description="IVA 10% - Aliquota Ridotta" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_10" taxPercentage="10.0" description="VAT 10% - Reduced Rate" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_5" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="5.0" description="IVA 5% - Aliquota Ridotta" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_5" taxPercentage="5.0" description="VAT 5% - Reduced Rate" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_4" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="4.0" description="IVA 4% - Aliquota Minima" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_4" taxPercentage="4.0" description="VAT 4% - Super Reduced Rate" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N1" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N1 Escluse ex art. 15" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N1" taxPercentage="0.0" description="VAT 0% - N1 Excluded ex art. 15" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N2" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N2 Non soggette ad IVA" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N2" taxPercentage="0.0" description="VAT 0% - N2 Not subject to VAT" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N3" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N3 Non imponibili (esportazioni)" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N3" taxPercentage="0.0" description="VAT 0% - N3 Non-taxable (exports/intra-EU)" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N4" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N4 Operazioni esenti ex art. 10" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N4" taxPercentage="0.0" description="VAT 0% - N4 Exempt operations ex art. 10" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N5" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N5 Regime del margine" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N5" taxPercentage="0.0" description="VAT 0% - N5 Margin scheme" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N6" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N6 Inversione contabile (reverse charge)" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N6" taxPercentage="0.0" description="VAT 0% - N6 Reverse charge" fromDate="2020-01-01 00:00:00"/>
     <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N7" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
-        taxPercentage="0.0" description="IVA 0% - N7 IVA assolta in altro stato UE" fromDate="2020-01-01 00:00:00"/>
+        productCategoryId="CAT_VAT_0_N7" taxPercentage="0.0" description="VAT 0% - N7 VAT paid in another EU country" fromDate="2020-01-01 00:00:00"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 4: FATTURAPA ENUMERATIONS (TIPO DOCUMENTO TD01 - TD29)   -->
+    <!-- SECTION 4: FATTURAPA ENUMERATIONS (DOCUMENT TYPE TD01 - TD29)     -->
     <!-- ================================================================= -->
-    <moqui.basic.EnumerationType enumTypeId="ElectronicInvoiceType" description="FatturaPA Tipo Documento (TD01-TD29)"/>
-    <moqui.basic.Enumeration enumId="TD01" enumTypeId="ElectronicInvoiceType" description="TD01 Fattura ordinaria" sequenceNum="1"/>
-    <moqui.basic.Enumeration enumId="TD02" enumTypeId="ElectronicInvoiceType" description="TD02 Acconto / anticipo su fattura" sequenceNum="2"/>
-    <moqui.basic.Enumeration enumId="TD03" enumTypeId="ElectronicInvoiceType" description="TD03 Acconto / anticipo su parcella" sequenceNum="3"/>
-    <moqui.basic.Enumeration enumId="TD04" enumTypeId="ElectronicInvoiceType" description="TD04 Nota di credito" sequenceNum="4"/>
-    <moqui.basic.Enumeration enumId="TD05" enumTypeId="ElectronicInvoiceType" description="TD05 Nota di debito" sequenceNum="5"/>
-    <moqui.basic.Enumeration enumId="TD06" enumTypeId="ElectronicInvoiceType" description="TD06 Parcella" sequenceNum="6"/>
-    <moqui.basic.Enumeration enumId="TD16" enumTypeId="ElectronicInvoiceType" description="TD16 Integrazione fattura reverse charge interno" sequenceNum="16"/>
-    <moqui.basic.Enumeration enumId="TD17" enumTypeId="ElectronicInvoiceType" description="TD17 Integrazione/autofattura acquisto servizi dall'estero" sequenceNum="17"/>
-    <moqui.basic.Enumeration enumId="TD18" enumTypeId="ElectronicInvoiceType" description="TD18 Integrazione acquisto beni intracomunitari (UE)" sequenceNum="18"/>
-    <moqui.basic.Enumeration enumId="TD19" enumTypeId="ElectronicInvoiceType" description="TD19 Integrazione/autofattura acquisto beni ex art. 17 c. 2 DPR 633/72" sequenceNum="19"/>
-    <moqui.basic.Enumeration enumId="TD20" enumTypeId="ElectronicInvoiceType" description="TD20 Autofattura denuncia regolarizzazione omessa/irregolare fattura" sequenceNum="20"/>
-    <moqui.basic.Enumeration enumId="TD24" enumTypeId="ElectronicInvoiceType" description="TD24 Fattura differita (art. 21, comma 4, lett. a)" sequenceNum="24"/>
-    <moqui.basic.Enumeration enumId="TD25" enumTypeId="ElectronicInvoiceType" description="TD25 Fattura differita per triangolari (art. 21, c. 4, lett. b)" sequenceNum="25"/>
-    <moqui.basic.Enumeration enumId="TD27" enumTypeId="ElectronicInvoiceType" description="TD27 Fattura per autoconsumo o cessioni gratuite" sequenceNum="27"/>
-    <moqui.basic.Enumeration enumId="TD28" enumTypeId="ElectronicInvoiceType" description="TD28 Acquisti da San Marino con IVA (fattura cartacea)" sequenceNum="28"/>
-    <moqui.basic.Enumeration enumId="TD29" enumTypeId="ElectronicInvoiceType" description="TD29 Comunicazione di fattura omessa o irregolare" sequenceNum="29"/>
+    <moqui.basic.EnumerationType enumTypeId="ElectronicInvoiceType" description="FatturaPA Document Type (TD01-TD29)"/>
+    <moqui.basic.Enumeration enumId="TD01" enumTypeId="ElectronicInvoiceType" description="TD01 Standard invoice" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="TD02" enumTypeId="ElectronicInvoiceType" description="TD02 Advance payment on invoice" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="TD03" enumTypeId="ElectronicInvoiceType" description="TD03 Advance payment on fee" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="TD04" enumTypeId="ElectronicInvoiceType" description="TD04 Credit note" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="TD05" enumTypeId="ElectronicInvoiceType" description="TD05 Debit note" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="TD06" enumTypeId="ElectronicInvoiceType" description="TD06 Professional fee invoice" sequenceNum="6"/>
+    <moqui.basic.Enumeration enumId="TD16" enumTypeId="ElectronicInvoiceType" description="TD16 Domestic reverse charge integration" sequenceNum="16"/>
+    <moqui.basic.Enumeration enumId="TD17" enumTypeId="ElectronicInvoiceType" description="TD17 Foreign services reverse charge / self-invoice" sequenceNum="17"/>
+    <moqui.basic.Enumeration enumId="TD18" enumTypeId="ElectronicInvoiceType" description="TD18 Intra-EU goods purchase integration" sequenceNum="18"/>
+    <moqui.basic.Enumeration enumId="TD19" enumTypeId="ElectronicInvoiceType" description="TD19 Foreign goods purchase integration ex art. 17 c. 2" sequenceNum="19"/>
+    <moqui.basic.Enumeration enumId="TD20" enumTypeId="ElectronicInvoiceType" description="TD20 Regularization self-invoice for missing supplier invoice" sequenceNum="20"/>
+    <moqui.basic.Enumeration enumId="TD24" enumTypeId="ElectronicInvoiceType" description="TD24 Deferred invoice (art. 21, par. 4, let. a)" sequenceNum="24"/>
+    <moqui.basic.Enumeration enumId="TD25" enumTypeId="ElectronicInvoiceType" description="TD25 Triangular deferred invoice (art. 21, par. 4, let. b)" sequenceNum="25"/>
+    <moqui.basic.Enumeration enumId="TD27" enumTypeId="ElectronicInvoiceType" description="TD27 Self-consumption or free sample invoice" sequenceNum="27"/>
+    <moqui.basic.Enumeration enumId="TD28" enumTypeId="ElectronicInvoiceType" description="TD28 Purchases from San Marino with VAT (paper invoice)" sequenceNum="28"/>
+    <moqui.basic.Enumeration enumId="TD29" enumTypeId="ElectronicInvoiceType" description="TD29 Missing or irregular invoice notice" sequenceNum="29"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 5: NATURA IVA (FATTURAPA v1.2.2 / v1.9 / v1.9.1)         -->
+    <!-- SECTION 5: VAT NATURE CODES (FATTURAPA v1.2.2 / v1.9 / v1.9.1)    -->
     <!-- ================================================================= -->
-    <moqui.basic.EnumerationType enumTypeId="VatNature" description="FatturaPA Codice Natura IVA (N1-N7)"/>
-    <moqui.basic.Enumeration enumId="N1" enumTypeId="VatNature" description="N1 Escluse ex art. 15 DPR 633/72"/>
-    <moqui.basic.Enumeration enumId="N2.1" enumTypeId="VatNature" description="N2.1 Non soggette ad IVA - artt. da 7 a 7-septies"/>
-    <moqui.basic.Enumeration enumId="N2.2" enumTypeId="VatNature" description="N2.2 Non soggette ad IVA - altri casi"/>
-    <moqui.basic.Enumeration enumId="N3.1" enumTypeId="VatNature" description="N3.1 Non imponibili - esportazioni art. 8 c. 1 lett. a/b"/>
-    <moqui.basic.Enumeration enumId="N3.2" enumTypeId="VatNature" description="N3.2 Non imponibili - cessioni intracomunitarie"/>
-    <moqui.basic.Enumeration enumId="N3.3" enumTypeId="VatNature" description="N3.3 Non imponibili - cessioni verso San Marino"/>
-    <moqui.basic.Enumeration enumId="N3.4" enumTypeId="VatNature" description="N3.4 Non imponibili - operazioni assimilate alle esportazioni"/>
-    <moqui.basic.Enumeration enumId="N3.5" enumTypeId="VatNature" description="N3.5 Non imponibili - a seguito di dichiarazione d'intento"/>
-    <moqui.basic.Enumeration enumId="N3.6" enumTypeId="VatNature" description="N3.6 Non imponibili - altre operazioni"/>
-    <moqui.basic.Enumeration enumId="N4" enumTypeId="VatNature" description="N4 Esenti ex art. 10 DPR 633/72"/>
-    <moqui.basic.Enumeration enumId="N5" enumTypeId="VatNature" description="N5 Regime del margine / IVA non esposta"/>
-    <moqui.basic.Enumeration enumId="N6.1" enumTypeId="VatNature" description="N6.1 Inversione contabile - rottami e altri materiali di recupero"/>
-    <moqui.basic.Enumeration enumId="N6.2" enumTypeId="VatNature" description="N6.2 Inversione contabile - oro e argento puro"/>
-    <moqui.basic.Enumeration enumId="N6.3" enumTypeId="VatNature" description="N6.3 Inversione contabile - subappalto nel settore edile"/>
-    <moqui.basic.Enumeration enumId="N6.4" enumTypeId="VatNature" description="N6.4 Inversione contabile - cessione di fabbricati"/>
-    <moqui.basic.Enumeration enumId="N6.5" enumTypeId="VatNature" description="N6.5 Inversione contabile - telefoni cellulari"/>
-    <moqui.basic.Enumeration enumId="N6.6" enumTypeId="VatNature" description="N6.6 Inversione contabile - prodotti elettronici / microprocessori"/>
-    <moqui.basic.Enumeration enumId="N6.7" enumTypeId="VatNature" description="N6.7 Inversione contabile - prestazioni comparto edile e settori connessi"/>
-    <moqui.basic.Enumeration enumId="N6.8" enumTypeId="VatNature" description="N6.8 Inversione contabile - settore energetico"/>
-    <moqui.basic.Enumeration enumId="N6.9" enumTypeId="VatNature" description="N6.9 Inversione contabile - altri casi"/>
-    <moqui.basic.Enumeration enumId="N7" enumTypeId="VatNature" description="N7 IVA assolta in altro stato UE"/>
+    <moqui.basic.EnumerationType enumTypeId="VatNature" description="FatturaPA VAT Nature Code (N1-N7)"/>
+    <moqui.basic.Enumeration enumId="N1" enumTypeId="VatNature" description="N1 Excluded ex art. 15 Pres. Decree 633/72"/>
+    <moqui.basic.Enumeration enumId="N2.1" enumTypeId="VatNature" description="N2.1 Not subject to VAT - art. 7 to 7-septies"/>
+    <moqui.basic.Enumeration enumId="N2.2" enumTypeId="VatNature" description="N2.2 Not subject to VAT - other cases"/>
+    <moqui.basic.Enumeration enumId="N3.1" enumTypeId="VatNature" description="N3.1 Non-taxable - exports art. 8 par. 1 let. a/b"/>
+    <moqui.basic.Enumeration enumId="N3.2" enumTypeId="VatNature" description="N3.2 Non-taxable - intra-community supplies"/>
+    <moqui.basic.Enumeration enumId="N3.3" enumTypeId="VatNature" description="N3.3 Non-taxable - supplies to San Marino"/>
+    <moqui.basic.Enumeration enumId="N3.4" enumTypeId="VatNature" description="N3.4 Non-taxable - transactions assimilated to exports"/>
+    <moqui.basic.Enumeration enumId="N3.5" enumTypeId="VatNature" description="N3.5 Non-taxable - declarations of intent"/>
+    <moqui.basic.Enumeration enumId="N3.6" enumTypeId="VatNature" description="N3.6 Non-taxable - other transactions"/>
+    <moqui.basic.Enumeration enumId="N4" enumTypeId="VatNature" description="N4 Exempt ex art. 10 Pres. Decree 633/72"/>
+    <moqui.basic.Enumeration enumId="N5" enumTypeId="VatNature" description="N5 Margin scheme / VAT not shown on invoice"/>
+    <moqui.basic.Enumeration enumId="N6.1" enumTypeId="VatNature" description="N6.1 Reverse charge - scrap and recycled materials"/>
+    <moqui.basic.Enumeration enumId="N6.2" enumTypeId="VatNature" description="N6.2 Reverse charge - pure gold and silver"/>
+    <moqui.basic.Enumeration enumId="N6.3" enumTypeId="VatNature" description="N6.3 Reverse charge - construction subcontracting"/>
+    <moqui.basic.Enumeration enumId="N6.4" enumTypeId="VatNature" description="N6.4 Reverse charge - building transfers"/>
+    <moqui.basic.Enumeration enumId="N6.5" enumTypeId="VatNature" description="N6.5 Reverse charge - mobile phones"/>
+    <moqui.basic.Enumeration enumId="N6.6" enumTypeId="VatNature" description="N6.6 Reverse charge - electronic products / processors"/>
+    <moqui.basic.Enumeration enumId="N6.7" enumTypeId="VatNature" description="N6.7 Reverse charge - construction and finishing services"/>
+    <moqui.basic.Enumeration enumId="N6.8" enumTypeId="VatNature" description="N6.8 Reverse charge - energy sector operations"/>
+    <moqui.basic.Enumeration enumId="N6.9" enumTypeId="VatNature" description="N6.9 Reverse charge - other cases"/>
+    <moqui.basic.Enumeration enumId="N7" enumTypeId="VatNature" description="N7 VAT paid in another EU member state"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 6: TIPO RITENUTA D'ACCONTO (RT01 - RT06)                 -->
+    <!-- SECTION 6: WITHHOLDING TAX TYPES (RT01 - RT06)                    -->
     <!-- ================================================================= -->
-    <moqui.basic.EnumerationType enumTypeId="WithholdingTaxType" description="FatturaPA Tipo Ritenuta (RT01-RT06)"/>
-    <moqui.basic.Enumeration enumId="RT01" enumTypeId="WithholdingTaxType" description="RT01 Ritenuta persone fisiche (es. 20% professionisti)"/>
-    <moqui.basic.Enumeration enumId="RT02" enumTypeId="WithholdingTaxType" description="RT02 Ritenuta persone giuridiche"/>
-    <moqui.basic.Enumeration enumId="RT03" enumTypeId="WithholdingTaxType" description="RT03 Contributo INPS"/>
-    <moqui.basic.Enumeration enumId="RT04" enumTypeId="WithholdingTaxType" description="RT04 Contributo ENASARCO"/>
-    <moqui.basic.Enumeration enumId="RT05" enumTypeId="WithholdingTaxType" description="RT05 Contributo ENPAM"/>
-    <moqui.basic.Enumeration enumId="RT06" enumTypeId="WithholdingTaxType" description="RT06 Altro contributo previdenziale"/>
+    <moqui.basic.EnumerationType enumTypeId="WithholdingTaxType" description="FatturaPA Withholding Tax Type (RT01-RT06)"/>
+    <moqui.basic.Enumeration enumId="RT01" enumTypeId="WithholdingTaxType" description="RT01 Natural person withholding (e.g. 20% professionals)"/>
+    <moqui.basic.Enumeration enumId="RT02" enumTypeId="WithholdingTaxType" description="RT02 Legal entity withholding"/>
+    <moqui.basic.Enumeration enumId="RT03" enumTypeId="WithholdingTaxType" description="RT03 INPS contribution withholding"/>
+    <moqui.basic.Enumeration enumId="RT04" enumTypeId="WithholdingTaxType" description="RT04 ENASARCO contribution withholding"/>
+    <moqui.basic.Enumeration enumId="RT05" enumTypeId="WithholdingTaxType" description="RT05 ENPAM contribution withholding"/>
+    <moqui.basic.Enumeration enumId="RT06" enumTypeId="WithholdingTaxType" description="RT06 Other social security contribution"/>
 
     <!-- ================================================================= -->
     <!-- SECTION 7: SDI NOTIFICATIONS & STATUS                             -->
     <!-- ================================================================= -->
-    <moqui.basic.EnumerationType enumTypeId="SdiNotificationType" description="Tipo Notifica Sistema di Interscambio"/>
-    <moqui.basic.Enumeration enumId="RC" enumTypeId="SdiNotificationType" description="RC Ricevuta di Consegna"/>
-    <moqui.basic.Enumeration enumId="NS" enumTypeId="SdiNotificationType" description="NS Notifica di Scarto"/>
-    <moqui.basic.Enumeration enumId="MC" enumTypeId="SdiNotificationType" description="MC Mancata Consegna (PEC o conservazione)"/>
-    <moqui.basic.Enumeration enumId="DT" enumTypeId="SdiNotificationType" description="DT Decorrenza Termini (PA)"/>
-    <moqui.basic.Enumeration enumId="EC" enumTypeId="SdiNotificationType" description="EC Esito Committente (Accettazione/Rifiuto PA)"/>
-    <moqui.basic.Enumeration enumId="NE" enumTypeId="SdiNotificationType" description="NE Notifica Esito"/>
+    <moqui.basic.EnumerationType enumTypeId="SdiNotificationType" description="SDI Notification Type"/>
+    <moqui.basic.Enumeration enumId="RC" enumTypeId="SdiNotificationType" description="RC Delivery Receipt"/>
+    <moqui.basic.Enumeration enumId="NS" enumTypeId="SdiNotificationType" description="NS Rejection Notice"/>
+    <moqui.basic.Enumeration enumId="MC" enumTypeId="SdiNotificationType" description="MC Failed Delivery Notice"/>
+    <moqui.basic.Enumeration enumId="DT" enumTypeId="SdiNotificationType" description="DT Expiry of Terms (PA)"/>
+    <moqui.basic.Enumeration enumId="EC" enumTypeId="SdiNotificationType" description="EC Customer Outcome Notice"/>
+    <moqui.basic.Enumeration enumId="NE" enumTypeId="SdiNotificationType" description="NE Outcome Notification"/>
 
-    <moqui.basic.EnumerationType enumTypeId="SdiStatus" description="Stato SdI Fattura Elettronica"/>
-    <moqui.basic.Enumeration enumId="SdiDraft" enumTypeId="SdiStatus" description="Bozza / Non generata"/>
-    <moqui.basic.Enumeration enumId="SdiGenerated" enumTypeId="SdiStatus" description="XML Generato e Validato"/>
-    <moqui.basic.Enumeration enumId="SdiSent" enumTypeId="SdiStatus" description="Inviata a SdI"/>
-    <moqui.basic.Enumeration enumId="SdiDelivered" enumTypeId="SdiStatus" description="Consegnata al destinatario (RC)"/>
-    <moqui.basic.Enumeration enumId="SdiAccepted" enumTypeId="SdiStatus" description="Accettata da PA / Destinatario"/>
-    <moqui.basic.Enumeration enumId="SdiRejected" enumTypeId="SdiStatus" description="Scartata da SdI (NS)"/>
-    <moqui.basic.Enumeration enumId="SdiUndelivered" enumTypeId="SdiStatus" description="Messa a disposizione (MC)"/>
-    <moqui.basic.Enumeration enumId="SdiReceived" enumTypeId="SdiStatus" description="Ricevuta da fornitore (fattura passiva)"/>
+    <moqui.basic.EnumerationType enumTypeId="SdiStatus" description="SDI E-Invoice Status"/>
+    <moqui.basic.Enumeration enumId="SdiDraft" enumTypeId="SdiStatus" description="Draft / Not Generated"/>
+    <moqui.basic.Enumeration enumId="SdiGenerated" enumTypeId="SdiStatus" description="XML Generated and Validated"/>
+    <moqui.basic.Enumeration enumId="SdiSent" enumTypeId="SdiStatus" description="Sent to SDI"/>
+    <moqui.basic.Enumeration enumId="SdiDelivered" enumTypeId="SdiStatus" description="Delivered to Recipient (RC)"/>
+    <moqui.basic.Enumeration enumId="SdiAccepted" enumTypeId="SdiStatus" description="Accepted by Recipient / PA"/>
+    <moqui.basic.Enumeration enumId="SdiRejected" enumTypeId="SdiStatus" description="Rejected by SDI (NS)"/>
+    <moqui.basic.Enumeration enumId="SdiUndelivered" enumTypeId="SdiStatus" description="Available for Pickup (MC)"/>
+    <moqui.basic.Enumeration enumId="SdiReceived" enumTypeId="SdiStatus" description="Received from Vendor (Incoming)"/>
 
     <!-- ================================================================= -->
-    <!-- SECTION 8: CUSTOMS DECLARATIONS (EUCDM H1-H7 / ADM PROSPETTO)    -->
+    <!-- SECTION 8: CUSTOMS DECLARATIONS (EUCDM H1-H7 / ADM SUMMARY)       -->
     <!-- ================================================================= -->
-    <moqui.basic.EnumerationType enumTypeId="CustomsDeclarationType" description="Tracciati Doganali EUCDM"/>
-    <moqui.basic.Enumeration enumId="H1" enumTypeId="CustomsDeclarationType" description="H1 Dichiarazione di immissione in libera pratica ordinaria"/>
-    <moqui.basic.Enumeration enumId="H2" enumTypeId="CustomsDeclarationType" description="H2 Dichiarazione di deposito doganale"/>
-    <moqui.basic.Enumeration enumId="H3" enumTypeId="CustomsDeclarationType" description="H3 Dichiarazione di perfezionamento attivo"/>
-    <moqui.basic.Enumeration enumId="H4" enumTypeId="CustomsDeclarationType" description="H4 Dichiarazione di ammissione temporanea"/>
-    <moqui.basic.Enumeration enumId="H5" enumTypeId="CustomsDeclarationType" description="H5 Dichiarazione di uso finale"/>
-    <moqui.basic.Enumeration enumId="H6" enumTypeId="CustomsDeclarationType" description="H6 Dichiarazione doganale a dati ridotti"/>
-    <moqui.basic.Enumeration enumId="H7" enumTypeId="CustomsDeclarationType" description="H7 Dichiarazione per invii di basso valore (IOSS)"/>
-    <moqui.basic.Enumeration enumId="B1" enumTypeId="CustomsDeclarationType" description="B1 Dichiarazione di esportazione ordinaria"/>
-    <moqui.basic.Enumeration enumId="B2" enumTypeId="CustomsDeclarationType" description="B2 Dichiarazione di perfezionamento passivo"/>
+    <moqui.basic.EnumerationType enumTypeId="CustomsDeclarationType" description="EUCDM Customs Declaration Type"/>
+    <moqui.basic.Enumeration enumId="H1" enumTypeId="CustomsDeclarationType" description="H1 Release for free circulation and special procedures"/>
+    <moqui.basic.Enumeration enumId="H2" enumTypeId="CustomsDeclarationType" description="H2 Customs warehousing"/>
+    <moqui.basic.Enumeration enumId="H3" enumTypeId="CustomsDeclarationType" description="H3 Inward processing"/>
+    <moqui.basic.Enumeration enumId="H4" enumTypeId="CustomsDeclarationType" description="H4 Temporary admission"/>
+    <moqui.basic.Enumeration enumId="H5" enumTypeId="CustomsDeclarationType" description="H5 End-use"/>
+    <moqui.basic.Enumeration enumId="H6" enumTypeId="CustomsDeclarationType" description="H6 Reduced dataset declaration"/>
+    <moqui.basic.Enumeration enumId="H7" enumTypeId="CustomsDeclarationType" description="H7 Low value consignments (IOSS)"/>
+    <moqui.basic.Enumeration enumId="B1" enumTypeId="CustomsDeclarationType" description="B1 Standard export declaration"/>
+    <moqui.basic.Enumeration enumId="B2" enumTypeId="CustomsDeclarationType" description="B2 Outward processing declaration"/>
 
     <!-- Customs Declaration Status -->
-    <moqui.basic.StatusType statusTypeId="CustomsDeclaration" description="Stato Bolletta Doganale"/>
-    <moqui.basic.StatusItem statusId="CustDeclDraft" statusTypeId="CustomsDeclaration" statusCode="DRAFT" description="Bozza"/>
-    <moqui.basic.StatusItem statusId="CustDeclRegistered" statusTypeId="CustomsDeclaration" statusCode="REGISTERED" description="Registrata a Registro IVA"/>
-    <moqui.basic.StatusItem statusId="CustDeclCleared" statusTypeId="CustomsDeclaration" statusCode="CLEARED" description="Svincolata / Liquidata"/>
+    <moqui.basic.StatusType statusTypeId="CustomsDeclaration" description="Customs Declaration Status"/>
+    <moqui.basic.StatusItem statusId="CustDeclDraft" statusTypeId="CustomsDeclaration" statusCode="DRAFT" description="Draft"/>
+    <moqui.basic.StatusItem statusId="CustDeclRegistered" statusTypeId="CustomsDeclaration" statusCode="REGISTERED" description="Registered in Purchase VAT"/>
+    <moqui.basic.StatusItem statusId="CustDeclCleared" statusTypeId="CustomsDeclaration" statusCode="CLEARED" description="Cleared / Settled"/>
 </entity-facade-xml>

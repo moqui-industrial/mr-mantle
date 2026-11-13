@@ -169,7 +169,7 @@ function local(p) {
                           : null
             const isVat = isVatAuthority || rate.rateTypeEnumId === "TarVatTax"
             if (isVat && !reason) {
-                const key = rate.taxAuthorityRateId || (authority.taxAuthorityId + "_" + (rate.taxPercentage ?? 0))
+                const key = rate.taxAuthorityRateId || (authority.taxAuthorityId + "_" + (rate.taxPercentage != null ? toDecimal(rate.taxPercentage).toNumber() : 0))
                 if (!vatBuckets.has(key)) vatBuckets.set(key, {rate, taxableAmount: toDecimal(0)})
                 const bucket = vatBuckets.get(key)
                 bucket.taxableAmount = bucket.taxableAmount.add(item.taxable)
@@ -206,7 +206,7 @@ function local(p) {
                 taxAmount: rounded,
                 taxRate: percentage.divide(toDecimal(100)),
                 taxAuthorityId: authority.taxAuthorityId,
-                taxName: (authority.description || authority.taxAuthorityId) + " " + percentage + "%",
+                taxName: (authority.description || authority.taxAuthorityId) + " " + percentage.toNumber() + "%",
                 taxAuthorityRateId: bucket.rate.taxAuthorityRateId,
                 taxableAmount: bucket.taxableAmount,
                 taxPercentage: percentage,
