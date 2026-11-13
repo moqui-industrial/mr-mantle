@@ -179,13 +179,14 @@ function readableSession(userScope, workEffortId) {
     return Object.assign(found, {access})
 }
 // An enrollment the caller reads, with its session and their access: the session's readers (the person their own only, the
-// trainer and development every one) and an approver of it.
+// trainer and development every one) and an approver of it (the session's trainer too when they decide it, who then reads its
+// reason as its approver: acceptance, PeopleTrainingUsable).
 function readableEnrollment(userScope, personTrainingId) {
     const enrollment = text(personTrainingId) ? one(ENROLLMENT, {personTrainingId: text(personTrainingId)}) : null
     const found = enrollment ? sessionOf(enrollment.workEffortId) : null
     const access = found ? sessionAccess(userScope, found.session) : {reads: false}
     const self = !!enrollment && !!userScope.partyId && enrollment.partyId === userScope.partyId
-    const approver = !!enrollment && !access.develop && !access.trainer && !self && approverOf(userScope, enrollment)
+    const approver = !!enrollment && !access.develop && !self && approverOf(userScope, enrollment)
     if (!enrollment || !found || !(access.develop || access.trainer || self || approver))
         denied("RECORD_UNAVAILABLE", "Training enrollment " + text(personTrainingId) + " is not available")
     return Object.assign(found, {enrollment, access, self, approver})
@@ -486,9 +487,13 @@ function getTraining(p) {
                 statusText: statusTexts[row.statusEnumId] || row.statusEnumId,
                 requestedDateText: dateText(row.requestedDate),
                 // why a place was asked for, and why it was refused: development's, the person's and the approver's (P19 review:
-                // not the trainer's)
-                reason: access.develop || own || row.personTrainingId === approverOnly ? row.reason || "" : "",
-                decisionReason: access.develop || own || row.personTrainingId === approverOnly ? row.decisionReason || "" : "",
+                // not the trainer's, unless the trainer is who decides it)
+                reason:
+                    access.develop || own || row.personTrainingId === approverOnly || summary?.canDecide ? row.reason || "" : "",
+                decisionReason:
+                    access.develop || own || row.personTrainingId === approverOnly || summary?.canDecide
+                        ? row.decisionReason || ""
+                        : "",
                 waitingText: summary?.waitingText || "",
                 peopleApprovalId: summary?.waiting ? summary.peopleApprovalId : null,
                 sourceRevision: summary?.waiting ? summary.sourceRevision : null,

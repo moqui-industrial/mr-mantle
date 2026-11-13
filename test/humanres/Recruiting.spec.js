@@ -40,6 +40,18 @@ function run(username, service, parameters = {}) {
         ec.artifactExecution.disableAuthz()
     }
 }
+// a block as the user, artifact authorization off (the services' own checks)
+function as(username, action) {
+    login(username)
+    ec.artifactExecution.disableAuthz()
+    try {
+        return action()
+    } finally {
+        ec.message.clearErrors()
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+    }
+}
 const code = out => (out.error ? /[A-Z][A-Z0-9_]{3,}(?=:)/.exec(out.error)?.[0] || out.error : "")
 const application = id => ec.entity.find(APPLICATION).condition("employmentApplicationId", id).disableAuthz().one()
 function organization(partyId, name) {
@@ -264,7 +276,39 @@ feature(
                     .condition("partyId", first.applicantPartyId)
                     .disableAuthz()
                     .count(),
-                board: run(state.recruiter.userId, R + "find#Applications", {jobOpeningId: state.openingId})
+                board: run(state.recruiter.userId, R + "find#Applications", {jobOpeningId: state.openingId}),
+                // People acceptance (PeopleReviewWalk): a person who is only an applicant is found by their employer's
+                // recruiters alone, in universal search too, never by another employer's recruiter or a self-service employee
+                hidden: Object.fromEntries(
+                    [
+                        ["recruiter", state.recruiter],
+                        ["recruiterB", state.recruiterB],
+                        ["ana", state.ana]
+                    ].map(([who, account]) => [
+                        who,
+                        as(account.userId, () =>
+                            Array.from(
+                                ec.resource
+                                    .script("component://mr-mantle/service/mantle/humanres/Recruiting.js")
+                                    .hiddenApplicants([first.applicantPartyId, state.ben.partyId])
+                            )
+                        )
+                    ])
+                ),
+                found: (() => {
+                    ec.search.indexDocuments(ec.entity.getDataDocuments("MantleParty", {partyId: first.applicantPartyId}))
+                    const search = account =>
+                        as(account.userId, () =>
+                            Array.from(
+                                ec.service
+                                    .sync()
+                                    .name("mantle.search.UniversalSearchServices.search#Universal")
+                                    .parameters({q: "Candidate", entityType: "MantleParty", limit: 100, highlight: false})
+                                    .call()?.results || []
+                            ).some(result => result.id == first.applicantPartyId)
+                        )
+                    return {recruiter: search(state.recruiter), ana: search(state.ana)}
+                })()
             }
         },
         then(r) {
@@ -288,6 +332,9 @@ feature(
                 .sort()
                 .join(",") == [state.cara, state.dan].sort().join(",")
             r.board.stages.find(stage => stage.statusId == "EaScreening").count == 2
+            r.hidden.recruiter.length == 0
+            r.hidden.recruiterB == [r.first.applicantPartyId] && r.hidden.ana == [r.first.applicantPartyId]
+            r.found.recruiter && !r.found.ana
         }
     }
 )
