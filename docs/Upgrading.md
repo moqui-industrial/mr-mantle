@@ -152,10 +152,10 @@ again by a later seed load), BOSS's groups, grants, bundles and registrations, a
 feed:
 
 ```sh
-moqui load location=runtime/component/mr-mantle/data/MaintenanceSetupData.xml
-moqui load location=runtime/component/mr-mantle/data/MaintenancePlanSetupData.xml
-moqui load location=runtime/component/mr-boss/data/BossSetupMaintenanceData.xml
-moqui load location=runtime/component/mr-boss/data/BossMaintenanceReportData.xml
+moqui load location=runtime/components/addon/mr-mantle/data/MaintenanceSetupData.xml
+moqui load location=runtime/components/addon/mr-mantle/data/MaintenancePlanSetupData.xml
+moqui load location=runtime/components/addon/mr-boss/data/BossSetupMaintenanceData.xml
+moqui load location=runtime/components/addon/mr-boss/data/BossMaintenanceReportData.xml
 ```
 
 These four are initial data: loading one again puts back its rows as shipped, over what the deployment has changed since
