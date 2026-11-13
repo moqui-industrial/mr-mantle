@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- People's attendance (IronStone People design §6 Attendance and TimeImport, PE-05, PE-19; impl-people P13): evidence of presence,
     apart from work allocation (Projects' time entries) and payable time. A punch (AttendancePunch) is a raw event of an employment,
-    in or out at an instant, with its source (the person's own clock in self-service, a device file imported, later the kiosk), the
+    in or out at an instant, with its source (the person's own clock in self-service, a device file imported, the clocking kiosk), the
     source's own identity (sourceSystem, externalKey) and a unique source key, so an event is recorded once; it is never changed or
     deleted. A day (AttendanceDay) is the employment's day the punches count on, in the zone of its working schedule (else the
     recorder's): an out-punch counts on the day of the in-punch it closes, so an overnight shift is its start day's; it keeps what
@@ -23,7 +23,12 @@ along with this software (see the LICENSE.md file). If not, see
     reason and waits for a People approval of kind PakAttendance; approved, it is the day's attendance, and the raw punches stay as
     they were. A device file is read into an import (AttendanceImport) whose rows (AttendanceImportRow) are previewed, then
     recorded each in its own transaction, known source keys skipped and bad rows named. Written only by
-    mantle.humanres.AttendanceServices (Attendance.js), which checks the People scope first. -->
+    mantle.humanres.AttendanceServices (Attendance.js), which checks the People scope first.
+    P30, the clocking kiosk's identity (design §6 ClockingKiosk, §15 the badge; PE-05): a worker proves who they are at a registered
+    shared device by a badge (KioskBadge: a revocable opaque number of an employment, printed once as a barcode, kept only as its
+    hash) and a PIN (kept only as its argon2 hash); a wrong PIN is counted on the badge, which it locks for a while, and every
+    refusal at a device is a KioskAttempt, which limits the device. Written only by KioskIdentity.js and Attendance.js's kiosk
+    punch. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
     <entity entity-name="AttendancePunch" package="mantle.humanres.attendance" cache="never">
         <description>A raw attendance event of an employment: in or out at an instant (punchDate), the zone it was read in and its
@@ -49,6 +54,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="facilityId" type="id"><description>The work location of the employment's assignment, when it has one</description></field>
         <field name="recordedByUserId" type="id"/>
         <field name="recordedDate" type="date-time"/>
+        <!-- P30: a kiosk punch's device (moqui.security.DeviceCredential) and the badge the worker proved themselves by -->
+        <field name="deviceId" type="id"><description>The registered shared device a kiosk punch was recorded at</description></field>
+        <field name="kioskBadgeId" type="id"><description>The badge a kiosk punch's worker was identified by</description></field>
         <relationship type="one-nofk" related="mantle.humanres.attendance.AttendanceDay" short-alias="day"/>
         <relationship type="one" title="AttendanceDirection" related="moqui.basic.Enumeration" short-alias="direction">
             <key-map field-name="directionEnumId" related="enumId"/></relationship>
@@ -205,5 +213,42 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="message" type="text-medium"/>
         <field name="attendancePunchId" type="id"/>
         <relationship type="one" related="mantle.humanres.attendance.AttendanceImport" short-alias="attendanceImport"/>
+    </entity>
+    <!-- P30: the clocking kiosk's identity (KioskIdentity.js) -->
+    <entity entity-name="KioskBadge" package="mantle.humanres.attendance" cache="never">
+        <description>A clocking badge of an employment: an opaque number printed once as a barcode and kept only as its hash
+            (tokenHash, unique), and the worker's PIN kept only as its argon2 hash. Issued by an HR editor of the employer, which
+            revokes the employment's badge before it; the number is made when its issuer prints it, once, within fifteen minutes of
+            the issue. A wrong PIN counts on the badge (failedCount), and enough of them lock it for a while (lockedUntilDate); a
+            right one clears the count. Revoked, it is refused at every kiosk; it is never deleted.</description>
+        <field name="kioskBadgeId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="tokenHash" type="text-medium"><description>The single-use hash of the badge's number, empty until printed</description></field>
+        <field name="pinHash" type="text-medium"><description>The argon2 hash of the PIN</description></field>
+        <field name="issuedByUserId" type="id"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="printedDate" type="date-time"><description>When its number was made and printed</description></field>
+        <field name="revokedDate" type="date-time"/>
+        <field name="revokedByUserId" type="id"/>
+        <field name="revokeReason" type="text-medium"/>
+        <field name="failedCount" type="number-integer"><description>Wrong PINs since the last right one</description></field>
+        <field name="lockedUntilDate" type="date-time"/>
+        <field name="lastUsedDate" type="date-time"/>
+        <field name="lastDeviceId" type="id"/>
+        <index name="KIOSK_BADGE_TOKEN" unique="true"><index-field name="tokenHash"/></index>
+        <index name="KIOSK_BADGE_EMPL"><index-field name="partyRelationshipId"/><index-field name="issuedDate"/></index>
+    </entity>
+    <entity entity-name="KioskAttempt" package="mantle.humanres.attendance" cache="never">
+        <description>A refused proof at a clocking kiosk: the device, when, why (reasonCode: BADGE_UNKNOWN, BADGE_REVOKED, PIN_WRONG,
+            PIN_LIMITED, ...) and the badge when one was read. Kept in a transaction of its own, so the refusal is counted although the
+            punch is not recorded; a device with many refusals in a short time is refused for a while.</description>
+        <field name="kioskAttemptId" type="id" is-pk="true"/>
+        <field name="deviceId" type="id"/>
+        <field name="kioskBadgeId" type="id"/>
+        <field name="attemptDate" type="date-time"/>
+        <field name="reasonCode" type="text-short"/>
+        <index name="KIOSK_ATTEMPT_DEVICE"><index-field name="deviceId"/><index-field name="attemptDate"/></index>
     </entity>
 </entities>

@@ -25,6 +25,8 @@
 // employers' days and imports; an HR editor (PEOPLE_HR_EDIT) turns clocking on and off and asks corrections; an import needs
 // PEOPLE_IMPORT beside PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer. The approvers of a correction decide it (Approvals.js).
 // Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
+// P30: at a registered clocking device (a shared device's request, as its display account with PEOPLE_KIOSK_PUNCH) a worker clocks
+// in and out by badge and PIN (record#KioskPunch); the proof and the badges are KioskIdentity.js's.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
@@ -323,7 +325,10 @@ function recordPunch(values) {
         externalKey: values.externalKey || null,
         sourceKey: values.sourceKey,
         attendanceImportId: values.attendanceImportId || null,
-        facilityId: facilityAt(employment.partyRelationshipId, values.punchMs),
+        // P30: a kiosk punch is at its device's site, when the registration names one
+        facilityId: values.facilityId || facilityAt(employment.partyRelationshipId, values.punchMs),
+        deviceId: values.deviceId || null,
+        kioskBadgeId: values.kioskBadgeId || null,
         recordedByUserId: ec.user.userId || null,
         recordedDate: ec.user.nowTimestamp
     })
@@ -410,6 +415,62 @@ function recordSelfPunch(p) {
     })
     return punchAnswer(recorded.punch, recorded.repeated)
 }
+// ===== record#KioskPunch (P30, the clocking kiosk) =====
+const kioskIdentity = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/KioskIdentity.js")
+// record#KioskPunch: a worker clocks in or out at a registered clocking device, now. Only in the device's request, as its display
+// account with PEOPLE_KIOSK_PUNCH; the worker is the one the badge and PIN prove (KioskIdentity.js: every refusal of a proof counted,
+// a wrong PIN limited), whose current employment is with an organization of the display account's and clocks (CLOCKING_OFF). The
+// direction is the one asked, else the other of the worker's state; in while in, or out while out, is refused. A retry with the same
+// operationKey (the event key the kiosk made for the attempt) at the same device answers the first punch, the worker proving
+// themselves again. The punch is at the device's site and names the device and the badge.
+function recordKioskPunch(p) {
+    const kiosk = kioskIdentity()
+    const device = kiosk.deviceOfRequest()
+    const proved = kiosk.identify(device, p.badgeText, p.pin)
+    const employment = proved.employment
+    const answer = (punch, repeated) =>
+        Object.assign(punchAnswer(punch, repeated), {
+            personName: proved.personName,
+            punchTimeText: timeIn(ms(punch.punchDate), punch.timeZone)
+        })
+    const operationKey = text(p.operationKey) || null
+    const sourceKey = operationKey ? "kiosk:" + device.deviceId + ":" + operationKey : null
+    const knownOf = () => {
+        const known = sourceKey ? first(find(PUNCH, {sourceKey})) : null
+        // an event key of the device is the worker's who recorded it: another worker's retry with it records nothing
+        if (known && known.partyRelationshipId !== employment.partyRelationshipId)
+            denied("OPERATION_KEY_USED", "This attempt was recorded for someone else: try again")
+        return known
+    }
+    const known = knownOf()
+    if (known) return answer(known, true)
+    if (!isClockingOn(employment.partyRelationshipId)) denied("CLOCKING_OFF", "Clocking is not on for you: ask HR")
+    lockEmployment(employment.partyRelationshipId)
+    const again = knownOf()
+    if (again) return answer(again, true)
+    const now = nowMs()
+    const state = clockState(employment.partyRelationshipId, now)
+    const directionEnumId = text(p.directionEnumId) || (state.clockedIn ? "AtdOut" : "AtdIn")
+    if (!directionTexts[directionEnumId]) denied("DIRECTION_INVALID", "Clock in or out")
+    const zone = scheduleZone(employment.partyRelationshipId, now) || userZone()
+    if (directionEnumId === "AtdIn" && state.clockedIn)
+        denied("ALREADY_IN", "You are clocked in since " + timeIn(state.sinceMs, zone))
+    if (directionEnumId === "AtdOut" && !state.clockedIn) denied("NOT_IN", "You are not clocked in")
+    const recorded = recordPunch({
+        employment,
+        directionEnumId,
+        punchMs: now,
+        zone,
+        sourceEnumId: "AtsKiosk",
+        sourceSystem: device.deviceName || "Clocking kiosk",
+        sourceKey: sourceKey || "kiosk:" + device.deviceId + ":" + now + ":" + employment.partyRelationshipId,
+        facilityId: device.facilityId || null,
+        deviceId: device.deviceId,
+        kioskBadgeId: proved.badge.kioskBadgeId
+    })
+    return answer(recorded.punch, recorded.repeated)
+}
+
 // get#MyClock: the caller's own current employments, each with whether clocking is on, whether they are clocked in and since when,
 // their last punch and today's minutes; clocking: any has it on. Nothing for a caller without self-service.
 function myClock() {
@@ -1433,6 +1494,7 @@ function findImportRuns(p) {
 
 const operations = {
     recordSelfPunch,
+    recordKioskPunch,
     myClock,
     offerClock,
     storeClocking,

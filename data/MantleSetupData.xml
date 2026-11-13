@@ -219,6 +219,11 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CASE_HANDLE" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_IMPORT" description="People Import (People's own employee and time imports)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_IMPORT" fromDate="0"/>
+    <!-- the clocking kiosk (impl-people P30; design-people §6 ClockingKiosk): a punch recorded at a registered shared device for the
+        worker its badge and PIN name (AttendanceServices record#KioskPunch, only in a device's request), held by the device's display
+        account, never by a person who clocks for themselves -->
+    <userPermissions userPermissionId="PEOPLE_KIOSK_PUNCH" description="People Kiosk Punch (a clocking device records the punches of workers by badge and PIN)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_KIOSK_PUNCH" fromDate="0"/>
     <userPermissions userPermissionId="PEOPLE_CONFIGURE" description="People Configure (People policy, setup and readiness)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PEOPLE_CONFIGURE" fromDate="0"/>
     <!-- a People reader's scope in every internal organization (the active one when there is one), as COMMERCE_ALL_ORGANIZATIONS
