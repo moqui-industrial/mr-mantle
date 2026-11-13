@@ -135,6 +135,11 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_CONFIGURE" fromDate="0"/>
     <userPermissions userPermissionId="SALES_OWNER_CHANGE" description="Sales Owner Change (another user's opportunities, accounts and open quotes)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_OWNER_CHANGE" fromDate="0"/>
+    <!-- the scope of a Sales read in every internal organization, which reads nothing by itself (the user's call, impl-sales P1
+        review; as PEOPLE_ALL_ORGANIZATIONS and MAINTENANCE_ALL_ORGANIZATIONS): the Sales administrator's, whose root filter is
+        MANTLE_ACTIVE_ORG -->
+    <userPermissions userPermissionId="SALES_ALL_ORGANIZATIONS" description="Sales in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ALL_ORGANIZATIONS" fromDate="0"/>
     <!-- the working hours of another party (a service team's, mantle.work.CalendarServices.store#WorkingHours) for a party of the
         user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
     <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>

@@ -462,6 +462,8 @@ along with this software (see the LICENSE.md file). If not, see
             const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
                     .execute('organizations', {organizationPartyIds: vendorPartyIds, productStoreIds: productStoreIds})
             vendorPartyIds = readScope.organizationPartyIds
+            // a reader whose costs are withheld is not ranked by them either (which products are top by cost would tell them)
+            if (readScope.costWithheld && /cost/i.test(String(orderByField || ''))) orderByField = 'totalSales'
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
 
             const perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
@@ -528,6 +530,8 @@ along with this software (see the LICENSE.md file). If not, see
             const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
                     .execute('organizations', {organizationPartyIds: fromPartyIds})
             fromPartyIds = readScope.organizationPartyIds
+            // a reader whose costs are withheld is not ordered by them either
+            if (readScope.costWithheld && /cost/i.test(String(orderByField || ''))) orderByField = '-invoiceTotal'
             // aggregation metrics are decimals on Postgres and numbers on OpenSearch; the summaries work in numbers
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
             const addNumbersInMap = (total, line) => {

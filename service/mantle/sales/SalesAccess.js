@@ -9,8 +9,9 @@
 //   screen or a supplied app root. A write permission alone reads nothing (reads): a Sales read is SALES_VIEW,
 //   SALES_TEAM_VIEW or SALES_REPORT_VIEW.
 // - The caller's organizations are their own (get#PartyOrganizationInfo over get#PartyInternalOrgIds), narrowed to the active
-//   one when it is theirs; every organization (organizationPartyIds null) for a system administrator; none for a caller who
-//   reads nothing. No Sales permission widens them to other organizations.
+//   one when it is theirs; every organization (organizationPartyIds null) for a system administrator or a holder of
+//   SALES_ALL_ORGANIZATIONS, which reads nothing by itself (the user's call, impl-sales P1 review: the Sales administrator's, as
+//   People's and Maintenance's); none for a caller who reads nothing. No other Sales permission widens them.
 // - Refusals carry reason codes (EntityLib.js denied): an organization outside the scope ORGANIZATION_DENIED, a missing
 //   permission PERMISSION_DENIED.
 //
@@ -41,7 +42,9 @@ const permissions = {
     customerInvite: "SALES_CUSTOMER_INVITE",
     import: "SALES_IMPORT",
     configure: "SALES_CONFIGURE",
-    ownerChange: "SALES_OWNER_CHANGE"
+    ownerChange: "SALES_OWNER_CHANGE",
+    // the scope of a read in every internal organization; no read by itself
+    allOrganizations: "SALES_ALL_ORGANIZATIONS"
 }
 // The derived reads, each from view permissions only: anything of Sales in an organization (anyRead), the organization's
 // whole pipeline rather than one's own and one's team's (teamRead), and its sales reports (reportRead).
@@ -75,7 +78,7 @@ function ownOrganizations() {
 function scope() {
     const caps = capabilities()
     const own = caps.anyRead ? ownOrganizations() : null
-    const all = !!own && access.systemAdmin()
+    const all = !!own && (access.systemAdmin() || caps.allOrganizations)
     return {
         capabilities: caps,
         partyId: ec.user.userAccount?.partyId || null,

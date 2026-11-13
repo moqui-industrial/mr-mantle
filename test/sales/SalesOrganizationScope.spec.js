@@ -3,7 +3,8 @@
 // leave another organization's opportunity, forecast and agreement out of a find under an app's ordinary grant
 // (MANTLE_USER_ORG), and an administrator's grant (MANTLE_ACTIVE_ORG) finds every organization's until one is active and then
 // that one's only; and SalesAccess.js gives a Sales reader their own organizations, a write permission alone none, and refuses
-// another organization with a reason code. Standalone: spec-local organizations, records, groups and users; the grants are
+// another organization with a reason code, but for a holder of SALES_ALL_ORGANIZATIONS, who reads every one (that permission
+// alone reading nothing). Standalone: spec-local organizations, records, groups and users; the grants are
 // spec-local artifact groups carrying the filter sets, as an app root's do.
 // Run: ./moq test mr-mantle --spec SalesOrganizationScope
 const prefix = "SOS"
@@ -142,6 +143,10 @@ spec({
             users.rep = user("rep", [orgA], ["SALES_VIEW"], prefix + "_USER_GRANT")
             users.admin = user("admin", [orgA, orgB], ["SALES_VIEW", "SALES_CONFIGURE"], prefix + "_ADMIN_GRANT")
             users.editor = user("editor", [orgA], ["SALES_OPPORTUNITY_EDIT"], null)
+            // every organization's reader (SALES_ALL_ORGANIZATIONS, the Sales administrator's), an agent of A alone, and the
+            // permission alone, which reads nothing
+            users.all = user("all", [orgA], ["SALES_VIEW", "SALES_ALL_ORGANIZATIONS"], null)
+            users.allOnly = user("allonly", [orgA], ["SALES_ALL_ORGANIZATIONS"], null)
             for (const [suffix, organizationPartyId] of [
                 ["A", orgA],
                 ["B", orgB]
@@ -188,22 +193,33 @@ feature("an administrator's grant finds every organization's until one is active
     }
 })
 
-feature("SalesAccess gives a reader their organizations and refuses another's; a write permission alone reads none", {
-    when() {
-        return {
-            rep: salesScope(users.rep, orgB),
-            repOwn: salesScope(users.rep, orgA),
-            editor: salesScope(users.editor, orgA)
+feature(
+    "SalesAccess gives a reader their organizations and refuses another's, an every-organization reader every one; a write permission alone reads none",
+    {
+        when() {
+            return {
+                rep: salesScope(users.rep, orgB),
+                repOwn: salesScope(users.rep, orgA),
+                editor: salesScope(users.editor, orgA),
+                all: salesScope(users.all, orgB),
+                allOnly: salesScope(users.allOnly, orgB)
+            }
+        },
+        then({rep, repOwn, editor, all, allOnly}) {
+            rep.anyRead == true
+            JSON.stringify(rep.organizationPartyIds) == JSON.stringify([orgA])
+            rep.refusal.includes("ORGANIZATION_DENIED")
+            repOwn.refusal == ""
+            editor.opportunityEdit == true
+            editor.anyRead == false
+            editor.organizationPartyIds.length == 0
+            editor.refusal.includes("ORGANIZATION_DENIED")
+            // the user's call (impl-sales P1 review): every organization for a holder, B among them without membership
+            all.organizationPartyIds == null
+            all.refusal == ""
+            allOnly.anyRead == false
+            allOnly.organizationPartyIds.length == 0
+            allOnly.refusal.includes("ORGANIZATION_DENIED")
         }
-    },
-    then({rep, repOwn, editor}) {
-        rep.anyRead == true
-        JSON.stringify(rep.organizationPartyIds) == JSON.stringify([orgA])
-        rep.refusal.includes("ORGANIZATION_DENIED")
-        repOwn.refusal == ""
-        editor.opportunityEdit == true
-        editor.anyRead == false
-        editor.organizationPartyIds.length == 0
-        editor.refusal.includes("ORGANIZATION_DENIED")
     }
-})
+)
