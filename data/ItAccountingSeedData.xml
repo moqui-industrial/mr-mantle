@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<entity-facade-xml type="seed">
+    <!-- ================================================================= -->
+    <!-- ITALY (ITA / OIC / XBRL PCI_2018-11-04) SEED DATA                 -->
+    <!-- Separated from US GAAP (USA) seed data; load for ITA companies.   -->
+    <!-- ================================================================= -->
+
+    <!-- Italian Financial Statement Tax Form -->
+    <moqui.basic.Enumeration description="Italian Civil Code / OIC Financial Statement (XBRL PCI_2018-11-04)"
+            enumId="TxfItOic" enumTypeId="TaxForm"/>
+
+    <!-- Official XBRL PCI_2018-11-04 (itcc-ci) Taxonomy Elements & CEE Codes -->
+    <!-- Labels follow itcc-ci-lab-en-2018-11-04.xml; Italian labels live in mr-l10n. -->
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccTotaleImmobilizzazioni" enumCode="SP.A.B"
+            description="Total fixed assets"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccImmobilizzazioniImmateriali" enumCode="SP.A.B.I"
+            description="Intangible fixed assets"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccImmobilizzazioniMateriali" enumCode="SP.A.B.II"
+            description="Tangible fixed assets"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccTotaleRimanenze" enumCode="SP.A.C.I"
+            description="Total inventories"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccTotaleCrediti" enumCode="SP.A.C.II"
+            description="Total receivables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCreditiVersoClienti" enumCode="SP.A.C.II.1"
+            description="Trade receivables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCreditiTributari" enumCode="SP.A.C.II.5-bis"
+            description="Tax receivables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccTotaleDisponibilitaLiquide" enumCode="SP.A.C.IV"
+            description="Total cash and cash equivalents"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCapitaleSociale" enumCode="SP.P.A.I"
+            description="Issued capital"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccAltreRiserve" enumCode="SP.P.A.VI"
+            description="Other reserves"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccUtiliPortatiNuovo" enumCode="SP.P.A.VIII"
+            description="Retained earnings (losses)"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccUtilePerditaEsercizio" enumCode="SP.P.A.IX"
+            description="Profit (loss) for the year"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccDebitiVersoFornitori" enumCode="SP.P.D.7"
+            description="Trade payables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccDebitiTributari" enumCode="SP.P.D.12"
+            description="Tax payables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccAltriDebiti" enumCode="SP.P.D.14"
+            description="Other payables"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccRicaviVenditePrestazioni" enumCode="CE.A.1"
+            description="Revenues from sales and services"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccAltriRicaviProventi" enumCode="CE.A.5"
+            description="Other revenues and income"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCostiMateriePrimeSussidiarieConsumoMerci" enumCode="CE.B.6"
+            description="Raw materials, consumables and goods for resale"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCostiServizi" enumCode="CE.B.7"
+            description="Services"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccTotaleCostiPersonale" enumCode="CE.B.9"
+            description="Total personnel costs"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccAmmortamentiSvalutazioni" enumCode="CE.B.10"
+            description="Depreciation, amortisation and write-downs"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccOneriDiversiGestione" enumCode="CE.B.14"
+            description="Other operating expenses"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccProventiOneriFinanziari" enumCode="CE.C"
+            description="Financial income and expenses"/>
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccImposteSulReddito" enumCode="CE.20"
+            description="Income taxes for the year"/>
+
+    <!-- Italian GL Account to XBRL PCI_2018-11-04 Mapping (for standard chart) -->
+    <!--
+    <mantle.ledger.account.GlAccount glAccountId="111100000" glXbrlClassEnumId="ItccTotaleDisponibilitaLiquide"/>
+    <mantle.ledger.account.GlAccount glAccountId="121000000" glXbrlClassEnumId="ItccCreditiVersoClienti"/>
+    <mantle.ledger.account.GlAccount glAccountId="131000000" glXbrlClassEnumId="ItccImmobilizzazioniMateriali"/>
+    <mantle.ledger.account.GlAccount glAccountId="133000000" glXbrlClassEnumId="ItccImmobilizzazioniImmateriali"/>
+    <mantle.ledger.account.GlAccount glAccountId="141000000" glXbrlClassEnumId="ItccTotaleRimanenze"/>
+    <mantle.ledger.account.GlAccount glAccountId="144000000" glXbrlClassEnumId="ItccCreditiTributari"/>
+    <mantle.ledger.account.GlAccount glAccountId="211000000" glXbrlClassEnumId="ItccDebitiVersoFornitori"/>
+    <mantle.ledger.account.GlAccount glAccountId="212300000" glXbrlClassEnumId="ItccDebitiTributari"/>
+    <mantle.ledger.account.GlAccount glAccountId="224000000" glXbrlClassEnumId="ItccDebitiTributari"/>
+    <mantle.ledger.account.GlAccount glAccountId="310000000" glXbrlClassEnumId="ItccCapitaleSociale"/>
+    <mantle.ledger.account.GlAccount glAccountId="330000000" glXbrlClassEnumId="ItccUtiliPortatiNuovo"/>
+    <mantle.ledger.account.GlAccount glAccountId="411000000" glXbrlClassEnumId="ItccRicaviVenditePrestazioni"/>
+    <mantle.ledger.account.GlAccount glAccountId="510000000" glXbrlClassEnumId="ItccCostiMateriePrimeSussidiarieConsumoMerci"/>
+    <mantle.ledger.account.GlAccount glAccountId="610000000" glXbrlClassEnumId="ItccTotaleCostiPersonale"/>
+    <mantle.ledger.account.GlAccount glAccountId="740000000" glXbrlClassEnumId="ItccOneriDiversiGestione"/>
+    -->
+</entity-facade-xml>

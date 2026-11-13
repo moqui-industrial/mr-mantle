@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ================================================================= -->
+    <!-- ITALIAN XBRL FINANCIAL STATEMENT (PCI_2018-11-04 / itcc-ci)       -->
+    <!-- ================================================================= -->
+    <service verb="generate" noun="XbrlFinancialStatement" allow-remote="true">
+        <description>
+            Generates an Italian OIC / IV Direttiva CEE Balance Sheet and Income Statement
+            and exports a compliant XBRL instance (Taxonomy PCI_2018-11-04, namespace itcc-ci).
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="decimals" type="Integer" default-value="0"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="xmlText" type="String"/>
+            <parameter name="filename" type="String"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="totalAssets" type="BigDecimal"/>
+            <parameter name="totalLiabilitiesEquity" type="BigDecimal"/>
+            <parameter name="netIncome" type="BigDecimal"/>
+            <parameter name="isBalanced" type="Boolean"/>
+            <parameter name="startDateStr"/>
+            <parameter name="endDateStr"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+                let year = fiscalYear || String(new Date().getFullYear());
+                let startTs = ec.l10n.parseTimestamp(year + '-01-01 00:00:00', 'yyyy-MM-dd HH:mm:ss');
+                let endTs = ec.l10n.parseTimestamp(year + '-12-31 23:59:59', 'yyyy-MM-dd HH:mm:ss');
+
+                if (timePeriodId) {
+                    const tp = ec.entity.find('mantle.party.time.TimePeriod').condition('timePeriodId', timePeriodId).one();
+                    if (tp) {
+                        if (tp.fromDate) startTs = tp.fromDate;
+                        if (tp.thruDate) endTs = tp.thruDate;
+                        year = ec.l10n.format(startTs, 'yyyy');
+                    }
+                }
+                const startDateStr = ec.l10n.format(startTs, 'yyyy-MM-dd');
+                const endDateStr = ec.l10n.format(endTs, 'yyyy-MM-dd');
+                context.startDateStr = startDateStr;
+                context.endDateStr = endDateStr;
+
+                // Organization Fiscal ID
+                const idents = ec.entity.find('mantle.party.PartyIdentification').condition('partyId', organizationPartyId).list() || [];
+                const taxAuths = ec.entity.find('mantle.other.tax.TaxAuthorityParty').condition('partyId', organizationPartyId).list() || [];
+                const fiscalId = idents.find(p => p.partyIdTypeEnumId === 'PtidSsn')?.idValue
+                    || taxAuths[0]?.partyTaxId?.replace(/^IT/i, '')
+                    || organizationPartyId;
+
+                // XBRL PCI_2018-11-04 taxonomy catalog (ordered by CEE code)
+                const taxonomyCatalog = [
+                    { tag: 'ImmobilizzazioniImmateriali', cee: 'SP.A.B.I', section: 'SP_ATTIVO', label: 'Intangible fixed assets' },
+                    { tag: 'ImmobilizzazioniMateriali', cee: 'SP.A.B.II', section: 'SP_ATTIVO', label: 'Tangible fixed assets' },
+                    { tag: 'TotaleRimanenze', cee: 'SP.A.C.I', section: 'SP_ATTIVO', label: 'Total inventories' },
+                    { tag: 'CreditiVersoClienti', cee: 'SP.A.C.II.1', section: 'SP_ATTIVO', label: 'Trade receivables' },
+                    { tag: 'CreditiTributari', cee: 'SP.A.C.II.5-bis', section: 'SP_ATTIVO', label: 'Tax receivables' },
+                    { tag: 'TotaleDisponibilitaLiquide', cee: 'SP.A.C.IV', section: 'SP_ATTIVO', label: 'Total cash and cash equivalents' },
+                    { tag: 'CapitaleSociale', cee: 'SP.P.A.I', section: 'SP_PASSIVO', label: 'Issued capital' },
+                    { tag: 'AltreRiserve', cee: 'SP.P.A.VI', section: 'SP_PASSIVO', label: 'Other reserves' },
+                    { tag: 'UtiliPortatiNuovo', cee: 'SP.P.A.VIII', section: 'SP_PASSIVO', label: 'Retained earnings (losses)' },
+                    { tag: 'UtilePerditaEsercizio', cee: 'SP.P.A.IX', section: 'SP_PASSIVO', label: 'Profit (loss) for the year' },
+                    { tag: 'DebitiVersoFornitori', cee: 'SP.P.D.7', section: 'SP_PASSIVO', label: 'Trade payables' },
+                    { tag: 'DebitiTributari', cee: 'SP.P.D.12', section: 'SP_PASSIVO', label: 'Tax payables' },
+                    { tag: 'AltriDebiti', cee: 'SP.P.D.14', section: 'SP_PASSIVO', label: 'Other payables' },
+                    { tag: 'RicaviVenditePrestazioni', cee: 'CE.A.1', section: 'CE', label: 'Revenues from sales and services' },
+                    { tag: 'AltriRicaviProventi', cee: 'CE.A.5', section: 'CE', label: 'Other revenues and income' },
+                    { tag: 'CostiMateriePrimeSussidiarieConsumoMerci', cee: 'CE.B.6', section: 'CE', label: 'Raw materials, consumables and goods for resale' },
+                    { tag: 'CostiServizi', cee: 'CE.B.7', section: 'CE', label: 'Services' },
+                    { tag: 'TotaleCostiPersonale', cee: 'CE.B.9', section: 'CE', label: 'Total personnel costs' },
+                    { tag: 'AmmortamentiSvalutazioni', cee: 'CE.B.10', section: 'CE', label: 'Depreciation, amortisation and write-downs' },
+                    { tag: 'OneriDiversiGestione', cee: 'CE.B.14', section: 'CE', label: 'Other operating expenses' },
+                    { tag: 'ProventiOneriFinanziari', cee: 'CE.C', section: 'CE', label: 'Financial income and expenses' },
+                    { tag: 'ImposteSulReddito', cee: 'CE.20', section: 'CE', label: 'Income taxes for the year' }
+                ];
+
+                const mapGlToXbrlTag = (glAcc) => {
+                    if (glAcc.glXbrlClassEnumId && glAcc.glXbrlClassEnumId.startsWith('Itcc')) {
+                        return glAcc.glXbrlClassEnumId.slice(4);
+                    }
+                    const id = String(glAcc.glAccountId || '');
+                    const cls = String(glAcc.glAccountClassEnumId || '');
+                    if (id === '144000000') return 'CreditiTributari';
+                    if (id === '212300000' || id === '224000000') return 'DebitiTributari';
+                    if (cls === 'CASH_EQUIVALENT' || id.startsWith('11')) return 'TotaleDisponibilitaLiquide';
+                    if (cls === 'ACCOUNTS_RECEIVABLE' || id.startsWith('12')) return 'CreditiVersoClienti';
+                    if (cls === 'INTANGIBLE_ASSET' || id.startsWith('133')) return 'ImmobilizzazioniImmateriali';
+                    if (cls === 'LONG_TERM_ASSET' || cls === 'EQUIPMENT' || cls === 'LAND_BUILDING' || id.startsWith('13')) return 'ImmobilizzazioniMateriali';
+                    if (cls === 'INVENTORY_ASSET' || id.startsWith('14')) return 'TotaleRimanenze';
+                    if (cls === 'CURRENT_ASSET' || cls === 'ASSET' || id.startsWith('1')) return 'CreditiTributari';
+                    if (cls === 'ACCOUNTS_PAYABLE' || id.startsWith('21')) return 'DebitiVersoFornitori';
+                    if (cls === 'ACCRUED_EXPENSES' || id.startsWith('22')) return 'DebitiTributari';
+                    if (cls === 'LIABILITY' || cls === 'CURRENT_LIABILITY' || cls === 'LONG_TERM_LIABILITY' || id.startsWith('2')) return 'AltriDebiti';
+                    if (id.startsWith('31')) return 'CapitaleSociale';
+                    if (id.startsWith('32')) return 'AltreRiserve';
+                    if (cls === 'EQUITY' || cls === 'RETAINED_EARNINGS' || id.startsWith('3')) return 'UtiliPortatiNuovo';
+                    if (cls === 'GOODS_REVENUE' || cls === 'SERVICE_REVENUE' || id.startsWith('41')) return 'RicaviVenditePrestazioni';
+                    if (cls === 'REVENUE' || cls === 'CASH_INCOME' || id.startsWith('4') || id.startsWith('8')) return 'AltriRicaviProventi';
+                    if (cls === 'COST_OF_SALES' || id.startsWith('5')) return 'CostiMateriePrimeSussidiarieConsumoMerci';
+                    if (cls === 'COMPENSATION' || id.startsWith('63')) return 'TotaleCostiPersonale';
+                    if (cls === 'DEPRECIATION_EXPENSE' || id.startsWith('68')) return 'AmmortamentiSvalutazioni';
+                    if (cls === 'INCOME_TAX_EXPENSE' || id.startsWith('73')) return 'ImposteSulReddito';
+                    if (cls === 'EXPENSE' || id.startsWith('6') || id.startsWith('7')) return 'OneriDiversiGestione';
+                    return 'AltriDebiti';
+                };
+
+                // Load posted AcctgTrans up to endTs
+                const txList = ec.entity.find('mantle.ledger.transaction.AcctgTrans')
+                    .condition('organizationPartyId', organizationPartyId)
+                    .condition('isPosted', 'Y')
+                    .condition('transactionDate', 'less-equals', endTs)
+                    .list() || [];
+
+                const glCache = {};
+                const balances = {};
+                for (const item of taxonomyCatalog) balances[item.tag] = 0;
+
+                for (const tx of txList) {
+                    const txDateStr = tx.transactionDate ? ec.l10n.format(tx.transactionDate, 'yyyy-MM-dd') : '';
+                    const isInPeriod = txDateStr && txDateStr >= startDateStr;
+                    const entries = ec.entity.find('mantle.ledger.transaction.AcctgTransEntry')
+                        .condition('acctgTransId', tx.acctgTransId)
+                        .list() || [];
+                    for (const e of entries) {
+                        if (!e.glAccountId) continue;
+                        if (!glCache[e.glAccountId]) {
+                            glCache[e.glAccountId] = ec.entity.find('mantle.ledger.account.GlAccount')
+                                .condition('glAccountId', e.glAccountId).useCache(true).one() || { glAccountId: e.glAccountId };
+                        }
+                        const glAcc = glCache[e.glAccountId];
+                        const tag = mapGlToXbrlTag(glAcc);
+                        const meta = taxonomyCatalog.find(c => c.tag === tag);
+                        if (!meta) continue;
+                        // CE accounts only count within the fiscal year; SP accounts are cumulative up to endDate
+                        if (meta.section === 'CE' && !isInPeriod) continue;
+
+                        const amt = toNum(e.amount);
+                        const isDebit = (e.debitCreditFlag === 'D');
+                        if (meta.section === 'SP_ATTIVO') {
+                            balances[tag] += isDebit ? amt : -amt;
+                        } else if (meta.section === 'SP_PASSIVO') {
+                            balances[tag] += isDebit ? -amt : amt;
+                        } else {
+                            // CE: Revenues positive (credit), Costs positive (debit) for CEE display
+                            if (tag === 'RicaviVenditePrestazioni' || tag === 'AltriRicaviProventi') {
+                                balances[tag] += isDebit ? -amt : amt;
+                            } else {
+                                balances[tag] += isDebit ? amt : -amt;
+                            }
+                        }
+                    }
+                }
+
+                // Compute Income Statement net income (Utile/Perdita d'esercizio)
+                const valProd = balances.RicaviVenditePrestazioni + balances.AltriRicaviProventi;
+                const costProd = balances.CostiMateriePrimeSussidiarieConsumoMerci + balances.CostiServizi
+                    + balances.TotaleCostiPersonale + balances.AmmortamentiSvalutazioni + balances.OneriDiversiGestione;
+                const netIncome = valProd - costProd - balances.ProventiOneriFinanziari - balances.ImposteSulReddito;
+                balances.UtilePerditaEsercizio += netIncome;
+
+                const totImm = balances.ImmobilizzazioniImmateriali + balances.ImmobilizzazioniMateriali;
+                const totAttCirc = balances.TotaleRimanenze + balances.CreditiVersoClienti + balances.CreditiTributari + balances.TotaleDisponibilitaLiquide;
+                const totAttivo = totImm + totAttCirc;
+
+                const totPn = balances.CapitaleSociale + balances.AltreRiserve + balances.UtiliPortatiNuovo + balances.UtilePerditaEsercizio;
+                const totDebiti = balances.DebitiVersoFornitori + balances.DebitiTributari + balances.AltriDebiti;
+                const totPassivo = totPn + totDebiti;
+
+                const dec = Number(decimals) || 0;
+                const fmtFact = (v) => (dec === 0 ? String(Math.round(v)) : v.toFixed(dec));
+
+                const rows = [];
+                for (const item of taxonomyCatalog) {
+                    const val = balances[item.tag] || 0;
+                    if (Math.abs(val) >= 0.005) {
+                        rows.push({
+                            ceeCode: item.cee,
+                            xbrlTag: 'itcc-ci:' + item.tag,
+                            label: item.label,
+                            section: item.section,
+                            amount: toDecimal(val).setScale(2, 'HALF_UP')
+                        });
+                    }
+                }
+                context.rows = rows;
+                context.totalAssets = toDecimal(totAttivo).setScale(2, 'HALF_UP');
+                context.totalLiabilitiesEquity = toDecimal(totPassivo).setScale(2, 'HALF_UP');
+                context.netIncome = toDecimal(netIncome).setScale(2, 'HALF_UP');
+                context.isBalanced = Math.abs(totAttivo - totPassivo) < 0.01;
+
+                // Build XBRL Instance XML (PCI_2018-11-04)
+                let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                xml += '<xbrli:xbrl\n';
+                xml += '    xmlns:xbrli="http://www.xbrl.org/2003/instance"\n';
+                xml += '    xmlns:link="http://www.xbrl.org/2003/linkbase"\n';
+                xml += '    xmlns:xlink="http://www.w3.org/1999/xlink"\n';
+                xml += '    xmlns:iso4217="http://www.xbrl.org/2003/iso4217"\n';
+                xml += '    xmlns:itcc-ci="http://www.infocamere.it/itnn/fr/itcc/ci/2018-11-04">\n';
+                xml += '  <link:schemaRef xlink:type="simple" xlink:href="http://infocamere.it/itcc-ci-2018-11-04.xsd"/>\n';
+                xml += '  <xbrli:context id="c_sp_attuale">\n';
+                xml += '    <xbrli:entity><xbrli:identifier scheme="http://infocamere.it">' + esc(fiscalId) + '</xbrli:identifier></xbrli:entity>\n';
+                xml += '    <xbrli:period><xbrli:instant>' + endDateStr + '</xbrli:instant></xbrli:period>\n';
+                xml += '  </xbrli:context>\n';
+                xml += '  <xbrli:context id="c_ce_attuale">\n';
+                xml += '    <xbrli:entity><xbrli:identifier scheme="http://infocamere.it">' + esc(fiscalId) + '</xbrli:identifier></xbrli:entity>\n';
+                xml += '    <xbrli:period><xbrli:startDate>' + startDateStr + '</xbrli:startDate><xbrli:endDate>' + endDateStr + '</xbrli:endDate></xbrli:period>\n';
+                xml += '  </xbrli:context>\n';
+                xml += '  <xbrli:unit id="u_eur"><xbrli:measure>iso4217:EUR</xbrli:measure></xbrli:unit>\n';
+
+                // Emit facts
+                for (const item of taxonomyCatalog) {
+                    const val = balances[item.tag] || 0;
+                    if (Math.abs(val) < 0.005) continue;
+                    const ctxRef = (item.section === 'CE') ? 'c_ce_attuale' : 'c_sp_attuale';
+                    xml += '  <itcc-ci:' + item.tag + ' contextRef="' + ctxRef + '" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(val) + '</itcc-ci:' + item.tag + '>\n';
+                }
+
+                // Emit key CEE subtotals and totals
+                xml += '  <itcc-ci:TotaleImmobilizzazioni contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totImm) + '</itcc-ci:TotaleImmobilizzazioni>\n';
+                xml += '  <itcc-ci:TotaleAttivoCircolante contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totAttCirc) + '</itcc-ci:TotaleAttivoCircolante>\n';
+                xml += '  <itcc-ci:TotaleAttivo contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totAttivo) + '</itcc-ci:TotaleAttivo>\n';
+                xml += '  <itcc-ci:TotalePatrimonioNetto contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totPn) + '</itcc-ci:TotalePatrimonioNetto>\n';
+                xml += '  <itcc-ci:TotaleDebiti contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totDebiti) + '</itcc-ci:TotaleDebiti>\n';
+                xml += '  <itcc-ci:TotalePassivo contextRef="c_sp_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(totPassivo) + '</itcc-ci:TotalePassivo>\n';
+                xml += '  <itcc-ci:ValoreProduzione contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(valProd) + '</itcc-ci:ValoreProduzione>\n';
+                xml += '  <itcc-ci:CostiProduzione contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(costProd) + '</itcc-ci:CostiProduzione>\n';
+                xml += '  <itcc-ci:UtilePerditaEsercizio contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(netIncome) + '</itcc-ci:UtilePerditaEsercizio>\n';
+
+                xml += '</xbrli:xbrl>\n';
+
+                context.xmlText = xml;
+                context.filename = 'IT' + fiscalId + '_Bilancio_' + year + '_PCI_2018-11-04.xbrl';
+            ]]></script>
+        </actions>
+    </service>
+</services>
