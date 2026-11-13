@@ -40,6 +40,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="marketingCampaignId" type="id"/>
         <field name="dataSourceId" type="id"/>
         <field name="opportunityStageId" type="id" enable-audit-log="true"/>
+        <!-- the selling organization (impl-sales P1, X12): an audit-logged copy of the effective internal-organization
+            SalesOpportunityParty row, kept equal to it by the opportunity services (P4), so the organization filters
+            (MANTLE_USER_ORG_SOPP, MANTLE_ACTIVE_ORG_SOPP) can bound what an app root's user reads -->
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
         <relationship type="one" title="SalesOpportunityType" related="moqui.basic.Enumeration">
             <key-map field-name="typeEnumId"/></relationship>
         <relationship type="one" title="Account" related="mantle.party.Party">
@@ -49,6 +53,8 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.sales.opportunity.SalesOpportunityStage">
             <key-map field-name="opportunityStageId"/></relationship>
         <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
     </entity>
     <entity entity-name="SalesOpportunityParty" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>

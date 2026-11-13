@@ -85,6 +85,56 @@ along with this software (see the LICENSE.md file). If not, see
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="RETURN_POLICY_EDIT" fromDate="0"/>
     <userPermissions userPermissionId="WARRANTY_APPROVE" description="Warranty Approve"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="WARRANTY_APPROVE" fromDate="0"/>
+    <!-- Sales (IronStone Sales design §1.1; impl-sales P1, §4): SALES_VIEW reads the Sales records of the user's organizations
+        assigned to them or their dated team, SALES_TEAM_VIEW the organization's whole pipeline; SALES_TEAM_MANAGE keeps teams and
+        their members; SALES_OPPORTUNITY_EDIT, SALES_ACCOUNT_EDIT, SALES_QUOTE_EDIT and SALES_ORDER_EDIT write leads and
+        opportunities, accounts and contacts, quote drafts and sales order entry; SALES_QUOTE_SEND issues a reviewed quote and its
+        link; SALES_ORDER_APPROVE approves a sales part where the seller's approval setting is on (approve#Order's sales
+        direction); SALES_ORDER_CHANGE and SALES_APPROVE propose and decide a commercial order change (OrderChangeServices checks
+        both already, impl-sales F13); SALES_AGREEMENT_EDIT and SALES_RECURRENCE_MANAGE keep customer agreements and recurring
+        orders; SALES_FORECAST_EDIT forecasts and targets; SALES_REPORT_VIEW reads the sales reports of the user's organizations
+        (SalesReportServices); SALES_CUSTOMER_INVITE invites a customer contact to PASS Sales; SALES_IMPORT runs the opportunity
+        import (with the permissions its target names); SALES_CONFIGURE keeps the Sales settings; SALES_OWNER_CHANGE moves a
+        departing user's opportunities, accounts and open quotes (Sales' lifecycle participant, an identity operator's, F54). An
+        edit permission alone reads nothing (mantle/sales/SalesAccess.js). Granted to the Sales groups by the app's setup data. -->
+    <userPermissions userPermissionId="SALES_VIEW" description="Sales View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_TEAM_VIEW" description="Sales Team View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_TEAM_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_TEAM_MANAGE" description="Sales Team Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_TEAM_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_OPPORTUNITY_EDIT" description="Sales Opportunity Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_OPPORTUNITY_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ACCOUNT_EDIT" description="Sales Account Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ACCOUNT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_QUOTE_EDIT" description="Sales Quote Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_QUOTE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_QUOTE_SEND" description="Sales Quote Send"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_QUOTE_SEND" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_EDIT" description="Sales Order Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_APPROVE" description="Sales Order Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_ORDER_CHANGE" description="Sales Order Change"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_ORDER_CHANGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_APPROVE" description="Sales Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_AGREEMENT_EDIT" description="Sales Agreement Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_AGREEMENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_RECURRENCE_MANAGE" description="Sales Recurrence Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_RECURRENCE_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_FORECAST_EDIT" description="Sales Forecast Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_FORECAST_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_REPORT_VIEW" description="Sales Report View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_REPORT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_CUSTOMER_INVITE" description="Sales Customer Invite"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_CUSTOMER_INVITE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_IMPORT" description="Sales Import"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_IMPORT" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_CONFIGURE" description="Sales Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="SALES_OWNER_CHANGE" description="Sales Owner Change (another user's opportunities, accounts and open quotes)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="SALES_OWNER_CHANGE" fromDate="0"/>
     <!-- the working hours of another party (a service team's, mantle.work.CalendarServices.store#WorkingHours) for a party of the
         user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
     <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>
@@ -355,6 +405,15 @@ along with this software (see the LICENSE.md file). If not, see
                 filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
         <filters entityFilterId="MANTLE_USER_ORG_IORG" entityName="mantle.party.InternalOrganization"
                 filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+        <!-- Sales (impl-sales P1, X12): an opportunity by its organization (SalesOpportunity.organizationPartyId, the effective
+            internal-organization party row's copy), a forecast and an agreement by theirs; each Sales service checks the
+            organization again (mantle/sales/SalesAccess.js) -->
+        <filters entityFilterId="MANTLE_USER_ORG_SOPP" entityName="mantle.sales.opportunity.SalesOpportunity"
+                filterMap="({organizationPartyId: filterOrgIds})"/>
+        <filters entityFilterId="MANTLE_USER_ORG_SFC" entityName="mantle.sales.forecast.SalesForecast"
+                filterMap="({organizationPartyId: filterOrgIds})"/>
+        <filters entityFilterId="MANTLE_USER_ORG_AGR" entityName="mantle.party.agreement.Agreement"
+                filterMap="({organizationPartyId: filterOrgIds})"/>
     </moqui.security.EntityFilterSet>
     <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_ACTIVE_ORG" description="Active Organization Filters" applyCond="activeOrgId" allowMissingAlias="Y">
         <filters entityFilterId="MANTLE_ACTIVE_ORG_1" entityName="mantle.account.invoice.Invoice" joinOr="Y"
@@ -396,6 +455,13 @@ along with this software (see the LICENSE.md file). If not, see
         <filters entityFilterId="MANTLE_ACTIVE_ORG_UAO" entityName="mantle.party.UserAccountOrganization"
                 filterMap="({organizationPartyId: activeOrgId})"/>
         <filters entityFilterId="MANTLE_ACTIVE_ORG_IORG" entityName="mantle.party.InternalOrganization"
+                filterMap="({organizationPartyId: activeOrgId})"/>
+        <!-- Sales (impl-sales P1, X12), as MANTLE_USER_ORG_SOPP, _SFC and _AGR -->
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_SOPP" entityName="mantle.sales.opportunity.SalesOpportunity"
+                filterMap="({organizationPartyId: activeOrgId})"/>
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_SFC" entityName="mantle.sales.forecast.SalesForecast"
+                filterMap="({organizationPartyId: activeOrgId})"/>
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_AGR" entityName="mantle.party.agreement.Agreement"
                 filterMap="({organizationPartyId: activeOrgId})"/>
         <!-- allow these for 3rd party facilities regardless of active org:
         <filters entityFilterId="MANTLE_ACTIVE_ORG_F" entityName="mantle.facility.Facility"
