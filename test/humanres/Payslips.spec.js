@@ -156,10 +156,23 @@ spec({
         // a payroll approver who is also an employee paid by the group
         state.APR = person("APR")
         state.APREmp = employ(state.APR, orgA)
-        state.payroll = account("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT"], person("USER_PAYROLL"), [orgA])
-        state.approver = account("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"], person("USER_APPROVER"), [orgA])
-        state.employedApprover = account("APR", ["PAYROLL_VIEW", "PAYROLL_APPROVE", "PEOPLE_SELF_SERVICE"], state.APR)
-        state.payrollB = account("PAYROLLB", ["PAYROLL_VIEW", "PAYROLL_EDIT"], person("USER_PAYROLLB"), [orgB])
+        state.payroll = account("PAYROLL", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], person("USER_PAYROLL"), [
+            orgA
+        ])
+        state.approver = account(
+            "APPROVER",
+            ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE"],
+            person("USER_APPROVER"),
+            [orgA]
+        )
+        state.employedApprover = account(
+            "APR",
+            ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE", "PEOPLE_SELF_SERVICE"],
+            state.APR
+        )
+        state.payrollB = account("PAYROLLB", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], person("USER_PAYROLLB"), [
+            orgB
+        ])
         state.hr = account("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], person("USER_HR"), [orgA])
         state.employee = account("SAL", ["PEOPLE_SELF_SERVICE"], state.SAL)
         state.other = account("OTHER", ["PEOPLE_SELF_SERVICE"], state.OTHER)

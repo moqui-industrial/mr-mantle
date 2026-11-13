@@ -132,13 +132,17 @@ spec({
         account(prefix + "_WAGES", "COMPENSATION", orgA)
         account(prefix + "_WITHHELD", "ACCRUED_EXPENSES", orgA)
         account(prefix + "_WAGES_B", "COMPENSATION", orgB)
-        state.config = user("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgA])
-        state.config2 = user("CONFIG2", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE", "PAYROLL_APPROVE"], [orgA])
-        state.configB = user("CONFIGB", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgB])
-        state.operator = user("OPERATOR", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
+        state.config = user("CONFIG", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgA])
+        state.config2 = user(
+            "CONFIG2",
+            ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE", "PAYROLL_APPROVE"],
+            [orgA]
+        )
+        state.configB = user("CONFIGB", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"], [orgB])
+        state.operator = user("OPERATOR", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
         // the People administrator's configuration permission no longer configures pay; an HR approver who reads no payroll
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_CONFIGURE", "PEOPLE_REQUEST_APPROVE"], [orgA])
-        state.approver = user("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"], [orgA])
+        state.approver = user("APPROVER", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE"], [orgA])
         // the salary every later feature reads: a year's salary over the periods a year, both declared inputs
         state.salary = component(
             {
@@ -827,7 +831,8 @@ feature(
                 currencyUomId: "USD",
                 payBasisEnumId: "PpbMixed"
             }).payrollStructureId
-            const msRevision = () => run(state.config, G + "find#Structures", {payrollStructureId: msStructure}).structure.revision
+            const msRevision = () =>
+                run(state.config, G + "find#Structures", {payrollStructureId: msStructure}).structure.revision
             run(state.config, G + "store#StructureComponent", {
                 payrollStructureId: msStructure,
                 payrollComponentId: sameSecond,

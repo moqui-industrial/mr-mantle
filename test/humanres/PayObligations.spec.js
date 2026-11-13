@@ -286,9 +286,9 @@ spec({
         assign(state.EMPEmp, state.EMP, state.group, "12244.92")
         assign(state.LEFTEmp, state.LEFT, state.group, "12000")
         assign(state.DEMOEmp, state.DEMO, state.demo, "12000")
-        state.payroll = account("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT"])
-        state.configurer = account("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"])
-        state.approver = account("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"])
+        state.payroll = account("PAYROLL", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"])
+        state.configurer = account("CONFIG", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"])
+        state.approver = account("APPROVER", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE"])
         const finance = ["ACCOUNTING_VIEW", "PAYABLE_VIEW", "PAYABLE_EDIT", "INVOICE_APPROVE", "PAYMENT_EDIT"]
         state.finance = account("FINANCE", finance.concat(["PAYROLL_VIEW"]))
         state.financeOnly = account("FINANCEONLY", finance)

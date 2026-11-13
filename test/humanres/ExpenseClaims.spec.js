@@ -155,8 +155,8 @@ spec({
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_EXPENSE_MANAGE"], state.hrBParty)
         // HR of A without the expense permission: refused what HR is accepted with
         state.hrOnly = user("HRONLY", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
-        state.payroll = user("PAY", ["PAYROLL_VIEW", "PAYROLL_EDIT"], state.payParty)
-        state.payrollReader = user("PAYV", ["PAYROLL_VIEW"], state.payParty)
+        state.payroll = user("PAY", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], state.payParty)
+        state.payrollReader = user("PAYV", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW"], state.payParty)
         state.finance = user(
             "FIN",
             ["ACCOUNTING_VIEW", "INVOICE_APPROVE", "PAYMENT_EDIT", "PAYABLE_VIEW", "PAYABLE_EDIT"],

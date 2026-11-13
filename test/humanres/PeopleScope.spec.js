@@ -1,5 +1,6 @@
 // People scope (mantle.humanres.PeopleServices; IronStone People design §1.1, impl-people P1): a staff reader's employers and the
-// units under them, another employer and a forged one refused by reason code, an edit permission alone reading nothing, and
+// units under them, another employer and a forged one refused by reason code, an edit permission alone reading nothing, nor
+// PAYROLL_VIEW alone (impl-people P31 review), and
 // PEOPLE_ALL_ORGANIZATIONS widening a staff read to every internal organization while reading nothing by itself; a person
 // admitted by employment and its dates (a directory reader the current employments, an HR reader the history too), by the live
 // reporting line and as self, and a person outside the scope refused as a missing one; Home's counts (distinct people against
@@ -128,6 +129,8 @@ spec({
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA])
         state.hrBoth = user("HRBOTH", ["PEOPLE_HR_VIEW"], [orgA, orgB])
         state.editOnly = user("EDITONLY", ["PEOPLE_HR_EDIT"], [orgA])
+        // P31 review: PAYROLL_VIEW alone (a finance group's) is no People read
+        state.payrollOnly = user("PAYROLLONLY", ["PAYROLL_VIEW"], [orgA])
         state.configure = user("CONFIGURE", ["PEOPLE_CONFIGURE"], [orgA, orgB])
         state.manager = user("MGR", ["PEOPLE_TEAM_VIEW", "PEOPLE_SELF_SERVICE"], [], state.MANAGER)
         state.everyHr = user("EVERYHR", ["PEOPLE_HR_VIEW", "PEOPLE_ALL_ORGANIZATIONS"], [orgA])
@@ -140,7 +143,7 @@ spec({
 })
 
 feature(
-    "a staff reader's scope is their employers and the units under them; another employer is refused by reason code, an edit permission alone reads nothing, and PEOPLE_ALL_ORGANIZATIONS widens a read to every employer",
+    "a staff reader's scope is their employers and the units under them; another employer is refused by reason code, an edit permission alone reads nothing, nor PAYROLL_VIEW alone, and PEOPLE_ALL_ORGANIZATIONS widens a read to every employer",
     {
         when() {
             const hr = run(state.hr, S + "get#Scope")
@@ -148,14 +151,15 @@ feature(
             const other = run(state.hr, S + "get#Scope", {organizationPartyId: orgB})
             const forged = run(state.hr, S + "get#Scope", {organizationPartyId: prefix + "_FORGED"})
             const editOnly = run(state.editOnly, S + "get#Scope")
+            const payrollOnly = run(state.payrollOnly, S + "get#Scope")
             // an agent of A holding PEOPLE_ALL_ORGANIZATIONS with an HR read: B and its employee too; the permission alone: nothing
             const every = run(state.everyHr, S + "get#Scope")
             const everyB = run(state.everyHr, S + "get#Scope", {organizationPartyId: orgB, partyId: state.BETA})
             const everyOnly = run(state.everyOnly, S + "get#Scope")
             const everyEmployers = [orgA, orgB, department].map(id => (every.organizationPartyIds || []).includes(id))
-            return {hr, both, other, forged, editOnly, every, everyEmployers, everyB, everyOnly}
+            return {hr, both, other, forged, editOnly, payrollOnly, every, everyEmployers, everyB, everyOnly}
         },
-        then({hr, both, other, forged, editOnly, every, everyEmployers, everyB, everyOnly}) {
+        then({hr, both, other, forged, editOnly, payrollOnly, every, everyEmployers, everyB, everyOnly}) {
             hr.error == ""
             hr.organizationPartyIds == [orgA]
             hr.unitPartyIds == [department]
@@ -170,6 +174,10 @@ feature(
             editOnly.capabilities.hrEdit == true
             editOnly.capabilities.staff == false
             editOnly.organizationPartyIds == []
+            payrollOnly.error == ""
+            payrollOnly.capabilities.payrollView == true
+            payrollOnly.capabilities.staff == false
+            payrollOnly.organizationPartyIds == []
             every.error == ""
             every.allOrganizations == true
             everyEmployers == [true, true, false]

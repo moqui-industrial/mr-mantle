@@ -202,10 +202,10 @@ spec({
             state[kind] = person(kind)
             state[kind + "Emp"] = employ(state[kind], orgA)
         }
-        state.payroll = user("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
-        state.maker = user("MAKER", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_APPROVE"], [orgA])
-        state.approver = user("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"], [orgA])
-        state.payrollB = user("PAYROLLB", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgB])
+        state.payroll = user("PAYROLL", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
+        state.maker = user("MAKER", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_APPROVE"], [orgA])
+        state.approver = user("APPROVER", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE"], [orgA])
+        state.payrollB = user("PAYROLLB", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgB])
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA])
         state.group = prefix + "_MONTHLY"
         call("create#mantle.humanres.payroll.PayrollGroup", {

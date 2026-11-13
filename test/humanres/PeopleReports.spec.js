@@ -92,7 +92,7 @@ spec({
         employ(state.cy, orgB, "2026-02-01 12:00:00")
         employ((state.HRB = person("HRB")), orgB)
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.HR)
-        state.pay = user("PAY", ["PAYROLL_VIEW"], state.PAY)
+        state.pay = user("PAY", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW"], state.PAY)
         state.admin = user("ADMIN", ["PEOPLE_CONFIGURE"], state.ADMIN)
         state.caseUser = user("CASE", ["PEOPLE_CASE_HANDLE"], state.CASE)
         state.dir = user("DIR", ["PEOPLE_DIRECTORY_VIEW"], state.DIR)
