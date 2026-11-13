@@ -449,6 +449,9 @@ function paymentQuery(scope, p = {}) {
         if (has("PAYABLE_VIEW")) sides.push(sideCondition(org, "payable"))
         q = q.condition(cf.makeCondition(sides, "or")).condition("paymentTypeEnumId", "not-equals", "PtInternalTransfer")
     }
+    // People P27 (AC-23): a payroll payment is a reader of payroll's, in every list and the detail this query authorizes
+    const payrollOrigin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").paymentCondition()
+    if (payrollOrigin) q = q.condition(payrollOrigin)
     const queue = p.queue || "all"
     if (!["all", "incoming", "outgoing", "toValidate", "unapplied", "refunds", "transfers"].includes(queue))
         denied("PAYMENT_QUEUE_INVALID", "Choose a payment queue")

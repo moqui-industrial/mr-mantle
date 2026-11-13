@@ -18,6 +18,12 @@ const maxBills = 500
 // pay run (P27), never by a payment run; Expense.js names those of a list
 const payrollReserved = ids =>
     ids.length ? ec.resource.script("component://mr-mantle/service/mantle/humanres/Expense.js").payrollReserved(ids) : []
+// People P27 (F69, AC-23): a finalized pay run's obligations by invoice, and the payroll-origin projection
+const obligationKinds = ids =>
+    ids.length
+        ? ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js").obligationKinds(ids)
+        : {}
+const payrollOrigin = () => ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
 
 // ---- Scope and values
 
@@ -64,11 +70,13 @@ function bankMethod(organizationPartyId, paymentMethodId, ach = false) {
     }
     return method
 }
-// A supplier's current bank account (the newest), or null.
-function supplierBank(supplierPartyId) {
+// A supplier's current bank account (the newest), or null. People P27 (F69): a payroll payee's (a person paid net pay or a claim a
+// pay run settled) payroll account first (purpose PmpPayroll), as payroll's own payments ask.
+function supplierBank(supplierPartyId, payroll = false) {
     const methods = rows(M, {ownerPartyId: supplierPartyId, paymentMethodTypeEnumId: "PmtBankAccount"})
         .filter(row => lib.policy.lib.active(row))
         .sort((a, b) => Number(b.fromDate || 0) - Number(a.fromDate || 0))
+    if (payroll) methods.sort((a, b) => (b.purposeEnumId === "PmpPayroll" ? 1 : 0) - (a.purposeEnumId === "PmpPayroll" ? 1 : 0))
     return methods.find(row => one("mantle.account.method.BankAccount", {paymentMethodId: row.paymentMethodId})) || null
 }
 function currentBank(item) {
@@ -157,9 +165,15 @@ function select(p) {
             .limit(maxBills + 1)
             .list()
     )
-    // an expense claim reserved for payroll is not a payment run's to pay (P27's pay run settles it)
+    // an expense claim reserved for payroll is not a payment run's to pay until a finalized pay run settles it (P27); a
+    // payroll-origin bill (a pay run's net pay or payee invoice) is paid only by a user who reads payroll (AC-23, PAYROLL_VIEW)
     const reserved = new Set(payrollReserved(bills.map(row => row.invoiceId)))
     if (reserved.size) bills.splice(0, bills.length, ...bills.filter(row => !reserved.has(row.invoiceId)))
+    if (!payrollOrigin().canRead()) {
+        const payroll = new Set(payrollOrigin().payrollInvoiceIds(bills.map(row => row.invoiceId)))
+        if (payroll.size) bills.splice(0, bills.length, ...bills.filter(row => !payroll.has(row.invoiceId)))
+    }
+    const payrollKinds = obligationKinds(bills.map(row => row.invoiceId))
     // more than the cap: the first by due date are selected and the run says that more are due
     const truncated = bills.length > maxBills
     if (truncated) bills.length = maxBills
@@ -200,7 +214,13 @@ function select(p) {
         const schedule = dueSchedules[bill.invoiceId],
             unpaid = lib.totals(bill).unpaidTotal,
             discount = schedule.discountAvailable
-        if (!(bill.fromPartyId in banks)) banks[bill.fromPartyId] = supplierBank(bill.fromPartyId)
+        if (!(bill.fromPartyId in banks))
+            banks[bill.fromPartyId] = supplierBank(
+                bill.fromPartyId,
+                bills.some(
+                    row => row.fromPartyId === bill.fromPartyId && ["PokNetPay", "PokClaim"].includes(payrollKinds[row.invoiceId])
+                )
+            )
         const bank = banks[bill.fromPartyId]
         let excludeReasonEnumId = null,
             excludeComment = null
@@ -212,6 +232,9 @@ function select(p) {
         } else if (otherRuns[bill.invoiceId]) {
             excludeReasonEnumId = "PrxInOtherRun"
             excludeComment = otherRuns[bill.invoiceId]
+        } else if (ach && payrollKinds[bill.invoiceId] === "PokPayee") {
+            // F69: an ACH file is PPD, a person's account; a payroll payee that is no person is paid by check or its own channel
+            excludeReasonEnumId = "PrxPayeeChannel"
         } else if (ach && !bank) {
             excludeReasonEnumId = "PrxNoBankAccount"
         } else if (bill.invoiceId in userExcluded) {
@@ -548,9 +571,25 @@ function paySupplier(p) {
             denied("DISCOUNT_NOT_AVAILABLE", "The discount on bill " + item.invoiceId + " is no longer available")
         if (ach && !currentBank(item)) denied("BANK_DETAILS_CHANGED", "The supplier's bank details changed; refresh the run")
     }
+    // People P27 (F69, AC-23): payroll bills are a reader of payroll's to pay; the payment's type comes from the bills' invoice
+    // type, as create#InvoicePayment takes it (a payroll invoice's PtPayrollPayment, which the projection keeps to PAYROLL_VIEW)
+    if (!payrollOrigin().canRead() && payrollOrigin().payrollInvoiceIds(Object.keys(bills)).length)
+        denied("PAYROLL_VIEW_REQUIRED", "Paying payroll needs PAYROLL_VIEW")
+    const paymentTypes = [
+        ...new Set(
+            Object.values(bills).map(
+                bill => one("moqui.basic.Enumeration", {enumId: bill.invoiceTypeEnumId})?.relatedEnumId || "PtInvoicePayment"
+            )
+        )
+    ]
+    const paymentTypeEnumId = paymentTypes.includes("PtPayrollPayment")
+        ? "PtPayrollPayment"
+        : paymentTypes.length === 1
+          ? paymentTypes[0]
+          : "PtInvoicePayment"
     const amount = total(list)
     const payment = call("mantle.account.PaymentServices.create#Payment", {
-        paymentTypeEnumId: "PtInvoicePayment",
+        paymentTypeEnumId,
         fromPartyId: run.organizationPartyId,
         toPartyId: p.supplierPartyId,
         amount,
@@ -790,7 +829,10 @@ function markReturned(p) {
 // A run for its screen: header, totals, capabilities and its bills with names, masked bank accounts and results.
 function getRun(p) {
     const run = runScope(p)
-    const list = items(run.paymentRunId)
+    const all = items(run.paymentRunId)
+    // People P27 (AC-23): a run's payroll items are a reader of payroll's; anyone else sees one masked "Payroll" amount in their place
+    const folded = payrollOrigin().maskRows(all)
+    const list = folded.rows
     const names = lib.partyNames([...new Set(list.map(row => row.supplierPartyId))])
     const workflow = ec.resource.script("component://mr-mantle/service/mantle/account/PaymentWorkflow.js")
     const methodIds = [...new Set([run.paymentMethodId, ...list.map(row => row.toPaymentMethodId)].filter(Boolean))]
@@ -826,7 +868,8 @@ function getRun(p) {
         ).map(row => [row.enumId, row.description])
     )
     const statusText = id => (id ? one("moqui.basic.StatusItem", {statusId: id})?.description || id : "")
-    const selected = list.filter(row => row.selectedIndicator === "Y")
+    const selected = all.filter(row => row.selectedIndicator === "Y")
+    const maskedSelected = folded.masked.filter(row => row.selectedIndicator === "Y")
     const fileRow =
         run.paymentMethodFileId && one("mantle.account.method.PaymentMethodFile", {paymentMethodFileId: run.paymentMethodFileId})
     const executing = !!run.executeOperationKey
@@ -850,7 +893,9 @@ function getRun(p) {
             payDateText: dayText(run.payDate),
             selectedTotal: total(selected),
             selectedCount: selected.length,
-            excludedCount: list.length - selected.length,
+            excludedCount: all.length - selected.length,
+            payrollMaskedCount: maskedSelected.length,
+            payrollMaskedTotal: maskedSelected.length ? total(maskedSelected) : null,
             discountTotal: selected.reduce((sum, row) => sum.add(row.discountAmount || 0), toDecimal(0)),
             paidCount: selected.filter(row => row.resultEnumId === "PrrPaid").length,
             failedCount: selected.filter(row => row.resultEnumId === "PrrFailed").length,

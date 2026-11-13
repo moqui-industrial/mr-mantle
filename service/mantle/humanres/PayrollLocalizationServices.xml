@@ -30,7 +30,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="organizationPartyId"/>
             <parameter name="currencyUomId" required="true"/>
             <parameter name="asOfDate" type="Timestamp"/>
-            <parameter name="payFacts" type="List"><description>Maps of componentCode, componentKindEnumId and amount</description></parameter>
+            <parameter name="payFacts" type="List"><description>Maps of componentCode, componentKindEnumId, amount and reimbursement
+                (true for a line paying an expense claim, which is no pay to levy; impl-people P27)</description></parameter>
             <parameter name="bases" type="Map"/>
             <parameter name="profile" type="Map"/>
         </in-parameters>

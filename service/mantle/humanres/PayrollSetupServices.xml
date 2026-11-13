@@ -598,7 +598,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The pay groups of the employers the caller reads (or organizationPartyId, an employer in scope), by name
             (ended ones with includeEnded), paged: each its employer, currency, frequency, first period, periods a year, pay-date
             policy, proration, time basis, workweek zone, localization and readiness (preview only in this build, with its reason:
-            NO_LOCALIZATION, PREVIEW_ONLY for the demonstration, COVERAGE_MISSING or PROJECTION_PENDING; liveAllowed never true),
+            NO_LOCALIZATION, PREVIEW_ONLY for the demonstration, COVERAGE_MISSING or PROJECTION_PENDING; P27: LIVE_AVAILABLE or LIVE
+            with liveAllowed for a real localization covering today, which no group of this build has), the localization binding,
             its revision and whether the caller may change it. With payrollGroupId, its prepared periods (dates, pay date, state).
             Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED) and
             another employer's group (RECORD_UNAVAILABLE).</description>
@@ -645,8 +646,11 @@ along with this software (see the LICENSE.md file). If not, see
             period's last day, -31 to 62), prorationEnumId and timeBasisEnumId are required; workweekTimeZone and the localization
             binding are optional. Once periods are prepared the currency, frequency and first period stay. Refuses a caller without
             PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
-            ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live
-            finalization (LIVE_NOT_AVAILABLE: no group can be live in this build), GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
+            ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live pay
+            where the group's readiness does not allow it (LIVE_NOT_AVAILABLE: a real localization covering today and Accounting's
+            payroll-origin projection are needed, impl-people P27; no group can be live in this build, whose one localization is the
+            demonstration), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
+            GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
             PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID,
             POLICY_LOCKED and STILL_ASSIGNED (an end while pay assignments use it then, P23).</description>
@@ -664,6 +668,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeBasisEnumId"/>
             <parameter name="workweekTimeZone"/>
             <parameter name="payrollLocalizationId"/>
+            <parameter name="localizationPayeePartyId"><description>The localization binding's payee (P27)</description></parameter>
+            <parameter name="localizationLiabilityGlAccountId"/>
+            <parameter name="localizationExpenseGlAccountId"/>
             <parameter name="liveEnabled"/>
             <parameter name="description"/>
             <parameter name="end" type="Boolean"/>

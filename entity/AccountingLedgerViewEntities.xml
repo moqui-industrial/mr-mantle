@@ -135,6 +135,37 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="txVoucherRef" entity-alias="ATX" field="voucherRef"/>
         <alias name="txAssetId" entity-alias="ATX" field="assetId"/>
     </view-entity>
+    <!-- People P27 (AC-23, the payroll-origin projection; design-accounting ExpensePosting): a transaction and its entries with the
+        payroll obligation of its invoice (an invoice a pay run's finalization made) and the type of its payment (a payroll
+        payment), so Accounting's journal and entry reads leave payroll-origin lines to holders of PAYROLL_VIEW
+        (AccountingPolicy.js query, mantle/account/PayrollOrigin.js) -->
+    <view-entity entity-name="AcctgTransFinance" package="mantle.ledger.transaction">
+        <member-entity entity-alias="ATX" entity-name="mantle.ledger.transaction.AcctgTrans"/>
+        <member-entity entity-alias="POB" entity-name="mantle.humanres.payroll.PayrollObligation" join-from-alias="ATX"
+                join-optional="true"><key-map field-name="invoiceId"/></member-entity>
+        <member-entity entity-alias="PMT" entity-name="mantle.account.payment.Payment" join-from-alias="ATX" join-optional="true">
+            <key-map field-name="paymentId"/></member-entity>
+        <alias-all entity-alias="ATX"/>
+        <alias name="payrollObligationKindEnumId" entity-alias="POB" field="obligationKindEnumId"/>
+        <alias name="paymentTypeEnumId" entity-alias="PMT" field="paymentTypeEnumId"/>
+    </view-entity>
+    <view-entity entity-name="AcctgTransAndEntryFinance" package="mantle.ledger.transaction">
+        <member-entity entity-alias="ATX" entity-name="mantle.ledger.transaction.AcctgTrans"/>
+        <member-entity entity-alias="ATE" entity-name="mantle.ledger.transaction.AcctgTransEntry" join-from-alias="ATX">
+            <key-map field-name="acctgTransId"/></member-entity>
+        <member-entity entity-alias="POB" entity-name="mantle.humanres.payroll.PayrollObligation" join-from-alias="ATX"
+                join-optional="true"><key-map field-name="invoiceId"/></member-entity>
+        <member-entity entity-alias="PMT" entity-name="mantle.account.payment.Payment" join-from-alias="ATX" join-optional="true">
+            <key-map field-name="paymentId"/></member-entity>
+        <alias-all entity-alias="ATX"><exclude field="description"/><exclude field="voucherRef"/>
+            <exclude field="assetId"/></alias-all>
+        <alias-all entity-alias="ATE"/>
+        <alias name="txDescription" entity-alias="ATX" field="description"/>
+        <alias name="txVoucherRef" entity-alias="ATX" field="voucherRef"/>
+        <alias name="txAssetId" entity-alias="ATX" field="assetId"/>
+        <alias name="payrollObligationKindEnumId" entity-alias="POB" field="obligationKindEnumId"/>
+        <alias name="paymentTypeEnumId" entity-alias="PMT" field="paymentTypeEnumId"/>
+    </view-entity>
     <view-entity entity-name="AcctgTransEntryGlAccount" package="mantle.ledger.transaction">
         <member-entity entity-alias="ATE" entity-name="mantle.ledger.transaction.AcctgTransEntry"/>
         <member-entity entity-alias="GLA" entity-name="mantle.ledger.account.GlAccount" join-from-alias="ATE">

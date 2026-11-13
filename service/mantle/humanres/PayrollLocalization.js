@@ -46,7 +46,8 @@ function calculateDemonstration(p) {
     if (!p.currencyUomId) denied("CURRENCY_REQUIRED", "A localization calculates in the pay's currency")
     const zero = toDecimal("0")
     const earnings = Array.from(p.payFacts || [])
-        .filter(fact => fact.componentKindEnumId === "PckEarning" && fact.amount != null)
+        // a line that pays an expense claim (reimbursement, impl-people P27) is no earning to levy
+        .filter(fact => fact.componentKindEnumId === "PckEarning" && fact.amount != null && !fact.reimbursement)
         .reduce((total, fact) => total.add(toDecimal(fact.amount)), zero)
     const item = (itemCode, itemName, party, rate) => {
         const amount = ec.l10n.roundCurrency(earnings.multiply(toDecimal(rate)), p.currencyUomId)

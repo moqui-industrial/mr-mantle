@@ -292,6 +292,12 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                     if (!readable) { financeDropped = true; continue }
                 }
+                // a ledger transaction of a payroll-origin invoice or payment only for a reader of payroll (People P27, AC-23)
+                if (hit.documentId === 'MantleAcctgTrans') {
+                    const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
+                    if (!origin.canRead() && (origin.isPayrollInvoice(current.invoiceId) || origin.isPayrollPayment(current.paymentId || null))) {
+                        financeDropped = true; continue }
+                }
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds, as get#RecordLinkInfo has it)
                 // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)

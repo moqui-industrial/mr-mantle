@@ -58,6 +58,7 @@ const inputs = () => ec.resource.script("component://mr-mantle/service/mantle/hu
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
 const slips = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollResults.js")
+const obligations = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
 
 const RUN = "mantle.humanres.payroll.PayrollRun"
 const UNIT = "mantle.humanres.payroll.PayrollRunEmployment"
@@ -299,6 +300,8 @@ function unpaidAdjustmentOwners(group, period, wanted) {
         .condition({payrollGroupId: group.payrollGroupId, timePeriodId: period.timePeriodId, statusId: "PinApproved"})
         .condition("payrollComponentId", "is-not-null", null)
         .condition("payrollRunId", "is-null", null)
+        // P27: an overpayment recovery is a regular run's (the user's call of Nov 12, 2026), never an off-cycle run's to pay alone
+        .condition("inputTypeEnumId", "not-equals", "PitOverpaymentRecovery")
     if (wanted.length) query.condition("partyRelationshipId", "in", wanted)
     return unique(
         Array.from(query.selectField("partyRelationshipId").distinct(true).limit(populationCap).list()).map(
@@ -330,11 +333,22 @@ function syncPopulation(run, group, period, zone, initialIds = null) {
             "The pay group pays more than " + populationCap + " employees in the period; split it into smaller groups"
         )
     const memberIds = new Set(members.map(member => member.partyRelationshipId))
+    // P27 (the user's call of Nov 12, 2026, P26's finding): a correction of an employment that ended by the period's last day (a
+    // backdated separation) keeps it, though the group no longer pays it, so the period's pay is recovered
+    const leavers =
+        run.runKindEnumId === "PrkCorrection"
+            ? endedBy(
+                  wanted.filter(id => !memberIds.has(id)),
+                  period,
+                  zone
+              )
+            : []
+    for (const leaver of leavers) memberIds.add(leaver.partyRelationshipId)
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
     const byEmployment = Object.fromEntries(units.map(unit => [unit.partyRelationshipId, unit]))
     let addedCount = 0
     let removedCount = 0
-    for (const member of members) {
+    for (const member of members.concat(leavers)) {
         if (byEmployment[member.partyRelationshipId]) continue
         call("create#" + UNIT, {
             payrollRunId: run.payrollRunId,
@@ -352,6 +366,14 @@ function syncPopulation(run, group, period, zone, initialIds = null) {
         removedCount++
     }
     return {addedCount, removedCount, memberCount: members.length}
+}
+// The employments of a list that ended by a period's last day (their PartyRelationship's thruDate), as population members.
+function endedBy(ids, period, zone) {
+    if (!ids.length) return []
+    const endMs = inputs().dayStart(period.thruDay, zone) + day
+    return rowsIn(RELATIONSHIP, "partyRelationshipId", ids)
+        .filter(row => row.thruDate != null && ms(row.thruDate) <= endMs)
+        .map(row => ({partyRelationshipId: row.partyRelationshipId, partyId: row.fromPartyId}))
 }
 // a unit's draft results removed and the inputs its calculation took released
 function clearUnit(run, unit) {
@@ -582,8 +604,16 @@ function factsOf(run, facts, units) {
 function takenInputs(run, found) {
     const {liveOthers, ownRunIds, adjustmentsOnly} = found.shared
     const periodInputs = found.periodInputs
+    // P27: a correction counts the inputs its base runs took as its own, finalized with their runs since
     const approved = periodInputs.filter(
-        row => row.statusId === "PinApproved" && (!adjustmentsOnly || (row.payrollComponentId && row.amount != null))
+        row =>
+            (row.statusId === "PinApproved" ||
+                (row.statusId === "PinFinalized" &&
+                    row.payrollRunId &&
+                    row.payrollRunId !== run.payrollRunId &&
+                    ownRunIds.has(row.payrollRunId))) &&
+            (!adjustmentsOnly ||
+                (row.payrollComponentId && row.amount != null && row.inputTypeEnumId !== "PitOverpaymentRecovery"))
     )
     const elsewhere = row => row.payrollRunId && !ownRunIds.has(row.payrollRunId) && liveOthers.has(row.payrollRunId)
     return {
@@ -997,7 +1027,12 @@ function finishEmployment(run, group, period, zone, member, byCode, taken, waiti
         const component = one(COMPONENT, {payrollComponentId: input.payrollComponentId})
         if (!component) continue
         const code = component.componentCode
-        const what = (input.inputTypeEnumId === "PitAdvanceRecovery" ? "advance recovery " : "adjustment ") + String(input.amount)
+        const what =
+            (input.inputTypeEnumId === "PitAdvanceRecovery"
+                ? "advance recovery "
+                : input.inputTypeEnumId === "PitOverpaymentRecovery"
+                  ? "overpayment recovery "
+                  : "adjustment ") + String(input.amount)
         if (byCode[code]) {
             byCode[code].amount = byCode[code].amount.add(decimalOf(input.amount))
             byCode[code].explanation += "; " + what
@@ -1040,7 +1075,11 @@ function finishEmployment(run, group, period, zone, member, byCode, taken, waiti
                 .map(line => ({
                     componentCode: line.component.componentCode,
                     componentKindEnumId: line.component.componentKindEnumId,
-                    amount: line.amount
+                    amount: line.amount,
+                    // P27: a line paying an expense claim (its term reads the reimbursement input) is no pay to levy
+                    reimbursement: String(line.term?.inputNames || "")
+                        .split(/[\s,;]+/)
+                        .includes("reimbursement")
                 })),
             profile: profileRow ? lib.json(profileRow.profileValues, {}) || {} : {}
         })
@@ -1120,6 +1159,28 @@ function computeOffCycle(run, group, period, zone, member, found, forCorrection 
         ownRunIds: found.shared.ownRunIds,
         splitText: "Off-cycle: the period's approved adjustments"
     })
+}
+// P27: what an employment that ended before the period is paid now: nothing (a correction then recovers what was paid)
+function nothingPaid(group) {
+    const none = zero()
+    return {
+        ok: true,
+        results: [],
+        takenIds: [],
+        waitingCount: 0,
+        assignment: null,
+        segmentCount: 0,
+        splitText: "No pay: the employment ended before the period",
+        totals: {
+            gross: none,
+            deductions: none,
+            contributions: none,
+            localEmployee: none,
+            localEmployer: none,
+            net: ec.l10n.roundCurrency(none, group.currencyUomId),
+            employerCost: none
+        }
+    }
 }
 const resultKey = row => (row.componentCode || "") + "|" + (row.localizationParty || "")
 // P26: a correction run's employment: calculated as it is now (computeEmployment over the original's inputs, its corrections' and
@@ -1204,8 +1265,15 @@ function calculateUnit(run, facts, unitId) {
     // P26 review: a correction of an off-cycle slip recalculates its adjustments alone (as the off-cycle run did), not the period's
     // salary and structure lines, which its original never paid
     const offCycleBase = found.shared.before?.original?.runKindEnumId === "PrkOffCycle"
+    // P27: a correction of an employment that ended by the period's last day pays nothing now, so it recovers the period's pay
+    const ended =
+        run.runKindEnumId === "PrkCorrection" &&
+        found.relationship?.thruDate != null &&
+        ms(found.relationship.thruDate) <= inputs().dayStart(period.thruDay, zone) + day
     let outcome = !member
-        ? failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
+        ? ended
+            ? nothingPaid(group)
+            : failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
         : run.runKindEnumId === "PrkOffCycle" || offCycleBase
           ? computeOffCycle(run, group, period, zone, member, found, offCycleBase)
           : computeEmployment(run, group, period, zone, periodDays, member, found)
@@ -1682,13 +1750,27 @@ function getRun(p) {
     const done = counts.calculated + counts.error + counts.excluded
     const label = runLabel(run)
     let state =
-        {PrnDraft: "draft", PrnCalculating: "calculating", PrnReview: "review", PrnApproved: "approved"}[run.statusId] || "closed"
+        {
+            PrnDraft: "draft",
+            PrnCalculating: "calculating",
+            PrnReview: "review",
+            PrnApproved: "approved",
+            PrnFinalizing: "finalizing",
+            PrnFinalized: "finalized"
+        }[run.statusId] || "closed"
     let stateText = runStateTexts[run.statusId] || run.statusId
     if (run.statusId === "PrnReview" && approval?.waiting) [state, stateText] = ["waiting", "Waiting for approval"]
     else if (run.statusId === "PrnReview" && run.returnedReason)
         [state, stateText] = ["returned", "Returned: " + run.returnedReason]
     else if (approvedNow && !approvalHolds) [state, stateText] = ["stale", "Approval no longer holds: calculate again"]
     else if (run.statusId === "PrnCancelled" && run.cancelReason) stateText = "Cancelled: " + run.cancelReason
+    else if (run.statusId === "PrnFinalizing") stateText = "Finalizing: not released to Accounting yet"
+    // P27: why the group's runs cannot be finalized (none: live), and whether this one may be now
+    const liveReasons = obligations().liveReasons(group)
+    const canFinalize =
+        edits(userScope) &&
+        !liveReasons.length &&
+        ((run.statusId === "PrnApproved" && approvalHolds) || run.statusId === "PrnFinalizing")
     const names = people.personNames(unique(units.map(unit => unit.partyId)))
     const prior = priorNets(run)
     let list = units.map(unit => unitRow(unit, names, currencyUomId, prior, staleIds))
@@ -1769,7 +1851,12 @@ function getRun(p) {
                     group,
                     group.payrollLocalizationId ? one(LOCALIZATION, {payrollLocalizationId: group.payrollLocalizationId}) : null,
                     nowMs()
-                ).message
+                ).message,
+                // P27: the group's live reasons, and the finalization's state
+                live: !liveReasons.length,
+                liveReasons,
+                finalizeMessage: run.finalizeMessage || "",
+                finalizedDateText: dateText(run.finalizedDate)
             },
             counts,
             progressPercent: counts.total ? Math.round((done * 100) / counts.total) : 0,
@@ -1781,7 +1868,8 @@ function getRun(p) {
                 population: counts.total > 0,
                 calculated: counts.total > 0 && counts.pending === 0,
                 resolved: counts.total > 0 && counts.pending === 0 && counts.error === 0 && stale.length === 0,
-                approved: approvalHolds
+                approved: approvalHolds || ["PrnFinalizing", "PrnFinalized"].includes(run.statusId),
+                finalized: run.statusId === "PrnFinalized"
             },
             canEdit,
             canCancel: edits(userScope) && cancellableStatuses.includes(run.statusId),
@@ -1795,6 +1883,7 @@ function getRun(p) {
                 stale.length === 0 &&
                 counts.calculated > 0,
             canDecide: !!approval?.canDecide,
+            canFinalize,
             employment
         },
         lib.pageList(list, p, "employments", {noLimitCap: listCap})

@@ -155,8 +155,14 @@ function aging(p) {
         const open = batch.filter(row => opens[row.invoiceId])
         if (!open.length) continue
         Object.assign(names, policy.lib.partyNames(open.map(row => row[partyField])))
+        // People P27 (AC-23): a payroll-origin invoice is a reader of payroll's; anyone else sees them as one "Payroll" row a
+        // currency, so the totals still reconcile, and never its person or its detail
+        const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
+        const payroll = origin.canRead() ? new Set() : new Set(origin.payrollInvoiceIds(open.map(row => row.invoiceId)))
         for (const invoice of open) {
-            const partyId = invoice[partyField]
+            const masked = payroll.has(invoice.invoiceId)
+            const partyId = masked ? "_PAYROLL_" : invoice[partyField]
+            if (masked) names[partyId] = "Payroll"
             if (!names[partyId]) continue
             const value = opens[invoice.invoiceId]
             const currency = invoice.currencyUomId
@@ -172,7 +178,7 @@ function aging(p) {
             const group = groups.get(key)
             group.invoiceCount++
             for (let index = 0; index < 6; index++) group.amounts[index] = group.amounts[index].add(amounts[index])
-            if (p.partyId && detailRows.length < 500) {
+            if (p.partyId && !masked && detailRows.length < 500) {
                 const index = amounts.findIndex(amount => !amount.isZero())
                 detailRows.push({
                     invoiceId: invoice.invoiceId,

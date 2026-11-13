@@ -39,6 +39,7 @@ const approvals = () => ec.resource.script("component://mr-mantle/service/mantle
 const leave = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Leave.js")
 const schedules = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Schedules.js")
 const expense = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Expense.js")
+const obligations = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
 
 const INPUT = "mantle.humanres.payroll.PayrollInput"
 const SOURCE = "mantle.humanres.payroll.PayrollInputSource"
@@ -83,7 +84,8 @@ const typeTexts = {
     PitPieces: "Pieces",
     PitReimbursement: "Expense reimbursement",
     PitAdjustment: "Adjustment",
-    PitAdvanceRecovery: "Advance recovery"
+    PitAdvanceRecovery: "Advance recovery",
+    PitOverpaymentRecovery: "Overpayment recovery"
 }
 const inputNames = {
     PitWorked: "workedHours",
@@ -654,6 +656,9 @@ function planOf(group, period, zone, member, cutoffMs = null) {
             ]
         })
     }
+    // P27 (the user's call of Nov 12, 2026): an overpayment on the payroll route recovered as a deduction a period, up to the
+    // employer's cap, the rest carried to the periods after (PayrollObligations.js recoveryInputs)
+    for (const recovery of obligations().recoveryInputs(member, group, period)) planned.push(recovery)
     return {basis, sheets, attendance, leave: leaveFound, claims, resolved, planned, problems, notes}
 }
 const signatureOf = (quantity, amount, sources) =>
@@ -1202,11 +1207,16 @@ function advanceLeft(advance, exceptSeriesId = null) {
             .condition("activeSourceKey", "is-not-null", null)
             .list()
     )
+    // P27: a finalized recovery is counted in the advance's outstanding already (Expense.js advanceMoney's recovered)
     const inputs = rowsIn(
         INPUT,
         "payrollInputId",
         recoveries.map(row => row.payrollInputId)
-    ).filter(input => !exceptSeriesId || (input.seriesInputId || input.payrollInputId) !== exceptSeriesId)
+    ).filter(
+        input =>
+            input.statusId !== "PinFinalized" &&
+            (!exceptSeriesId || (input.seriesInputId || input.payrollInputId) !== exceptSeriesId)
+    )
     return inputs.reduce((left, input) => left.subtract(decimalOf(input.amount)), decimalOf(outstanding))
 }
 
@@ -1219,7 +1229,7 @@ function storeAdjustment(p) {
     // locked before its checks (P24 review): two recoveries of one advance at once cannot both pass its outstanding
     lockEmployment(employment.partyRelationshipId)
     const inputTypeEnumId = text(p.inputTypeEnumId) || (text(p.employeeAdvanceId) ? "PitAdvanceRecovery" : "PitAdjustment")
-    if (!typeTexts[inputTypeEnumId] || inputTypeEnumId === "PitReimbursement")
+    if (!typeTexts[inputTypeEnumId] || inputTypeEnumId === "PitReimbursement" || inputTypeEnumId === "PitOverpaymentRecovery")
         denied("TYPE_INVALID", "Choose an adjustment, an advance recovery or the hours of a day")
     const reason = shortText(p.reason)
     if (!reason) denied("REASON_REQUIRED", "Give the reason for the adjustment")

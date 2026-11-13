@@ -1959,6 +1959,12 @@ along with this software (see the LICENSE.md file). If not, see
             paymentTypeEnumId="PtInvoicePayment"/><!-- AP (applied) -->
     <mantle.ledger.config.PaymentTypeGlAccount glAccountId="216000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
             paymentTypeEnumId="PtInvoicePayment"/><!-- AP Unapplied -->
+    <!-- People P27 (F69): a payment run pays a payroll invoice as PtPayrollPayment, as create#InvoicePayment does: the payroll
+        payable applied, the payables unapplied account until a bank file delivers it -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="212100000" isApplied="Y" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPayrollPayment"/><!-- Payroll payable (applied) -->
+    <mantle.ledger.config.PaymentTypeGlAccount glAccountId="216000000" isApplied="N" isPayable="Y" organizationPartyId="DefaultSettings"
+            paymentTypeEnumId="PtPayrollPayment"/><!-- AP Unapplied -->
     <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258100000" isApplied="E" isPayable="N" organizationPartyId="DefaultSettings"
             paymentTypeEnumId="PtFinancialAccount"/><!-- Financial Account In Transit Deposits -->
     <mantle.ledger.config.PaymentTypeGlAccount glAccountId="258200000" isApplied="E" isPayable="Y" organizationPartyId="DefaultSettings"

@@ -98,6 +98,9 @@ function payableQuery(p) {
         if (queue === "due") add("dueDate", "less", new Date(now + 7 * dayMs))
         if (queue === "overdue") add("dueDate", "less", new Date(now))
     }
+    // People P27 (AC-23): a payroll-origin bill (a pay run's net pay or payee invoice) is a reader of payroll's
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").invoiceCondition()
+    if (origin) conditions.push(origin)
     const condition = all(conditions)
     return {find: () => find("mantle.account.invoice.InvoiceFinance").condition(condition), organizationPartyId}
 }

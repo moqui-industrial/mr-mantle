@@ -4,6 +4,7 @@
 const domain = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, map, call, probe, ms, active, pick, hash, dateText, calendarDateText, display, denied, check} = lib
+const payrollOrigin = () => ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
 // A posting's book day: its accounting day, else the day of its transaction date in the user's zone, the rule of a
 // document's and an application's book day.
 function postingDay(transaction) {
@@ -199,6 +200,11 @@ const kinds = {
     locks: ["mantle.ledger.config.AccountingLock", "accountingLockId", "organizationPartyId", "admin"],
     exceptions: ["mantle.ledger.config.AccountingLockException", "accountingLockExceptionId", "organizationPartyId", "admin"]
 }
+// People P27 (AC-23): the transaction kinds read through a view that joins their payroll origin
+const transactionViews = {
+    journals: "mantle.ledger.transaction.AcctgTransFinance",
+    entries: "mantle.ledger.transaction.AcctgTransAndEntryFinance"
+}
 // The fields a search text matches, ignoring case: the record's id and its names.
 const searchFields = {
     invoices: ["invoiceId", "description", "referenceNumber"],
@@ -260,7 +266,13 @@ function query(p) {
         denied("RECORD_UNAVAILABLE", "Accounting record is not available")
     let ids = organizationIds(s)
     if (["accounts", "periods"].includes(p.kind)) ids = [...new Set(ids.flatMap(id => organizationChain(id)))]
-    let q = find(kind[0])
+    // People P27 (AC-23, the payroll-origin projection): payroll-origin invoices, payments and ledger lines are a holder of
+    // PAYROLL_VIEW's. For anyone else a list leaves them out and a record read finds none: a transaction read without a lock
+    // through its view with the payroll origin joined (a locked read, which a view's outer joins cannot take, is checked on the row
+    // it finds, record below)
+    const origin = payrollOrigin()
+    const originView = !p.forUpdate && !origin.canRead() ? transactionViews[p.kind] : null
+    let q = find(originView || kind[0])
     if (["invoices", "bills"].includes(p.kind)) {
         q = q.condition(invoiceDirectionCondition(p.kind, ids))
         if (!s.capabilities.systemAdmin) {
@@ -285,6 +297,14 @@ function query(p) {
             )
         )
     } else q = q.condition(kind[2], "in", ids.length ? ids : ["_DENIED_"])
+    const originCondition = ["invoices", "bills"].includes(p.kind)
+        ? origin.invoiceCondition()
+        : p.kind === "payments"
+          ? origin.paymentCondition()
+          : originView
+            ? origin.transactionCondition()
+            : null
+    if (originCondition) q = q.condition(originCondition)
     if (p.recordId) q = q.condition(kind[1], p.recordId)
     if (p.acctgTransId && p.kind === "entries") q = q.condition("acctgTransId", p.acctgTransId)
     if (p.parentGlAccountId && p.kind === "accounts") q = q.condition("parentGlAccountId", p.parentGlAccountId)
@@ -305,10 +325,16 @@ function query(p) {
 }
 function record(p, need = "read", lock = false) {
     if (!p.recordId) denied("RECORD_REQUIRED", "An accounting record ID is required")
-    const {q, s} = query(p)
+    const {q, s} = query(lock ? Object.assign({}, p, {forUpdate: true}) : p)
     if (need !== "read" && !s.capabilities[need]) denied("PERMISSION_DENIED", "Accounting " + need + " authority is required")
     const row = (lock ? q.forUpdate(true) : q).one()
     if (!row) denied("RECORD_UNAVAILABLE", "Accounting record is not available")
+    // People P27 (AC-23): a locked transaction read is checked on its row (its query had no payroll origin joined)
+    if (lock && transactionViews[p.kind]) {
+        const origin = payrollOrigin()
+        if (!origin.canRead() && (origin.isPayrollInvoice(row.invoiceId) || origin.isPayrollPayment(row.paymentId || null)))
+            denied("RECORD_UNAVAILABLE", "Accounting record is not available")
+    }
     return row
 }
 ;({
