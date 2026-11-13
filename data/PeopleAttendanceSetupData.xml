@@ -28,6 +28,20 @@ along with this software (see the LICENSE.md file). If not, see
             refuseServiceName="mantle.humanres.AttendanceServices.refuse#Correction" refuseReasonRequired="Y"
             titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
 
+    <!-- impl-people P30 review (the user's call of Nov 12, 2026): a burst of refused proofs at a clocking kiosk (KioskIdentity.js: ten
+        within ten minutes) told to the HR editors of the device's organizations, at most once an hour per device, to them alone.
+        The message holds deviceId, deviceName, refusalCount and windowMinutes: never a badge, a number, a PIN or a person. -->
+    <moqui.security.user.NotificationTopic topic="PeopleKioskRefusals" inboxEnumId="NinNotifications"
+            description="Refused attempts at a clocking kiosk" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${refusalCount} refused attempts at the clocking kiosk ${deviceName} in ${windowMinutes} minutes"/>
+    <!-- P30 review (the user's call of Nov 12, 2026): refused kiosk attempts are kept 90 days; the daily prune deletes older ones a
+        batch at a time, a failing row logged and left for the next run -->
+    <moqui.service.job.ServiceJob jobName="prune_KioskAttempts"
+            description="Delete clocking kiosk attempts older than 90 days"
+            serviceName="mantle.humanres.AttendanceServices.prune#KioskAttempts" cronExpression="0 20 1 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+
     <!-- impl-people P13 (design-people §6 TimeImport; design-admin §11.1; impl-people §4): the time-and-attendance import as a
         registered target of the framework's org.moqui.admin.DataTransferServices, on the pattern of Accounting's statement imports
         (AccountingSetupData.xml): People keeps its own wizard (TimeImport: punches need a device and a zone), so only its result
