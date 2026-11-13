@@ -32,7 +32,7 @@ function organization(partyId, name) {
     make("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
 }
 // a user, agent of the organizations, in a spec group holding the permissions and the spec's service grant
-function user(kind, organizationPartyIds, permissions) {
+function user(kind, organizationPartyIds, permissions, grantGroupId = prefix + "_GRANT") {
     const id = prefix + "_" + kind.toUpperCase()
     make("mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
     make("mantle.party.Person", {partyId: id, firstName: "Accounts", lastName: kind})
@@ -55,7 +55,7 @@ function user(kind, organizationPartyIds, permissions) {
         passwordHashType: "SHA"
     })
     make("moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
-    make("moqui.security.UserGroupMember", {userId: id, userGroupId: prefix + "_GRANT", fromDate: 0})
+    make("moqui.security.UserGroupMember", {userId: id, userGroupId: grantGroupId, fromDate: 0})
     return id
 }
 // an account of an organization, made directly (as demo data would), with its roles
@@ -119,10 +119,32 @@ spec({
                 authzTypeEnumId: "AUTHZT_ALLOW",
                 authzActionEnumId: "AUTHZA_ALL"
             })
+            // the same grant under the organization filters (MANTLE_USER_ORG), as a Sales root carries them
+            make("moqui.security.UserGroup", {
+                userGroupId: prefix + "_FILTERED",
+                description: "Sales accounts spec filtered grant"
+            })
+            make("moqui.security.ArtifactAuthz", {
+                artifactAuthzId: prefix + "_FILTERED",
+                userGroupId: prefix + "_FILTERED",
+                artifactGroupId: prefix + "_SERVICES",
+                authzTypeEnumId: "AUTHZT_ALLOW",
+                authzActionEnumId: "AUTHZA_ALL"
+            })
+            make("moqui.security.ArtifactAuthzFilter", {
+                artifactAuthzId: prefix + "_FILTERED",
+                entityFilterSetId: "MANTLE_USER_ORG"
+            })
             users.rep = user("rep", [orgA], ["SALES_VIEW", "SALES_ACCOUNT_EDIT"])
             users.viewer = user("viewer", [orgA], ["SALES_VIEW"])
             users.repB = user("repb", [orgB], ["SALES_VIEW", "SALES_ACCOUNT_EDIT"])
             users.manager = user("manager", [orgA], ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_ACCOUNT_EDIT", "SALES_TEAM_MANAGE"])
+            users.filteredManager = user(
+                "fmanager",
+                [orgA],
+                ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_ACCOUNT_EDIT", "SALES_TEAM_MANAGE"],
+                prefix + "_FILTERED"
+            )
             account(prefix + "_PARENT_B", "Parent of B", orgB)
             account(prefix + "_ACC_B", "Account of B", orgB)
             account(prefix + "_SHARED", "Shared account", "_NA_")
@@ -328,6 +350,63 @@ feature(
             opportunity.accountPartyId == prefix + "_MERGE_KEEP"
             dependency.includes("DEPENDENCY_OTHER_ORGANIZATION")
             crossed.mergedToPartyId == null
+        }
+    }
+)
+
+feature(
+    "a manager's merge under the organization filters sees and moves the rows the filters hide: another organization's opportunity refuses it, an invoice with an outside party moves",
+    {
+        when() {
+            const ids = system(() => {
+                const keep = account(prefix + "_FMERGE_KEEP", "Filtered Keep", orgA)
+                const gone = account(prefix + "_FMERGE_GONE", "Filtered Keep Inc", orgA)
+                const crossed = account(prefix + "_FMERGE_CROSSED", "Filtered Crossed", orgA)
+                make("mantle.sales.opportunity.SalesOpportunity", {
+                    salesOpportunityId: prefix + "_FOPP_CROSSED",
+                    opportunityName: "Crossed deal under filters",
+                    accountPartyId: crossed,
+                    organizationPartyId: orgB
+                })
+                // an invoice between the merged account and a party outside the manager's organizations, which the filters hide
+                make("mantle.account.invoice.Invoice", {
+                    invoiceId: prefix + "_FINV_GONE",
+                    fromPartyId: prefix + "_ACC_B",
+                    toPartyId: gone,
+                    statusId: "InvoiceInProcess"
+                })
+                return {keep, gone, crossed}
+            })
+            // the manager with their organizations in the user context, as an app root's setup#UserOrganizationInfo puts them
+            const filtered = action =>
+                as(users.filteredManager, () => {
+                    const was = ec.artifactExecution.disableAuthz()
+                    call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+                    if (!was) ec.artifactExecution.enableAuthz()
+                    try {
+                        return action()
+                    } finally {
+                        for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) ec.user.context.remove(name)
+                    }
+                })
+            const dependency = filtered(() =>
+                refusal(duplicates + "merge#Parties", {toPartyId: ids.keep, fromPartyId: ids.crossed})
+            )
+            const merged = filtered(() => refusal(duplicates + "merge#Parties", {toPartyId: ids.keep, fromPartyId: ids.gone}))
+            return {
+                dependency,
+                merged,
+                crossed: one("mantle.party.Party", {partyId: ids.crossed}),
+                gone: one("mantle.party.Party", {partyId: ids.gone}),
+                invoice: one("mantle.account.invoice.Invoice", {invoiceId: prefix + "_FINV_GONE"})
+            }
+        },
+        then({dependency, merged, crossed, gone, invoice}) {
+            dependency.includes("DEPENDENCY_OTHER_ORGANIZATION")
+            crossed.mergedToPartyId == null
+            merged == ""
+            gone.mergedToPartyId == prefix + "_FMERGE_KEEP"
+            invoice.toPartyId == prefix + "_FMERGE_KEEP"
         }
     }
 )

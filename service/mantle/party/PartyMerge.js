@@ -18,7 +18,7 @@
 // Refusals carry reason codes (EntityLib.js denied). merge#Parties moves what it may (ExternalAccessContact, agreements and their
 // parties, an opportunity's account and parties) after these checks.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
-const {one, find, denied} = lib
+const {one, denied} = lib
 const access = lib.access
 const salesAccess = () => ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
 
@@ -57,7 +57,7 @@ function admits(to, from) {
 }
 // The rules every merge meets, then for a Sales merger the documents it moves.
 function rules(to, from, admitted) {
-    if (one("mantle.party.PartyRole", {partyId: from.partyId, roleTypeId: "OrgInternal"}))
+    if (isInternal(from.partyId))
         denied("INTERNAL_PARTY", "Party " + from.partyId + " is an internal organization and is not merged")
     if (to.partyTypeEnumId !== from.partyTypeEnumId) denied("PARTY_KIND_MISMATCH", "A person and an organization are not merged")
     const toOwner = ownerOf(to)
@@ -74,41 +74,64 @@ function rules(to, from, admitted) {
             )
     }
     if (admitted.by === "sales") {
+        // the merged party's orders, invoices and payments with an internal organization outside the Sales merger's scope
+        // (read without the caller's filters, as merge#Parties moves them)
         const sales = salesAccess()
-        const vendors = Array.from(
-            find("mantle.order.OrderHeaderAndPart")
-                .condition("customerPartyId", from.partyId)
-                .selectField("vendorPartyId")
-                .distinct(true)
-                .list()
-        ).map(row => row.vendorPartyId)
-        if (vendors.some(partyId => partyId && !sales.covers(admitted.userScope, partyId)))
-            denied("DEPENDENCY_UNAVAILABLE", "Party " + from.partyId + " has orders you may not see and is not merged")
+        const others = counterparties(from.partyId).filter(
+            partyId => isInternal(partyId) && !sales.covers(admitted.userScope, partyId)
+        )
+        if (others.length)
+            denied(
+                "DEPENDENCY_UNAVAILABLE",
+                "Party " + from.partyId + " has orders, invoices or payments you may not see and is not merged"
+            )
     }
+}
+// Reads without the caller's entity filters (impl-sales P3 review): the guard sees every row merge#Parties will move, which it moves
+// unfiltered too, so a row of an organization the caller's root filters out is neither missed by the guard nor left behind.
+function unfiltered(entityName, conditions) {
+    let query = ec.entity.find(entityName).disableAuthz()
+    for (const [field, value] of Object.entries(conditions))
+        query = Array.isArray(value) ? query.condition(field, "in", value) : query.condition(field, value)
+    return query
+}
+const distinctOf = (entityName, conditions, field) =>
+    Array.from(unfiltered(entityName, conditions).selectField(field).distinct(true).list())
+        .map(row => row[field])
+        .filter(Boolean)
+function isInternal(partyId) {
+    return !!unfiltered("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"}).one()
+}
+// The other parties of the party's orders (OrderPart vendor and customer), invoices and payments.
+function counterparties(partyId) {
+    const ids = new Set()
+    for (const [entityName, mine, other] of [
+        ["mantle.order.OrderPart", "customerPartyId", "vendorPartyId"],
+        ["mantle.order.OrderPart", "vendorPartyId", "customerPartyId"],
+        ["mantle.account.invoice.Invoice", "toPartyId", "fromPartyId"],
+        ["mantle.account.invoice.Invoice", "fromPartyId", "toPartyId"],
+        ["mantle.account.payment.Payment", "toPartyId", "fromPartyId"],
+        ["mantle.account.payment.Payment", "fromPartyId", "toPartyId"]
+    ])
+        for (const id of distinctOf(entityName, {[mine]: partyId}, other)) if (id !== partyId) ids.add(id)
+    return Array.from(ids)
 }
 // The organizations of the party's opportunities (as the account or a party of one) and agreements (as the other party or a party).
 function dependencyOrganizations(partyId) {
-    const ids = new Set()
-    for (const row of find("mantle.sales.opportunity.SalesOpportunity")
-        .condition("accountPartyId", partyId)
-        .selectField("organizationPartyId")
-        .distinct(true)
-        .list())
-        if (row.organizationPartyId) ids.add(row.organizationPartyId)
-    for (const row of lib.rows("mantle.sales.opportunity.SalesOpportunityParty", {partyId})) {
-        const opportunity = one("mantle.sales.opportunity.SalesOpportunity", {salesOpportunityId: row.salesOpportunityId})
-        if (opportunity?.organizationPartyId) ids.add(opportunity.organizationPartyId)
-    }
-    for (const row of find("mantle.party.agreement.Agreement")
-        .condition("otherPartyId", partyId)
-        .selectField("organizationPartyId")
-        .distinct(true)
-        .list())
-        if (row.organizationPartyId) ids.add(row.organizationPartyId)
-    for (const row of lib.rows("mantle.party.agreement.AgreementParty", {partyId})) {
-        const agreement = one("mantle.party.agreement.Agreement", {agreementId: row.agreementId})
-        if (agreement?.organizationPartyId) ids.add(agreement.organizationPartyId)
-    }
+    const ids = new Set(distinctOf("mantle.sales.opportunity.SalesOpportunity", {accountPartyId: partyId}, "organizationPartyId"))
+    const opportunityIds = distinctOf("mantle.sales.opportunity.SalesOpportunityParty", {partyId}, "salesOpportunityId")
+    if (opportunityIds.length)
+        for (const id of distinctOf(
+            "mantle.sales.opportunity.SalesOpportunity",
+            {salesOpportunityId: opportunityIds},
+            "organizationPartyId"
+        ))
+            ids.add(id)
+    for (const id of distinctOf("mantle.party.agreement.Agreement", {otherPartyId: partyId}, "organizationPartyId")) ids.add(id)
+    const agreementIds = distinctOf("mantle.party.agreement.AgreementParty", {partyId}, "agreementId")
+    if (agreementIds.length)
+        for (const id of distinctOf("mantle.party.agreement.Agreement", {agreementId: agreementIds}, "organizationPartyId"))
+            ids.add(id)
     return Array.from(ids)
 }
 

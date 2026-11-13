@@ -876,6 +876,11 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <script><![CDATA[
+                // the moves read without the caller's entity filters (impl-sales P3 review): the guards above decided who may merge
+                // and that no other organization's opportunity, agreement or (for a Sales merger) order, invoice or payment is
+                // touched, so a row a filtered root does not see is moved with the party, not left behind on a disabled one
+                const mergeAuthzWasDisabled = ec.artifactExecution.disableAuthz()
+                try { // the moves, not indented apart from the original
                 // TODO: the Groovy original disabled entity ECAs for the merge (disableEntityEca and
                 //     enableEntityEca on the artifact execution facade), the script runtime does not have them so they run here
 
@@ -1130,6 +1135,9 @@ along with this software (see the LICENSE.md file). If not, see
                         }
                     }
                     row.delete()
+                }
+                } finally {
+                    if (!mergeAuthzWasDisabled) ec.artifactExecution.enableAuthz()
                 }
             ]]></script>
 
