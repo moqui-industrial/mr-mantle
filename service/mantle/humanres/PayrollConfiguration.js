@@ -1791,6 +1791,29 @@ const groupRevision = payrollGroupId => revisionOf([one(GROUP, {payrollGroupId})
 // localization is the demonstration (impl-people §4). PayrollObligations.js liveReasons adds the group's own switch.
 function groupReadiness(group, localization, at) {
     const out = state => Object.assign({liveAllowed: false}, state)
+    // P28 (design §8.4): a group in external processing is calculated by its processor, so it needs no localization; its live
+    // results wait on Accounting's payroll-origin projection as finalization does (impl-people §4, F30)
+    if (group?.externalProcessing === "Y") {
+        if (!ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").inPlace())
+            return out({
+                state: "warning",
+                reasonCode: "PROJECTION_PENDING",
+                message: "External processing: live results wait on Accounting's payroll-origin projection"
+            })
+        if (group.liveEnabled === "Y")
+            return {
+                state: "ready",
+                reasonCode: "LIVE",
+                message: "Live, external processing: the processor's results imported and finalized make the pay obligations",
+                liveAllowed: true
+            }
+        return {
+            state: "warning",
+            reasonCode: "LIVE_AVAILABLE",
+            message: "External processing: preview until the group is enabled for live pay",
+            liveAllowed: true
+        }
+    }
     if (!localization)
         return out({
             state: "warning",
@@ -1892,6 +1915,8 @@ function groupRow(group, at, userScope, names, localizations) {
         thruDateText: dateText(group.thruDate),
         ended: (ms(group.thruDate) ?? Infinity) <= at,
         liveEnabled: group.liveEnabled === "Y",
+        // P28: calculated by an external processor, its results imported in the payroll exchange
+        externalProcessing: group.externalProcessing === "Y",
         // P27: the localization binding (the payee of its amounts and their accounts)
         localizationPayeePartyId: group.localizationPayeePartyId || null,
         localizationPayeeName: group.localizationPayeePartyId
@@ -1995,9 +2020,24 @@ function storeGroup(p) {
     // P27: live pay only where the group's readiness allows it (a real localization covering today, Accounting's projection in
     // place): never in this build, whose one localization is the demonstration (LIVE_NOT_AVAILABLE)
     const liveWanted = given(p.liveEnabled) ? flag(p.liveEnabled) : existing?.liveEnabled === "Y"
+    // P28: external processing, the group's pay calculated by a processor and imported (PayrollExchange.js); its runs are never
+    // calculated here, so it is changed only while no live run of the group is calculated here
+    const externalProcessing = given(p.externalProcessing) ? flag(p.externalProcessing) : existing?.externalProcessing === "Y"
+    if (existing && externalProcessing !== (existing.externalProcessing === "Y")) {
+        const live = rows("mantle.humanres.payroll.PayrollRun", {payrollGroupId: existing.payrollGroupId}).find(
+            run => !["PrnCancelled", "PrnFinalized"].includes(run.statusId)
+        )
+        if (live)
+            denied(
+                "RUN_OPEN",
+                "Pay run " +
+                    live.payrollRunId +
+                    " of the group is open: finish or cancel it before changing how the group is calculated"
+            )
+    }
     if (liveWanted) {
         const localization = payrollLocalizationId ? one(LOCALIZATION, {payrollLocalizationId}) : null
-        const readiness = groupReadiness(null, localization, nowMs())
+        const readiness = groupReadiness({externalProcessing: externalProcessing ? "Y" : "N"}, localization, nowMs())
         if (!readiness.liveAllowed)
             denied(
                 "LIVE_NOT_AVAILABLE",
@@ -2019,7 +2059,8 @@ function storeGroup(p) {
         localizationPayeePartyId,
         localizationLiabilityGlAccountId,
         localizationExpenseGlAccountId,
-        liveEnabled: liveWanted ? "Y" : "N"
+        liveEnabled: liveWanted ? "Y" : "N",
+        externalProcessing: externalProcessing ? "Y" : "N"
     }
     if (!existing) {
         const created = call("create#" + GROUP, Object.assign({organizationPartyId, fromDate: ec.user.nowTimestamp}, fields))

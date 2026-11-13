@@ -652,7 +652,7 @@ along with this software (see the LICENSE.md file). If not, see
             ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live pay
             where the group's readiness does not allow it (LIVE_NOT_AVAILABLE: a real localization covering today and Accounting's
             payroll-origin projection are needed, impl-people P27; no group can be live in this build, whose one localization is the
-            demonstration), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
+            demonstration; P28: a group in external processing needs no localization, only the projection), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
             GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
             PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID,
@@ -675,6 +675,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="localizationLiabilityGlAccountId"/>
             <parameter name="localizationExpenseGlAccountId"/>
             <parameter name="liveEnabled"/>
+            <parameter name="externalProcessing"><description>Y: an external processor calculates the group's pay (P28: its inputs
+                exported and its results imported in the payroll exchange; never calculated here; live with no localization once
+                Accounting's payroll-origin projection is in place)</description></parameter>
             <parameter name="description"/>
             <parameter name="end" type="Boolean"/>
             <parameter name="thruDate" type="Timestamp"/>
@@ -693,10 +696,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="RecoverySettings" allow-remote="false">
         <description>The overpayment recovery settings of the payroll reader's employers (PAYROLL_VIEW; organizationPartyId one of
-            them, ORGANIZATION_DENIED for another): each its recovery deduction, the cap a period (an amount, or a percentage of net
-            pay: of the employee's wage net on their latest finalized regular run), its deductions to choose from and the revision a
-            change names; canEdit for a holder of PAYROLL_EDIT and PAYROLL_CONFIGURE (impl-people P27 review, the user's call of Nov
-            13, 2026).</description>
+            them, ORGANIZATION_DENIED for another): each its recovery deduction, the cap a period (an amount, a percentage of net pay:
+            of the employee's wage net on their latest finalized regular run, or both: the percentage at most the amount, the amount
+            before a first net; capText says which), its deductions to choose from and the revision a change names; canEdit for a
+            holder of PAYROLL_EDIT and PAYROLL_CONFIGURE (impl-people P27 review and P28, the user's calls of Nov 13, 2026).</description>
         <in-parameters><parameter name="organizationPartyId"/></in-parameters>
         <out-parameters>
             <parameter name="employers" type="List"/>
@@ -711,11 +714,12 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="RecoverySettings" allow-remote="false">
         <description>An employer's overpayment recovery settings changed at the revision read (PartySettings PayrollRecoveryComponent,
             PayrollRecoveryCap and PayrollRecoveryCapPercent, audited): the recovery deduction, and the cap a period as an amount
-            (capAmount) or a percentage of net pay (capPercent, above 0 and at most 100), not both; an empty value clears it. Refuses a
-            caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope
-            (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a stale revision (REVISION_CHANGED), a component that is not one of the
-            employer's deductions (COMPONENT_INVALID) and a cap that is not a positive number, both kinds, or a percentage above 100
-            (CAP_INVALID).</description>
+            (capAmount), a percentage of net pay (capPercent, above 0 and at most 100), or both (the percentage of the last finalized
+            net applies, at most the amount; before the employee's first net pay the amount applies: the user's call of Nov 13, 2026,
+            impl-people P28); an empty value clears it. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE
+            (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a stale revision
+            (REVISION_CHANGED), a component that is not one of the employer's deductions (COMPONENT_INVALID) and a cap that is not a
+            positive number or a percentage above 100 (CAP_INVALID).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="expectedRevision"/>

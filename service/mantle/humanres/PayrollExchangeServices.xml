@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payroll exchange (IronStone People design §8.4 external processing and migration, PayrollExchange, §15; PE-19;
+    impl-people P28; PayrollExchange.js): an export of a pay group's period's approved inputs with its manifest, an import of payroll
+    history (legacy pay records, never an obligation, never counting a day People paid), and an import of an external processor's
+    results for a group in external processing (a pay run of the period approved and finalized as any run, so the same slips and
+    obligations follow; refused until the group is live and Accounting's payroll-origin projection is in place). Each batch is
+    previewed, reconciled and executed; a file replayed answers its batch. Read with PAYROLL_VIEW; an export needs PAYROLL_EDIT too,
+    an import PEOPLE_IMPORT, PAYROLL_VIEW and PAYROLL_EDIT; another employer's batch is a missing one. The registrations of the
+    framework's data transfer (data/PeoplePayrollExchangeSetupData.xml) name find#ExchangeRuns, find#ExportScopes and
+    export#InputsTransfer. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="preview" noun="Batch" allow-remote="false">
+        <description>A payroll exchange read and each row resolved, nothing made (PayrollExchange's Exchange step). exchangeKind export
+            (PAYROLL_VIEW and PAYROLL_EDIT): a pay group's prepared period's approved inputs, each with its source key (NOTHING_TO_EXPORT,
+            TOO_MANY_ROWS past 2000; an input of an employment the group does not pay then is refused NOT_IN_GROUP); history (PEOPLE_IMPORT,
+            PAYROLL_VIEW, PAYROLL_EDIT): an employer's file of pay records (worker, payDate, gross, net, currency) before the cutover day,
+            each resolved to the employment of that day and refused WORKER_UNKNOWN, WORKER_AMBIGUOUS, DATE_INVALID, AFTER_CUTOVER,
+            AMOUNT_INVALID, CURRENCY_INVALID, NOT_EMPLOYED, EMPLOYMENT_AMBIGUOUS, PAID_HERE (a day People paid) or CONFLICT (the day's
+            record has other amounts), or known (recorded already) or duplicate; results (the same permissions): a group in external
+            processing's period's lines (worker, component, amount), with the employees, net and gross the processor signed off
+            (SIGNOFF_REQUIRED), each refused WORKER_UNKNOWN, NOT_IN_GROUP, COMPONENT_UNKNOWN (no published term on the pay date),
+            AMOUNT_INVALID, CURRENCY_MISMATCH or LINE_REPEATED, an employee with a refused line refused whole (EMPLOYEE_INCOMPLETE), with a
+            negative net (NEGATIVE_NET) or paid already (ALREADY_PAID), one in the period's run already known. A file (or for an export
+            the same inputs) seen already for the scope answers its batch (repeated). Refuses: KIND_INVALID, PERMISSION_DENIED,
+            GROUP_REQUIRED, RECORD_UNAVAILABLE, PERIOD_UNAVAILABLE, NOT_EXTERNAL, ORGANIZATION_REQUIRED, ORGANIZATION_DENIED,
+            CUTOVER_REQUIRED, SOURCE_REQUIRED, WORKER_KIND_INVALID, SIGNOFF_INVALID, FILE_REQUIRED, FILE_TOO_LARGE, FILE_UNREADABLE,
+            COLUMN_MISSING.</description>
+        <in-parameters>
+            <parameter name="exchangeKind" required="true"><description>export, history or results</description></parameter>
+            <parameter name="organizationPartyId"><description>History's employer</description></parameter>
+            <parameter name="payrollGroupId"><description>An export's and results' pay group</description></parameter>
+            <parameter name="timePeriodId"><description>Its prepared period</description></parameter>
+            <parameter name="cutoverDate"><description>History: the day People's own pay starts (yyyy-MM-dd)</description></parameter>
+            <parameter name="currencyUomId"><description>History: the currency of rows that name none</description></parameter>
+            <parameter name="sourceSystem"/>
+            <parameter name="workerIdKind"><description>partyId (default) or workEmail</description></parameter>
+            <parameter name="importFile" type="FileItem"/>
+            <parameter name="importText" allow-html="any"/>
+            <parameter name="fileName"/>
+            <parameter name="delimiter"/>
+            <parameter name="expectedCount"/>
+            <parameter name="expectedGross"/>
+            <parameter name="expectedNet"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollExchangeBatchId"/>
+            <parameter name="exchangeKindEnumId"/>
+            <parameter name="statusId"/>
+            <parameter name="rowCount" type="Integer"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('previewBatch', context)"/>
+            <set field="payrollExchangeBatchId" from="out.payrollExchangeBatchId"/>
+            <set field="exchangeKindEnumId" from="out.exchangeKindEnumId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="rowCount" from="out.rowCount"/>
+            <set field="readyCount" from="out.readyCount"/>
+            <set field="skippedCount" from="out.skippedCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="reconcile" noun="Batch" allow-remote="false">
+        <description>A batch compared now with what its sender signed off (PayrollExchange's Reconcile step), by its kind's
+            permissions and employer: each ready or known row checked again (an export's input changed or taken since: INPUT_CHANGED;
+            a history day recorded or paid since; results paid or in the period's run since), the totals (an export's amounts and
+            quantities with its source keys; history's records, gross and net and each employee's a year; results' employees, gross,
+            deductions, employer contributions and net and each employee's), the differences from the signed-off count and totals
+            (expectedCount, expectedGross, expectedNet, which may be given again here), and for results the pay group's live reasons.
+            Kept as the batch's reconciliation at a revision, which execute#Batch names. A batch done answers its reconciliation.</description>
+        <in-parameters>
+            <parameter name="payrollExchangeBatchId" required="true"/>
+            <parameter name="expectedCount"/>
+            <parameter name="expectedGross"/>
+            <parameter name="expectedNet"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollExchangeBatchId"/>
+            <parameter name="statusId"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="reconciliation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('reconcileBatch', context)"/>
+            <set field="payrollExchangeBatchId" from="out.payrollExchangeBatchId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="readyCount" from="out.readyCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+            <set field="reconciliation" from="out.reconciliation"/>
+        </actions>
+    </service>
+    <service verb="execute" noun="Batch" allow-remote="false" transaction-timeout="600">
+        <description>A reconciled batch done (PayrollExchange's CommitExchange step), by its kind's permissions and employer, at the
+            revision reconciled (RECONCILE_STALE), with no difference from what was signed off (TOTALS_DIFFER) and a ready row
+            (NOTHING_READY; NOT_RECONCILED before a reconciliation). An export: written through the export target payrollExchangeInputs
+            (its record kept by the framework, listed in Admin's Exports) and stored with its manifest. History: each ready row in its
+            own transaction a legacy pay record (EmploymentPayHistory, internal payroll N), checked again; no invoice or obligation.
+            Results: refused for a group not in external processing (NOT_EXTERNAL), not live (NOT_LIVE, each reason) or before
+            Accounting's payroll-origin projection (PROJECTION_PENDING), as finalization is; then the period's pay run of external
+            results (made here, or the one an earlier batch made while not approved: RUN_EXISTS for a run calculated here, RUN_CLOSED
+            for an approved one), each employee in their own transaction a calculated employment with the provider's lines and the
+            period's approved inputs taken; the run is in review, asked, approved and finalized as any run. A failure is named and the
+            rest go on. A batch done answers as it ended (repeated).</description>
+        <in-parameters><parameter name="payrollExchangeBatchId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="payrollExchangeBatchId"/>
+            <parameter name="statusId"/>
+            <parameter name="appliedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="payrollRunId"/>
+            <parameter name="transferId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('executeBatch', context)"/>
+            <set field="payrollExchangeBatchId" from="out.payrollExchangeBatchId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="appliedCount" from="out.appliedCount"/>
+            <set field="skippedCount" from="out.skippedCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="transferId" from="out.transferId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Batch" allow-remote="false">
+        <description>A batch a payroll reader of its employer reads (PAYROLL_VIEW; another is refused as missing, RECORD_UNAVAILABLE):
+            its kind, scope, file, state, counts, signed-off totals, who made and did it and when, its reconciliation, what it made (a
+            pay run, the export's record and, for a holder of its kind's permissions, its stored file and manifest), whether the user
+            reconciles or does it now, and its rows (all, an outcome, or problems: refused and failed) with what each named and its
+            outcome.</description>
+        <in-parameters>
+            <parameter name="payrollExchangeBatchId" required="true"/>
+            <parameter name="outcome"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="batch" type="Map"/>
+            <parameter name="reconciliation" type="Map"/>
+            <parameter name="rows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('getBatch', context)"/>
+            <set field="batch" from="out.batch"/>
+            <set field="reconciliation" from="out.reconciliation"/>
+            <set field="rows" from="out.rows"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Batches" allow-remote="false">
+        <description>The latest 50 payroll exchanges of the employers a payroll reader reads (PAYROLL_VIEW), newest first, of a kind
+            when asked (exchangeKind), each its kind, scope, file, state and counts.</description>
+        <in-parameters><parameter name="exchangeKind"/></in-parameters>
+        <out-parameters><parameter name="batches" type="List"/></out-parameters>
+        <actions>
+            <set field="batches" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('findBatches', context).batches"/>
+        </actions>
+    </service>
+
+    <!-- the payroll exchange's contracts for the framework's org.moqui.admin.DataTransferServices (the targets payrollExchange and
+        payrollExchangeInputs, data/PeoplePayrollExchangeSetupData.xml) -->
+    <service verb="find" noun="ExchangeRuns" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetRuns"/>
+        <description>The payroll history and results imports of the employers a payroll reader reads (PAYROLL_VIEW and People's
+            scope; a scope key narrows), newest first, as summaries with the parameters that open each in PayrollExchange. None
+            otherwise.</description>
+        <actions>
+            <set field="runList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('findExchangeRuns', context).runList"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ExportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The pay inputs export's scopes: each prepared period, from about a year back to two months ahead, of the pay
+            groups of the employers a payroll exporter (PAYROLL_VIEW and PAYROLL_EDIT) reads, as group:period. None otherwise.</description>
+        <actions>
+            <set field="scopeList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('findExportScopes', context).scopeList"/>
+        </actions>
+    </service>
+    <service verb="export" noun="InputsTransfer" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.run#TargetExport"/>
+        <description>A pay group's period's approved inputs (scopeKey group:period) as delimited text, or a payroll exchange export's
+            rows (selection.batch), for a payroll exporter (PAYROLL_VIEW and PAYROLL_EDIT) of the group's employer: each its worker,
+            name, employment, kind, component or input name, day, quantity and unit, amount, currency, rate and source key, the fields
+            asked alone. rowCount alone with countOnly or past maxRows. Refused with a reason a person can act on: PERMISSION_DENIED,
+            SCOPE_INVALID, BATCH_INVALID.</description>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollExchange.js').execute('exportInputs', context)"/>
+            <set field="rowCount" from="out.rowCount"/>
+            <set field="fileText" from="out.fileText"/>
+            <set field="fileName" from="out.fileName"/>
+            <set field="contentType" from="out.contentType"/>
+            <set field="refused" from="out.refused"/>
+            <set field="reasonCode" from="out.reasonCode"/>
+            <set field="reason" from="out.reason"/>
+        </actions>
+    </service>
+</services>

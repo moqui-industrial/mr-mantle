@@ -194,6 +194,15 @@ function checkUncorrected(run) {
                 " corrects a payslip of this approved run, so the run stays as approved: correct its payslips instead"
         )
 }
+// P28 (design §8.4): a group in external processing is calculated by its processor, never here: its runs are its imported results
+// (PayrollExchange.js), approved and finalized as any run
+function checkNative(group, run = null) {
+    if (group?.externalProcessing === "Y" || run?.exchangeBatchId)
+        denied(
+            "EXTERNAL_PROCESSING",
+            "This pay group's pay is calculated by its external processor: import its results in Payroll exchange instead"
+        )
+}
 function checkChangeable(run) {
     if (!changeableStatuses.includes(run.statusId))
         denied(
@@ -228,6 +237,7 @@ function createRun(p) {
         const first = one(RUN, {operationKey, createdByUserId: ec.user.userId})
         if (first) return {payrollRunId: first.payrollRunId, repeated: true}
     }
+    checkNative(group)
     const period = inputs().periodOf(group, p.timePeriodId)
     const zone = inputs().zoneOf(group)
     if ((ms(group.thruDate) ?? Infinity) <= inputs().dayStart(period.fromDay, zone))
@@ -403,6 +413,7 @@ function selectEmployments(p) {
     let run = runIn(userScope, p.payrollRunId)
     checkChangeable(run)
     const group = groupOfRun(run)
+    checkNative(group, run)
     const period = inputs().periodOf(group, run.timePeriodId)
     const zone = inputs().zoneOf(group)
     const excludeIds = splitIds(p.excludeIds)
@@ -668,6 +679,11 @@ function rulesKey(assignment, found, at) {
 function fingerprintsOf(run, facts, units, loaded = null) {
     const out = new Map()
     if (!units.length) return out
+    // P28: an external processor's results are the facts their approval binds: they change only by another import
+    if (run.exchangeBatchId) {
+        for (const unit of units) out.set(unit.payrollRunEmploymentId, unit.sourceRevision || "")
+        return out
+    }
     const {group, zone, periodDays} = facts
     const all = loaded || factsOf(run, facts, units)
     const stamp = row => ms(row?.lastUpdatedStamp) ?? 0
@@ -1351,6 +1367,7 @@ function calculateRun(p) {
     const userScope = editorScope()
     const run = runIn(userScope, p.payrollRunId)
     checkChangeable(run)
+    checkNative(groupOfRun(run), run)
     const facts = periodFacts(run)
     const batchSize = Math.min(batchCap, Math.max(1, Number(p.batchSize) || batchDefault))
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
@@ -1585,6 +1602,7 @@ function createCorrection(p) {
         const first = one(RUN, {operationKey, createdByUserId: ec.user.userId})
         if (first) return {payrollRunId: first.payrollRunId, originalPayslipId: first.correctsPayslipId, repeated: true}
     }
+    checkNative(one(GROUP, {payrollGroupId: slip.payrollGroupId}), one(RUN, {payrollRunId: slip.payrollRunId}))
     const original = slips().originalOf(slip)
     if (!original || original.statusId === "PssWithdrawn")
         denied(
@@ -1746,7 +1764,8 @@ function getRun(p) {
     const approval = approvals().sourceSummary(KIND, run.payrollRunId, RUN)
     const approvedNow = run.statusId === "PrnApproved"
     const approvalHolds = approvedNow && run.approvedRevision === runRevision(run.payrollRunId, prints)
-    const canEdit = edits(userScope) && changeableStatuses.includes(run.statusId)
+    // P28: an external run's population and results are its import's, never changed here
+    const canEdit = edits(userScope) && changeableStatuses.includes(run.statusId) && !run.exchangeBatchId
     const done = counts.calculated + counts.error + counts.excluded
     const label = runLabel(run)
     let state =
@@ -1839,6 +1858,9 @@ function getRun(p) {
                 // P26: a correction run's original slip and reason, and the run's slips
                 correctsPayslipId: run.correctsPayslipId || null,
                 correctionReason: run.correctionReason || "",
+                // P28: the payroll exchange whose external results the run carries
+                exchangeBatchId: run.exchangeBatchId || null,
+                externalProcessing: group?.externalProcessing === "Y",
                 payslipCount: Array.from(
                     find(SLIP)
                         .condition("payrollRunId", run.payrollRunId)

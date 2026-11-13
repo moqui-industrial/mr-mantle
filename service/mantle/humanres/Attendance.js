@@ -1514,4 +1514,9 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown attendance operation " + op)
     return operations[op](p || {})
 }
-;({execute: run, isClockingOn})
+;({
+    execute: run,
+    isClockingOn,
+    // P28 (PayrollExchange.js): a file's worker named by People's person id or work email among the employer's people
+    workerResolver
+})
