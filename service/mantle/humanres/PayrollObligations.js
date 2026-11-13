@@ -456,9 +456,9 @@ function recoveryOf(run, group, slip, lines, amount, what) {
     return []
 }
 // The employer's recovery settings: the deduction recovery inputs are made to, and the most a period recovers (none: the whole
-// rest): an amount, or a percentage of net pay (the user's call of Nov 13, 2026), read as the share of the employee's wage net on
-// their latest finalized regular run (the net a recovery is planned against: a period's own net is not known until its run
-// calculates, after its inputs are prepared).
+// rest): an amount, a percentage of net pay, or both (the user's calls of Nov 13, 2026; capFor), the percentage read as the share of
+// the employee's wage net on their latest finalized regular run (the net a recovery is planned against: a period's own net is not
+// known until its run calculates, after its inputs are prepared).
 const RECOVERY_SETTINGS = ["PayrollRecoveryComponent", "PayrollRecoveryCap", "PayrollRecoveryCapPercent"]
 function recoverySetup(organizationPartyId) {
     const value = id => text(one(SETTING, {partyId: organizationPartyId, partySettingTypeId: id})?.settingValue) || null
@@ -478,29 +478,44 @@ function lastWageNet(partyRelationshipId) {
         .sort((a, b) => (lib.ms(b.run.payDate) ?? 0) - (lib.ms(a.run.payDate) ?? 0))
     return regular.length ? decimalOf(regular[0].row.amount) : null
 }
-// The cap of a period's recovery for an employment: the amount, or the percentage of its last finalized regular wage net (rounded to
-// the currency). With no earlier net to take the percentage of, the amount when one is set, else zero: the recovery waits for the
-// period after the employee's first finalized regular run, never uncapped (the user's call of Nov 13, 2026, impl-people P28). None:
-// no cap, the whole rest.
+// The cap of a period's recovery for an employment (the user's calls of Nov 13, 2026, impl-people P28): with a percentage, that share of
+// its last finalized regular wage net (rounded to the currency), at most the amount when one is set too; with no earlier net to take
+// the percentage of, the amount when one is set, else zero (the recovery waits for the period after the employee's first finalized
+// regular run, never uncapped). An amount alone is the cap; neither: null, no cap, the whole rest.
 function capFor(setup, partyRelationshipId, currencyUomId) {
+    const amount = setup.cap && setup.cap.compare(0) > 0 ? setup.cap : null
     if (setup.capPercent && setup.capPercent.compare(0) > 0) {
         const net = lastWageNet(partyRelationshipId)
-        if (net != null) return ec.l10n.roundCurrency(net.multiply(setup.capPercent).divide(toDecimal(100)), currencyUomId)
-        return setup.cap && setup.cap.compare(0) > 0 ? setup.cap : zero()
+        if (net == null) return amount || zero()
+        const share = ec.l10n.roundCurrency(net.multiply(setup.capPercent).divide(toDecimal(100)), currencyUomId)
+        return amount && amount.compare(share) < 0 ? amount : share
     }
-    if (setup.cap && setup.cap.compare(0) > 0) return setup.cap
-    return null
+    return amount
 }
 
 // ===== get#RecoverySettings and store#RecoverySettings (the user's call of Nov 13, 2026) =====
 // Each employer of the payroll reader's scope with its overpayment recovery settings: the recovery deduction, and the cap a period
-// as an amount or a percentage of net pay; the employer's deductions to choose from; whether the user changes them (PAYROLL_VIEW,
+// as an amount, a percentage of net pay or both; the employer's deductions to choose from; whether the user changes them (PAYROLL_VIEW,
 // PAYROLL_EDIT and PAYROLL_CONFIGURE) and the revision each change names.
 function settingsRevision(organizationPartyId) {
     const stamps = RECOVERY_SETTINGS.map(
         id => lib.ms(one(SETTING, {partyId: organizationPartyId, partySettingTypeId: id})?.lastUpdatedStamp) ?? 0
     )
     return String(Math.max(0, ...stamps))
+}
+// The cap as a person reads it: a percentage (with the amount beside it, the most a period and what is taken before a first net),
+// an amount, or none.
+function capText(setup) {
+    const amount = setup.cap != null ? String(setup.cap) : null
+    if (setup.capPercent != null)
+        return (
+            String(setup.capPercent) +
+            "% of net pay a period" +
+            (amount
+                ? ", at most " + amount + " (" + amount + " before the employee's first finalized pay)"
+                : " (from the period after the employee's first finalized pay)")
+        )
+    return amount ? amount + " a period" : "No cap: the whole rest on the next run"
 }
 const configures = caps => !!(caps.payrollView && caps.payrollEdit && caps.payrollConfigure)
 function getRecoverySettings(p) {
@@ -527,13 +542,7 @@ function getRecoverySettings(p) {
                 componentText: component ? component.componentName || component.componentCode : "",
                 capAmount: setup.cap == null ? null : String(setup.cap),
                 capPercent: setup.capPercent == null ? null : String(setup.capPercent),
-                capText:
-                    setup.cap != null
-                        ? String(setup.cap) + " a period"
-                        : setup.capPercent != null
-                          ? String(setup.capPercent) +
-                            "% of net pay a period (from the period after the employee's first finalized pay)"
-                          : "No cap: the whole rest on the next run",
+                capText: capText(setup),
                 deductions,
                 revision: settingsRevision(organizationPartyId)
             }
@@ -542,8 +551,9 @@ function getRecoverySettings(p) {
     return {employers, canEdit: configures(userScope.capabilities)}
 }
 // An employer's recovery settings changed at the revision read (PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE): the recovery
-// deduction (one of the employer's deductions) and the cap, an amount or a percentage (above 0, at most 100), not both; an empty
-// value clears it (its setting kept, empty, so the change is in the setting's audit log).
+// deduction (one of the employer's deductions) and the cap: an amount (above 0), a percentage of net pay (above 0, at most 100), or
+// both (the percentage at most the amount, which is taken before the employee's first finalized pay: the user's call of Nov 13, 2026,
+// impl-people P28); an empty value clears it (its setting kept, empty, so the change is in the setting's audit log).
 function storeRecoverySettings(p) {
     const userScope = people.scopeOf()
     if (!configures(userScope.capabilities))
@@ -574,7 +584,6 @@ function storeRecoverySettings(p) {
     }
     const capAmount = number(p.capAmount, "The cap")
     const capPercent = number(p.capPercent, "The percentage")
-    if (capAmount && capPercent) denied("CAP_INVALID", "The cap is an amount or a percentage of net pay, not both")
     if (capAmount && capAmount.compare(0) <= 0) denied("CAP_INVALID", "The cap is above zero")
     if (capPercent && (capPercent.compare(0) <= 0 || capPercent.compare(100) > 0))
         denied("CAP_INVALID", "The percentage is above 0 and at most 100")

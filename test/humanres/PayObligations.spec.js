@@ -10,7 +10,8 @@
 // transaction rolls back stays Finalizing (a retry finishes it); a finalized run's statements are issued; payroll's posting mappings
 // added to an existing database (migrate#PayrollOrigin) and a leaver's receivable posted; the recovery cap a percentage of net pay,
 // set through store#RecoverySettings; a pension deduction and the employer's contribution paid to the fund, one invoice from it
-// (the user's calls of Nov 13, 2026); P28: a percentage cap with no earlier net waits a period, or takes an amount set.
+// (the user's calls of Nov 13, 2026); P28: a percentage cap with no earlier net waits a period, or takes an amount set; an amount
+// and a percentage together (the user's call of Nov 13, 2026, P28's review): the percentage of the last net, at most the amount.
 // Standalone: spec-local organizations, people, employments, pay configuration (published as data), a live localization,
 // salaries, inputs, a claim, an advance and users.
 // Run: ./moq test mr-mantle --spec PayObligations
@@ -742,7 +743,7 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         // no recovery deduction set up: that employee stays pending; set up, a retry finishes
         const noSetup = run(state.payroll, R + "finalize#Run", {payrollRunId: empCorrection.payrollRunId})
         // the employer's recovery set on Overpayment recovery (the user's call of Nov 13, 2026): its deduction, and at most 30% of
-        // net pay a period; refused to the payroll operator (no PAYROLL_CONFIGURE), an amount and a percentage both, and a stale read
+        // net pay a period; refused to the payroll operator (no PAYROLL_CONFIGURE), a percentage above 100, and a stale read
         const settings = () =>
             run(state.configurer, S + "get#RecoverySettings", {organizationPartyId: state.org}).employers?.[0] || {}
         const recoveryValues = {
@@ -753,8 +754,8 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         }
         const settingRefusals = {
             operator: code(run(state.payroll, S + "store#RecoverySettings", recoveryValues)),
-            both: code(
-                run(state.configurer, S + "store#RecoverySettings", Object.assign({}, recoveryValues, {capAmount: "300"}))
+            above100: code(
+                run(state.configurer, S + "store#RecoverySettings", Object.assign({}, recoveryValues, {capPercent: "150"}))
             ),
             stale: code(
                 run(state.configurer, S + "store#RecoverySettings", Object.assign({}, recoveryValues, {expectedRevision: "1"}))
@@ -834,7 +835,7 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         empCorrection.error == ""
         noSetup.statusId == "PrnFinalizing"
         noSetup.message.includes("RECOVERY_SETUP_MISSING")
-        settingRefusals == {operator: "PERMISSION_DENIED", both: "CAP_INVALID", stale: "REVISION_CHANGED"}
+        settingRefusals == {operator: "PERMISSION_DENIED", above100: "CAP_INVALID", stale: "REVISION_CHANGED"}
         stored.error == ""
         settingsRead.payrollComponentId == state.recovery
         settingsRead.capPercent == "30"
@@ -997,55 +998,87 @@ feature(
     }
 )
 
-// The user's call of Nov 13, 2026 (impl-people P28): the percentage cap is a share of the employee's last finalized regular wage net;
-// with none yet the recovery waits a period (no input) or, when an amount cap is set too, recovers that amount; it is never uncapped.
-// A new hire with no finalized pay and an overpayment to recover on the payroll route, planned for the next period as prepare#Inputs
-// plans it (PayrollObligations.js recoveryInputs).
-feature("a percentage cap with no earlier net waits a period, or takes the amount set, never uncapped", {
-    when() {
-        const NEW = person("NEWHIRE")
-        const newEmp = employ(NEW)
-        call("create#mantle.humanres.payroll.PayrollRecovery", {
-            payslipId: prefix + "_NOSLIP",
-            payrollRunId: state.regular,
-            partyRelationshipId: newEmp,
-            partyId: NEW,
-            organizationPartyId: state.org,
-            payrollGroupId: state.group,
-            currencyUomId: "USD",
-            amount: "500",
-            recoveryRouteEnumId: "PrcPayroll",
-            payrollComponentId: state.recovery
-        })
-        const setting = (partySettingTypeId, settingValue) => {
-            const found = one("mantle.party.PartySetting", {partyId: state.org, partySettingTypeId})
-            call((found ? "update" : "create") + "#mantle.party.PartySetting", {
-                partyId: state.org,
-                partySettingTypeId,
-                settingValue
+// The user's calls of Nov 13, 2026 (impl-people P28 and its review): the percentage cap is a share of the employee's last finalized
+// regular wage net; with none yet the recovery waits a period (no input) or, when an amount cap is set too, recovers that amount; it
+// is never uncapped. Both may be set (store#RecoverySettings): once there is a net, its percentage applies, at most the amount. A new
+// hire with no finalized pay and an overpayment to recover on the payroll route, planned for the next period as prepare#Inputs plans
+// it (PayrollObligations.js recoveryInputs); then a finalized regular net of 1,000.00.
+feature(
+    "a percentage cap with no earlier net waits a period or takes the amount; with a net, the percentage at most the amount",
+    {
+        when() {
+            const NEW = person("NEWHIRE")
+            const newEmp = employ(NEW)
+            call("create#mantle.humanres.payroll.PayrollRecovery", {
+                payslipId: prefix + "_NOSLIP",
+                payrollRunId: state.regular,
+                partyRelationshipId: newEmp,
+                partyId: NEW,
+                organizationPartyId: state.org,
+                payrollGroupId: state.group,
+                currencyUomId: "USD",
+                amount: "500",
+                recoveryRouteEnumId: "PrcPayroll",
+                payrollComponentId: state.recovery
             })
+            const settings = () =>
+                run(state.configurer, S + "get#RecoverySettings", {organizationPartyId: state.org}).employers?.[0] || {}
+            const store = (capPercent, capAmount) =>
+                run(state.configurer, S + "store#RecoverySettings", {
+                    organizationPartyId: state.org,
+                    expectedRevision: settings().revision,
+                    payrollComponentId: state.recovery,
+                    capPercent,
+                    capAmount
+                })
+            const plan = () =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
+                    .recoveryInputs(
+                        {partyRelationshipId: newEmp},
+                        one("mantle.humanres.payroll.PayrollGroup", {payrollGroupId: state.group}),
+                        {timePeriodId: state.next, thruDay: state.months.nextThru}
+                    )
+                    .map(input => money(input.amount))
+            const percentStored = store("30", "")
+            const percentOnly = plan()
+            const both = store("30", "40")
+            const bothRead = settings()
+            const withAmount = plan()
+            // the new hire's first finalized regular net: 1,000.00, so 30% is 300.00
+            call("create#mantle.humanres.payroll.PayrollObligation", {
+                obligationKey: prefix + ":NEWHIRE:NET",
+                obligationKindEnumId: "PokNetPay",
+                payrollRunId: state.regular,
+                partyRelationshipId: newEmp,
+                partyId: NEW,
+                organizationPartyId: state.org,
+                payeePartyId: NEW,
+                currencyUomId: "USD",
+                amount: "1000"
+            })
+            const amountBounds = plan()
+            store("30", "450")
+            const percentApplies = plan()
+            store("30", "")
+            const percentAlone = plan()
+            return {percentStored, percentOnly, both, bothRead, withAmount, amountBounds, percentApplies, percentAlone}
+        },
+        then({percentStored, percentOnly, both, bothRead, withAmount, amountBounds, percentApplies, percentAlone}) {
+            percentStored.error == ""
+            // no earlier net: nothing this period, never the whole 500.00
+            percentOnly.length == 0
+            // both kept together
+            both.error == ""
+            bothRead.capPercent == "30"
+            bothRead.capAmount == "40"
+            bothRead.capText.includes("at most 40")
+            // before a first net, the amount
+            withAmount == ["40.00"]
+            // with a net of 1,000.00: 30% is 300.00, bounded by the amount 40.00, or within the amount 450.00
+            amountBounds == ["40.00"]
+            percentApplies == ["300.00"]
+            percentAlone == ["300.00"]
         }
-        setting("PayrollRecoveryComponent", state.recovery)
-        setting("PayrollRecoveryCapPercent", "30")
-        setting("PayrollRecoveryCap", null)
-        const plan = () =>
-            ec.resource
-                .script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
-                .recoveryInputs(
-                    {partyRelationshipId: newEmp},
-                    one("mantle.humanres.payroll.PayrollGroup", {payrollGroupId: state.group}),
-                    {timePeriodId: state.next, thruDay: state.months.nextThru}
-                )
-                .map(input => money(input.amount))
-        const percentOnly = plan()
-        setting("PayrollRecoveryCap", "40")
-        const withAmount = plan()
-        setting("PayrollRecoveryCap", null)
-        return {percentOnly, withAmount}
-    },
-    then({percentOnly, withAmount}) {
-        // no earlier net: nothing this period, never the whole 500.00
-        percentOnly.length == 0
-        withAmount == ["40.00"]
     }
-})
+)

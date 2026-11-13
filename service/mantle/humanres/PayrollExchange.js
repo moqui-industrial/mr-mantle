@@ -24,6 +24,7 @@ const inputs = () => ec.resource.script("component://mr-mantle/service/mantle/hu
 const obligations = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
 const attendance = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Attendance.js")
 const transferLib = () => ec.resource.script("component://framework/service/org/moqui/admin/DataTransferLib.js")
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 
 const BATCH = "mantle.humanres.payroll.PayrollExchangeBatch"
 const ROW = "mantle.humanres.payroll.PayrollExchangeRow"
@@ -118,9 +119,11 @@ const dayValue = value => {
     const given = text(value).slice(0, 10)
     return /^\d{4}-\d{2}-\d{2}$/.test(given) && Number.isFinite(Date.parse(given + "T12:00:00Z")) ? given : null
 }
+// a plain amount, with commas only as thousands separators (1,234.50): "1.234,50" is no amount, never read as 1.23450
 const amountOf = value => {
-    const given = text(value).replace(/,/g, "")
-    return /^[0-9]+(\.[0-9]+)?$/.test(given) ? toDecimal(given) : null
+    const given = text(value)
+    if (!/^([0-9]+|[0-9]{1,3}(,[0-9]{3})+)(\.[0-9]+)?$/.test(given)) return null
+    return toDecimal(given.replace(/,/g, ""))
 }
 const revisionOf = value => String(lib.hash(value)).slice(0, 48)
 
@@ -373,18 +376,28 @@ function historyEmployment(partyId, organizationPartyId, dayText) {
         return {problem: ["EMPLOYMENT_AMBIGUOUS", "The worker had more than one employment there that day"]}
     return {employment: candidates[0]}
 }
-// what a history row would make now: a day People paid (PAID_HERE), the day's record with other amounts (CONFLICT), the same record
-// (known), or ready
+// The first day People's own pay of an employment covers: the earliest start of a final or issued slip's period, or its pay day when
+// earlier (a regular slip of January covers from January 1 whatever day it was paid), or null when People has not paid it.
+function paidFrom(partyRelationshipId) {
+    let first = null
+    for (const slip of rows(SLIP, {partyRelationshipId}).filter(found => factStatuses.includes(found.statusId))) {
+        const period = slip.timePeriodId ? one(PERIOD, {timePeriodId: slip.timePeriodId}) : null
+        const days = [calendarDateText(slip.payDate), period ? calendarDateText(period.fromDate) : ""].filter(Boolean)
+        for (const day of days) if (!first || day < first) first = day
+    }
+    return first
+}
+// what a history row would make now: a day People's own pay covers (PAID_HERE: on or after the start of the first period People paid
+// the employment, so a former system's pay of a period People paid never counts beside it), the day's record with other amounts
+// (CONFLICT), the same record (known), or ready
 function historyState(row) {
     const day = calendarDateText(row.payDate)
-    const slipsThatDay = rows(SLIP, {partyRelationshipId: row.partyRelationshipId}).filter(
-        slip => factStatuses.includes(slip.statusId) && calendarDateText(slip.payDate) === day
-    )
-    if (slipsThatDay.length)
+    const from = paidFrom(row.partyRelationshipId)
+    if (from && day >= from)
         return {
             outcome: "refused",
             reasonCode: "PAID_HERE",
-            message: "People paid this employment on " + day + ": history and People's pay never both count a day"
+            message: "People pays this employment from " + from + ": history is the pay before it, so no period counts twice"
         }
     const record = rows(HISTORY, {partyRelationshipId: row.partyRelationshipId}).find(
         found => calendarDateText(found.payDate) === day
@@ -1068,6 +1081,15 @@ function executeResults(batch) {
                     "Pay run " + existing.payrollRunId + " of this period is approved already: its results stay as approved"
                 )
             payrollRunId = existing.payrollRunId
+            // whoever imports into the run prepared it too, so they never approve it (as a calculation adds its user)
+            const preparers = text(existing.preparedByUserIds)
+                .split(",")
+                .map(id => id.trim())
+                .filter(Boolean)
+            if (ec.user.userId && !preparers.includes(ec.user.userId)) {
+                preparers.push(ec.user.userId)
+                call("update#" + RUN, {payrollRunId, preparedByUserIds: preparers.join(",")})
+            }
         } else
             payrollRunId = call("create#" + RUN, {
                 organizationPartyId: group.organizationPartyId,
@@ -1172,8 +1194,12 @@ function executeResults(batch) {
         for (const line of lines) markRow(line, outcome)
     }
     call("update#" + BATCH, {payrollExchangeBatchId: batch.payrollExchangeBatchId, payrollRunId})
-    if (added && run.statusId !== "PrnReview")
-        call("update#" + RUN, {payrollRunId, statusId: "PrnReview", calculatedDate: ec.user.nowTimestamp})
+    if (added) {
+        if (run.statusId !== "PrnReview")
+            call("update#" + RUN, {payrollRunId, statusId: "PrnReview", calculatedDate: ec.user.nowTimestamp})
+        // a request waiting on the run asked for another population: superseded, as a change of a calculated run supersedes it
+        approvals().sourceChanged("PakPayrollRun", payrollRunId, RUN, true)
+    }
 }
 
 // ===== get#Batch, find#Batches =====
@@ -1414,6 +1440,25 @@ function findExportScopes() {
             }))
     }
 }
+// The pay inputs file: every cell written as the framework's delimited writer writes it (a cell a spreadsheet would read as a formula
+// written as text), except a number field whose value is a plain number (-10.00, 8): a processor reads it as the number, and a cell
+// of digits, one leading minus and a point is no formula. The framework's writer escapes a leading "-" whatever follows, so a negative
+// amount would reach the processor as '-10.00.
+const numberColumns = new Set(["quantity", "amount", "rate"])
+function inputsFile(headers, records) {
+    const cell = transferLib().delimitedCell
+    const valueCell = (name, value) => {
+        const given = String(value ?? "")
+        return numberColumns.has(name) && /^-?[0-9]+(\.[0-9]+)?$/.test(given) ? '"' + given + '"' : cell(given)
+    }
+    return (
+        "﻿" +
+        headers.map(cell).join(",") +
+        "\r\n" +
+        records.map(record => headers.map(name => valueCell(name, record[name])).join(",")).join("\r\n") +
+        "\r\n"
+    )
+}
 // export#InputsTransfer (run#TargetExport): a pay group's period's approved inputs as delimited text, or an export batch's ready rows
 // (selection.batch), for a payroll exporter of the group's employer: the fields asked for alone (the amount and the rate a payroll
 // reader's, which the registration names). A refusal a person can act on is answered.
@@ -1489,7 +1534,7 @@ function exportInputs(p) {
     })
     return {
         rowCount,
-        fileText: transferLib().writeDelimited(wanted, records),
+        fileText: inputsFile(wanted, records),
         fileName: (
             "PayInputs-" +
             (group.groupName || payrollGroupId) +

@@ -696,10 +696,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="RecoverySettings" allow-remote="false">
         <description>The overpayment recovery settings of the payroll reader's employers (PAYROLL_VIEW; organizationPartyId one of
-            them, ORGANIZATION_DENIED for another): each its recovery deduction, the cap a period (an amount, or a percentage of net
-            pay: of the employee's wage net on their latest finalized regular run), its deductions to choose from and the revision a
-            change names; canEdit for a holder of PAYROLL_EDIT and PAYROLL_CONFIGURE (impl-people P27 review, the user's call of Nov
-            13, 2026).</description>
+            them, ORGANIZATION_DENIED for another): each its recovery deduction, the cap a period (an amount, a percentage of net pay:
+            of the employee's wage net on their latest finalized regular run, or both: the percentage at most the amount, the amount
+            before a first net; capText says which), its deductions to choose from and the revision a change names; canEdit for a
+            holder of PAYROLL_EDIT and PAYROLL_CONFIGURE (impl-people P27 review and P28, the user's calls of Nov 13, 2026).</description>
         <in-parameters><parameter name="organizationPartyId"/></in-parameters>
         <out-parameters>
             <parameter name="employers" type="List"/>
@@ -714,11 +714,12 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="RecoverySettings" allow-remote="false">
         <description>An employer's overpayment recovery settings changed at the revision read (PartySettings PayrollRecoveryComponent,
             PayrollRecoveryCap and PayrollRecoveryCapPercent, audited): the recovery deduction, and the cap a period as an amount
-            (capAmount) or a percentage of net pay (capPercent, above 0 and at most 100), not both; an empty value clears it. Refuses a
-            caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope
-            (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a stale revision (REVISION_CHANGED), a component that is not one of the
-            employer's deductions (COMPONENT_INVALID) and a cap that is not a positive number, both kinds, or a percentage above 100
-            (CAP_INVALID).</description>
+            (capAmount), a percentage of net pay (capPercent, above 0 and at most 100), or both (the percentage of the last finalized
+            net applies, at most the amount; before the employee's first net pay the amount applies: the user's call of Nov 13, 2026,
+            impl-people P28); an empty value clears it. Refuses a caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE
+            (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a stale revision
+            (REVISION_CHANGED), a component that is not one of the employer's deductions (COMPONENT_INVALID) and a cap that is not a
+            positive number or a percentage above 100 (CAP_INVALID).</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="expectedRevision"/>

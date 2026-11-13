@@ -184,7 +184,7 @@ spec({
         group(state.ext, {externalProcessing: "Y"})
         state.native = prefix + "_NATIVE"
         group(state.native, {payrollLocalizationId: "PlzDemonstration"})
-        for (const kind of ["ANN", "BEN", "CAL"]) {
+        for (const kind of ["ANN", "BEN", "CAL", "EVE"]) {
             state[kind] = person(kind)
             state[kind + "Emp"] = employ(state[kind])
             assign(state[kind + "Emp"], state[kind], state.ext)
@@ -210,7 +210,27 @@ spec({
             activeEntitlementKey: prefix + ":HOURS:ANN",
             isAdjustment: "N"
         }).payrollInputId
+        // Cal's approved adjustment of the period takes 10.00 back, and its name reads like a formula (P28 review: a negative amount
+        // reaches the processor as a number, a formula as text)
+        state.adjustment = call("create#mantle.humanres.payroll.PayrollInput", {
+            partyRelationshipId: state.CALEmp,
+            partyId: state.CAL,
+            organizationPartyId: state.org,
+            payrollGroupId: state.ext,
+            timePeriodId: state.period,
+            inputTypeEnumId: "PitAdjustment",
+            inputName: "=1+2",
+            inputDate: state.month.from,
+            amount: "-10.00",
+            currencyUomId: "USD",
+            statusId: "PinApproved",
+            entitlementKey: prefix + ":ADJ:CAL",
+            activeEntitlementKey: prefix + ":ADJ:CAL",
+            isAdjustment: "Y"
+        }).payrollInputId
         state.payroll = account("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_IMPORT"])
+        // P28 review: a second importer who also approves pay runs
+        state.importer2 = account("IMPORTER2", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_IMPORT", "PAYROLL_APPROVE"])
         state.noImport = account("NOIMPORT", ["PAYROLL_VIEW", "PAYROLL_EDIT"])
         state.configurer = account("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"])
         state.approver = account("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"])
@@ -247,7 +267,7 @@ feature("a group in external processing exports its approved inputs with a manif
     },
     then({previewed, again, early, reconciled, executed, read, fileText, manifest, nativeRun}) {
         previewed.error == ""
-        previewed.readyCount == 1
+        previewed.readyCount == 2
         again.payrollExchangeBatchId == previewed.payrollExchangeBatchId
         again.repeated == true
         early == "NOT_RECONCILED"
@@ -258,8 +278,12 @@ feature("a group in external processing exports its approved inputs with a manif
         read.rows[0].outcome == "exported"
         fileText.includes(prefix + ":HOURS:ANN")
         fileText.includes("Worked hours")
-        manifest.rows == 1
-        manifest.sourceKeys == [prefix + ":HOURS:ANN"]
+        // a negative amount is a plain number for the processor; a cell that reads as a formula stays text (P28 review)
+        fileText.includes('"-10"')
+        !fileText.includes("'-10")
+        fileText.includes('"\'=1+2"')
+        manifest.rows == 2
+        Array.from(manifest.sourceKeys).sort() == [prefix + ":ADJ:CAL", prefix + ":HOURS:ANN"]
         manifest.fileSha256.length == 64
         // native calculation is refused for the group
         nativeRun == "EXTERNAL_PROCESSING"
@@ -276,7 +300,9 @@ feature(
                 state.BEN + ",2025-01-31,1200.00,900.00",
                 prefix + "_NOBODY,2025-01-31,500.00,400.00",
                 state.ANN + ",2099-01-31,1000.00,800.00",
-                state.ANN + ",2025-01-31,1000.00,800.00"
+                state.ANN + ",2025-01-31,1000.00,800.00",
+                // P28 review: a comma decimal is no amount, never read as 2.00 and 1.00
+                state.BEN + ',2025-02-28,"2.000,00","1.000,00"'
             ])
             const values = {
                 exchangeKind: "history",
@@ -329,10 +355,11 @@ feature(
         then({noImport, previewed, outcomes, reconciled, executed, replayed, second, records, invoices}) {
             noImport == "PERMISSION_DENIED"
             previewed.error == ""
-            outcomes == ["ready", "ready", "refused:WORKER_UNKNOWN", "refused:AFTER_CUTOVER", "duplicate"]
+            outcomes ==
+                ["ready", "ready", "refused:WORKER_UNKNOWN", "refused:AFTER_CUTOVER", "duplicate", "refused:AMOUNT_INVALID"]
             reconciled.reconciliation.differences.length == 0
             executed.appliedCount == 2
-            executed.errorCount == 2
+            executed.errorCount == 3
             records.length == 2
             records.every(record => record.internalPayroll == "N")
             records.map(record => money(record.netPayAmount)).sort() == ["800.00", "900.00"]
@@ -386,18 +413,44 @@ feature("a processor's results wait for a live group, then become a pay run appr
         const executed = run(state.payroll, X + "execute#Batch", {payrollExchangeBatchId: previewed.payrollExchangeBatchId})
         const payrollRunId = executed.payrollRunId
         const calculate = code(run(state.payroll, R + "calculate#Run", {payrollRunId}))
+        const firstAsk = run(state.payroll, R + "submit#Run", {payrollRunId})
+        // P28 review: Eve's results from a second importer join the run: the request waiting is superseded, and that importer
+        // prepared the run too, so they never approve it
+        const eveValues = {
+            exchangeKind: "results",
+            payrollGroupId: state.ext,
+            timePeriodId: state.period,
+            sourceSystem: "Acme Payroll",
+            importText: csv(["worker,component,amount", state.EVE + ",SALARY,1000.00"]),
+            expectedCount: "1",
+            expectedNet: "1000"
+        }
+        const evePreviewed = run(state.importer2, X + "preview#Batch", eveValues)
+        run(state.importer2, X + "reconcile#Batch", {payrollExchangeBatchId: evePreviewed.payrollExchangeBatchId})
+        const eveExecuted = run(state.importer2, X + "execute#Batch", {
+            payrollExchangeBatchId: evePreviewed.payrollExchangeBatchId
+        })
+        const firstAskState = one("mantle.humanres.approval.PeopleApproval", {
+            peopleApprovalId: firstAsk.peopleApprovalId
+        })?.statusId
         const submitted = run(state.payroll, R + "submit#Run", {payrollRunId})
+        const selfApproved = run(state.importer2, R + "approve#Run", {payrollRunId})
         const approved = run(state.approver, R + "approve#Run", {payrollRunId})
         const finalized = run(state.payroll, R + "finalize#Run", {payrollRunId})
         const replayed = run(state.payroll, X + "preview#Batch", values)
-        // a day People paid is refused as history: no amount counts twice
+        // a day People paid is refused as history, and (P28 review) any other day of the period People paid: no amount counts twice
+        const otherDay = state.month.today === state.month.thru ? state.month.from : state.month.thru
         const paidDay = run(state.payroll, X + "preview#Batch", {
             exchangeKind: "history",
             organizationPartyId: state.org,
             cutoverDate: "2099-01-01",
             currencyUomId: "USD",
             sourceSystem: "Old payroll",
-            importText: csv(["worker,payDate,gross,net", state.ANN + "," + state.month.today + ",3000,2400"])
+            importText: csv([
+                "worker,payDate,gross,net",
+                state.ANN + "," + state.month.today + ",3000,2400",
+                state.BEN + "," + otherDay + ",2500,2000"
+            ])
         })
         const obligations = rows(OBLIGATION, {payrollRunId})
         return {
@@ -409,7 +462,11 @@ feature("a processor's results wait for a live group, then become a pay run appr
             liveOn,
             executed,
             calculate,
+            firstAsk,
+            eveExecuted,
+            firstAskState,
             submitted,
+            selfApproved,
             approved,
             finalized,
             replayed,
@@ -446,15 +503,20 @@ feature("a processor's results wait for a live group, then become a pay run appr
         found.executed.appliedCount == 4
         found.executed.errorCount == 3
         found.run.exchangeBatchId == found.previewed.payrollExchangeBatchId
-        found.units == 2
+        found.units == 3
         found.calculate == "EXTERNAL_PROCESSING"
+        found.firstAsk.error == ""
+        found.eveExecuted.appliedCount == 1
+        found.eveExecuted.payrollRunId == found.run.payrollRunId
+        found.firstAskState == "PapSuperseded"
         found.submitted.error == ""
+        code(found.selfApproved) == "SELF_APPROVAL"
         // the importer prepared the run, so they never approve it
-        found.run.preparedByUserIds == state.payroll
+        found.run.preparedByUserIds == state.payroll + "," + state.importer2
         found.approved.approved == true
         found.finalized.statusId == "PrnFinalized"
         // the same obligations as native pay: each net pay invoice, and the withholding to its payee
-        found.nets == [state.ANN + "=2400.00", state.BEN + "=2000.00"]
+        found.nets == [state.ANN + "=2400.00", state.BEN + "=2000.00", state.EVE + "=1000.00"]
         found.payee.payeePartyId == state.authority
         money(found.payee.amount) == "1100.00"
         found.slips.every(status => status == "PssFinal" || status == "PssIssued")
@@ -462,6 +524,6 @@ feature("a processor's results wait for a live group, then become a pay run appr
         found.input.statusId == "PinFinalized"
         found.input.payrollRunId == found.run.payrollRunId
         found.replayed.repeated == true
-        found.paidDay == ["refused:PAID_HERE"]
+        found.paidDay == ["refused:PAID_HERE", "refused:PAID_HERE"]
     }
 })
