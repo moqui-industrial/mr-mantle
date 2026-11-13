@@ -88,7 +88,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft or published</description></field>
         <field name="basisEnumId" type="id"><description>PayrollComponentBasis</description></field>
-        <field name="amount" type="number-decimal"><description>A fixed amount's value</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"><description>A fixed amount's value</description></field>
         <field name="formula" type="text-long"/>
         <field name="inputNames" type="text-medium"><description>The declared inputs, comma separated</description></field>
         <field name="dependencyCodes" type="text-medium"><description>The codes of the components the formula reads, comma
@@ -127,8 +127,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payrollComponentExampleId" type="id" is-pk="true"/>
         <field name="payrollComponentTermId" type="id"/>
         <field name="exampleName" type="text-medium"/>
-        <field name="inputValues" type="text-long"/>
-        <field name="expectedAmount" type="number-decimal"/>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
+        <field name="expectedAmount" type="number-decimal" ai-opt-out="true"/>
         <relationship type="one" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
         <index name="PAY_COMP_EX_TERM"><index-field name="payrollComponentTermId"/></index>
     </entity>
@@ -339,7 +339,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="fromDate" type="date-time"/>
         <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
             change; "update" would skip it), with its reason (P23 review)</description></field>
-        <field name="inputValues" type="text-long"/>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
         <field name="electedComponentIds" type="text-medium"><description>The components of elective lines (PleElected) the
             assignment takes, comma separated</description></field>
         <field name="reason" type="text-long"/>
@@ -410,9 +410,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="inputDate" type="date"><description>The day it is for (an adjustment's date)</description></field>
         <field name="quantity" type="number-decimal"/>
         <field name="quantityUomId" type="id"/>
-        <field name="amount" type="currency-amount"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
         <field name="currencyUomId" type="id"/>
-        <field name="rateAmount" type="number-decimal"><description>The source's own rate (a time entry's worker rate), kept as
+        <field name="rateAmount" type="number-decimal" ai-opt-out="true"><description>The source's own rate (a time entry's worker rate), kept as
             evidence</description></field>
         <field name="statusId" type="id" enable-audit-log="update"><description>PayrollInput: PinProposed, PinApproved, PinRefused,
             PinVoided, PinFinalized</description></field>
