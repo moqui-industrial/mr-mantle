@@ -297,6 +297,10 @@ along with this software (see the LICENSE.md file). If not, see
                 if (hit.documentId === 'MantleAcctgTrans' && current.payrollOrigin === 'Y' &&
                         !ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').canRead()) {
                     financeDropped = true; continue }
+                // a person who is only an applicant only for a recruiter of their application's employer or its panel (People
+                // acceptance, PeopleReviewWalk; Recruiting.js hiddenApplicants): an unowned person is otherwise everyone's hit
+                if (hit.documentId === 'MantleParty' && current.partyTypeEnumId === 'PtyPerson' && ec.resource
+                        .script('component://mr-mantle/service/mantle/humanres/Recruiting.js').hiddenApplicants([current.partyId]).length) continue
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds, as get#RecordLinkInfo has it)
                 // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)

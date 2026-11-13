@@ -1818,6 +1818,41 @@ function transferOpening(p) {
     return {transferred: true}
 }
 
+// ===== applicants elsewhere =====
+// Of the parties given, the applicants the caller may not find (People acceptance, PeopleReviewWalk: universal search showed an
+// applicant's name to every user, as its party documents show every person no organization owns): a person who is only an
+// applicant (the applying party of an application, with no relationship and no account of their own) is a recruiting record, found
+// by a recruiter of one of their applications' employers or a panel member of one of them alone. A person related otherwise (an
+// employee, a contact, a hire) is found as that.
+function hiddenApplicants(partyIds) {
+    const ids = [
+        ...new Set(
+            Array.from(partyIds || [])
+                .map(id => text(id))
+                .filter(Boolean)
+        )
+    ]
+    if (!ids.length) return []
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        const applications = Array.from(find(APPLICATION).condition("applyingPartyId", "in", ids).list())
+        if (!applications.length) return []
+        const only = [...new Set(applications.map(row => row.applyingPartyId))].filter(
+            partyId =>
+                find(RELATIONSHIP).condition("fromPartyId", partyId).count() === 0 &&
+                find(RELATIONSHIP).condition("toPartyId", partyId).count() === 0 &&
+                find("moqui.security.UserAccount").condition("partyId", partyId).count() === 0
+        )
+        if (!only.length) return []
+        const userScope = people.scopeOf()
+        return only.filter(
+            partyId => !applications.some(row => row.applyingPartyId === partyId && accessOf(userScope, row) != null)
+        )
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
 const operations = {
     findOpenings,
     storeOpening,
@@ -1856,5 +1891,7 @@ function run(op, p) {
 ;({
     execute: run,
     // P17 review: the applicant's address an issued offer's letter is emailed to (Offers.js)
-    applicantEmails
+    applicantEmails,
+    // People acceptance: the applicants universal search leaves out (UniversalSearchServices search#Universal)
+    hiddenApplicants
 })

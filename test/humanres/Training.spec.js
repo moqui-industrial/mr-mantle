@@ -272,6 +272,19 @@ feature(
                 hrDecides: code(run(state.hr.userId, D + "decide#Enrollment", {personTrainingId: state.anaTraining}))
             }
             out.approverView = run(state.max.userId, D + "get#Training", {personTrainingId: state.anaTraining})
+            // a trainer who decides a place reads its reason as its approver (acceptance PeopleTrainingUsable: Hannah trains the
+            // session and decides Tomas's place): Max trains a session of his own, and Bo asks for a place in it
+            const maxSession = run(state.dev.userId, D + "store#Training", {
+                trainingClassId: state.classId,
+                startDate: at(48),
+                endDate: at(50),
+                capacity: "2",
+                trainerPartyId: state.max.partyId,
+                assessmentFormId: state.formId
+            }).workEffortId
+            const boAsked = run(state.bo.userId, D + "enroll#Training", {workEffortId: maxSession, reason: "Weekend opener"})
+            out.trainerApprover = run(state.max.userId, D + "get#Training", {personTrainingId: boAsked.personTrainingId})
+            out.trainerSession = run(state.max.userId, D + "get#Training", {workEffortId: maxSession})
             out.approved = run(state.max.userId, D + "decide#Enrollment", {personTrainingId: state.anaTraining})
             out.boEnrolled = enroll(state.dev, {partyId: state.bo.partyId})
             state.boTraining = out.boEnrolled.personTrainingId
@@ -307,6 +320,8 @@ feature(
             // the approver reads the place they decide, its reason, and no one else's
             out.approverView.enrollments.length == 1 && out.approverView.enrollments[0].canDecide
             out.approverView.enrollments[0].reason == "First aider for the floor"
+            out.trainerApprover.enrollments[0].canDecide && out.trainerApprover.enrollments[0].reason == "Weekend opener"
+            out.trainerSession.enrollments[0].reason == "Weekend opener"
             out.approved.statusEnumId == "PtsEnrolled" && out.boEnrolled.statusEnumId == "PtsEnrolled"
             out.full == "SESSION_FULL"
             out.anaOn == 1 && out.anaReminder.length == 1 && out.anaReminder[0].offsetMinutes == 1440
