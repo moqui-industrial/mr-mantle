@@ -261,11 +261,18 @@ function analysis(p) {
 // staff member's own; one outside it RECORD_UNAVAILABLE), read as the stores' organizations (an organization named must be
 // one of them), with the costs withheld unless PRODUCT_COST_VIEW (costWithheld). A holder of ACCOUNTING_VIEW is answered
 // as before, whatever stores they name.
+//
+// Sales reads (impl-sales P1, F2; the answer to impl-accounting §5's open question): a user without report read who holds
+// SALES_REPORT_VIEW, and is not answered as a store-scoped reader, is answered for the organizations of their sales scope
+// (SalesAccess.js reportOrganizations: their own, the active one when it is theirs; an organization named must be one of them),
+// with the costs withheld unless PRODUCT_COST_VIEW.
 function organizations(p) {
     const named = Array.from(p.organizationPartyIds || []).filter(Boolean)
     const storeIds = Array.from(new Set(Array.from(p.productStoreIds || []).filter(Boolean)))
-    if (storeIds.length && !policy.capabilities().reportRead && access.has("COMMERCE_VIEW"))
-        return storeOrganizations(named, storeIds)
+    const reportRead = policy.capabilities().reportRead
+    if (storeIds.length && !reportRead && access.has("COMMERCE_VIEW")) return storeOrganizations(named, storeIds)
+    if (!reportRead && access.has("SALES_REPORT_VIEW"))
+        return ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js").reportOrganizations(named)
     const scope = policy.scope({}, "reportRead")
     const allowed = scope.organizationPartyIds
     for (const id of named) if (!allowed.includes(id)) denied("ORGANIZATION_DENIED", "Accounting organization is not available")
