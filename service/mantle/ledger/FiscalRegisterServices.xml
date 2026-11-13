@@ -335,12 +335,12 @@ Grant of Patent License.
 
             <!-- 3. Titles -->
             <if condition="registerType == 'sales'">
-                <set field="registerTitle" value="Registro IVA Vendite (Fatture Emesse - Art. 23 D.P.R. 633/72)"/>
+                <set field="registerTitle" value="Sales VAT Register (Issued Invoices)"/>
             <else-if condition="registerType == 'purchases'">
-                <set field="registerTitle" value="Registro IVA Acquisti (Fatture Ricevute - Art. 25 D.P.R. 633/72)"/>
+                <set field="registerTitle" value="Purchase VAT Register (Received Invoices)"/>
             </else-if>
             <else>
-                <set field="registerTitle" value="Prospetto di Liquidazione Periodica IVA (Art. 27 D.P.R. 633/72)"/>
+                <set field="registerTitle" value="Periodic VAT Settlement Statement"/>
             </else>
             </if>
 
@@ -350,17 +350,14 @@ Grant of Patent License.
                 const isPurchases = (registerType === 'purchases');
                 const isSummary = (registerType === 'summary');
 
-                let invoiceTypes = [];
-                if (isSales || isSummary) invoiceTypes.push('InvoiceSales', 'InvoiceReturn');
-                if (isPurchases || isSummary) invoiceTypes.push('InvoicePurchase', 'InvoiceReturn');
-
+                const validTypes = ['InvoiceSales', 'InvoicePurchase', 'InvoiceReturn', 'InvoiceCreditMemo'];
                 let q = ec.entity.find("mantle.account.invoice.Invoice");
                 if (isSales) {
                     q = q.condition("fromPartyId", organizationPartyId);
-                    q = q.condition("invoiceTypeEnumId", "in", ['InvoiceSales', 'InvoiceReturn']);
+                    q = q.condition("invoiceTypeEnumId", "in", validTypes);
                 } else if (isPurchases) {
                     q = q.condition("toPartyId", organizationPartyId);
-                    q = q.condition("invoiceTypeEnumId", "in", ['InvoicePurchase', 'InvoiceReturn']);
+                    q = q.condition("invoiceTypeEnumId", "in", validTypes);
                 } else {
                     // Summary: include both
                     const conds = ec.entity.conditionFactory;
@@ -368,7 +365,7 @@ Grant of Patent License.
                         conds.makeCondition("fromPartyId", "equals", organizationPartyId),
                         conds.makeCondition("toPartyId", "equals", organizationPartyId)
                     ], "or"));
-                    q = q.condition("invoiceTypeEnumId", "in", ['InvoiceSales', 'InvoicePurchase', 'InvoiceReturn']);
+                    q = q.condition("invoiceTypeEnumId", "in", validTypes);
                 }
 
                 if (fromDate) q = q.condition("invoiceDate", "greater-equals", fromDate);
