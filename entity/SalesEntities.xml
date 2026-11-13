@@ -44,6 +44,9 @@ along with this software (see the LICENSE.md file). If not, see
             SalesOpportunityParty row, kept equal to it by the opportunity services (P4), so the organization filters
             (MANTLE_USER_ORG_SOPP, MANTLE_ACTIVE_ORG_SOPP) can bound what an app root's user reads -->
         <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <!-- the outcome (impl-sales P2): SalesOppOpen, SalesOppWon or SalesOppLost (data/SalesCrmSeedData.xml); empty is open. A
+            retired stage's open deals are those not Won or Lost (OpportunityServices store#Stage); the lifecycle is P4's -->
+        <field name="statusId" type="id" enable-audit-log="true"/>
         <relationship type="one" title="SalesOpportunityType" related="moqui.basic.Enumeration">
             <key-map field-name="typeEnumId"/></relationship>
         <relationship type="one" title="Account" related="mantle.party.Party">
@@ -55,6 +58,7 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem"/>
     </entity>
     <entity entity-name="SalesOpportunityParty" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>
@@ -67,11 +71,48 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" related="mantle.party.RoleType"/>
     </entity>
+    <!-- impl-sales P2 (design-sales §9 Stages): a pipeline scopes its stages. organizationPartyId empty is the instance's
+        shared pipeline, offered to every organization (the seeded default, data/SalesData.xml), changed only by a reader of
+        every organization; defaultFlag Y is its organization's default (one in effect at a time). An optional team narrows it
+        to that team's opportunities. Dated: a pipeline is ended, never deleted (OpportunityServices store#Pipeline). -->
+    <entity entity-name="SalesPipeline" package="mantle.sales.opportunity">
+        <field name="salesPipelineId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="pipelineName" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="teamPartyId" type="id"/>
+        <field name="defaultFlag" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Team" related="mantle.party.Party">
+            <key-map field-name="teamPartyId"/></relationship>
+    </entity>
     <entity entity-name="SalesOpportunityStage" package="mantle.sales.opportunity">
         <field name="opportunityStageId" type="id" is-pk="true"/>
         <field name="description" type="text-medium"/>
         <field name="defaultProbability" type="number-decimal"/>
         <field name="sequenceNum" type="number-integer"/>
+        <!-- impl-sales P2: the pipeline the stage belongs to, whether the board folds its column, and its effective interval: a
+            stage in use is retired (thruDate) with its open deals moved to another stage, never deleted (store#Stage) -->
+        <field name="salesPipelineId" type="id"/>
+        <field name="foldFlag" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesPipeline"/>
+    </entity>
+    <!-- impl-sales P2 (design-sales §9 LeadSources): a lead source is a moqui.basic.DataSource of a LEAD_SOURCE type, shared by
+        the instance (Marketing mounts the same editor); this dated binding offers it to an organization, and ending it stops
+        the offer without touching the source or the records that name it. -->
+    <entity entity-name="SalesLeadSourceBinding" package="mantle.sales.opportunity">
+        <field name="dataSourceId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
     </entity>
     <entity entity-name="SalesOpportunityWorkEffort" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>
