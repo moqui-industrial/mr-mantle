@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' account and contact writes (IronStone Sales design §4 Accounts and Contacts; impl-sales P3, F5): each requires a
+<!-- mantle.sales.SalesWorkspaceServices (S, design-sales §12.1): Sales' authorized projections. P3 (design §4): the accounts and
+    contacts of the caller's sales scope and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over
+    SalesAccess.js); later phases add theirs (the readiness of P2, Home's of P6). Each reads the caller's scope, refuses a caller
+    who reads nothing of Sales (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED), and leaves out what
+    the caller may not read. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ========== P3: accounts and contacts ========== -->
+    <service verb="find" noun="Accounts" read-only="true">
+        <description>The accounts of the caller's sales scope (AccountList): parties with a Customer or Prospect role that are not
+            internal, disabled or someone else's personal contacts, owned by the organization named (which must be in the scope) or by
+            any organization of the scope, and the shared ones (owner _NA_); by name or id (text, ignoring case), role, kind, account
+            manager (mine Y: the caller's), parent account. Each row: its name, kind, role, owner, account managers, first contact and
+            contact count, and, for a holder of SALES_TEAM_VIEW, its open orders with the scope's organizations (null otherwise).
+            Paged in the query (accountList and its page fields; pageNoLimit, up to 1000, for an export).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="text"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="partyTypeEnumId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="parentAccountPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="accountList" type="List"/>
+            <parameter name="accountListCount" type="Integer"/>
+            <parameter name="accountListPageIndex" type="Integer"/>
+            <parameter name="accountListPageSize" type="Integer"/>
+            <parameter name="accountListPageMaxIndex" type="Integer"/>
+            <parameter name="accountListPageRangeLow" type="Integer"/>
+            <parameter name="accountListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('findAccounts', context)"/>
+            <set field="accountList" from="found.accountList"/>
+            <set field="accountListCount" from="found.accountListCount"/>
+            <set field="accountListPageIndex" from="found.accountListPageIndex"/>
+            <set field="accountListPageSize" from="found.accountListPageSize"/>
+            <set field="accountListPageMaxIndex" from="found.accountListPageMaxIndex"/>
+            <set field="accountListPageRangeLow" from="found.accountListPageRangeLow"/>
+            <set field="accountListPageRangeHigh" from="found.accountListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="find" noun="AccountContacts" read-only="true">
+        <description>The contacts of the accounts of the caller's sales scope (Contacts): current PrtContact relationships from a
+            person to an account the caller may see, the person also one they may see, of one account (accountPartyId, refused when
+            outside the scope: RECORD_UNAVAILABLE) or organization (organizationPartyId) when named; by name or account name (text).
+            Each row: the relationship, the person, the account, the title, email, phone and the date from. Paged in the
+            query.</description>
+        <in-parameters>
+            <parameter name="accountPartyId"/>
+            <parameter name="contactPartyId"><description>One person's accounts (ContactDetail)</description></parameter>
+            <parameter name="organizationPartyId"/>
+            <parameter name="text"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactList" type="List"/>
+            <parameter name="contactListCount" type="Integer"/>
+            <parameter name="contactListPageIndex" type="Integer"/>
+            <parameter name="contactListPageSize" type="Integer"/>
+            <parameter name="contactListPageMaxIndex" type="Integer"/>
+            <parameter name="contactListPageRangeLow" type="Integer"/>
+            <parameter name="contactListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('findContacts', context)"/>
+            <set field="contactList" from="found.contactList"/>
+            <set field="contactListCount" from="found.contactListCount"/>
+            <set field="contactListPageIndex" from="found.contactListPageIndex"/>
+            <set field="contactListPageSize" from="found.contactListPageSize"/>
+            <set field="contactListPageMaxIndex" from="found.contactListPageMaxIndex"/>
+            <set field="contactListPageRangeLow" from="found.contactListPageRangeLow"/>
+            <set field="contactListPageRangeHigh" from="found.contactListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CustomerSales" read-only="true">
+        <description>Customer360's Sales summary of an account of the caller's sales scope (crosscut §3.2 Sales row): its name, kind,
+            role, owner (or shared), email and phone, account managers, parent and child accounts of the scope, current contacts
+            (each with title, email and phone), what the caller may do (canEdit: SALES_ACCOUNT_EDIT; canManage: a manager's change of
+            the account manager; canMerge: a Sales manager or administrator for an account of their organization), and by their rights
+            its orders with the scope's organizations (organizationPartyId narrows them; ordersRead for a holder of SALES_TEAM_VIEW,
+            until Sales' order scope) and its invoices from them (financeRead: ACCOUNTING_VIEW or RECEIVABLE_VIEW), each withheld
+            otherwise. An account the caller may not see answers customerFound false, like a missing one.</description>
+        <in-parameters>
+            <parameter name="customerPartyId" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="customerFound" type="Boolean"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="customerDetail" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('customerSales', context)"/>
+            <set field="customerFound" from="found.customerFound"/>
+            <set field="customerPartyId" from="found.customerPartyId"/>
+            <set field="customerDetail" from="found.customerDetail"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AccountDocumentCounts" read-only="true">
+        <description>The Sales documents each party carries with the organizations of the caller's sales scope, for MergeAccounts'
+            Compare (design §4): its opportunities (as the account or a party of one), orders and agreements. A party the caller may
+            not see gives no row. Refuses a caller without SALES_TEAM_VIEW (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List" required="true"><parameter name="partyId"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="counts" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('documentCounts', context)"/>
+            <set field="counts" from="found.counts"/>
+        </actions>
+    </service>
+</services>

@@ -20,7 +20,7 @@ const cev = (id) => ec.entity.find("mantle.party.communication.CommunicationEven
 
 feature("sales accounts and contacts", {
     when() {
-        accountId = call("mantle.sales.AccountServices.create#Account", { organizationName: "CRM Account", roleTypeId: "Account" }).partyId
+        accountId = call("mantle.sales.AccountServices.create#Account", { organizationName: "CRM Account", organizationPartyId: "ORG_ZIZI_RETAIL" }).partyId
         contactId = call("mantle.sales.AccountServices.create#Contact", { firstName: "Connie", lastName: "Contact", accountPartyId: accountId }).partyId
         personId = call("mantle.party.PartyServices.create#Person", { firstName: "Pete", lastName: "Person" }).partyId
         call("mantle.sales.AccountServices.add#Contact", { partyId: personId, accountPartyId: accountId })
