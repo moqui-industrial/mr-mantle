@@ -282,6 +282,9 @@ function termRow(term, at, exampleCounts, waiting) {
             expenseAccountText: accountText(term.expenseGlAccountId),
             liabilityGlAccountId: term.liabilityGlAccountId || null,
             liabilityAccountText: accountText(term.liabilityGlAccountId),
+            // P27 review (the user's call of Nov 13, 2026): who a deduction withheld or an employer contribution is paid to
+            payeePartyId: term.payeePartyId || null,
+            payeeName: term.payeePartyId ? lib.partyNames([term.payeePartyId])[term.payeePartyId] || term.payeePartyId : "",
             publishedDateText: dateText(term.publishedDate),
             publishedByName: userName(term.publishedByUserId),
             exampleCount: exampleCounts?.[term.payrollComponentTermId] || 0
@@ -454,6 +457,7 @@ const termFields = [
     "prorated",
     "expenseGlAccountId",
     "liabilityGlAccountId",
+    "payeePartyId",
     "fromDate",
     "thruDate"
 ]
@@ -629,6 +633,15 @@ function checkTerm(component, term) {
             !one("mantle.ledger.account.GlAccountOrganization", {glAccountId, organizationPartyId: component.organizationPartyId})
         )
             denied("ACCOUNT_INVALID", "Account " + glAccountId + " is not one of the employer's")
+    // P27 review (the user's call of Nov 13, 2026): a deduction's or an employer contribution's payee (a pension fund, a union): a
+    // finalization makes its withheld and owed amounts one invoice from it a liability account; an earning is paid to the person
+    out.payeePartyId = text(term.payeePartyId) || null
+    if (out.payeePartyId && !(kind === "PckDeduction" || kind === "PckContribution"))
+        denied("PAYEE_NOT_FOR_KIND", "Only a deduction or an employer contribution is paid to a payee")
+    if (out.payeePartyId && !one("mantle.party.Party", {partyId: out.payeePartyId}))
+        denied("PAYEE_INVALID", out.payeePartyId + " is not a party")
+    if (out.payeePartyId && out.payeePartyId === component.organizationPartyId)
+        denied("PAYEE_INVALID", "The employer is not its own payee")
     const fromMs = when(term.fromDate)
     const thruMs = when(term.thruDate)
     if (fromMs == null) denied("DATES_INVALID", "A term starts on a date")
@@ -1772,8 +1785,10 @@ function applyStructurePublication(structure, approval) {
 
 // ===== groups =====
 const groupRevision = payrollGroupId => revisionOf([one(GROUP, {payrollGroupId})])
-// A group's readiness: preview only in this build, and why (no localization, the synthetic one, coverage missing, or the
-// payroll-origin projection still to come); liveAllowed is never true here (design §8 Release 1, §8.4).
+// A group's readiness: preview only, and why (no localization, the synthetic one, coverage missing, or Accounting's payroll-origin
+// projection not in place), or live allowed (design §8 Release 1, §8.4). P27 builds the projection, so a group whose localization
+// is real and covers today may be enabled for live pay (store#Group's liveEnabled); none can be in this build, whose one
+// localization is the demonstration (impl-people §4). PayrollObligations.js liveReasons adds the group's own switch.
 function groupReadiness(group, localization, at) {
     const out = state => Object.assign({liveAllowed: false}, state)
     if (!localization)
@@ -1790,11 +1805,25 @@ function groupReadiness(group, localization, at) {
         })
     if ((ms(localization.coverageFromDate) ?? -Infinity) > at || (ms(localization.coverageThruDate) ?? Infinity) <= at)
         return out({state: "failed", reasonCode: "COVERAGE_MISSING", message: "The localization does not cover today"})
-    return out({
+    if (!ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").inPlace())
+        return out({
+            state: "warning",
+            reasonCode: "PROJECTION_PENDING",
+            message: "Preview only: live finalization waits on Accounting's payroll-origin projection"
+        })
+    if (group?.liveEnabled === "Y")
+        return {
+            state: "ready",
+            reasonCode: "LIVE",
+            message: "Live: finalizing a run makes its pay obligations",
+            liveAllowed: true
+        }
+    return {
         state: "warning",
-        reasonCode: "PROJECTION_PENDING",
-        message: "Preview only: live finalization waits on Accounting's payroll-origin projection"
-    })
+        reasonCode: "LIVE_AVAILABLE",
+        message: "Preview until the group is enabled for live pay",
+        liveAllowed: true
+    }
 }
 function frequencyName(timePeriodTypeId) {
     const type = timePeriodTypeId ? one("mantle.party.time.TimePeriodType", {timePeriodTypeId}) : null
@@ -1862,7 +1891,14 @@ function groupRow(group, at, userScope, names, localizations) {
         fromDateText: dateText(group.fromDate),
         thruDateText: dateText(group.thruDate),
         ended: (ms(group.thruDate) ?? Infinity) <= at,
-        liveEnabled: false,
+        liveEnabled: group.liveEnabled === "Y",
+        // P27: the localization binding (the payee of its amounts and their accounts)
+        localizationPayeePartyId: group.localizationPayeePartyId || null,
+        localizationPayeeName: group.localizationPayeePartyId
+            ? lib.partyNames([group.localizationPayeePartyId])[group.localizationPayeePartyId] || group.localizationPayeePartyId
+            : "",
+        localizationLiabilityGlAccountId: group.localizationLiabilityGlAccountId || null,
+        localizationExpenseGlAccountId: group.localizationExpenseGlAccountId || null,
         readiness: groupReadiness(group, localization, at),
         canEdit: edits(userScope) && (ms(group.thruDate) ?? Infinity) > nowMs(),
         revision: groupRevision(group.payrollGroupId)
@@ -1911,11 +1947,6 @@ function findGroups(p) {
 // first period stay.
 function storeGroup(p) {
     const userScope = editorScope()
-    if (flag(p.liveEnabled))
-        denied(
-            "LIVE_NOT_AVAILABLE",
-            "A pay group is preview only: no localization covers it and the payroll-origin projection is not built"
-        )
     const existing = text(p.payrollGroupId)
         ? readable(userScope, GROUP, "payrollGroupId", text(p.payrollGroupId), "Pay group")
         : null
@@ -1952,6 +1983,27 @@ function storeGroup(p) {
         denied("LOCALIZATION_INVALID", payrollLocalizationId + " is not a registered localization")
     const workweekTimeZone = text(pick("workweekTimeZone")) || null
     if (workweekTimeZone && workweekTimeZone.length > 60) denied("ZONE_INVALID", "That is not a time zone")
+    // P27: the localization binding, a payee party and the employer's accounts its amounts post to
+    const localizationPayeePartyId = text(pick("localizationPayeePartyId")) || null
+    if (localizationPayeePartyId && !one("mantle.party.Party", {partyId: localizationPayeePartyId}))
+        denied("PAYEE_INVALID", localizationPayeePartyId + " is not a party")
+    const localizationLiabilityGlAccountId = text(pick("localizationLiabilityGlAccountId")) || null
+    const localizationExpenseGlAccountId = text(pick("localizationExpenseGlAccountId")) || null
+    for (const glAccountId of [localizationLiabilityGlAccountId, localizationExpenseGlAccountId])
+        if (glAccountId && !one("mantle.ledger.account.GlAccount", {glAccountId}))
+            denied("ACCOUNT_INVALID", glAccountId + " is not an account")
+    // P27: live pay only where the group's readiness allows it (a real localization covering today, Accounting's projection in
+    // place): never in this build, whose one localization is the demonstration (LIVE_NOT_AVAILABLE)
+    const liveWanted = given(p.liveEnabled) ? flag(p.liveEnabled) : existing?.liveEnabled === "Y"
+    if (liveWanted) {
+        const localization = payrollLocalizationId ? one(LOCALIZATION, {payrollLocalizationId}) : null
+        const readiness = groupReadiness(null, localization, nowMs())
+        if (!readiness.liveAllowed)
+            denied(
+                "LIVE_NOT_AVAILABLE",
+                "This pay group cannot be live: " + readiness.message + " (" + readiness.reasonCode + ")"
+            )
+    }
     const fields = {
         groupName,
         currencyUomId,
@@ -1964,7 +2016,10 @@ function storeGroup(p) {
         payrollLocalizationId,
         workweekTimeZone,
         description: text(pick("description")) || null,
-        liveEnabled: "N"
+        localizationPayeePartyId,
+        localizationLiabilityGlAccountId,
+        localizationExpenseGlAccountId,
+        liveEnabled: liveWanted ? "Y" : "N"
     }
     if (!existing) {
         const created = call("create#" + GROUP, Object.assign({organizationPartyId, fromDate: ec.user.nowTimestamp}, fields))

@@ -188,7 +188,8 @@ along with this software (see the LICENSE.md file). If not, see
             (a published term is never changed), BASIS_REQUIRED, BASIS_INVALID, AMOUNT_REQUIRED, AMOUNT_INVALID, FORMULA_REQUIRED,
             FORMULA_INVALID (the evaluator's message, position and code), CYCLIC_DEPENDENCY (the formula reads the component itself),
             INPUT_INVALID, CURRENCY_REQUIRED, CURRENCY_INVALID, CURRENCY_PRECISION, UNIT_REQUIRED, UNIT_INVALID, ROUNDING_INVALID,
-            STATISTICAL_NO_POSTING, ACCOUNT_NOT_FOR_KIND, ACCOUNT_INVALID (not one of the employer's) and DATES_INVALID.</description>
+            STATISTICAL_NO_POSTING, ACCOUNT_NOT_FOR_KIND, ACCOUNT_INVALID (not one of the employer's), PAYEE_NOT_FOR_KIND (a payee for an
+            earning or a statistical value), PAYEE_INVALID (no party, or the employer) and DATES_INVALID.</description>
         <in-parameters>
             <parameter name="payrollComponentId"/>
             <parameter name="expectedRevision"/>
@@ -214,6 +215,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="prorated"><description>A fixed amount's proration in a part period: Y or N</description></parameter>
             <parameter name="expenseGlAccountId"/>
             <parameter name="liabilityGlAccountId"/>
+            <parameter name="payeePartyId"><description>A deduction's or an employer contribution's payee (People P27 review): its
+                amounts are one invoice from it a liability account at finalization</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="payrollComponentId"/>
@@ -598,7 +601,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The pay groups of the employers the caller reads (or organizationPartyId, an employer in scope), by name
             (ended ones with includeEnded), paged: each its employer, currency, frequency, first period, periods a year, pay-date
             policy, proration, time basis, workweek zone, localization and readiness (preview only in this build, with its reason:
-            NO_LOCALIZATION, PREVIEW_ONLY for the demonstration, COVERAGE_MISSING or PROJECTION_PENDING; liveAllowed never true),
+            NO_LOCALIZATION, PREVIEW_ONLY for the demonstration, COVERAGE_MISSING or PROJECTION_PENDING; P27: LIVE_AVAILABLE or LIVE
+            with liveAllowed for a real localization covering today, which no group of this build has), the localization binding,
             its revision and whether the caller may change it. With payrollGroupId, its prepared periods (dates, pay date, state).
             Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED) and
             another employer's group (RECORD_UNAVAILABLE).</description>
@@ -645,8 +649,11 @@ along with this software (see the LICENSE.md file). If not, see
             period's last day, -31 to 62), prorationEnumId and timeBasisEnumId are required; workweekTimeZone and the localization
             binding are optional. Once periods are prepared the currency, frequency and first period stay. Refuses a caller without
             PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
-            ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live
-            finalization (LIVE_NOT_AVAILABLE: no group can be live in this build), GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
+            ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live pay
+            where the group's readiness does not allow it (LIVE_NOT_AVAILABLE: a real localization covering today and Accounting's
+            payroll-origin projection are needed, impl-people P27; no group can be live in this build, whose one localization is the
+            demonstration), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
+            GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
             PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID,
             POLICY_LOCKED and STILL_ASSIGNED (an end while pay assignments use it then, P23).</description>
@@ -664,6 +671,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="timeBasisEnumId"/>
             <parameter name="workweekTimeZone"/>
             <parameter name="payrollLocalizationId"/>
+            <parameter name="localizationPayeePartyId"><description>The localization binding's payee (P27)</description></parameter>
+            <parameter name="localizationLiabilityGlAccountId"/>
+            <parameter name="localizationExpenseGlAccountId"/>
             <parameter name="liveEnabled"/>
             <parameter name="description"/>
             <parameter name="end" type="Boolean"/>
@@ -681,6 +691,48 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="get" noun="RecoverySettings" allow-remote="false">
+        <description>The overpayment recovery settings of the payroll reader's employers (PAYROLL_VIEW; organizationPartyId one of
+            them, ORGANIZATION_DENIED for another): each its recovery deduction, the cap a period (an amount, or a percentage of net
+            pay: of the employee's wage net on their latest finalized regular run), its deductions to choose from and the revision a
+            change names; canEdit for a holder of PAYROLL_EDIT and PAYROLL_CONFIGURE (impl-people P27 review, the user's call of Nov
+            13, 2026).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="employers" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('getRecoverySettings', context)"/>
+            <set field="employers" from="out.employers"/>
+            <set field="canEdit" from="out.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="RecoverySettings" allow-remote="false">
+        <description>An employer's overpayment recovery settings changed at the revision read (PartySettings PayrollRecoveryComponent,
+            PayrollRecoveryCap and PayrollRecoveryCapPercent, audited): the recovery deduction, and the cap a period as an amount
+            (capAmount) or a percentage of net pay (capPercent, above 0 and at most 100), not both; an empty value clears it. Refuses a
+            caller without PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope
+            (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a stale revision (REVISION_CHANGED), a component that is not one of the
+            employer's deductions (COMPONENT_INVALID) and a cap that is not a positive number, both kinds, or a percentage above 100
+            (CAP_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="payrollComponentId"/>
+            <parameter name="capAmount"/>
+            <parameter name="capPercent"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('storeRecoverySettings', context)"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="revision" from="out.revision"/>
+        </actions>
+    </service>
     <service verb="prepare" noun="Periods" allow-remote="false">
         <description>A pay group's next periodCount periods (1 to 24), after the last prepared one or from its first period's
             start: each Mantle's TimePeriod of the employer and the group's frequency (create#TimePeriod: made once, shared by the

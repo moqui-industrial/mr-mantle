@@ -98,6 +98,9 @@ function payableQuery(p) {
         if (queue === "due") add("dueDate", "less", new Date(now + 7 * dayMs))
         if (queue === "overdue") add("dueDate", "less", new Date(now))
     }
+    // People P27 (AC-23): a payroll-origin bill (a pay run's net pay or payee invoice) is a reader of payroll's
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").invoiceCondition()
+    if (origin) conditions.push(origin)
     const condition = all(conditions)
     return {find: () => find("mantle.account.invoice.InvoiceFinance").condition(condition), organizationPartyId}
 }
@@ -486,12 +489,12 @@ function holds(p) {
 // A supplier's bills and payments with an organization, by currency: the open payable (approved and unpaid), the part
 // of it on hold, and what is overdue. Bills beyond the first 500 make the summary incomplete.
 function supplierSummary(p) {
+    // People P27 review (AC-23): a payroll-origin bill (a person's net pay) for a reader of payroll alone
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").invoiceCondition()
+    let billFind = find(I, {toPartyId: p.organizationPartyId, fromPartyId: p.supplierPartyId})
+    if (origin) billFind = billFind.condition(origin)
     const bills = Array.from(
-        find(I, {toPartyId: p.organizationPartyId, fromPartyId: p.supplierPartyId})
-            .condition("statusId", "not-in", ["InvoiceCancelled"])
-            .condition("unpaidTotal", "greater", 0)
-            .limit(501)
-            .list()
+        billFind.condition("statusId", "not-in", ["InvoiceCancelled"]).condition("unpaidTotal", "greater", 0).limit(501).list()
     )
     const holds = lib.openHolds(bills.map(row => row.invoiceId))
     const now = Number(ec.user.nowTimestamp)

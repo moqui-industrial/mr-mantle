@@ -26,6 +26,7 @@
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText, calendarDateText} = lib
+const obligations = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
 
 const SLIP = "mantle.humanres.payroll.Payslip"
 const ITEM = "mantle.humanres.payroll.PayslipItem"
@@ -134,14 +135,7 @@ function makeSlips(run) {
     const existing = Object.fromEntries(
         rows(SLIP, {payrollRunId: run.payrollRunId}).map(row => [row.payrollRunEmploymentId, row])
     )
-    const results = rowsIn(RESULT, "payrollRunId", [run.payrollRunId])
-    const byUnit = {}
-    for (const result of results) (byUnit[result.payrollRunEmploymentId] ||= []).push(result)
-    const termIds = unique(results.map(row => row.payrollComponentTermId).filter(Boolean))
-    const visible = Object.fromEntries(
-        rowsIn(TERM, "payrollComponentTermId", termIds).map(row => [row.payrollComponentTermId, row])
-    )
-    const now = ec.user.nowTimestamp
+    const found = resultsOf(run)
     let made = 0
     for (const unit of units) {
         const slip = existing[unit.payrollRunEmploymentId]
@@ -155,58 +149,86 @@ function makeSlips(run) {
                 })
             continue
         }
-        const values = {
-            payrollRunId: run.payrollRunId,
-            payrollRunEmploymentId: unit.payrollRunEmploymentId,
-            organizationPartyId: run.organizationPartyId,
-            partyRelationshipId: unit.partyRelationshipId,
-            partyId: unit.partyId,
-            payrollGroupId: run.payrollGroupId,
-            timePeriodId: run.timePeriodId,
-            payDate: run.payDate,
-            currencyUomId: run.currencyUomId,
-            runKindEnumId: run.runKindEnumId,
-            correctsPayslipId: run.correctsPayslipId || null,
-            statusId: "PssPreview",
-            isPreview: "Y",
-            grossAmount: unit.grossAmount,
-            deductionAmount: unit.deductionAmount,
-            contributionAmount: unit.contributionAmount,
-            localEmployeeAmount: unit.localEmployeeAmount,
-            localEmployerAmount: unit.localEmployerAmount,
-            netAmount: unit.netAmount,
-            employerCostAmount: unit.employerCostAmount,
-            splitText: unit.splitText,
-            sourceRevision: unit.sourceRevision,
-            approvedDate: now
-        }
-        let payslipId
-        if (slip) {
-            payslipId = slip.payslipId
-            for (const item of rows(ITEM, {payslipId})) call("delete#" + ITEM, {payslipItemId: item.payslipItemId})
-            call("update#" + SLIP, Object.assign({payslipId}, values))
-        } else payslipId = call("create#" + SLIP, Object.assign({createdDate: now}, values)).payslipId
-        for (const result of byUnit[unit.payrollRunEmploymentId] || [])
-            call("create#" + ITEM, {
-                payslipId,
-                payrollComponentId: result.payrollComponentId || null,
-                payrollComponentTermId: result.payrollComponentTermId || null,
-                componentCode: result.componentCode,
-                itemName: result.resultName,
-                componentKindEnumId: result.componentKindEnumId || null,
-                localizationParty: result.localizationParty || null,
-                amount: result.amount,
-                previousAmount: result.previousAmount ?? null,
-                currencyUomId: result.currencyUomId || null,
-                quantityUomId: result.quantityUomId || null,
-                inTotals: result.inTotals || "Y",
-                payslipVisible: visible[result.payrollComponentTermId]?.payslipVisible === "N" ? "N" : "Y",
-                sequenceNum: result.sequenceNum ?? null,
-                explanation: result.explanation
-            })
+        writeSlip(run, unit, slip, false, found)
         made++
     }
     return made
+}
+// A run's results by employment and the terms their lines name (whether each is on the payslip).
+function resultsOf(run, payrollRunEmploymentId = null) {
+    const results = payrollRunEmploymentId
+        ? rows(RESULT, {payrollRunEmploymentId})
+        : rowsIn(RESULT, "payrollRunId", [run.payrollRunId])
+    const byUnit = {}
+    for (const result of results) (byUnit[result.payrollRunEmploymentId] ||= []).push(result)
+    const termIds = unique(results.map(row => row.payrollComponentTermId).filter(Boolean))
+    const visible = Object.fromEntries(
+        rowsIn(TERM, "payrollComponentTermId", termIds).map(row => [row.payrollComponentTermId, row])
+    )
+    return {byUnit, visible}
+}
+// An employment's slip written from its results: made, or made again in place with its lines replaced. A preview (preview mode), or
+// final (P27's finalization: not a preview, never written again).
+function writeSlip(run, unit, slip, final, found) {
+    const now = ec.user.nowTimestamp
+    const values = {
+        payrollRunId: run.payrollRunId,
+        payrollRunEmploymentId: unit.payrollRunEmploymentId,
+        organizationPartyId: run.organizationPartyId,
+        partyRelationshipId: unit.partyRelationshipId,
+        partyId: unit.partyId,
+        payrollGroupId: run.payrollGroupId,
+        timePeriodId: run.timePeriodId,
+        payDate: run.payDate,
+        currencyUomId: run.currencyUomId,
+        runKindEnumId: run.runKindEnumId,
+        correctsPayslipId: run.correctsPayslipId || null,
+        statusId: final ? "PssFinal" : "PssPreview",
+        isPreview: final ? "N" : "Y",
+        grossAmount: unit.grossAmount,
+        deductionAmount: unit.deductionAmount,
+        contributionAmount: unit.contributionAmount,
+        localEmployeeAmount: unit.localEmployeeAmount,
+        localEmployerAmount: unit.localEmployerAmount,
+        netAmount: unit.netAmount,
+        employerCostAmount: unit.employerCostAmount,
+        splitText: unit.splitText,
+        sourceRevision: unit.sourceRevision,
+        approvedDate: final ? run.approvedDate || now : now
+    }
+    let payslipId
+    if (slip) {
+        payslipId = slip.payslipId
+        for (const item of rows(ITEM, {payslipId})) call("delete#" + ITEM, {payslipItemId: item.payslipItemId})
+        call("update#" + SLIP, Object.assign({payslipId}, values))
+    } else payslipId = call("create#" + SLIP, Object.assign({createdDate: now}, values)).payslipId
+    for (const result of found.byUnit[unit.payrollRunEmploymentId] || [])
+        call("create#" + ITEM, {
+            payslipId,
+            payrollComponentId: result.payrollComponentId || null,
+            payrollComponentTermId: result.payrollComponentTermId || null,
+            componentCode: result.componentCode,
+            itemName: result.resultName,
+            componentKindEnumId: result.componentKindEnumId || null,
+            localizationParty: result.localizationParty || null,
+            amount: result.amount,
+            previousAmount: result.previousAmount ?? null,
+            currencyUomId: result.currencyUomId || null,
+            quantityUomId: result.quantityUomId || null,
+            inTotals: result.inTotals || "Y",
+            payslipVisible: found.visible[result.payrollComponentTermId]?.payslipVisible === "N" ? "N" : "Y",
+            sequenceNum: result.sequenceNum ?? null,
+            explanation: result.explanation
+        })
+    return one(SLIP, {payslipId})
+}
+// P27: an employment's final slip, made by its run's finalization (PayrollObligations.js) from its results: its preview slip made
+// final in place (a group made live after its run was approved; a withdrawn one too, its key being the employment's), else made
+// final; one already final is answered as it is.
+function finalSlip(run, unit) {
+    const slip = one(SLIP, {payrollRunEmploymentId: unit.payrollRunEmploymentId})
+    if (slip && factStatuses.includes(slip.statusId)) return slip
+    return writeSlip(run, unit, slip, true, resultsOf(run, unit.payrollRunEmploymentId))
 }
 // A run's preview slips withdrawn: its approval was taken back (it is selected or calculated again), so they no longer stand;
 // approved again, they are made again in place.
@@ -677,7 +699,15 @@ function slipView(scope, slip, how) {
                   contentType: slip.contentType,
                   issuedDateText: dateText(slip.issuedDate)
               }
-            : null
+            : null,
+        // P27, payroll's alone: the obligations the slip's finalization made (its net pay invoice, the claims it settled) and an
+        // overpayment it is recovering, with what remains (the user's call of Nov 12, 2026: "its remainder readable from the slip")
+        settlement: self
+            ? null
+            : {
+                  obligations: obligations().slipObligationRows(slip.payslipId),
+                  recovery: obligations().slipRecovery(slip.payslipId)
+              }
     }
     return view
 }
@@ -992,6 +1022,8 @@ function run(op, p) {
     execute: run,
     // for PayrollRuns.js: an approved run's slips, a run's preview slips withdrawn, what a correction pays the change from
     makeSlips,
+    // for PayrollObligations.js (P27): an employment's final slip, made at its run's finalization
+    finalSlip,
     withdrawSlips,
     paidBefore,
     originalOf

@@ -542,8 +542,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toBillingRep">
                 <field-map field-name="partyId" from="toBillingRelList?.[0]?.fromPartyId"/></entity-find-one>
 
+            <!-- People P27 review (AC-23): a payroll-origin invoice or payment (a receivable from a person a pay run made, a payment
+                applied to one) is on a statement for a reader of payroll alone (its payrollOrigin mark, PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <!-- all Invoices -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="allInvoiceList">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="statusId" operator="in" value="InvoiceFinalized,InvoiceSent,InvoiceAcked"/>
                 <econdition field-name="unpaidTotal" operator="not-equals" from="toDecimal(0)"/>
                 <econdition field-name="toPartyId"/>
@@ -553,6 +557,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <!-- all Payments -->
             <entity-find entity-name="mantle.account.payment.Payment" list="allUnappliedPaymentList">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="toPartyId"/>
                 <econdition field-name="toPartyId" from="fromPartyId" ignore-if-empty="true"/>
                 <econdition field-name="unappliedTotal" operator="not-equals" from="toDecimal(0)"/>
@@ -3661,6 +3666,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </econditions>
                 <order-by field-name="appliedDate"/><order-by field-name="paymentApplicationId"/>
             </entity-find>
+            <!-- People P27 review (AC-23): a payroll payment applied to this invoice (one paying an expense claim with net pay) and
+                its ledger lines are a reader of payroll's (their payrollOrigin mark, PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
+            <set field="paymentRows" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
+                .visibleRows(Array.from(paymentRows), {payment:['paymentId', 'toPaymentId'], invoice:['invoiceId', 'toInvoiceId']})"/>
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderSourceList" limit="500" disable-authz="true">
                 <econdition field-name="invoiceId"/></entity-find>
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentRows" limit="500" disable-authz="true">
@@ -3672,6 +3682,7 @@ along with this software (see the LICENSE.md file). If not, see
                         disable-authz="true">
                     <econdition field-name="invoiceId"/>
                     <econdition field-name="organizationPartyId" from="scope.organizationPartyId"/>
+                    <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                     <order-by field-name="transactionDate"/><order-by field-name="acctgTransId"/>
                 </entity-find>
             </if>

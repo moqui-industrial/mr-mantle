@@ -171,7 +171,11 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.InvoiceServices.find#Payables" out-map="payables" disable-authz="true"
                     in-map="{organizationPartyId:organizationPartyId, supplierPartyId:supplierPartyId, pageSize:100}"/>
             <set field="bills" from="payables.records"/>
+            <!-- People P27 review (AC-23): a payroll payment (or one applied to a payroll invoice) for a reader of payroll alone,
+                by its payrollOrigin mark (PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList" limit="101" disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="organizationPartyId"/>
                 <econdition field-name="toPartyId" from="supplierPartyId"/>
                 <order-by field-name="-effectiveDate"/><order-by field-name="paymentId"/>

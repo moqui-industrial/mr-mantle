@@ -40,8 +40,12 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.resource.script(workflow).execute('organization',
                 {organizationPartyId:organizationPartyId, permission:'RECEIVABLE_EDIT'})</script>
             <set field="customerIds" from="customerPartyIdList ? Array.from(customerPartyIdList) : null"/>
+            <!-- People P27 review (AC-23): a receivable from a person a pay run made, and a payment applied to one, is on a
+                statement for a reader of payroll alone (their payrollOrigin mark; get#ReceivableStatementInfo the same) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <entity-find entity-name="mantle.account.invoice.Invoice" list="openInvoiceList" distinct="true" limit="1001"
                     disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="organizationPartyId"/>
                 <econdition field-name="toPartyId" operator="in" from="customerIds" ignore="customerIds == null"/>
                 <econdition field-name="currencyUomId" ignore-if-empty="true"/>
@@ -51,6 +55,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <entity-find entity-name="mantle.account.payment.Payment" list="openPaymentList" distinct="true" limit="1001"
                     disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="toPartyId" from="organizationPartyId"/>
                 <econdition field-name="fromPartyId" operator="in" from="customerIds" ignore="customerIds == null"/>
                 <econdition field-name="amountUomId" from="currencyUomId" ignore-if-empty="true"/>

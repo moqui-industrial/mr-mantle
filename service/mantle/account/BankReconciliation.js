@@ -660,6 +660,8 @@ function candidates(line, method, options = {}) {
         [cf.makeCondition("reconcileStatusId", "is-null", null), cf.makeCondition("reconcileStatusId", "not-equals", "PmtrRec")],
         "or"
     )
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
+    const payrollHidden = origin.paymentCondition()
     const paymentQuery = () => {
         let q = find(PAYMENT, incoming ? {toPaymentMethodId: method.paymentMethodId} : {paymentMethodId: method.paymentMethodId})
             .condition(incoming ? "toPartyId" : "fromPartyId", method.ownerPartyId)
@@ -668,6 +670,8 @@ function candidates(line, method, options = {}) {
             .condition("amount", absolute)
             .condition(notReconciled)
         if (options.partyId) q = q.condition(incoming ? "fromPartyId" : "toPartyId", options.partyId)
+        // People P27 review (AC-23): a payroll payment (its payrollOrigin mark) is a candidate for a reader of payroll alone
+        if (payrollHidden) q = q.condition(payrollHidden)
         return q
     }
     const found = []
@@ -731,7 +735,12 @@ function candidates(line, method, options = {}) {
         }
     }
     if (method.glAccountId) {
-        for (const entry of find("mantle.ledger.transaction.AcctgTransAndEntry", {
+        // People P27 review (AC-23): a payroll-origin ledger line is a candidate for a reader of payroll alone
+        const entryFind = conditions => {
+            const q = find("mantle.ledger.transaction.AcctgTransAndEntry", conditions)
+            return origin.transactionCondition() ? q.condition(origin.transactionCondition()) : q
+        }
+        for (const entry of entryFind({
             glAccountId: method.glAccountId,
             organizationPartyId: method.ownerPartyId,
             debitCreditFlag: incoming ? "D" : "C",

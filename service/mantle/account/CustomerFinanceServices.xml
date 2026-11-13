@@ -165,7 +165,11 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.InvoiceServices.find#Receivables" out-map="receivables" disable-authz="true"
                     in-map="{organizationPartyId:organizationPartyId, customerPartyId:customerPartyId, pageSize:100}"/>
             <set field="invoices" from="receivables.records"/>
+            <!-- People P27 review (AC-23): payroll-origin invoices and payments (a receivable from a person a pay run made, a
+                payment applied to one) for a reader of payroll alone, by their payrollOrigin mark (PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList" limit="101" disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="customerPartyId"/>
                 <econdition field-name="toPartyId" from="organizationPartyId"/>
                 <order-by field-name="-effectiveDate"/><order-by field-name="paymentId"/>
@@ -197,6 +201,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- by currency: the open balance and its aging by due date, the amount billed this year, the last payment -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="invoiceCurrencyList" distinct="true"
                     disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="organizationPartyId"/>
                 <econdition field-name="toPartyId" from="customerPartyId"/>
                 <econdition field-name="statusId" operator="not-in"
@@ -205,6 +210,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentCurrencyList" distinct="true"
                     disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="customerPartyId"/>
                 <econdition field-name="toPartyId" from="organizationPartyId"/>
                 <econdition field-name="statusId" operator="in" value="PmntDelivered,PmntConfirmed"/>
@@ -223,6 +229,7 @@ along with this software (see the LICENSE.md file). If not, see
                     .find((row) => row.fromPartyId == organizationPartyId) ?? {}"/>
                 <set field="dueAging" from="Array.from(receivable.agingSummaryList ?? [])[0] ?? {}"/>
                 <entity-find entity-name="mantle.account.invoice.Invoice" list="billedList" disable-authz="true">
+                    <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                     <econdition field-name="fromPartyId" from="organizationPartyId"/>
                     <econdition field-name="toPartyId" from="customerPartyId"/>
                     <econdition field-name="currencyUomId"/>
@@ -232,6 +239,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <select-field field-name="invoiceTotal"/>
                 </entity-find>
                 <entity-find entity-name="mantle.account.payment.Payment" list="lastPaymentList" limit="1" disable-authz="true">
+                    <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                     <econdition field-name="fromPartyId" from="customerPartyId"/>
                     <econdition field-name="toPartyId" from="organizationPartyId"/>
                     <econdition field-name="amountUomId" from="currencyUomId"/>

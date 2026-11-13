@@ -181,6 +181,10 @@ along with this software (see the LICENSE.md file). If not, see
                     description="In another open run"/>
             <moqui.basic.Enumeration enumId="PrxUser" enumTypeId="PaymentRunExclusion" sequenceNum="4"
                     description="Left out by the user"/>
+            <!-- People P27 (F69): an ACH file is PPD (a person's account), so a payroll payee that is no person (a localization's
+                authority) is paid by check or its own channel -->
+            <moqui.basic.Enumeration enumId="PrxPayeeChannel" enumTypeId="PaymentRunExclusion" sequenceNum="5"
+                    description="Paid by check or the payee's own channel"/>
             <moqui.basic.EnumerationType description="Payment Run Result" enumTypeId="PaymentRunResult"/>
             <moqui.basic.Enumeration enumId="PrrPaid" enumTypeId="PaymentRunResult" sequenceNum="1" description="Paid"/>
             <moqui.basic.Enumeration enumId="PrrSent" enumTypeId="PaymentRunResult" sequenceNum="2"

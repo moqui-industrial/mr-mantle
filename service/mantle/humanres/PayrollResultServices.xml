@@ -95,6 +95,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canCorrect" type="Boolean"/>
             <parameter name="openCorrectionRunId"/>
             <parameter name="file" type="Map"/>
+            <parameter name="settlement" type="Map"><description>Payroll's alone (P27): the slip's obligations (kindText, invoiceId,
+                amountText) and an overpayment it recovers (routeText, amountText, recoveredText, remainingText, invoiceId)</description></parameter>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('getPayslip', context)"/>
@@ -108,6 +110,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canCorrect" from="found.canCorrect"/>
             <set field="openCorrectionRunId" from="found.openCorrectionRunId"/>
             <set field="file" from="found.file"/>
+            <set field="settlement" from="found.settlement"/>
         </actions>
     </service>
     <service verb="get" noun="MyPayslip" allow-remote="false">

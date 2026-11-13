@@ -31,6 +31,7 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const {find, one, rows, denied, call, dateText} = lib
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
 const invoiceLib = () => ec.resource.script("component://mr-mantle/service/mantle/account/InvoiceWorkflowLib.js")
+const obligations = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollObligations.js")
 
 const CLAIM = "mantle.humanres.expense.ExpenseClaim"
 const CLAIM_ITEM = "mantle.humanres.expense.ExpenseClaimItem"
@@ -945,8 +946,12 @@ function financeApproval(invoiceId) {
     if (!claim) return
     if (claim.statusEnumId !== "EcsApproved")
         denied("CLAIM_NOT_APPROVED", "This expense claim waits for its business approval in People")
-    if (claim.reservedRouteEnumId === "EcrPayroll" || claim.routeEnumId === "EcrPayroll")
+    if (claim.reservedRouteEnumId === "EcrPayroll" || claim.routeEnumId === "EcrPayroll") {
+        // P27: a claim a finalized pay run settles (its obligation) is approved for payment as it is, on the payroll route, and a
+        // payment run pays it with the person's net pay (design §9: one payment applied to both)
+        if (obligations().claimSettled(claim.invoiceId)) return
         denied("CLAIM_RESERVED", "This expense claim is reserved for payroll")
+    }
     if (!claim.reservedRouteEnumId) reserve(claim, "EcrPayable", "Accounts payable")
 }
 function reserve(claim, routeEnumId, reference) {
@@ -1051,13 +1056,38 @@ function advanceMoney(advance) {
           )
         : []
     const applied = sum(credited.map(row => row.amountApplied))
-    const left = delivered.subtract(applied)
+    // P27 (design §9: a recovery deduction and a payment application reconcile to the same advance): what finalized pay runs
+    // recovered of it by deduction (its PitAdvanceRecovery inputs once finalized; their net pay invoices withheld it)
+    const recoverySources = Array.from(
+        find("mantle.humanres.payroll.PayrollInputSource")
+            .condition({sourceEntityName: ADVANCE, sourceId: advance.employeeAdvanceId})
+            .condition("activeSourceKey", "is-not-null", null)
+            .list()
+    )
+    const finalizedIds = new Set(
+        recoverySources.length
+            ? Array.from(
+                  find("mantle.humanres.payroll.PayrollInput")
+                      .condition(
+                          "payrollInputId",
+                          "in",
+                          recoverySources.map(row => row.payrollInputId)
+                      )
+                      .condition("statusId", "PinFinalized")
+                      .selectField("payrollInputId")
+                      .list()
+              ).map(row => row.payrollInputId)
+            : []
+    )
+    const recovered = sum(recoverySources.filter(row => finalizedIds.has(row.payrollInputId)).map(row => row.amount))
+    const left = delivered.subtract(applied).subtract(recovered)
     const outstanding = left.compare(0) > 0 ? money(left, currencyUomId) : zero()
     return {
         currencyUomId,
         bill,
         delivered: money(delivered, currencyUomId),
         applied: money(applied, currencyUomId),
+        recovered: money(recovered, currencyUomId),
         outstanding,
         appliedInvoiceIds: unique(credited.filter(row => decimalOf(row.amountApplied).compare(0) > 0).map(row => row.toInvoiceId))
     }
@@ -1428,9 +1458,13 @@ function applyAdvance(p) {
 function payrollReserved(invoiceIds) {
     const ids = unique(Array.from(invoiceIds || []).filter(Boolean))
     if (!ids.length) return []
-    return Array.from(find(CLAIM).condition("invoiceId", "in", ids).list())
-        .filter(claim => claim.reservedRouteEnumId === "EcrPayroll" || claim.routeEnumId === "EcrPayroll")
-        .map(claim => claim.invoiceId)
+    return (
+        Array.from(find(CLAIM).condition("invoiceId", "in", ids).list())
+            .filter(claim => claim.reservedRouteEnumId === "EcrPayroll" || claim.routeEnumId === "EcrPayroll")
+            .map(claim => claim.invoiceId)
+            // P27: one a finalized pay run settles is paid by a payment run with the person's net pay
+            .filter(invoiceId => !obligations().claimSettled(invoiceId))
+    )
 }
 
 // ===== mail and chat intake =====

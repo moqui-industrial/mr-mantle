@@ -130,6 +130,8 @@ along with this software (see the LICENSE.md file). If not, see
         <alias entity-alias="INV" name="toPartyId"/>
         <alias entity-alias="INV" name="statusId"/>
         <alias entity-alias="INV" name="invoiceTypeEnumId"/>
+        <!-- People P27 review (AC-23): the bill's payroll-origin mark (mantle/account/PayrollOrigin.js) -->
+        <alias entity-alias="INV" name="invoicePayrollOrigin" field="payrollOrigin"/>
         <alias entity-alias="INV" name="referenceNumber"/>
         <alias entity-alias="INV" name="currencyUomId"/>
         <alias entity-alias="INV" name="invoiceTotal"/>

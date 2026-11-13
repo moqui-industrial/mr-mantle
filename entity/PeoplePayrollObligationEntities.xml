@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's Accounting handoff (IronStone People design §8.1 PayrollObligation, §8.2 steps 6 and 7, §8.3, §9's payroll route;
+    PE-11; impl-people P27; PayrollObligations.js): a finalized pay run's obligations, each a unique link from a payslip or an
+    aggregate payee bucket to the invoice it made through Mantle's invoice services (an employee's net pay, a localization payee's
+    withheld and employer amounts, a receivable from a person who has left) or to the claim invoice it settles (an expense claim on
+    the payroll route: no second invoice); and the recovery of an overpayment (a correction whose net is negative), keyed by its
+    correction slip, recovered by deductions on the next regular runs up to the employer's cap a period, or as a receivable once
+    the person has left. Written only by mantle.humanres.PayrollRunServices finalize#Run, which checks PAYROLL_VIEW and
+    PAYROLL_EDIT and the employer first; read by get#Settlement, payroll's, and by Accounting's payroll-origin projection
+    (AC-23, mantle/account/PayrollOrigin.js), which keeps the invoices an obligation made, their payments and their ledger lines to
+    holders of PAYROLL_VIEW. An obligation is no balance of its own: what is posted, approved, paid and returned is the invoice's
+    and its payments', read from Accounting. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PayrollObligation" package="mantle.humanres.payroll" cache="never">
+        <description>A finalized pay run's obligation: its unique key (NET and the payslip, PAYEE with the run and the payee, CLAIM
+            and the claim's invoice, RECEIVABLE and the correction slip), so a retried finalization finds it and makes nothing again;
+            its kind (PayrollObligationKind: an employee's net pay, a payee's aggregate, an expense claim settled on the payroll
+            route, a receivable from a person who has left); the run, the payslip (none for a payee's aggregate), the employment,
+            the person, the employer, the payee and the currency; the invoice (unique: an invoice is one obligation's), and the
+            amount it was made for. Never changed once made.</description>
+        <field name="payrollObligationId" type="id" is-pk="true"/>
+        <field name="obligationKey" type="text-medium"/>
+        <field name="obligationKindEnumId" type="id"><description>PayrollObligationKind</description></field>
+        <field name="payrollRunId" type="id"/>
+        <field name="payslipId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"><description>The person the obligation is for (none for a payee's aggregate)</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payeePartyId" type="id"><description>Who is paid (the person, a payee), or who owes (a receivable's person)</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="invoiceId" type="id"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRun" short-alias="run"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.Payslip" short-alias="payslip"/>
+        <relationship type="one-nofk" related="mantle.account.invoice.Invoice" short-alias="invoice"/>
+        <relationship type="one" title="PayrollObligationKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="obligationKindEnumId" related="enumId"/></relationship>
+        <index name="PAY_OBLIG_KEY" unique="true"><index-field name="obligationKey"/></index>
+        <index name="PAY_OBLIG_INVOICE" unique="true"><index-field name="invoiceId"/></index>
+        <index name="PAY_OBLIG_RUN"><index-field name="payrollRunId"/></index>
+        <index name="PAY_OBLIG_SLIP"><index-field name="payslipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Obligation Kind" enumTypeId="PayrollObligationKind"/>
+            <moqui.basic.Enumeration enumId="PokNetPay" description="Net pay" sequenceNum="1" enumTypeId="PayrollObligationKind"/>
+            <moqui.basic.Enumeration enumId="PokPayee" description="Payee" sequenceNum="2" enumTypeId="PayrollObligationKind"/>
+            <moqui.basic.Enumeration enumId="PokClaim" description="Expense claim settled" sequenceNum="3" enumTypeId="PayrollObligationKind"/>
+            <moqui.basic.Enumeration enumId="PokReceivable" description="Receivable from the person" sequenceNum="4"
+                    enumTypeId="PayrollObligationKind"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollRecovery" package="mantle.humanres.payroll" cache="never">
+        <description>An overpayment to recover (the user's call of Nov 12, 2026, impl-people P27): a finalized correction slip whose
+            net is negative, keyed by that slip so it is made once. Recovered by deductions on the employment's next regular runs
+            (PitOverpaymentRecovery inputs of the employer's recovery component, each at most the employer's cap a period, the rest
+            carried to the runs after it), or, when the person has left and no regular run will pay them, by a receivable from the
+            person (its invoice). What is recovered is the finalized recovery inputs' sum, and what remains the amount less it,
+            never kept as a balance.</description>
+        <field name="payrollRecoveryId" type="id" is-pk="true"/>
+        <field name="payslipId" type="id"><description>The correction slip with a negative net</description></field>
+        <field name="payrollRunId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="payrollGroupId" type="id"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"><description>What is to be recovered (positive)</description></field>
+        <field name="recoveryRouteEnumId" type="id"><description>PayrollRecoveryRoute</description></field>
+        <field name="payrollComponentId" type="id"><description>The deduction recovery inputs are made to</description></field>
+        <field name="invoiceId" type="id"><description>The receivable from the person, on that route</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.Payslip" short-alias="payslip"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" title="PayrollRecoveryRoute" related="moqui.basic.Enumeration" short-alias="route">
+            <key-map field-name="recoveryRouteEnumId" related="enumId"/></relationship>
+        <index name="PAY_RECOV_SLIP" unique="true"><index-field name="payslipId"/></index>
+        <index name="PAY_RECOV_EMPL"><index-field name="partyRelationshipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Recovery Route" enumTypeId="PayrollRecoveryRoute"/>
+            <moqui.basic.Enumeration enumId="PrcPayroll" description="Deducted from the next regular runs" sequenceNum="1"
+                    enumTypeId="PayrollRecoveryRoute"/>
+            <moqui.basic.Enumeration enumId="PrcReceivable" description="A receivable from the person" sequenceNum="2"
+                    enumTypeId="PayrollRecoveryRoute"/>
+            <!-- a preview slip (a group made live after its run was approved) or a withdrawn one made final at finalization -->
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssPreview" toStatusId="PssFinal" transitionName="Finalize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssWithdrawn" toStatusId="PssFinal" transitionName="Finalize"/>
+            <moqui.basic.Enumeration enumId="PitOverpaymentRecovery" description="Overpayment recovery" sequenceNum="8"
+                    enumTypeId="PayrollInputType"/>
+            <!-- the employer's recovery settings (impl-people P27): the deduction component recovery inputs are made to, and the
+                most a regular run recovers a period (an amount in the group's currency; none: the whole remainder) -->
+            <mantle.party.PartySettingType partySettingTypeId="PayrollRecoveryComponent"
+                    description="Payroll - Overpayment recovery deduction component"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <mantle.party.PartySettingType partySettingTypeId="PayrollRecoveryCap"
+                    description="Payroll - Most recovered from an employee a period" validRegexp="^[0-9]+(\.[0-9]+)?$"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <!-- or a percentage of net pay (the user's call of Nov 13, 2026): of the employee's wage net on their latest finalized
+                regular run; set by store#RecoverySettings, which keeps the two exclusive -->
+            <mantle.party.PartySettingType partySettingTypeId="PayrollRecoveryCapPercent"
+                    description="Payroll - Most recovered from an employee a period, as a percentage of net pay"
+                    validRegexp="^[0-9]+(\.[0-9]+)?$"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+        </seed-data>
+    </entity>
+    <extend-entity entity-name="PayrollRun" package="mantle.humanres.payroll">
+        <field name="finalizedDate" type="date-time"/>
+        <field name="finalizedByUserId" type="id"/>
+        <field name="finalizeMessage" type="text-long"><description>Why a finalization is still pending (a unit or a payee bucket
+            that failed), cleared once it completes</description></field>
+    </extend-entity>
+    <extend-entity entity-name="PayrollRunEmployment" package="mantle.humanres.payroll">
+        <field name="finalizedDate" type="date-time"/>
+    </extend-entity>
+    <extend-entity entity-name="PayrollGroup" package="mantle.humanres.payroll">
+        <field name="localizationPayeePartyId" type="id" enable-audit-log="update"><description>The localization binding's payee: who
+            is paid the localization's employee and employer amounts (impl-people P27)</description></field>
+        <field name="localizationLiabilityGlAccountId" type="id" enable-audit-log="update"><description>Where the localization's
+            withheld and owed amounts are held until its payee is paid</description></field>
+        <field name="localizationExpenseGlAccountId" type="id" enable-audit-log="update"><description>The expense of the
+            localization's employer amounts</description></field>
+    </extend-entity>
+    <extend-entity entity-name="PayrollComponentTerm" package="mantle.humanres.payroll">
+        <field name="payeePartyId" type="id"><description>A deduction's or an employer contribution's payee (the People P27 review,
+            the user's call of Nov 13, 2026): a finalization makes the withheld and owed amounts of its final slips one draft invoice
+            from it a liability account (PayrollObligations.js payeeBuckets)</description></field>
+    </extend-entity>
+    <!-- Accounting's payroll-origin projection (AC-23, mantle/account/PayrollOrigin.js; the People P27 review): the mark every finance
+        read filters on, so a view of these entities carries it and a list, export or report leaves payroll-origin rows to holders
+        of PAYROLL_VIEW with no join to People. Set by the finalization (its invoices) and by entity/PayrollOrigin.eecas.xml (a
+        payroll payment, a payment applied to a marked invoice or payment, a transaction of either); never taken off. -->
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: an invoice a pay run's finalization made (net pay, a
+            payee's amounts, a receivable from a person), read with PAYROLL_VIEW alone</description></field>
+        <index name="INVOICE_PAYROLL_ORIGIN"><index-field name="payrollOrigin"/></index>
+    </extend-entity>
+    <extend-entity entity-name="Payment" package="mantle.account.payment">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: a payroll payment, or one applied to a payroll-origin
+            invoice or payment, read with PAYROLL_VIEW alone</description></field>
+    </extend-entity>
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: a transaction of a payroll-origin invoice or payment, read
+            with PAYROLL_VIEW alone</description></field>
+    </extend-entity>
+</entities>
