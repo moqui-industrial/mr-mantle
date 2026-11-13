@@ -22,11 +22,12 @@
 //   (PIN_NOT_SET), the PIN right (PIN_WRONG: counted on the badge, and the fifth in a row locks it, for fifteen minutes the first
 //   time and twice as long each time after until a right PIN; the twentieth within a day, at kiosks and in self-service alike,
 //   stops the badge until HR resets its PIN or issues a new one, and tells the employer's HR editors, to them alone, naming the
-//   person and never the number or a PIN: PeopleKioskBadgeDisabled; the user's call of Nov 12, 2026); the employment is current
+//   person and never the number or a PIN: PeopleKioskBadgeDisabled; and the worker, PeopleMyKioskBadgeDisabled; the user's calls
+//   of Nov 12, 2026); the employment is current
 //   (EMPLOYMENT_ENDED) and with an organization of the display account's (ORGANIZATION_DENIED). Every refusal of a proof is a
 //   KioskAttempt of the device, written in a transaction of its own, so it counts although nothing else is kept; a burst of them
-//   at a device tells the HR editors of its organizations, at most hourly, naming the device and the count, no badge or person
-//   (PeopleKioskRefusals, to them alone). Attempts are kept 90 days (prune#KioskAttempts, a daily job).
+//   at a device tells the HR editors of its organizations and the access administrators whose scope covers its display account,
+//   at most hourly, naming the device and the count, no badge or person (PeopleKioskRefusals, to them alone). Attempts are kept 90 days (prune#KioskAttempts, a daily job).
 // - The scan resolver answers the scanned text as the badge read, looking nothing up, so a scan learns nothing of whom a number
 //   belongs to: the worker is named only once badge and PIN prove them.
 // Who: an HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) issues, revokes, resets and reads a badge's state; only its
@@ -340,9 +341,11 @@ const wrongPinText = (counted, wrongText) =>
           ? wrongText + ": this badge is locked for " + durationText(counted.lockedMs)
           : wrongText
 // A badge stopped by a day's wrong PINs, told to the HR editors of its employer, to them alone: the person and the employment
-// (Employee360, where its PIN is reset), never its number or a PIN. Sent after the stop is committed, in a transaction of its own
-// (the refusal rolls the caller's back); a failure is logged and the stop stands.
+// (Employee360, where its PIN is reset), never its number or a PIN; and to the worker, to them alone, that their badge is stopped
+// and HR must reset its PIN (PeopleMyKioskBadgeDisabled, follow-up 4). Each sent after the stop is committed, in a transaction of
+// its own (the refusal rolls the caller's back); a failure is logged and the stop stands.
 function noticeDisabled(badge) {
+    noticeWorkerDisabled(badge)
     try {
         const at = nowMs()
         const userIds = hrEditorUsers([badge.organizationPartyId], at)
@@ -354,6 +357,31 @@ function noticeDisabled(badge) {
     } catch (error) {
         ec.message.clearErrors()
         ec.logger.error("The stopped badge notice of clocking badge " + badge.kioskBadgeId + " was not sent: " + error.message)
+    }
+}
+function noticeWorkerDisabled(badge) {
+    try {
+        const userIds = ownUsers(badge.partyId)
+        if (!userIds.length) return
+        ec.transaction.runRequireNew(null, "Telling a worker their clocking badge is stopped", () => {
+            ec.makeNotificationMessage()
+                .topic("PeopleMyKioskBadgeDisabled")
+                .message({
+                    organizationName:
+                        people.organizationNames([badge.organizationPartyId])[badge.organizationPartyId] ||
+                        badge.organizationPartyId,
+                    wrongCount: maxWrongPerDay
+                })
+                .userIds(userIds)
+                .directOnly()
+                .send()
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        })
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.error(
+            "The stopped badge notice to the worker of clocking badge " + badge.kioskBadgeId + " was not sent: " + error.message
+        )
     }
 }
 function sendDisabled(badge, userIds) {
@@ -466,11 +494,11 @@ function pace(device, at) {
         denied("KIOSK_WAIT", "One moment: try again in " + seconds + (seconds === 1 ? " second" : " seconds"))
     }
 }
-// The users who are HR editors (PEOPLE_HR_EDIT) on the staff of one of the organizations: an enabled, not display, account in an
-// active group holding the permission, whose party is a current employee or agent of the organization.
-function hrEditorUsers(organizationPartyIds, at) {
+// The users holding a permission on the staff of one of the organizations: an enabled, not display, account in an active group
+// holding it (not ALL_USERS), whose party is a current relationship of one of the kinds with the organization.
+function staffUsers(permission, relationshipTypes, organizationPartyIds, at) {
     if (!organizationPartyIds.length) return []
-    const groupIds = Array.from(find("moqui.security.UserGroupPermission", {userPermissionId: "PEOPLE_HR_EDIT"}).list())
+    const groupIds = Array.from(find("moqui.security.UserGroupPermission", {userPermissionId: permission}).list())
         .filter(row => lib.active(row))
         .map(row => row.userGroupId)
         .filter(groupId => groupId !== "ALL_USERS")
@@ -488,7 +516,7 @@ function hrEditorUsers(organizationPartyIds, at) {
             people
                 .current(
                     find(RELATIONSHIP)
-                        .condition("relationshipTypeEnumId", "in", ["PrtEmployee", "PrtAgent"])
+                        .condition("relationshipTypeEnumId", "in", relationshipTypes)
                         .condition("toPartyId", "in", organizationPartyIds)
                         .condition(
                             "fromPartyId",
@@ -502,8 +530,24 @@ function hrEditorUsers(organizationPartyIds, at) {
     )
     return Array.from(new Set(accounts.filter(row => staff.has(row.partyId)).map(row => row.userId)))
 }
-// A burst of refusals at a device (noticeAt within the window) told to the HR editors of its organizations, at most once each
-// noticeEveryMs, naming the device and the count, never a badge or a person, to them alone. The device's KioskDeviceNotice is
+// The HR editors (PEOPLE_HR_EDIT) on the staff of one of the organizations (employees and agents).
+const hrEditorUsers = (organizationPartyIds, at) =>
+    staffUsers("PEOPLE_HR_EDIT", ["PrtEmployee", "PrtAgent"], organizationPartyIds, at)
+// The access administrators (ADMIN_ACCESS_MANAGE, who revoke a device in Admin) whose scope covers a device's display account:
+// members of one of its organizations (the identity scope's organizations of a user: employee, agent or member). Follow-up 4, the
+// user's call of Nov 12, 2026.
+const accessAdminUsers = (organizationPartyIds, at) =>
+    staffUsers("ADMIN_ACCESS_MANAGE", ["PrtEmployee", "PrtAgent", "PrtMember"], organizationPartyIds, at)
+// The worker's own enabled accounts, not display accounts.
+const ownUsers = partyId =>
+    partyId
+        ? Array.from(find("moqui.security.UserAccount", {partyId}).list())
+              .filter(row => row.disabled !== "Y" && row.displayAccount !== "Y")
+              .map(row => row.userId)
+        : []
+// A burst of refusals at a device (noticeAt within the window) told to the HR editors of its organizations and to the access
+// administrators whose scope covers its display account (follow-up 4: they open the device in Admin, where it is revoked), at most
+// once each noticeEveryMs, naming the device and the count, never a badge or a person, to them alone. The device's KioskDeviceNotice is
 // claimed under its row lock and the notice sent in one transaction of its own, so two refusals at once send one and a notice that
 // fails is tried again at the next refusal. A failure is logged and the refusal stands.
 function noticeBurst(device, at) {
@@ -518,9 +562,12 @@ function noticeBurst(device, at) {
                 lastNoticeDate: ec.user.nowTimestamp,
                 lastRefusalCount: count
             })
-            const userIds = hrEditorUsers(deviceEmployers(), at)
+            const organizationPartyIds = deviceEmployers()
+            const userIds = Array.from(
+                new Set(hrEditorUsers(organizationPartyIds, at).concat(accessAdminUsers(organizationPartyIds, at)))
+            )
             if (!userIds.length) {
-                ec.logger.warn("Clocking device " + device.deviceId + " had " + count + " refused attempts: no HR editor to tell")
+                ec.logger.warn("Clocking device " + device.deviceId + " had " + count + " refused attempts: no one to tell")
                 return
             }
             ec.makeNotificationMessage()
