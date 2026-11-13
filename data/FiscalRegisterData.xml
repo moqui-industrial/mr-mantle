@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="FiscalRegisterType" description="Fiscal and Statutory Register Type"/>
+    <moqui.basic.Enumeration enumId="FregJournal" enumTypeId="FiscalRegisterType" description="General Journal (Libro Giornale)"/>
+    <moqui.basic.Enumeration enumId="FregVatSale" enumTypeId="FiscalRegisterType" description="Sales VAT Register (Registro IVA Vendite)"/>
+    <moqui.basic.Enumeration enumId="FregVatPurchase" enumTypeId="FiscalRegisterType" description="Purchase VAT Register (Registro IVA Acquisti)"/>
+    <moqui.basic.Enumeration enumId="FregAsset" enumTypeId="FiscalRegisterType" description="Fixed Asset Register (Registro Cespiti)"/>
+    <moqui.basic.Enumeration enumId="FregLedger" enumTypeId="FiscalRegisterType" description="General Ledger (Libro Mastro)"/>
+</entity-facade-xml>

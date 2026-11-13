@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="journalSequenceNum" type="number-integer"/>
+        <field name="fiscalYear" type="id"/>
+    </extend-entity>
+
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="vatProtocolNum" type="text-short"/>
+        <field name="vatProtocolDate" type="date"/>
+        <field name="vatRegisterSeries" type="id"/>
+    </extend-entity>
+
+    <entity entity-name="FiscalRegisterLog" package="mantle.ledger.report" use="transactional" cache="never">
+        <field name="registerLogId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" not-null="true"/>
+        <field name="fiscalYear" type="id" not-null="true"/>
+        <field name="registerTypeEnumId" type="id" not-null="true"/>
+        <field name="series" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="fromDate" type="date"/>
+        <field name="thruDate" type="date"/>
+        <field name="firstPageNumber" type="number-integer"/>
+        <field name="lastPageNumber" type="number-integer"/>
+        <field name="firstSequenceNum" type="number-integer"/>
+        <field name="lastSequenceNum" type="number-integer"/>
+        <field name="totalDebitAmount" type="currency-amount"/>
+        <field name="totalCreditAmount" type="currency-amount"/>
+        <field name="isFinalized" type="text-indicator"/>
+        <field name="finalizedDate" type="date-time"/>
+        <field name="finalizedByUserId" type="id"/>
+        <field name="printedDate" type="date-time"/>
+        <field name="printedByUserId" type="id"/>
+        <field name="documentLocation" type="text-medium"/>
+
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="RegisterType" related="moqui.basic.Enumeration">
+            <key-map field-name="registerTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="mantle.ledger.timeline.TimePeriod">
+            <key-map field-name="timePeriodId"/></relationship>
+    </entity>
+</entities>

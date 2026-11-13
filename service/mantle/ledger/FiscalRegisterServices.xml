@@ -1,0 +1,298 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="GeneralJournalData" allow-remote="true">
+        <description>
+            Retrieves the General Journal (Libro Giornale) data for an organization and fiscal period or date range.
+            Orders transactions chronologically and calculates running totals (Dare/Avere), page splits, and carry-overs.
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pageStartingNumber" type="Integer"/>
+            <parameter name="linesPerPage" type="Integer" default-value="26"/>
+            <parameter name="isFinalizedRun" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organization" type="Map"/>
+            <parameter name="fiscalYear" type="String"/>
+            <parameter name="periodDescription" type="String"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="pages" type="List"/>
+            <parameter name="totalDebit" type="BigDecimal"/>
+            <parameter name="totalCredit" type="BigDecimal"/>
+            <parameter name="totalTransactions" type="Integer"/>
+            <parameter name="totalEntries" type="Integer"/>
+            <parameter name="startPageNumber" type="Integer"/>
+            <parameter name="endPageNumber" type="Integer"/>
+            <parameter name="isFinalized" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <!-- 1. Resolve Time Period / Date Range -->
+            <if condition="timePeriodId">
+                <entity-find-one entity-name="mantle.ledger.timeline.TimePeriod" value-field="tp">
+                    <field-map field-name="timePeriodId"/>
+                </entity-find-one>
+                <if condition="tp">
+                    <set field="fromDate" from="fromDate ?: tp.fromDate"/>
+                    <set field="thruDate" from="thruDate ?: tp.thruDate"/>
+                    <set field="periodDescription" from="tp.periodName ?: tp.timePeriodId"/>
+                </if>
+            </if>
+
+            <!-- Determine fiscalYear if missing -->
+            <if condition="!fiscalYear">
+                <set field="refDate" from="fromDate ?: ec.user.nowTimestamp"/>
+                <set field="fiscalYear" from="String.format('%tY', refDate)"/>
+            </if>
+            <if condition="!periodDescription">
+                <set field="periodDescription" from="fiscalYear"/>
+            </if>
+
+            <!-- 2. Get Organization Fiscal Details -->
+            <service-call name="mantle.party.PartyServices.get#PartyFiscalDetails"
+                    in-map="[partyId:organizationPartyId]" out-map="orgFiscal"/>
+            <entity-find-one entity-name="mantle.party.Organization" value-field="org">
+                <field-map field-name="partyId" from="organizationPartyId"/>
+            </entity-find-one>
+            <set field="organization" from="[partyId:organizationPartyId, organizationName:org?.organizationName ?: organizationPartyId,
+                    taxIdNumber:orgFiscal?.taxIdNumber, socialSecurityNumber:orgFiscal?.socialSecurityNumber,
+                    exchSysCode:orgFiscal?.exchSysCode, reaNumber:orgFiscal?.reaNumber]"/>
+
+            <!-- 3. Determine Starting Page Number from FiscalRegisterLog -->
+            <if condition="pageStartingNumber == null || pageStartingNumber &lt; 1">
+                <entity-find entity-name="mantle.ledger.report.FiscalRegisterLog" list="lastLogs">
+                    <econdition field-name="organizationPartyId" from="organizationPartyId"/>
+                    <econdition field-name="fiscalYear" from="fiscalYear"/>
+                    <econdition field-name="registerTypeEnumId" value="FregJournal"/>
+                    <order-by field-name="-lastPageNumber"/>
+                </entity-find>
+                <set field="startPageNumber" from="lastLogs ? (lastLogs[0].lastPageNumber + 1) : 1"/>
+            <else>
+                <set field="startPageNumber" from="pageStartingNumber"/>
+            </else>
+            </if>
+
+            <!-- 4. Query Posted Entries using AcctgTransAndEntryGlaSummary -->
+            <entity-find entity-name="mantle.ledger.transaction.AcctgTransAndEntryGlaSummary" list="rawEntries">
+                <econdition field-name="organizationPartyId" from="organizationPartyId"/>
+                <econdition field-name="isPosted" value="Y"/>
+                <econdition field-name="transactionDate" operator="greater-equals" from="fromDate" ignore="!fromDate"/>
+                <econdition field-name="transactionDate" operator="less-equals" from="thruDate" ignore="!thruDate"/>
+                <order-by field-name="transactionDate,acctgTransId,acctgTransEntrySeqId"/>
+            </entity-find>
+
+            <!-- 5. Group entries into transactions and calculate page lines -->
+            <script><![CDATA[
+                import java.math.BigDecimal
+
+                def txMap = [:]
+                for (def row in rawEntries) {
+                    def txId = row.acctgTransId
+                    def tx = txMap[txId]
+                    if (!tx) {
+                        tx = [
+                            acctgTransId: txId,
+                            transactionDate: row.transactionDate,
+                            txDescription: row.txDescription ?: '',
+                            txVoucherRef: row.txVoucherRef ?: '',
+                            txVoucherDate: row.txVoucherDate,
+                            invoiceId: row.invoiceId,
+                            paymentId: row.paymentId,
+                            journalSequenceNum: row.journalSequenceNum,
+                            entries: []
+                        ]
+                        txMap[txId] = tx
+                    }
+                    def isDebit = (row.debitCreditFlag == 'D')
+                    def amt = row.amount != null ? (BigDecimal) row.amount : BigDecimal.ZERO
+                    tx.entries.add([
+                        acctgTransEntrySeqId: row.acctgTransEntrySeqId,
+                        glAccountId: row.glAccountId,
+                        accountCode: row.accountCode ?: row.glAccountId,
+                        accountName: row.accountName ?: '',
+                        debitCreditFlag: row.debitCreditFlag,
+                        debitAmount: isDebit ? amt : BigDecimal.ZERO,
+                        creditAmount: !isDebit ? amt : BigDecimal.ZERO
+                    ])
+                }
+
+                def txList = new ArrayList(txMap.values())
+                totalTransactions = txList.size()
+                totalEntries = rawEntries.size()
+
+                // Sequential numbering if missing in preview
+                int seq = 1
+                for (def tx in txList) {
+                    if (!tx.journalSequenceNum) tx.journalSequenceNum = seq
+                    seq++
+                }
+
+                // Page distribution
+                pages = []
+                int currentPageNum = startPageNumber
+                int maxLines = linesPerPage != null && linesPerPage > 5 ? linesPerPage : 26
+                int currentLineCount = 0
+
+                BigDecimal runningDebit = BigDecimal.ZERO
+                BigDecimal runningCredit = BigDecimal.ZERO
+
+                BigDecimal pageDebit = BigDecimal.ZERO
+                BigDecimal pageCredit = BigDecimal.ZERO
+
+                def currentPageRows = []
+                BigDecimal carriedForwardDebit = BigDecimal.ZERO
+                BigDecimal carriedForwardCredit = BigDecimal.ZERO
+
+                for (def tx in txList) {
+                    int txLines = 1 + tx.entries.size() // header line + entry lines
+                    if (currentLineCount + txLines > maxLines && !currentPageRows.isEmpty()) {
+                        // Close current page
+                        BigDecimal carryOverDebit = carriedForwardDebit.add(pageDebit)
+                        BigDecimal carryOverCredit = carriedForwardCredit.add(pageCredit)
+
+                        pages.add([
+                            pageNumber: currentPageNum,
+                            pageLabel: "${fiscalYear} / ${currentPageNum}",
+                            carriedForwardDebit: carriedForwardDebit,
+                            carriedForwardCredit: carriedForwardCredit,
+                            transactions: currentPageRows,
+                            pageDebit: pageDebit,
+                            pageCredit: pageCredit,
+                            carryOverDebit: carryOverDebit,
+                            carryOverCredit: carryOverCredit
+                        ])
+
+                        currentPageNum++
+                        carriedForwardDebit = carryOverDebit
+                        carriedForwardCredit = carryOverCredit
+                        currentPageRows = []
+                        pageDebit = BigDecimal.ZERO
+                        pageCredit = BigDecimal.ZERO
+                        currentLineCount = 0
+                    }
+
+                    currentPageRows.add(tx)
+                    currentLineCount += txLines
+                    for (def entry in tx.entries) {
+                        pageDebit = pageDebit.add(entry.debitAmount)
+                        pageCredit = pageCredit.add(entry.creditAmount)
+                        runningDebit = runningDebit.add(entry.debitAmount)
+                        runningCredit = runningCredit.add(entry.creditAmount)
+                    }
+                }
+
+                // Add last page
+                if (!currentPageRows.isEmpty() || pages.isEmpty()) {
+                    BigDecimal carryOverDebit = carriedForwardDebit.add(pageDebit)
+                    BigDecimal carryOverCredit = carriedForwardCredit.add(pageCredit)
+                    pages.add([
+                        pageNumber: currentPageNum,
+                        pageLabel: "${fiscalYear} / ${currentPageNum}",
+                        carriedForwardDebit: carriedForwardDebit,
+                        carriedForwardCredit: carriedForwardCredit,
+                        transactions: currentPageRows,
+                        pageDebit: pageDebit,
+                        pageCredit: pageCredit,
+                        carryOverDebit: carryOverDebit,
+                        carryOverCredit: carryOverCredit
+                    ])
+                }
+
+                totalDebit = runningDebit
+                totalCredit = runningCredit
+                endPageNumber = currentPageNum
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="finalize" noun="GeneralJournalPeriod" allow-remote="true">
+        <description>
+            Finalizes the General Journal for a period: assigns atomic sequential numbers to transactions via SequenceValueItem
+            and logs the page counts and totals in FiscalRegisterLog.
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear" required="true"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Date" required="true"/>
+            <parameter name="thruDate" type="Date" required="true"/>
+            <parameter name="documentLocation"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registerLogId" type="String"/>
+            <parameter name="firstPageNumber" type="Integer"/>
+            <parameter name="lastPageNumber" type="Integer"/>
+            <parameter name="firstSequenceNum" type="Integer"/>
+            <parameter name="lastSequenceNum" type="Integer"/>
+            <parameter name="totalDebitAmount" type="BigDecimal"/>
+            <parameter name="totalCreditAmount" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <!-- 1. Generate journal preview to get totals and transactions -->
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#GeneralJournalData"
+                    in-map="[organizationPartyId:organizationPartyId, fiscalYear:fiscalYear,
+                        timePeriodId:timePeriodId, fromDate:ec.l10n.parseTimestamp(fromDate.toString() + ' 00:00:00.000', 'yyyy-MM-dd HH:mm:ss.SSS'),
+                        thruDate:ec.l10n.parseTimestamp(thruDate.toString() + ' 23:59:59.999', 'yyyy-MM-dd HH:mm:ss.SSS'),
+                        isFinalizedRun:true]"
+                    out-map="journalData"/>
+
+            <set field="firstPageNumber" from="journalData.startPageNumber"/>
+            <set field="lastPageNumber" from="journalData.endPageNumber"/>
+            <set field="totalDebitAmount" from="journalData.totalDebit"/>
+            <set field="totalCreditAmount" from="journalData.totalCredit"/>
+
+            <!-- 2. Assign permanent progressive sequence numbers using SequenceValueItem -->
+            <set field="seqName" value="FiscalJournal_${organizationPartyId}_${fiscalYear}"/>
+            <set field="firstSeq" type="Integer" from="null"/>
+            <set field="lastSeq" type="Integer" from="null"/>
+
+            <script><![CDATA[
+                for (def page in journalData.pages) {
+                    for (def tx in page.transactions) {
+                        def txId = tx.acctgTransId
+                        def existing = ec.entity.find('mantle.ledger.transaction.AcctgTrans')
+                                .condition('acctgTransId', txId).one()
+                        if (existing && !existing.journalSequenceNum) {
+                            long nextNum = ec.entity.sequencedIdPrimary(seqName, 1, 1)
+                            existing.journalSequenceNum = nextNum
+                            existing.fiscalYear = fiscalYear
+                            existing.update()
+                            if (firstSeq == null) firstSeq = (int) nextNum
+                            lastSeq = (int) nextNum
+                        } else if (existing) {
+                            if (firstSeq == null) firstSeq = (int) existing.journalSequenceNum
+                            lastSeq = (int) existing.journalSequenceNum
+                        }
+                    }
+                }
+            ]]></script>
+
+            <set field="firstSequenceNum" from="firstSeq ?: 1"/>
+            <set field="lastSequenceNum" from="lastSeq ?: 1"/>
+
+            <!-- 3. Record in FiscalRegisterLog -->
+            <service-call name="create#mantle.ledger.report.FiscalRegisterLog"
+                    in-map="[organizationPartyId:organizationPartyId, fiscalYear:fiscalYear,
+                        registerTypeEnumId:'FregJournal', timePeriodId:timePeriodId,
+                        fromDate:fromDate, thruDate:thruDate,
+                        firstPageNumber:firstPageNumber, lastPageNumber:lastPageNumber,
+                        firstSequenceNum:firstSequenceNum, lastSequenceNum:lastSequenceNum,
+                        totalDebitAmount:totalDebitAmount, totalCreditAmount:totalCreditAmount,
+                        isFinalized:'Y', finalizedDate:ec.user.nowTimestamp,
+                        finalizedByUserId:ec.user.userId, printedDate:ec.user.nowTimestamp,
+                        printedByUserId:ec.user.userId, documentLocation:documentLocation]"
+                    out-map="logResult"/>
+            <set field="registerLogId" from="logResult.registerLogId"/>
+        </actions>
+    </service>
+</services>
