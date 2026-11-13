@@ -282,6 +282,9 @@ function termRow(term, at, exampleCounts, waiting) {
             expenseAccountText: accountText(term.expenseGlAccountId),
             liabilityGlAccountId: term.liabilityGlAccountId || null,
             liabilityAccountText: accountText(term.liabilityGlAccountId),
+            // P27 review (the user's call of Nov 13, 2026): who a deduction withheld or an employer contribution is paid to
+            payeePartyId: term.payeePartyId || null,
+            payeeName: term.payeePartyId ? lib.partyNames([term.payeePartyId])[term.payeePartyId] || term.payeePartyId : "",
             publishedDateText: dateText(term.publishedDate),
             publishedByName: userName(term.publishedByUserId),
             exampleCount: exampleCounts?.[term.payrollComponentTermId] || 0
@@ -454,6 +457,7 @@ const termFields = [
     "prorated",
     "expenseGlAccountId",
     "liabilityGlAccountId",
+    "payeePartyId",
     "fromDate",
     "thruDate"
 ]
@@ -629,6 +633,15 @@ function checkTerm(component, term) {
             !one("mantle.ledger.account.GlAccountOrganization", {glAccountId, organizationPartyId: component.organizationPartyId})
         )
             denied("ACCOUNT_INVALID", "Account " + glAccountId + " is not one of the employer's")
+    // P27 review (the user's call of Nov 13, 2026): a deduction's or an employer contribution's payee (a pension fund, a union): a
+    // finalization makes its withheld and owed amounts one invoice from it a liability account; an earning is paid to the person
+    out.payeePartyId = text(term.payeePartyId) || null
+    if (out.payeePartyId && !(kind === "PckDeduction" || kind === "PckContribution"))
+        denied("PAYEE_NOT_FOR_KIND", "Only a deduction or an employer contribution is paid to a payee")
+    if (out.payeePartyId && !one("mantle.party.Party", {partyId: out.payeePartyId}))
+        denied("PAYEE_INVALID", out.payeePartyId + " is not a party")
+    if (out.payeePartyId && out.payeePartyId === component.organizationPartyId)
+        denied("PAYEE_INVALID", "The employer is not its own payee")
     const fromMs = when(term.fromDate)
     const thruMs = when(term.thruDate)
     if (fromMs == null) denied("DATES_INVALID", "A term starts on a date")

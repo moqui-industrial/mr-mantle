@@ -1,4 +1,5 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
+const payrollOrigin = () => ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
 const SUMMARY = "mantle.ledger.transaction.AcctgTransAndEntrySummary"
 function base(p, before = false) {
     const s = lib.organization(p, "reportRead")
@@ -167,6 +168,10 @@ function ledger(p) {
         thruDay: p.thruAccountingDate
     })
     if (dates) q = q.condition(dates)
+    // People P27 review (AC-23): a reader without PAYROLL_VIEW sees an account's payroll-origin lines as one masked "Payroll" line
+    // (no entry, date or person), so the account's balances still reconcile
+    const origin = payrollOrigin()
+    const masking = !origin.canRead()
 
     const balances = {}
     for (const row of Array.from(base(p, true).q.list())) {
@@ -186,15 +191,35 @@ function ledger(p) {
             a.acctgTransId.localeCompare(b.acctgTransId) ||
             a.acctgTransEntrySeqId.localeCompare(b.acctgTransEntrySeqId)
     )
-    const reportRows = selected.map(row => {
+    const reportRows = []
+    const maskedRows = {}
+    for (const row of selected) {
         const key = row.glAccountId + ":" + row.amountUomId
         balances[key] = (balances[key] || toDecimal(0)).add(toDecimal(row.amount).multiply(row.debitCreditFlag === "D" ? 1 : -1))
-        return Object.assign(lib.display(row), {
-            debits: row.debitCreditFlag === "D" ? row.amount : toDecimal(0),
-            credits: row.debitCreditFlag === "C" ? row.amount : toDecimal(0),
-            ending: balances[key]
-        })
-    })
+        const debits = row.debitCreditFlag === "D" ? toDecimal(row.amount) : toDecimal(0)
+        const credits = row.debitCreditFlag === "C" ? toDecimal(row.amount) : toDecimal(0)
+        if (masking && row.payrollOrigin === "Y") {
+            // the account's payroll lines folded into its one "Payroll" line, at the first one's place
+            let masked = maskedRows[key]
+            if (!masked) {
+                masked = maskedRows[key] = {
+                    glAccountId: row.glAccountId,
+                    accountName: row.accountName,
+                    amountUomId: row.amountUomId,
+                    description: "Payroll",
+                    payrollMasked: true,
+                    debits: toDecimal(0),
+                    credits: toDecimal(0)
+                }
+                reportRows.push(masked)
+            }
+            masked.debits = masked.debits.add(debits)
+            masked.credits = masked.credits.add(credits)
+            masked.ending = balances[key]
+            continue
+        }
+        reportRows.push(Object.assign(lib.display(row), {debits, credits, ending: balances[key]}))
+    }
     return {
         reportRows,
         organizationPartyId: s.organizationPartyId,
@@ -291,8 +316,9 @@ function invoiceReconciliation(p) {
     )
     const currency = lib.preference(org).baseCurrencyUomId
     const reportRows = []
-    const add = (check, checkText, sourceKind, sourceId, description, documentAmount, glAmount) =>
-        reportRows.push({
+    const rowPayments = new Map()
+    const add = (check, checkText, sourceKind, sourceId, description, documentAmount, glAmount) => {
+        const row = {
             check,
             checkText,
             sourceKind,
@@ -301,7 +327,10 @@ function invoiceReconciliation(p) {
             documentAmount,
             glAmount,
             difference: documentAmount != null && glAmount != null ? toDecimal(documentAmount).subtract(glAmount) : null
-        })
+        }
+        reportRows.push(row)
+        return row
+    }
     // the net on the receivable or payable accounts of the postings of some documents, through the period's end
     const glNet = (field, ids) => {
         const out = {}
@@ -480,7 +509,7 @@ function invoiceReconciliation(p) {
         .condition("appliedDate", "greater-equals", fromStamp)
         .condition("appliedDate", "less", afterStamp)
         .condition("invoiceDate", "greater-equals", afterStamp)
-        .list())
+        .list()) {
         add(
             "applicationAfterPeriod",
             "Applied in the period to a later invoice",
@@ -490,6 +519,8 @@ function invoiceReconciliation(p) {
             row.amountApplied,
             null
         )
+        rowPayments.set(reportRows[reportRows.length - 1], row.paymentId)
+    }
     // the aging's open total against the ledger at the period's end, summed in the queries
     const side = payable ? "toPartyId" : "fromPartyId"
     const statuses = payable ? PAYABLE_STATUSES : RECEIVABLE_STATUSES
@@ -535,6 +566,22 @@ function invoiceReconciliation(p) {
             }
             agingOpen = agingOpen.add(open)
         }
+    }
+    // People P27 review (AC-23): a reader without PAYROLL_VIEW gets no exception row of a payroll-origin invoice, payment or
+    // transaction (the summary's totals are aggregates and keep them)
+    if (!payrollOrigin().canRead() && reportRows.length) {
+        const keyed = reportRows.map(row => ({
+            row,
+            invoiceId: ["invoices", "bills"].includes(row.sourceKind) ? row.sourceId : null,
+            paymentId: row.sourceKind === "payments" ? row.sourceId : rowPayments.get(row) || null,
+            acctgTransId: row.sourceKind === "journals" ? row.sourceId : null
+        }))
+        const kept = new Set(
+            payrollOrigin()
+                .visibleRows(keyed, {invoice: ["invoiceId"], payment: ["paymentId"], transaction: ["acctgTransId"]})
+                .map(entry => entry.row)
+        )
+        reportRows.splice(0, reportRows.length, ...reportRows.filter(row => kept.has(row)))
     }
     let ledgerBalance = toDecimal(0)
     for (const row of lib
@@ -865,9 +912,17 @@ function partnerLedger(p) {
             glAccountClassEnumId: accountClass
         })
         if (p.partyId) q = q.condition("otherPartyId", p.partyId)
+        if (p.partyId && masking) q = q.condition(payrollOrigin().transactionCondition())
         if (p.amountUomId) q = q.condition("amountUomId", p.amountUomId)
+        if (masking) q = q.selectField("payrollOrigin")
         return dates ? q.condition(dates) : q
     }
+    // People P27 review (AC-23): a reader without PAYROLL_VIEW sees the payroll-origin lines as one masked "Payroll" party (its
+    // opening, one line of their debits and credits, and its closing), so the totals still reconcile; asked for one party, none of
+    // its payroll lines
+    const masking = !payrollOrigin().canRead()
+    const PAYROLL_PARTY = "_PAYROLL_"
+    const partyOf = row => (masking && row.payrollOrigin === "Y" ? PAYROLL_PARTY : row.otherPartyId)
     const signed = row => toDecimal(row.amount ?? 0).multiply(row.debitCreditFlag === "D" ? sign : -sign)
     const groups = new Map()
     const group = (partyId, amountUomId) => {
@@ -884,7 +939,7 @@ function partnerLedger(p) {
             .selectField("debitCreditFlag")
             .selectField("amount")
             .list()) {
-            const total = group(row.otherPartyId, row.amountUomId)
+            const total = group(partyOf(row), row.amountUomId)
             total.opening = total.opening.add(signed(row))
         }
     }
@@ -925,13 +980,14 @@ function partnerLedger(p) {
             a.acctgTransEntrySeqId.localeCompare(b.acctgTransEntrySeqId)
     )
     for (const row of lines) {
-        const total = group(row.otherPartyId, row.amountUomId)
+        const total = group(partyOf(row), row.amountUomId)
         const debit = row.debitCreditFlag === "D"
         total[debit ? "debits" : "credits"] = total[debit ? "debits" : "credits"].add(toDecimal(row.amount ?? 0))
         total.lines.push(row)
     }
-    const names = lib.lib.partyNames([...groups.values()].map(row => row.partyId))
-    const nameOf = partyId => (!partyId ? "No party" : names[partyId] || "Private contact")
+    const names = lib.lib.partyNames([...groups.values()].map(row => row.partyId).filter(id => id !== PAYROLL_PARTY))
+    const nameOf = partyId =>
+        !partyId ? "No party" : partyId === PAYROLL_PARTY ? "Payroll" : names[partyId] || "Private contact"
     const sorted = [...groups.values()].sort(
         (a, b) => nameOf(a.partyId).localeCompare(nameOf(b.partyId)) || a.amountUomId.localeCompare(b.amountUomId)
     )
@@ -943,7 +999,22 @@ function partnerLedger(p) {
         const head = {partyId, partyName, amountUomId: total.amountUomId}
         let balance = total.opening
         reportRows.push(Object.assign({rowType: "opening", description: "Opening balance", balance: total.opening}, head))
-        for (const row of total.lines) {
+        if (total.partyId === PAYROLL_PARTY) {
+            // the masked party's lines as one: no entry, day, account or document
+            for (const row of total.lines) balance = balance.add(signed(row))
+            if (total.lines.length)
+                reportRows.push(
+                    Object.assign({}, head, {
+                        rowType: "entry",
+                        description: "Payroll",
+                        payrollMasked: true,
+                        debit: complete ? total.debits : null,
+                        credit: complete ? total.credits : null,
+                        balance: complete ? balance : null
+                    })
+                )
+        }
+        for (const row of total.partyId === PAYROLL_PARTY ? [] : total.lines) {
             balance = balance.add(signed(row))
             const sourceKind = row.invoiceId ? (payable ? "bills" : "invoices") : row.paymentId ? "payments" : "journals"
             reportRows.push(

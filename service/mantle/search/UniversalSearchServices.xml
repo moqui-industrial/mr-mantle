@@ -292,12 +292,11 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                     if (!readable) { financeDropped = true; continue }
                 }
-                // a ledger transaction of a payroll-origin invoice or payment only for a reader of payroll (People P27, AC-23)
-                if (hit.documentId === 'MantleAcctgTrans') {
-                    const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
-                    if (!origin.canRead() && (origin.isPayrollInvoice(current.invoiceId) || origin.isPayrollPayment(current.paymentId || null))) {
-                        financeDropped = true; continue }
-                }
+                // a ledger transaction of a payroll-origin invoice or payment only for a reader of payroll (People P27, AC-23: its
+                // payrollOrigin mark, PayrollOrigin.js)
+                if (hit.documentId === 'MantleAcctgTrans' && current.payrollOrigin === 'Y' &&
+                        !ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').canRead()) {
+                    financeDropped = true; continue }
                 // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
                 // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds, as get#RecordLinkInfo has it)
                 // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)
@@ -363,8 +362,12 @@ along with this software (see the LICENSE.md file). If not, see
             const finance = ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js').capabilities()
             const bothSides = finance.systemAdmin || finance.admin || finance.reportRead || (finance.arRead && finance.apRead)
             const sidedTypes = ['MantleInvoice', 'MantlePayment'].filter((type) => types.includes(type))
-            const liveTypes = (liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
-                    .concat(financeDropped || !bothSides ? sidedTypes : [])
+            // People P27 review (AC-23): a user without PAYROLL_VIEW, once there are payroll-origin documents, gets the page's counts of
+            // invoices, payments and transactions, so the index's counts never tell the payroll matches
+            const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
+            const payrollTypes = !origin.canRead() && origin.anyMarked() ? ['MantleInvoice', 'MantlePayment', 'MantleAcctgTrans'].filter((type) => types.includes(type)) : []
+            const liveTypes = [...new Set((liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
+                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes))]
             if (liveTypes.length) { total = results.length; totalRelation = 'gte' }
             // facets over the whole authorized match, not the page
             const facetList = facets ?? []

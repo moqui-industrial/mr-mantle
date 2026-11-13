@@ -107,6 +107,11 @@ along with this software (see the LICENSE.md file). If not, see
                     description="Payroll - Overpayment recovery deduction component"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
             <mantle.party.PartySettingType partySettingTypeId="PayrollRecoveryCap"
                     description="Payroll - Most recovered from an employee a period" validRegexp="^[0-9]+(\.[0-9]+)?$"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
+            <!-- or a percentage of net pay (the user's call of Nov 13, 2026): of the employee's wage net on their latest finalized
+                regular run; set by store#RecoverySettings, which keeps the two exclusive -->
+            <mantle.party.PartySettingType partySettingTypeId="PayrollRecoveryCapPercent"
+                    description="Payroll - Most recovered from an employee a period, as a percentage of net pay"
+                    validRegexp="^[0-9]+(\.[0-9]+)?$"><roles roleTypeId="OrgInternal"/></mantle.party.PartySettingType>
         </seed-data>
     </entity>
     <extend-entity entity-name="PayrollRun" package="mantle.humanres.payroll">
@@ -125,5 +130,27 @@ along with this software (see the LICENSE.md file). If not, see
             withheld and owed amounts are held until its payee is paid</description></field>
         <field name="localizationExpenseGlAccountId" type="id" enable-audit-log="update"><description>The expense of the
             localization's employer amounts</description></field>
+    </extend-entity>
+    <extend-entity entity-name="PayrollComponentTerm" package="mantle.humanres.payroll">
+        <field name="payeePartyId" type="id"><description>A deduction's or an employer contribution's payee (the People P27 review,
+            the user's call of Nov 13, 2026): a finalization makes the withheld and owed amounts of its final slips one draft invoice
+            from it a liability account (PayrollObligations.js payeeBuckets)</description></field>
+    </extend-entity>
+    <!-- Accounting's payroll-origin projection (AC-23, mantle/account/PayrollOrigin.js; the People P27 review): the mark every finance
+        read filters on, so a view of these entities carries it and a list, export or report leaves payroll-origin rows to holders
+        of PAYROLL_VIEW with no join to People. Set by the finalization (its invoices) and by entity/PayrollOrigin.eecas.xml (a
+        payroll payment, a payment applied to a marked invoice or payment, a transaction of either); never taken off. -->
+    <extend-entity entity-name="Invoice" package="mantle.account.invoice">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: an invoice a pay run's finalization made (net pay, a
+            payee's amounts, a receivable from a person), read with PAYROLL_VIEW alone</description></field>
+        <index name="INVOICE_PAYROLL_ORIGIN"><index-field name="payrollOrigin"/></index>
+    </extend-entity>
+    <extend-entity entity-name="Payment" package="mantle.account.payment">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: a payroll payment, or one applied to a payroll-origin
+            invoice or payment, read with PAYROLL_VIEW alone</description></field>
+    </extend-entity>
+    <extend-entity entity-name="AcctgTrans" package="mantle.ledger.transaction">
+        <field name="payrollOrigin" type="text-indicator"><description>Y: a transaction of a payroll-origin invoice or payment, read
+            with PAYROLL_VIEW alone</description></field>
     </extend-entity>
 </entities>

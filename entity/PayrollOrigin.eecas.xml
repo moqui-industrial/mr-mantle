@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting's payroll-origin projection (AC-23, mantle/account/PayrollOrigin.js; the People P27 review): the payrollOrigin mark
+    kept on payments and ledger transactions as they are written, so a payment made by hand and applied to a payroll invoice is
+    hidden as a payment run's PtPayrollPayment is -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="PaymentPayrollOrigin" entity="mantle.account.payment.Payment" on-create="true" on-update="true"
+            run-on-error="false" run-before="true" get-entire-entity="true">
+        <condition><expression>paymentTypeEnumId == 'PtPayrollPayment'</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').markPaymentValue(entityValue)</script></actions>
+    </eeca>
+    <eeca id="AcctgTransPayrollOrigin" entity="mantle.ledger.transaction.AcctgTrans" on-create="true" on-update="true"
+            run-on-error="false" run-before="true" get-entire-entity="true">
+        <condition><expression>payrollOrigin != 'Y' &amp;&amp; (invoiceId || paymentId || toInvoiceId || toPaymentId)</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').markTransactionValue(entityValue)</script></actions>
+    </eeca>
+    <eeca id="PaymentApplicationPayrollOrigin" entity="mantle.account.payment.PaymentApplication" on-create="true"
+            on-update="true" run-on-error="false" get-entire-entity="true">
+        <condition><expression>invoiceId || toInvoiceId || toPaymentId</expression></condition>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').markApplication(entityValue)</script></actions>
+    </eeca>
+</eecas>

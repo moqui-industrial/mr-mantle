@@ -373,17 +373,23 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- impl-people P27 (design §8.2 steps 6 and 7, §8.3, §9's payroll route; PayrollObligations.js) -->
-    <service verb="finalize" noun="Run" allow-remote="false" transaction-timeout="600">
+    <service verb="finalize" noun="Run" allow-remote="false" transaction="ignore">
         <description>An approved run of a live pay group finalized (PAYROLL_VIEW and PAYROLL_EDIT), under locks: the approval still
-            holding (APPROVAL_NO_LONGER_HOLDS) and every amount's account mapped (ACCOUNT_MAPPING_MISSING) first; then each employment
+            holding (APPROVAL_NO_LONGER_HOLDS) and every amount's account mapped, with each employer contribution's payee
+            (ACCOUNT_MAPPING_MISSING), first, the run then Finalizing; every step commits in a transaction of its own (the service
+            holds none), so the run never goes back to Approved behind an employment made final; then each employment
             in its own transaction: its slip made final, the inputs its calculation took finalized, its net pay a draft invoice from
             the person through Mantle's invoice services (earnings on their expense accounts, deductions and the localization's
             employee amount withheld on their liability accounts; a reimbursement left out), each expense claim it reimburses linked
             as it is (no second expense), an overpayment (a negative correction) to recover by deductions on the next regular runs
             or, once the person has left, as a receivable; one that fails is left pending with its reason while the others go on.
-            Once every employment is final, the localization payee's amounts as one invoice from the group's payee, then the run's
-            invoices released to Accounting (received) and the run finalized; until then nothing is released. A retry finds what
-            was made (each obligation's unique key) and finishes the rest; a finalized run answers as it is (repeated). No ledger
+            Once every employment is final, one invoice for each payee and liability account (the localization payee's amounts, and
+            each deduction's or employer contribution's payee named by its term: the withheld amounts on the liability account, the
+            employer's on their expense account), each in its own transaction, then the run's invoices released to Accounting
+            (received) and the run finalized; until then nothing is released. Then each final slip's statement is issued
+            (issue#Payslip: the stored PDF and the person's direct-only notice), each in its own transaction, one that fails counted
+            (issueFailedCount) and left final. A retry finds what was made (each obligation's unique key) and finishes the rest; a
+            finalized run answers as it is (repeated), issuing any statement still not issued. No ledger
             entry, approval for payment or payment is made here. Refuses a run not approved (NOT_APPROVED), a pay group that is not
             live (NOT_LIVE, naming each reason: every group of this build, the demonstration localization never being live), and
             another employer's run (RECORD_UNAVAILABLE).</description>
@@ -399,9 +405,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="obligationCount" type="Integer"/>
             <parameter name="message"/>
             <parameter name="repeated" type="Boolean"/>
+            <parameter name="issuedCount" type="Integer"><description>Statements issued by this call</description></parameter>
+            <parameter name="issueFailedCount" type="Integer"><description>Statements that failed to issue (their slips stay
+                final)</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('finalizeRun', context)"/>
+            <set field="issuedCount" from="out.issuedCount ?? 0"/>
+            <set field="issueFailedCount" from="out.issueFailedCount ?? 0"/>
             <set field="payrollRunId" from="out.payrollRunId"/>
             <set field="statusId" from="out.statusId"/>
             <set field="complete" from="out.complete"/>

@@ -415,8 +415,12 @@ function previewDunning(p) {
     const asOf = dayText(p.asOfDate) || today()
     const levels = levelsInEffect(organizationPartyId)
     if (!levels.length) denied("LEVELS_REQUIRED", "Set up the dunning levels first")
+    // People P27 review (AC-23): a receivable from a person a pay run made is dunned by a reader of payroll alone (PayrollOrigin.js)
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
+    let invoiceFind = find(I, {fromPartyId: organizationPartyId})
+    if (origin.invoiceCondition()) invoiceFind = invoiceFind.condition(origin.invoiceCondition())
     const found = Array.from(
-        find(I, {fromPartyId: organizationPartyId})
+        invoiceFind
             .condition("statusId", "in", OPEN_STATUSES)
             .condition("unpaidTotal", "greater", toDecimal(0))
             .condition("invoiceDate", "less-equals", endOf(asOf))
@@ -488,12 +492,14 @@ function previewDunning(p) {
         if (disputedLeftOut.length) excludedRow("DISPUTED", disputedLeftOut)
         if (!level || !included.length) continue
         const overdueAmount = included.reduce((sum, line) => sum.add(line.overdueAmount), toDecimal(0))
+        let coverFind = find("mantle.account.payment.Payment", {
+            fromPartyId: customerPartyId,
+            toPartyId: organizationPartyId,
+            amountUomId: currencyUomId
+        })
+        if (origin.paymentCondition()) coverFind = coverFind.condition(origin.paymentCondition())
         const cover = Array.from(
-            find("mantle.account.payment.Payment", {
-                fromPartyId: customerPartyId,
-                toPartyId: organizationPartyId,
-                amountUomId: currencyUomId
-            })
+            coverFind
                 .condition("statusId", "in", ["PmntDelivered", "PmntConfirmed"])
                 .condition("unappliedTotal", "greater", toDecimal(0))
                 .list()

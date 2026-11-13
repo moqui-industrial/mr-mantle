@@ -100,6 +100,11 @@ function query(scope, kind, filters = {}) {
         )
         .condition(invoice ? "currencyUomId" : "amountUomId", scope.currencyUomId)
     q = privateQuery(q)
+    // People P27 review (AC-23): a payroll-origin invoice or payment (its payrollOrigin mark) is no open item, nor a linked record
+    // a payment's detail shows, for a user without PAYROLL_VIEW (PayrollOrigin.js)
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
+    const originCondition = invoice ? origin.invoiceCondition() : origin.paymentCondition()
+    if (originCondition) q = q.condition(originCondition)
     if (invoice) q = q.condition("invoiceTypeEnumId", kind === "credit" ? "equals" : "not-equals", "InvoiceCreditMemo")
     else {
         const sourceField = scope.direction === "receivable" ? "toPartyId" : "fromPartyId"

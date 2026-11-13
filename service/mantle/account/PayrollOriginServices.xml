@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting's payroll-origin projection and payroll posting (AC-23, mantle/account/PayrollOrigin.js; impl-people P27 and its
+    review): the data update an existing database needs -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="migrate" noun="PayrollOrigin" allow-remote="false">
+        <description>What a database made before People P27 needs for payroll to post and stay confidential, run on every seed load
+            (data/ZaaGlAccountsUpdateData.xml) and with nothing to do once done or on a new database (its install data has the
+            mappings): for DefaultSettings and each organization with its own payment mappings, PtPayrollPayment's payable mappings
+            (applied: the organization's InvoicePayroll payable account; unapplied: its PtInvoicePayment unapplied account), and for
+            each with its own InvoicePayroll payable type, the receivable side (InvoicePayroll from the organization, a receivable
+            from a person who left: its InvoiceSales receivable account), each added only where missing, never changing one that is
+            there; and the payments of PtPayrollPayment made before the payrollOrigin mark, with their transactions, marked. Each
+            organization on its own: one that fails is logged and counted, and the rest go on.</description>
+        <out-parameters>
+            <parameter name="mappingCount" type="Integer"><description>Mappings added</description></parameter>
+            <parameter name="markedCount" type="Integer"><description>Payments marked</description></parameter>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const out = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').migrate()
+            mappingCount = out.mappingCount; markedCount = out.markedCount; failedCount = out.failedCount
+        ]]></script></actions>
+    </service>
+</services>

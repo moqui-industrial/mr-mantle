@@ -6,7 +6,11 @@
 // on the payroll route is linked as it is (no second expense), and the design's example (1,000 wage net, a 100 claim, a 40 advance
 // applied to it) delivers 1,060 in one payroll payment from the person's payroll account; a negative correction is recovered by
 // deductions capped a period on the next regular run, a leaver's (the group no longer paying them in the period) as a receivable;
-// a finance user without PAYROLL_VIEW finds no payroll invoice where one with it does. Standalone: spec-local organizations, people,
+// a finance user without PAYROLL_VIEW finds no payroll invoice where one with it does. The P27 review: a finalization whose caller's
+// transaction rolls back stays Finalizing (a retry finishes it); a finalized run's statements are issued; payroll's posting mappings
+// added to an existing database (migrate#PayrollOrigin) and a leaver's receivable posted; the recovery cap a percentage of net pay,
+// set through store#RecoverySettings; a pension deduction and the employer's contribution paid to the fund, one invoice from it
+// (the user's calls of Nov 13, 2026). Standalone: spec-local organizations, people,
 // employments, pay configuration (published as data), a live localization, salaries, inputs, a claim, an advance and users.
 // Run: ./moq test mr-mantle --spec PayObligations
 const prefix = "PAYOBL"
@@ -437,6 +441,29 @@ feature("finalizing releases nothing until every employee and the payee's amount
                 lastUpdatedStamp: one(INVOICE, {invoiceId: state.claim}).lastUpdatedStamp
             })
         )
+        // the finalizing caller's transaction rolled back (a timeout, say) after the employees' own transactions committed: the run
+        // stays Finalizing, so the retry below goes on (the P27 review: it went back to Approved, its approval no longer holding)
+        login(state.payroll)
+        ec.artifactExecution.disableAuthz()
+        ec.message.pushErrors()
+        try {
+            ec.transaction.runRequireNew(null, "The spec's caller rolled back", () => {
+                ec.service
+                    .sync()
+                    .name(R + "finalize#Run")
+                    .parameters({payrollRunId: state.regular})
+                    .call()
+                throw new Error("SPEC_ROLLBACK: the caller's transaction rolled back")
+            })
+        } catch (error) {
+            // the caller's rollback, as meant
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+        }
+        const rolledBack = one("mantle.humanres.payroll.PayrollRun", {payrollRunId: state.regular}).statusId
         const pending = run(state.payroll, R + "finalize#Run", {payrollRunId: state.regular})
         const net = obligationOf(state.regular, "PokNetPay", state.EMP)
         const netStatus = one(INVOICE, {invoiceId: net.invoiceId}).statusId
@@ -459,6 +486,7 @@ feature("finalizing releases nothing until every employee and the payee's amount
         const items = rows(ITEM, {invoiceId: net.invoiceId})
         return {
             claimBefore,
+            rolledBack,
             pending,
             net,
             netStatus,
@@ -477,6 +505,7 @@ feature("finalizing releases nothing until every employee and the payee's amount
     },
     then({
         claimBefore,
+        rolledBack,
         pending,
         net,
         netStatus,
@@ -494,7 +523,9 @@ feature("finalizing releases nothing until every employee and the payee's amount
     }) {
         // before finalization the claim is payroll's, not finance's
         claimBefore == "CLAIM_RESERVED"
+        rolledBack == "PrnFinalizing"
         // the payee could not be invoiced: the employees are final, but nothing is released to Accounting
+        pending.error == ""
         pending.statusId == "PrnFinalizing"
         !pending.complete
         netStatus == "InvoiceIncoming"
@@ -521,7 +552,10 @@ feature("finalizing releases nothing until every employee and the payee's amount
         total(payee.invoiceId) == "60.61"
         one(INVOICE, {invoiceId: payee.invoiceId}).fromPartyId == state.authority
         slips.length == 2
-        slips.every(slip => slip.statusId == "PssFinal" && slip.isPreview == "N")
+        // each final slip's statement issued once the run is finalized (the user's call of Nov 13, 2026), and not again
+        done.issuedCount == 2
+        again.issuedCount == 0
+        slips.every(slip => slip.statusId == "PssIssued" && slip.isPreview == "N" && !!slip.contentLocation)
         inputs.every(input => input.statusId == "PinFinalized")
     }
 })
@@ -532,6 +566,26 @@ feature("Accounting settles: the 100 claim less a 40 advance and the 1,000 wage 
         const net = obligationOf(state.regular, "PokNetPay", state.EMP).invoiceId
         const payee = obligationOf(state.regular, "PokPayee").invoiceId
         // a finance user without PAYROLL_VIEW: the payroll invoice is missing to them, as the claim is not
+        // an existing database: the employer's payroll posting mappings missing, as before P27; the data update adds them
+        const PTGA = "mantle.ledger.config.PaymentTypeGlAccount"
+        const ITTT = "mantle.ledger.config.InvoiceTypeTransType"
+        const mappings = () =>
+            rows(PTGA, {organizationPartyId: state.org, paymentTypeEnumId: "PtPayrollPayment"}).length +
+            rows(ITTT, {organizationPartyId: state.org, invoiceTypeEnumId: "InvoicePayroll", isPayable: "N"}).length
+        const mappingsBefore = mappings()
+        ec.entity
+            .find(PTGA)
+            .condition({organizationPartyId: state.org, paymentTypeEnumId: "PtPayrollPayment"})
+            .disableAuthz()
+            .deleteAll()
+        ec.entity
+            .find(ITTT)
+            .condition({organizationPartyId: state.org, invoiceTypeEnumId: "InvoicePayroll", isPayable: "N"})
+            .disableAuthz()
+            .deleteAll()
+        const mappingsRemoved = mappings()
+        const migrated = call("mantle.account.PayrollOriginServices.migrate#PayrollOrigin")
+        const mappingsAfter = mappings()
         const financeOnly = run(state.financeOnly, "mantle.account.InvoiceServices.find#Payables", {
             organizationPartyId: state.org,
             queue: "all",
@@ -586,6 +640,10 @@ feature("Accounting settles: the 100 claim less a 40 advance and the 1,000 wage 
             invoiceId => one("mantle.account.payment.PaymentRunItem", {paymentRunId: made.paymentRunId, invoiceId}).paymentId
         )
         return {
+            mappingsBefore,
+            mappingsRemoved,
+            migrated,
+            mappingsAfter,
             financeOnly,
             financeOnlyApprove,
             financeList,
@@ -605,6 +663,10 @@ feature("Accounting settles: the 100 claim less a 40 advance and the 1,000 wage 
         }
     },
     then({
+        mappingsBefore,
+        mappingsRemoved,
+        migrated,
+        mappingsAfter,
         financeOnly,
         financeOnlyApprove,
         financeList,
@@ -622,6 +684,11 @@ feature("Accounting settles: the 100 claim less a 40 advance and the 1,000 wage 
         paymentIds,
         payment
     }) {
+        // the employer's three payroll mappings (PtPayrollPayment applied and unapplied, a receivable InvoicePayroll) put back
+        mappingsBefore == 3
+        mappingsRemoved == 0
+        migrated.mappingCount >= 3
+        mappingsAfter == 3
         // AC-23: the same list and approval, refused for PAYROLL_VIEW alone
         !financeOnly.records.some(row => row.invoiceId == net)
         financeOnly.records.some(row => row.invoiceId == state.claim)
@@ -673,16 +740,27 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         approve(empCorrection.payrollRunId)
         // no recovery deduction set up: that employee stays pending; set up, a retry finishes
         const noSetup = run(state.payroll, R + "finalize#Run", {payrollRunId: empCorrection.payrollRunId})
-        call("create#mantle.party.PartySetting", {
-            partyId: state.org,
-            partySettingTypeId: "PayrollRecoveryComponent",
-            settingValue: state.recovery
-        })
-        call("create#mantle.party.PartySetting", {
-            partyId: state.org,
-            partySettingTypeId: "PayrollRecoveryCap",
-            settingValue: "300"
-        })
+        // the employer's recovery set on Overpayment recovery (the user's call of Nov 13, 2026): its deduction, and at most 30% of
+        // net pay a period; refused to the payroll operator (no PAYROLL_CONFIGURE), an amount and a percentage both, and a stale read
+        const settings = () =>
+            run(state.configurer, S + "get#RecoverySettings", {organizationPartyId: state.org}).employers?.[0] || {}
+        const recoveryValues = {
+            organizationPartyId: state.org,
+            expectedRevision: settings().revision,
+            payrollComponentId: state.recovery,
+            capPercent: "30"
+        }
+        const settingRefusals = {
+            operator: code(run(state.payroll, S + "store#RecoverySettings", recoveryValues)),
+            both: code(
+                run(state.configurer, S + "store#RecoverySettings", Object.assign({}, recoveryValues, {capAmount: "300"}))
+            ),
+            stale: code(
+                run(state.configurer, S + "store#RecoverySettings", Object.assign({}, recoveryValues, {expectedRevision: "1"}))
+            )
+        }
+        const stored = run(state.configurer, S + "store#RecoverySettings", recoveryValues)
+        const settingsRead = settings()
         const finalized = run(state.payroll, R + "finalize#Run", {payrollRunId: empCorrection.payrollRunId})
         const correctionSlip = one(SLIP, {payrollRunId: empCorrection.payrollRunId}).payslipId
         // the next period: its input recovers the cap, its run deducts it
@@ -703,7 +781,22 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         approve(leftCorrection.payrollRunId)
         const leftFinal = run(state.payroll, R + "finalize#Run", {payrollRunId: leftCorrection.payrollRunId})
         const receivable = obligationOf(leftCorrection.payrollRunId, "PokReceivable", state.LEFT)
+        const receivableInvoice = receivable ? one(INVOICE, {invoiceId: receivable.invoiceId}) : null
+        // Accounting finalizes the receivable: it posts (InvoicePayroll's receivable mapping), marked payroll-origin
+        if (receivable)
+            call("update#mantle.account.invoice.Invoice", {invoiceId: receivable.invoiceId, statusId: "InvoiceFinalized"})
+        const receivableTrans = receivable ? rows("mantle.ledger.transaction.AcctgTrans", {invoiceId: receivable.invoiceId}) : []
+        const receivableDebit = receivableTrans.length
+            ? rows("mantle.ledger.transaction.AcctgTransEntry", {acctgTransId: receivableTrans[0].acctgTransId}).find(
+                  entry => entry.debitCreditFlag === "D" && money(entry.amount) === "980.00"
+              )
+            : null
         return {
+            settingRefusals,
+            stored,
+            settingsRead,
+            receivableTrans,
+            receivableDebit,
             empCorrection,
             noSetup,
             finalized,
@@ -715,10 +808,15 @@ feature("a negative correction is recovered: by capped deductions on the next ru
             leftCorrection,
             leftFinal,
             receivable,
-            receivableInvoice: receivable ? one(INVOICE, {invoiceId: receivable.invoiceId}) : null
+            receivableInvoice
         }
     },
     then({
+        settingRefusals,
+        stored,
+        settingsRead,
+        receivableTrans,
+        receivableDebit,
         empCorrection,
         noSetup,
         finalized,
@@ -735,13 +833,19 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         empCorrection.error == ""
         noSetup.statusId == "PrnFinalizing"
         noSetup.message.includes("RECOVERY_SETUP_MISSING")
+        settingRefusals == {operator: "PERMISSION_DENIED", both: "CAP_INVALID", stale: "REVISION_CHANGED"}
+        stored.error == ""
+        settingsRead.payrollComponentId == state.recovery
+        settingsRead.capPercent == "30"
+        settingsRead.capText.includes("30% of net pay")
         finalized.statusId == "PrnFinalized"
         // 500.00 a month now: salary 520.41 less, the levy 10.41 less: 510.00 overpaid, on the payroll route
         money(recovery.amount) == "510.00"
         recovery.recoveryRouteEnumId == "PrcPayroll"
         prepared.createdCount >= 1
         nextFinal.statusId == "PrnFinalized"
-        // the next month: 500.00 less the 10.00 levy less the 300.00 recovered (the cap)
+        // the next month: 500.00 less the 10.00 levy less the 300.00 recovered (the cap: 30% of the 1,000.00 wage net of Emp's last
+        // regular run)
         money(nextNet.amount) == "190.00"
         afterNext.settlement.recovery.recoveredText.includes("300.00")
         afterNext.settlement.recovery.remainingText.includes("210.00")
@@ -753,5 +857,141 @@ feature("a negative correction is recovered: by capped deductions on the next ru
         receivableInvoice.toPartyId == state.LEFT
         receivableInvoice.statusId == "InvoiceInProcess"
         total(receivable.invoiceId) == "980.00"
+        // it posts: the 980.00 on accounts receivable, the transaction payroll-origin
+        receivableTrans.length == 1
+        receivableTrans[0].isPosted == "Y"
+        receivableTrans[0].payrollOrigin == "Y"
+        receivableDebit.glAccountId == "121000000"
+        money(receivableDebit.amount) == "980.00"
     }
 })
+
+feature(
+    "a pension deduction and the employer's contribution are paid to the fund: one invoice from it, the contribution posted",
+    {
+        when() {
+            // the user's call of Nov 13, 2026: a component's term names its payee; refused for an earning
+            state.fund = prefix + "_FUND"
+            call("create#mantle.party.Party", {partyId: state.fund, partyTypeEnumId: "PtyOrganization"})
+            call("create#mantle.party.Organization", {partyId: state.fund, organizationName: "Obligations pension fund"})
+            const earningPayee = code(
+                run(state.configurer, S + "store#Component", {
+                    organizationPartyId: state.org,
+                    componentCode: "BONUS_PAYEE",
+                    componentName: "Bonus",
+                    componentKindEnumId: "PckEarning",
+                    basisEnumId: "PcbAmount",
+                    amount: "10",
+                    currencyUomId: "USD",
+                    expenseGlAccountId: "631100000",
+                    payeePartyId: state.fund
+                })
+            )
+            const pension = component("PENSION", "PckDeduction", {
+                amount: "50",
+                liabilityGlAccountId: "224000000",
+                payeePartyId: state.fund
+            })
+            const employer = component("PENSION_ER", "PckContribution", {
+                amount: "30",
+                expenseGlAccountId: "631100000",
+                liabilityGlAccountId: "224000000",
+                payeePartyId: state.fund
+            })
+            call("create#mantle.humanres.payroll.PayrollStructure", {
+                payrollStructureId: prefix + "_PEN",
+                organizationPartyId: state.org,
+                structureName: "Obligations with a pension",
+                currencyUomId: "USD",
+                payBasisEnumId: "PpbSalaried",
+                statusId: "PtsPublished",
+                fromDate: "2000-01-01T00:00:00Z"
+            })
+            ;[state.salaryC, pension, employer].forEach((payrollComponentId, index) =>
+                call("create#mantle.humanres.payroll.PayrollStructureComponent", {
+                    payrollStructureId: prefix + "_PEN",
+                    payrollComponentId,
+                    statusId: "PtsPublished",
+                    fromDate: "2000-01-01T00:00:00Z",
+                    sequenceNum: index + 1
+                })
+            )
+            const penGroup = prefix + "_PENGRP"
+            group(penGroup, state.live, {
+                localizationPayeePartyId: state.authority,
+                localizationLiabilityGlAccountId: "224000000",
+                localizationExpenseGlAccountId: "631100000",
+                liveEnabled: "Y"
+            })
+            const PEN = person("PEN")
+            const penEmp = employ(PEN)
+            call("create#mantle.humanres.payroll.PayrollAssignment", {
+                partyRelationshipId: penEmp,
+                partyId: PEN,
+                organizationPartyId: state.org,
+                payrollStructureId: prefix + "_PEN",
+                payrollGroupId: penGroup,
+                isPrimary: "Y",
+                fromDate: "2026-01-01T00:00:00Z"
+            })
+            call("create#mantle.humanres.employment.EmploymentSalary", {
+                partyRelationshipId: penEmp,
+                fromDate: "2026-01-01T00:00:00Z",
+                amount: "12000",
+                currencyUomId: "USD",
+                timePeriodTypeId: "PayrollYear"
+            })
+            const penRun = approvedRun(penGroup, state.period)
+            const finalized = run(state.payroll, R + "finalize#Run", {payrollRunId: penRun})
+            const payees = obligations(penRun).filter(row => row.obligationKindEnumId === "PokPayee")
+            const fundObligation = payees.find(row => row.payeePartyId === state.fund)
+            const fundInvoice = fundObligation?.invoiceId
+            // Accounting approves the fund's invoice: it posts the withheld pension off its liability and the contribution's expense
+            const approved = fundInvoice
+                ? run(state.finance, "mantle.account.InvoiceServices.approve#Payable", {
+                      invoiceId: fundInvoice,
+                      lastUpdatedStamp: one(INVOICE, {invoiceId: fundInvoice}).lastUpdatedStamp
+                  })
+                : {}
+            const trans = fundInvoice ? rows("mantle.ledger.transaction.AcctgTrans", {invoiceId: fundInvoice}) : []
+            return {
+                earningPayee,
+                finalized,
+                net: obligationOf(penRun, "PokNetPay", PEN),
+                payees,
+                fundObligation,
+                fundInvoice: fundInvoice ? one(INVOICE, {invoiceId: fundInvoice}) : null,
+                fundItems: fundInvoice ? rows(ITEM, {invoiceId: fundInvoice}) : [],
+                authority: payees.find(row => row.payeePartyId === state.authority),
+                approved,
+                entries: trans.length
+                    ? rows("mantle.ledger.transaction.AcctgTransEntry", {acctgTransId: trans[0].acctgTransId})
+                    : []
+            }
+        },
+        then({earningPayee, finalized, net, payees, fundObligation, fundInvoice, fundItems, authority, approved, entries}) {
+            earningPayee == "PAYEE_NOT_FOR_KIND"
+            finalized.statusId == "PrnFinalized"
+            // the person's net pay: 1,000.00 less the 50.00 pension and the 20.00 levy withheld
+            money(net.amount) == "930.00"
+            // one invoice for each payee and liability: the authority's levy (20.00 withheld, 10.00 the employer's), the fund's pension
+            payees.length == 2
+            money(authority.amount) == "30.00"
+            money(fundObligation.amount) == "80.00"
+            fundInvoice.fromPartyId == state.fund
+            fundInvoice.invoiceTypeEnumId == "InvoicePayroll"
+            fundInvoice.payrollOrigin == "Y"
+            fundItems.some(item => money(item.amount) == "50.00" && item.overrideGlAccountId == "224000000")
+            fundItems.some(item => money(item.amount) == "30.00" && item.overrideGlAccountId == "631100000")
+            approved.error == ""
+            // posted: the pension off its liability, the contribution on the wage expense, 80.00 owed to the fund
+            entries.some(
+                entry => entry.debitCreditFlag == "D" && entry.glAccountId == "224000000" && money(entry.amount) == "50.00"
+            )
+            entries.some(
+                entry => entry.debitCreditFlag == "D" && entry.glAccountId == "631100000" && money(entry.amount) == "30.00"
+            )
+            entries.some(entry => entry.debitCreditFlag == "C" && money(entry.amount) == "80.00")
+        }
+    }
+)

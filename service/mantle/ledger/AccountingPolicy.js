@@ -200,11 +200,6 @@ const kinds = {
     locks: ["mantle.ledger.config.AccountingLock", "accountingLockId", "organizationPartyId", "admin"],
     exceptions: ["mantle.ledger.config.AccountingLockException", "accountingLockExceptionId", "organizationPartyId", "admin"]
 }
-// People P27 (AC-23): the transaction kinds read through a view that joins their payroll origin
-const transactionViews = {
-    journals: "mantle.ledger.transaction.AcctgTransFinance",
-    entries: "mantle.ledger.transaction.AcctgTransAndEntryFinance"
-}
 // The fields a search text matches, ignoring case: the record's id and its names.
 const searchFields = {
     invoices: ["invoiceId", "description", "referenceNumber"],
@@ -266,13 +261,7 @@ function query(p) {
         denied("RECORD_UNAVAILABLE", "Accounting record is not available")
     let ids = organizationIds(s)
     if (["accounts", "periods"].includes(p.kind)) ids = [...new Set(ids.flatMap(id => organizationChain(id)))]
-    // People P27 (AC-23, the payroll-origin projection): payroll-origin invoices, payments and ledger lines are a holder of
-    // PAYROLL_VIEW's. For anyone else a list leaves them out and a record read finds none: a transaction read without a lock
-    // through its view with the payroll origin joined (a locked read, which a view's outer joins cannot take, is checked on the row
-    // it finds, record below)
-    const origin = payrollOrigin()
-    const originView = !p.forUpdate && !origin.canRead() ? transactionViews[p.kind] : null
-    let q = find(originView || kind[0])
+    let q = find(kind[0])
     if (["invoices", "bills"].includes(p.kind)) {
         q = q.condition(invoiceDirectionCondition(p.kind, ids))
         if (!s.capabilities.systemAdmin) {
@@ -297,11 +286,15 @@ function query(p) {
             )
         )
     } else q = q.condition(kind[2], "in", ids.length ? ids : ["_DENIED_"])
+    // People P27 (AC-23, the payroll-origin projection): payroll-origin invoices, payments and ledger lines are a holder of
+    // PAYROLL_VIEW's; for anyone else a list leaves them out and a record read (a locked one too) finds none, by the payrollOrigin
+    // mark of the Invoice, Payment or AcctgTrans each kind reads
+    const origin = payrollOrigin()
     const originCondition = ["invoices", "bills"].includes(p.kind)
         ? origin.invoiceCondition()
         : p.kind === "payments"
           ? origin.paymentCondition()
-          : originView
+          : ["journals", "entries"].includes(p.kind)
             ? origin.transactionCondition()
             : null
     if (originCondition) q = q.condition(originCondition)
@@ -325,16 +318,10 @@ function query(p) {
 }
 function record(p, need = "read", lock = false) {
     if (!p.recordId) denied("RECORD_REQUIRED", "An accounting record ID is required")
-    const {q, s} = query(lock ? Object.assign({}, p, {forUpdate: true}) : p)
+    const {q, s} = query(p)
     if (need !== "read" && !s.capabilities[need]) denied("PERMISSION_DENIED", "Accounting " + need + " authority is required")
     const row = (lock ? q.forUpdate(true) : q).one()
     if (!row) denied("RECORD_UNAVAILABLE", "Accounting record is not available")
-    // People P27 (AC-23): a locked transaction read is checked on its row (its query had no payroll origin joined)
-    if (lock && transactionViews[p.kind]) {
-        const origin = payrollOrigin()
-        if (!origin.canRead() && (origin.isPayrollInvoice(row.invoiceId) || origin.isPayrollPayment(row.paymentId || null)))
-            denied("RECORD_UNAVAILABLE", "Accounting record is not available")
-    }
     return row
 }
 ;({

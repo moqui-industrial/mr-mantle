@@ -166,25 +166,39 @@ function termFor(row, atMs, terms) {
     return terms.get(key)
 }
 // What a line of a slip (or a run's result) is for the handoff: on the person's net pay invoice (an earning on its expense account,
-// a deduction or the localization's employee amount withheld on its liability account, with its sign), the payee's (the
-// localization's amounts), a reimbursement (settled on the claim's invoice), or nothing posted (a statistical value, an employer
-// contribution with no payee: its accounts are kept for when payees are configured).
+// a deduction or the localization's employee amount withheld on its liability account, with its sign), a payee's (the bucket of
+// its payee and liability account: the localization's employee and employer amounts, and since the People P27 review a deduction's
+// or an employer contribution's whose term names a payee), a reimbursement (settled on the claim's invoice), or nothing posted (a
+// statistical value). problem names what is not mapped (ACCOUNT_MAPPING_MISSING): an account, the localization binding, or an
+// employer contribution's payee (a contribution owed to no one would be paid nowhere, so a live run waits for its payee).
 function lineRole(row, term, group) {
     if (row.inTotals === "N" || row.componentKindEnumId === "PckStatistical") return {role: "none"}
+    const name = row.resultName || row.itemName || row.componentCode
+    const localization = {
+        payeePartyId: group.localizationPayeePartyId || null,
+        liabilityGlAccountId: group.localizationLiabilityGlAccountId || null,
+        localization: true
+    }
+    const binding = "the pay group's localization binding (its payee and accounts)"
     if (row.localizationParty === "employee")
         return {
             role: "withheld",
             itemTypeEnumId: "ItemPayrollDeduct",
             sign: -1,
             glAccountId: group.localizationLiabilityGlAccountId || null,
-            payeeGlAccountId: group.localizationLiabilityGlAccountId || null,
-            missing: !group.localizationLiabilityGlAccountId || !group.localizationPayeePartyId
+            bucket: Object.assign({part: "withheld", glAccountId: group.localizationLiabilityGlAccountId || null}, localization),
+            problem: !group.localizationLiabilityGlAccountId || !group.localizationPayeePartyId ? binding : null
         }
     if (row.localizationParty === "employer")
         return {
             role: "employer",
-            payeeGlAccountId: group.localizationExpenseGlAccountId || null,
-            missing: !group.localizationExpenseGlAccountId || !group.localizationPayeePartyId
+            bucket: Object.assign({part: "employer", glAccountId: group.localizationExpenseGlAccountId || null}, localization),
+            problem:
+                !group.localizationExpenseGlAccountId ||
+                !group.localizationPayeePartyId ||
+                !group.localizationLiabilityGlAccountId
+                    ? binding
+                    : null
         }
     if (row.componentKindEnumId === "PckEarning") {
         if (readsReimbursement(term)) return {role: "reimbursement"}
@@ -193,20 +207,35 @@ function lineRole(row, term, group) {
             itemTypeEnumId: "ItemPayrollIncome",
             sign: 1,
             glAccountId: term?.expenseGlAccountId || null,
-            missing: !term?.expenseGlAccountId
+            problem: term?.expenseGlAccountId ? null : name + "'s expense account"
         }
     }
+    const payee = term?.payeePartyId
+        ? {payeePartyId: term.payeePartyId, liabilityGlAccountId: term.liabilityGlAccountId || null, localization: false}
+        : null
     if (row.componentKindEnumId === "PckDeduction")
         return {
             role: "pay",
             itemTypeEnumId: "ItemPayrollDeduct",
             sign: -1,
             glAccountId: term?.liabilityGlAccountId || null,
-            missing: !term?.liabilityGlAccountId
+            bucket: payee ? Object.assign({part: "withheld", glAccountId: term.liabilityGlAccountId || null}, payee) : null,
+            problem: term?.liabilityGlAccountId ? null : name + "'s liability account"
+        }
+    if (row.componentKindEnumId === "PckContribution")
+        return {
+            role: "employer",
+            bucket: payee ? Object.assign({part: "employer", glAccountId: term.expenseGlAccountId || null}, payee) : null,
+            problem: !payee
+                ? name + "'s payee"
+                : !term.expenseGlAccountId || !term.liabilityGlAccountId
+                  ? name + "'s expense and liability accounts"
+                  : null
         }
     return {role: "none"}
 }
-// The accounts a run's calculated results would post to and do not have, named (ACCOUNT_MAPPING_MISSING before anything is made).
+// The accounts (and payees) a run's calculated results would post to and do not have, named (ACCOUNT_MAPPING_MISSING before
+// anything is made).
 function mappingProblems(run, group) {
     const atMs = lib.ms(run.payDate) ?? nowMs()
     const terms = new Map()
@@ -218,21 +247,19 @@ function mappingProblems(run, group) {
     )
     for (const result of rows(RESULT, {payrollRunId: run.payrollRunId})) {
         if (!calculated.has(result.payrollRunEmploymentId) || decimalOf(result.amount).isZero()) continue
-        const role = lineRole(result, termFor(result, atMs, terms), group)
-        if (!role.missing) continue
-        problems.add(
-            result.localizationParty
-                ? "the pay group's localization binding (its payee and accounts)"
-                : (result.resultName || result.componentCode) +
-                      (result.componentKindEnumId === "PckEarning" ? "'s expense account" : "'s liability account")
-        )
+        const problem = lineRole(result, termFor(result, atMs, terms), group).problem
+        if (problem) problems.add(problem)
     }
     return Array.from(problems)
 }
 
 // ===== invoices =====
+// An invoice a finalization makes is payroll-origin: marked, so Accounting's reads keep it to PAYROLL_VIEW (PayrollOrigin.js)
 function makeInvoice(values, lines, description) {
-    const created = call("mantle.account.InvoiceServices.create#Invoice", Object.assign({description}, values))
+    const created = call(
+        "mantle.account.InvoiceServices.create#Invoice",
+        Object.assign({description, payrollOrigin: "Y"}, values)
+    )
     for (const line of lines)
         call("mantle.account.InvoiceServices.create#InvoiceItem", {
             invoiceId: created.invoiceId,
@@ -428,11 +455,140 @@ function recoveryOf(run, group, slip, lines, amount, what) {
     )
     return []
 }
-// The employer's recovery settings: the deduction recovery inputs are made to, and the most a period recovers (none: the whole rest).
+// The employer's recovery settings: the deduction recovery inputs are made to, and the most a period recovers (none: the whole
+// rest): an amount, or a percentage of net pay (the user's call of Nov 13, 2026), read as the share of the employee's wage net on
+// their latest finalized regular run (the net a recovery is planned against: a period's own net is not known until its run
+// calculates, after its inputs are prepared).
+const RECOVERY_SETTINGS = ["PayrollRecoveryComponent", "PayrollRecoveryCap", "PayrollRecoveryCapPercent"]
 function recoverySetup(organizationPartyId) {
     const value = id => text(one(SETTING, {partyId: organizationPartyId, partySettingTypeId: id})?.settingValue) || null
     const cap = value("PayrollRecoveryCap")
-    return {payrollComponentId: value("PayrollRecoveryComponent"), cap: cap ? toDecimal(cap) : null}
+    const percent = value("PayrollRecoveryCapPercent")
+    return {
+        payrollComponentId: value("PayrollRecoveryComponent"),
+        cap: cap ? toDecimal(cap) : null,
+        capPercent: percent ? toDecimal(percent) : null
+    }
+}
+// An employment's wage net on its latest finalized regular run (its net pay obligation), or null.
+function lastWageNet(partyRelationshipId) {
+    const regular = rows(OBLIGATION, {partyRelationshipId, obligationKindEnumId: "PokNetPay"})
+        .map(row => ({row, run: one(RUN, {payrollRunId: row.payrollRunId})}))
+        .filter(entry => entry.run?.runKindEnumId === "PrkRegular" && entry.run.statusId === "PrnFinalized")
+        .sort((a, b) => (lib.ms(b.run.payDate) ?? 0) - (lib.ms(a.run.payDate) ?? 0))
+    return regular.length ? decimalOf(regular[0].row.amount) : null
+}
+// The cap of a period's recovery for an employment: the amount, or the percentage of its last wage net (rounded to the currency;
+// none known yet: the whole rest, as with no cap).
+function capFor(setup, partyRelationshipId, currencyUomId) {
+    if (setup.cap && setup.cap.compare(0) > 0) return setup.cap
+    if (setup.capPercent && setup.capPercent.compare(0) > 0) {
+        const net = lastWageNet(partyRelationshipId)
+        if (net == null) return null
+        return ec.l10n.roundCurrency(net.multiply(setup.capPercent).divide(toDecimal(100)), currencyUomId)
+    }
+    return null
+}
+
+// ===== get#RecoverySettings and store#RecoverySettings (the user's call of Nov 13, 2026) =====
+// Each employer of the payroll reader's scope with its overpayment recovery settings: the recovery deduction, and the cap a period
+// as an amount or a percentage of net pay; the employer's deductions to choose from; whether the user changes them (PAYROLL_VIEW,
+// PAYROLL_EDIT and PAYROLL_CONFIGURE) and the revision each change names.
+function settingsRevision(organizationPartyId) {
+    const stamps = RECOVERY_SETTINGS.map(
+        id => lib.ms(one(SETTING, {partyId: organizationPartyId, partySettingTypeId: id})?.lastUpdatedStamp) ?? 0
+    )
+    return String(Math.max(0, ...stamps))
+}
+const configures = caps => !!(caps.payrollView && caps.payrollEdit && caps.payrollConfigure)
+function getRecoverySettings(p) {
+    const userScope = readerScope()
+    const organizationPartyIds = text(p.organizationPartyId)
+        ? (people.requireOrganization(userScope, text(p.organizationPartyId)), [text(p.organizationPartyId)])
+        : userScope.organizationPartyIds
+    const names = people.organizationNames(organizationPartyIds)
+    const employers = organizationPartyIds
+        .map(organizationPartyId => {
+            const setup = recoverySetup(organizationPartyId)
+            const deductions = rows(COMPONENT, {organizationPartyId, componentKindEnumId: "PckDeduction"})
+                .filter(row => !row.thruDate || (lib.ms(row.thruDate) ?? Infinity) > nowMs())
+                .map(row => ({
+                    value: row.payrollComponentId,
+                    label: (row.componentName || row.componentCode) + " (" + row.componentCode + ")"
+                }))
+                .sort((a, b) => a.label.localeCompare(b.label))
+            const component = setup.payrollComponentId ? one(COMPONENT, {payrollComponentId: setup.payrollComponentId}) : null
+            return {
+                organizationPartyId,
+                organizationName: names[organizationPartyId] || organizationPartyId,
+                payrollComponentId: setup.payrollComponentId,
+                componentText: component ? component.componentName || component.componentCode : "",
+                capAmount: setup.cap == null ? null : String(setup.cap),
+                capPercent: setup.capPercent == null ? null : String(setup.capPercent),
+                capText:
+                    setup.cap != null
+                        ? String(setup.cap) + " a period"
+                        : setup.capPercent != null
+                          ? String(setup.capPercent) + "% of net pay a period"
+                          : "No cap: the whole rest on the next run",
+                deductions,
+                revision: settingsRevision(organizationPartyId)
+            }
+        })
+        .sort((a, b) => a.organizationName.localeCompare(b.organizationName))
+    return {employers, canEdit: configures(userScope.capabilities)}
+}
+// An employer's recovery settings changed at the revision read (PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE): the recovery
+// deduction (one of the employer's deductions) and the cap, an amount or a percentage (above 0, at most 100), not both; an empty
+// value clears it (its setting kept, empty, so the change is in the setting's audit log).
+function storeRecoverySettings(p) {
+    const userScope = people.scopeOf()
+    if (!configures(userScope.capabilities))
+        denied("PERMISSION_DENIED", "Changing the overpayment recovery needs PAYROLL_EDIT and PAYROLL_CONFIGURE")
+    const organizationPartyId = text(p.organizationPartyId)
+    if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose the employer")
+    people.requireOrganization(userScope, organizationPartyId)
+    const revision = settingsRevision(organizationPartyId)
+    if (text(p.expectedRevision) !== revision)
+        denied(
+            "REVISION_CHANGED",
+            "The recovery settings changed since you read them; open them again (revision " + revision + ")"
+        )
+    const payrollComponentId = text(p.payrollComponentId) || null
+    if (payrollComponentId) {
+        const component = one(COMPONENT, {payrollComponentId})
+        if (
+            !component ||
+            component.organizationPartyId !== organizationPartyId ||
+            component.componentKindEnumId !== "PckDeduction"
+        )
+            denied("COMPONENT_INVALID", "The recovery is made through one of the employer's deductions")
+    }
+    const number = (value, label) => {
+        if (value == null || text(value) === "") return null
+        if (!/^[0-9]+(\.[0-9]+)?$/.test(text(value))) denied("CAP_INVALID", label + " is a positive number")
+        return toDecimal(text(value))
+    }
+    const capAmount = number(p.capAmount, "The cap")
+    const capPercent = number(p.capPercent, "The percentage")
+    if (capAmount && capPercent) denied("CAP_INVALID", "The cap is an amount or a percentage of net pay, not both")
+    if (capAmount && capAmount.compare(0) <= 0) denied("CAP_INVALID", "The cap is above zero")
+    if (capPercent && (capPercent.compare(0) <= 0 || capPercent.compare(100) > 0))
+        denied("CAP_INVALID", "The percentage is above 0 and at most 100")
+    const values = {
+        PayrollRecoveryComponent: payrollComponentId,
+        PayrollRecoveryCap: capAmount == null ? null : String(capAmount),
+        PayrollRecoveryCapPercent: capPercent == null ? null : String(capPercent)
+    }
+    for (const [partySettingTypeId, settingValue] of Object.entries(values)) {
+        const existing = one(SETTING, {partyId: organizationPartyId, partySettingTypeId})
+        if (existing) {
+            if ((text(existing.settingValue) || null) !== settingValue)
+                call("update#" + SETTING, {partyId: organizationPartyId, partySettingTypeId, settingValue})
+        } else if (settingValue != null)
+            call("create#" + SETTING, {partyId: organizationPartyId, partySettingTypeId, settingValue})
+    }
+    return {organizationPartyId, revision: settingsRevision(organizationPartyId)}
 }
 
 // One employment finalized, in the caller's (new) transaction under its lock: its slip final, its inputs finalized, its obligations.
@@ -464,63 +620,82 @@ function finalizeUnit(run, group, unitId) {
     })
     return "finalized"
 }
-// The localization payee's bucket of a run whose employments are all final: the employee amounts withheld and the employer amounts of
-// its final slips, one invoice from the payee (design §8.3: third-party obligations only for a configured payee; a withheld sum on
-// its liability account, so paying it does not expense the wages twice). Nothing when the run has no such amount; a run whose
-// amounts net to nothing or less (a correction lowering them) makes no invoice and says so.
-function payeeBucket(run, group) {
+// The payee buckets of a run whose employments are all final, from its final slips alone (design §8.3: third-party obligations only
+// for a configured payee): for each payee and liability account (the localization's binding; since the People P27 review, a
+// deduction's or an employer contribution's payee, the user's call of Nov 13, 2026), the amounts withheld (on the liability account,
+// so paying them does not expense the wages twice) and the employer's (on their expense account, so an employer contribution is
+// posted with the run's invoices), one invoice from the payee: the localization's statutory (InvoiceTax), any other a payroll
+// invoice. A bucket that nets to nothing or less (a correction lowering it) makes no invoice and says so.
+function payeeBuckets(run, group) {
+    const atMs = lib.ms(run.payDate) ?? nowMs()
+    const terms = new Map()
     const slipIds = rows(SLIP, {payrollRunId: run.payrollRunId})
         .filter(slip => finalSlipStatuses.includes(slip.statusId))
         .map(slip => slip.payslipId)
-    const items = rowsIn(ITEM, "payslipId", slipIds).filter(item => item.localizationParty && item.inTotals !== "N")
-    if (!items.length) return null
-    const total = party =>
-        items.filter(item => item.localizationParty === party).reduce((sum, item) => sum.add(decimalOf(item.amount)), zero())
-    const withheld = total("employee")
-    const owed = total("employer")
-    const amount = withheld.add(owed)
+    const buckets = new Map()
+    for (const item of rowsIn(ITEM, "payslipId", slipIds)) {
+        if (decimalOf(item.amount).isZero()) continue
+        const bucket = lineRole(item, termFor(item, atMs, terms), group).bucket
+        if (!bucket?.payeePartyId) continue
+        const key = bucket.payeePartyId + ":" + (bucket.liabilityGlAccountId || "")
+        const entry = buckets.get(key) || {
+            key,
+            payeePartyId: bucket.payeePartyId,
+            liabilityGlAccountId: bucket.liabilityGlAccountId,
+            localization: bucket.localization,
+            lines: new Map()
+        }
+        entry.localization = entry.localization || bucket.localization
+        const lineKey = bucket.part + ":" + (bucket.glAccountId || "")
+        const line = entry.lines.get(lineKey) || {part: bucket.part, glAccountId: bucket.glAccountId, amount: zero()}
+        line.amount = line.amount.add(decimalOf(item.amount))
+        entry.lines.set(lineKey, line)
+        buckets.set(key, entry)
+    }
+    return Array.from(buckets.values()).sort((a, b) => a.key.localeCompare(b.key))
+}
+// One payee bucket's invoice and obligation, once (its key: the run, the payee and the liability account); a note when it nets to
+// nothing or less.
+function payeeBucket(run, bucket) {
+    const lines = Array.from(bucket.lines.values()).filter(line => !line.amount.isZero())
+    const amount = lines.reduce((sum, line) => sum.add(line.amount), zero())
+    const payeeName = lib.partyNames([bucket.payeePartyId])[bucket.payeePartyId] || bucket.payeePartyId
     if (amount.compare(0) <= 0)
-        return {note: "The localization's amounts of this run net to " + String(amount) + ": no payee invoice"}
-    const payeePartyId = group.localizationPayeePartyId
-    const key = "PAYEE:" + run.payrollRunId + ":" + payeePartyId
+        return {note: payeeName + "'s amounts of this run net to " + String(amount) + ": no payee invoice"}
+    const key = "PAYEE:" + run.payrollRunId + ":" + bucket.key
     const existing = one(OBLIGATION, {obligationKey: key})
     if (existing) return {obligation: existing}
     const payDay = calendarDateText(run.payDate)
-    const lines = []
-    if (!withheld.isZero())
-        lines.push({
-            itemTypeEnumId: "ItemPayrollDeduct",
-            glAccountId: group.localizationLiabilityGlAccountId,
-            amount: withheld,
-            description: "Withheld from employees"
-        })
-    if (!owed.isZero())
-        lines.push({
-            itemTypeEnumId: "ItemPayrollDeduct",
-            glAccountId: group.localizationExpenseGlAccountId,
-            amount: owed,
-            description: "Employer amounts"
-        })
     const invoiceId = makeInvoice(
         {
-            invoiceTypeEnumId: "InvoiceTax",
-            fromPartyId: payeePartyId,
+            invoiceTypeEnumId: bucket.localization ? "InvoiceTax" : "InvoicePayroll",
+            fromPartyId: bucket.payeePartyId,
             toPartyId: run.organizationPartyId,
             invoiceDate: dayStamp(payDay),
             dueDate: dayStamp(payDay),
             currencyUomId: run.currencyUomId,
             timePeriodId: run.timePeriodId
         },
-        lines,
+        lines
+            .sort((a, b) =>
+                a.part === b.part ? String(a.glAccountId).localeCompare(String(b.glAccountId)) : a.part === "withheld" ? -1 : 1
+            )
+            .map(line => ({
+                itemTypeEnumId: "ItemPayrollDeduct",
+                glAccountId: line.glAccountId,
+                amount: line.amount,
+                description: line.part === "withheld" ? "Withheld from employees" : "Employer amounts"
+            })),
         "Payroll amounts of " + periodWords(run) + ", pay run " + run.payrollRunId
     )
+    if (!invoiceTotal(invoiceId).eq(amount)) denied("RECONCILE_FAILED", "The payee invoice does not total " + String(amount))
     return {
         obligation: obligation({
             obligationKey: key,
             obligationKindEnumId: "PokPayee",
             payrollRunId: run.payrollRunId,
             organizationPartyId: run.organizationPartyId,
-            payeePartyId,
+            payeePartyId: bucket.payeePartyId,
             currencyUomId: run.currencyUomId,
             invoiceId,
             amount
@@ -533,20 +708,27 @@ function payeeBucket(run, group) {
 // mapped, then each employment in its own transaction, the payee buckets, and the release; or, run again, the rest of a pending one.
 function finalizeRun(p) {
     const userScope = editorScope()
-    let run = runIn(userScope, p.payrollRunId)
-    run = find(RUN, {payrollRunId: run.payrollRunId}).forNoKeyUpdate(true).one()
-    if (run.statusId === "PrnFinalized") return answer(run, true)
-    if (!["PrnApproved", "PrnFinalizing"].includes(run.statusId)) denied("NOT_APPROVED", "Only an approved pay run is finalized")
+    const payrollRunId = runIn(userScope, p.payrollRunId).payrollRunId
+    // Each step commits in a transaction of its own, under its lock (the People P27 review; the service itself holds none): the
+    // checks and the move to Finalizing first, so a Finalizing run never rolls back to Approved behind an employment made final (a
+    // timeout or a failed release did, and its revision, which counts the employments' states, was then no longer the approved one:
+    // the run could never be finalized); each employment; each payee bucket; then the release and Finalized together, under the
+    // run's lock again; then the statements. A retry of a Finalizing run, or one made at the same time, finishes the rest: what is
+    // made is found by its key, and an employment or a run already final is left as it is.
+    let refusal = null
+    ec.transaction.runRequireNew(null, "Starting the finalization of pay run " + payrollRunId + " failed", () => {
+        try {
+            begin(payrollRunId)
+        } catch (error) {
+            if (!lib.reasonCode(error)) throw error
+            refusal = error
+        }
+    })
+    if (refusal) throw refusal
+    const run = one(RUN, {payrollRunId})
+    if (run.statusId === "PrnFinalized") return Object.assign(answer(run, true), issueStatements(run))
+    if (run.statusId !== "PrnFinalizing") denied("NOT_APPROVED", "Only an approved pay run is finalized")
     const group = one(GROUP, {payrollGroupId: run.payrollGroupId})
-    requireLive(group)
-    requireProjection(run.organizationPartyId)
-    if (run.statusId === "PrnApproved") {
-        if (run.approvedRevision !== runs().runRevision(run.payrollRunId))
-            denied("APPROVAL_NO_LONGER_HOLDS", "The run changed since it was approved: calculate it and ask for approval again")
-        const missing = mappingProblems(run, group)
-        if (missing.length) denied("ACCOUNT_MAPPING_MISSING", "Map the accounts before finalizing: " + missing.join(", "))
-        call("update#" + RUN, {payrollRunId: run.payrollRunId, statusId: "PrnFinalizing", finalizeMessage: null})
-    }
     const units = rows(UNIT, {payrollRunId: run.payrollRunId}).filter(unit => unit.statusId === "PruCalculated")
     let finalizedCount = 0
     for (const unit of units) {
@@ -580,28 +762,84 @@ function finalizeRun(p) {
     let note = null
     let payeeFailed = false
     if (!pending.length) {
-        // the payee buckets from the final slips alone, then the release
+        // the payee buckets from the final slips alone, each in its own transaction (one that fails leaves the run finalizing and
+        // the others made), then the release
+        const notes = []
+        for (const bucket of payeeBuckets(run, group)) {
+            ec.message.pushErrors()
+            try {
+                ec.transaction.runRequireNew(
+                    null,
+                    "Finalizing the payee amounts of pay run " + run.payrollRunId + " failed",
+                    () => {
+                        const made = payeeBucket(run, bucket)
+                        if (made?.note) notes.push(made.note)
+                        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    }
+                )
+            } catch (error) {
+                payeeFailed = true
+                if (!lib.reasonCode(error))
+                    ec.logger.error("A payee bucket of pay run " + run.payrollRunId + " failed: " + error.message)
+                notes.push(
+                    "The payee amounts were not made: " + String(error?.message || error).replace(/^[A-Z][A-Z0-9_]+: /, "")
+                )
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        note = notes.join("; ") || null
+    }
+    const complete = !pending.length && !payeeFailed
+    ec.transaction.runRequireNew(null, "Completing the finalization of pay run " + run.payrollRunId + " failed", () =>
+        end(run.payrollRunId, complete, pending, note)
+    )
+    // each final slip's statement issued once the finalization is complete (the user's call of Nov 13, 2026)
+    const issued =
+        one(RUN, {payrollRunId: run.payrollRunId}).statusId === "PrnFinalized"
+            ? issueStatements(run)
+            : {issuedCount: 0, issueFailedCount: 0}
+    return Object.assign(answer(one(RUN, {payrollRunId: run.payrollRunId}), false), issued, {
+        finalizedCount,
+        failedCount: pending.length
+    })
+}
+// The statements of a finalized run's final slips issued (the user's call of Nov 13, 2026: PayrollResults.js issue#Payslip, the
+// stored PDF and the person's direct-only PayslipIssued notice), each in its own transaction: one that fails is logged and counted,
+// its slip stays final for PayslipDetail's Issue statement or a Finalize again, and the others go on. A slip issued already is left.
+function issueStatements(run) {
+    const out = {issuedCount: 0, issueFailedCount: 0}
+    const finals = rows(SLIP, {payrollRunId: run.payrollRunId}).filter(slip => slip.statusId === "PssFinal")
+    for (const slip of finals) {
         ec.message.pushErrors()
         try {
-            ec.transaction.runRequireNew(null, "Finalizing the payee amounts of pay run " + run.payrollRunId + " failed", () => {
-                note = payeeBucket(run, group)?.note || null
+            ec.transaction.runRequireNew(null, "Issuing payslip " + slip.payslipId + " failed", () => {
+                const issued = call("mantle.humanres.PayrollResultServices.issue#Payslip", {payslipId: slip.payslipId})
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                if (!issued.repeated) out.issuedCount++
             })
         } catch (error) {
-            payeeFailed = true
-            if (!lib.reasonCode(error))
-                ec.logger.error("The payee bucket of pay run " + run.payrollRunId + " failed: " + error.message)
-            note = "The payee amounts were not made: " + String(error?.message || error).replace(/^[A-Z][A-Z0-9_]+: /, "")
+            out.issueFailedCount++
+            ec.logger.error(
+                "Issuing payslip " + slip.payslipId + " of pay run " + run.payrollRunId + " failed: " + (error?.message || error)
+            )
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
         }
     }
-    const complete = !pending.length && !payeeFailed
+    return out
+}
+// A finalization's end, in its own transaction under the run's lock: complete, the run's invoices released to Accounting and the run
+// Finalized together; else why it is pending. A run another call finalized meanwhile is left as it is.
+function end(payrollRunId, complete, pending, note) {
+    const run = find(RUN, {payrollRunId}).forNoKeyUpdate(true).one()
+    if (run.statusId !== "PrnFinalizing") return
     if (complete) {
         release(run)
         call("update#" + RUN, {
-            payrollRunId: run.payrollRunId,
+            payrollRunId,
             statusId: "PrnFinalized",
             finalizedDate: ec.user.nowTimestamp,
             finalizedByUserId: ec.user.userId || null,
@@ -609,7 +847,7 @@ function finalizeRun(p) {
         })
     } else
         call("update#" + RUN, {
-            payrollRunId: run.payrollRunId,
+            payrollRunId,
             finalizeMessage: pending.length
                 ? pending.length +
                   (pending.length === 1 ? " employee is" : " employees are") +
@@ -618,7 +856,23 @@ function finalizeRun(p) {
                   "): fix and finalize again; nothing is released to Accounting until every employee is"
                 : note
         })
-    return Object.assign(answer(one(RUN, {payrollRunId: run.payrollRunId}), false), {finalizedCount, failedCount: pending.length})
+}
+// A finalization begun, in its own transaction under the run's lock: a finalized run is left as it is; else the run must be approved
+// (or finalizing, a retry) and its group live, and an approved one must still hold its approval and have every account mapped, then
+// it is Finalizing. A refusal changes nothing.
+function begin(payrollRunId) {
+    const run = find(RUN, {payrollRunId}).forNoKeyUpdate(true).one()
+    if (run.statusId === "PrnFinalized") return
+    if (!["PrnApproved", "PrnFinalizing"].includes(run.statusId)) denied("NOT_APPROVED", "Only an approved pay run is finalized")
+    const group = one(GROUP, {payrollGroupId: run.payrollGroupId})
+    requireLive(group)
+    requireProjection(run.organizationPartyId)
+    if (run.statusId !== "PrnApproved") return
+    if (run.approvedRevision !== runs().runRevision(run.payrollRunId))
+        denied("APPROVAL_NO_LONGER_HOLDS", "The run changed since it was approved: calculate it and ask for approval again")
+    const missing = mappingProblems(run, group)
+    if (missing.length) denied("ACCOUNT_MAPPING_MISSING", "Map the accounts before finalizing: " + missing.join(", "))
+    call("update#" + RUN, {payrollRunId: run.payrollRunId, statusId: "PrnFinalizing", finalizeMessage: null})
 }
 // The run's invoices released to Accounting: a payable made received (Accounting reviews, approves and pays it), a receivable left
 // in process for Accounting to finalize.
@@ -908,7 +1162,7 @@ function recoveryInputs(member, group, period) {
         ).filter(input => input.statusId !== "PinFinalized" && input.timePeriodId !== period.timePeriodId)
         let left = elsewhere.reduce((sum, input) => sum.subtract(decimalOf(input.amount)), state.remaining)
         if (left.compare(0) <= 0) continue
-        const cap = recoverySetup(recovery.organizationPartyId).cap
+        const cap = capFor(recoverySetup(recovery.organizationPartyId), member.partyRelationshipId, recovery.currencyUomId)
         if (cap && cap.compare(0) > 0 && left.compare(cap) > 0) left = cap
         const key = "RECOVERY:" + recovery.payrollRecoveryId + ":" + period.timePeriodId
         out.push({
@@ -955,7 +1209,7 @@ function obligationKinds(invoiceIds) {
     return Object.fromEntries(rowsIn(OBLIGATION, "invoiceId", invoiceIds).map(row => [row.invoiceId, row.obligationKindEnumId]))
 }
 
-const operations = {finalizeRun, getSettlement, getObligation}
+const operations = {finalizeRun, getSettlement, getObligation, getRecoverySettings, storeRecoverySettings}
 function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown payroll obligation operation " + op)
     return operations[op](p || {})

@@ -67,14 +67,7 @@ along with this software (see the LICENSE.md file). If not, see
         <member-entity entity-alias="ECLM" entity-name="mantle.humanres.expense.ExpenseClaim" join-from-alias="INV" join-optional="true">
             <key-map field-name="invoiceId"/>
         </member-entity>
-        <!-- People P27 (AC-23, the payroll-origin projection): the payroll obligation that made the invoice or settles it (an
-            invoice is one obligation's), so Accounting's reads leave a payroll-origin invoice to holders of PAYROLL_VIEW -->
-        <member-entity entity-alias="POB" entity-name="mantle.humanres.payroll.PayrollObligation" join-from-alias="INV"
-                join-optional="true">
-            <key-map field-name="invoiceId"/>
-        </member-entity>
         <alias-all entity-alias="INV"/>
-        <alias entity-alias="POB" name="payrollObligationKindEnumId" field="obligationKindEnumId"/>
         <alias entity-alias="OHLD" name="openHoldCount"/>
         <alias entity-alias="ECLM" name="claimStatusEnumId" field="statusEnumId"/>
         <alias entity-alias="ECLM" name="claimReservedRouteEnumId" field="reservedRouteEnumId"/>
