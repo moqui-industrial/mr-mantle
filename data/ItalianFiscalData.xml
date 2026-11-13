@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<entity-facade-xml type="seed">
+    <!-- Italian PartyIdType Enumerations -->
+    <moqui.basic.Enumeration enumId="PtidREA" enumTypeId="PartyIdType" description="Numero REA (Registro Imprese)" sequenceNum="10"/>
+    <moqui.basic.Enumeration enumId="PtidEORI" enumTypeId="PartyIdType" description="Codice EORI" sequenceNum="11"/>
+    <moqui.basic.Enumeration enumId="PtidExchSysCode" enumTypeId="PartyIdType" description="Codice Univoco SDI" sequenceNum="12"/>
+    <moqui.basic.Enumeration enumId="PtidPec" enumTypeId="PartyIdType" description="Indirizzo PEC" sequenceNum="13"/>
+
+    <!-- Italian Tax Authority -->
+    <mantle.party.Party partyId="IT_ADE" partyTypeEnumId="PtyOrganization" disabled="N"/>
+    <mantle.party.Organization partyId="IT_ADE" organizationName="Agenzia delle Entrate"/>
+    <mantle.other.tax.TaxAuthority taxAuthorityId="IT_ADE" taxAuthGeoId="ITA" taxAuthPartyId="IT_ADE"
+        taxAuthorityTypeEnumId="TatFederal" description="Agenzia delle Entrate"/>
+
+    <!-- Italian VAT Rates -->
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_22" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="22.0" description="IVA 22% - Aliquota Ordinaria" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_10" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="10.0" description="IVA 10% - Aliquota Ridotta" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_5" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="5.0" description="IVA 5% - Aliquota Ridotta" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_4" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="4.0" description="IVA 4% - Aliquota Minima" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N1" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N1 Escluse ex art. 15" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N2" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N2 Non soggette ad IVA" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N3" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N3 Non imponibili (esportazioni)" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N4" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N4 Operazioni esenti ex art. 10" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N6" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N6 Inversione contabile (reverse charge)" fromDate="2020-01-01 00:00:00"/>
+    <mantle.other.tax.TaxAuthorityRate taxAuthorityRateId="IT_VAT_0_N7" taxAuthorityId="IT_ADE" rateTypeEnumId="TarVatTax"
+        taxPercentage="0.0" description="IVA 0% - N7 IVA assolta in altro stato UE" fromDate="2020-01-01 00:00:00"/>
+</entity-facade-xml>

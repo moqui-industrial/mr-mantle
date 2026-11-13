@@ -3820,7 +3820,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
             <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromExchVal">
                 <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
-            <set field="fromFiscal" from="{taxIdNumber: fromTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: fromSsnVal?.idValue,
+            <set field="fromFiscal" from="{taxIdNumber: fromTaxAuthList?.[0]?.partyTaxId || fromTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: fromSsnVal?.idValue,
                 reaNumber: fromReaVal?.idValue, eoriNumber: fromEoriVal?.idValue, exchSysCode: fromExchVal?.idValue}"/>
 
             <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="toTaxAuthList">
@@ -3833,7 +3833,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
             <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toExchVal">
                 <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
-            <set field="toFiscal" from="{taxIdNumber: toTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: toSsnVal?.idValue,
+            <set field="toFiscal" from="{taxIdNumber: toTaxAuthList?.[0]?.partyTaxId || toTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: toSsnVal?.idValue,
                 reaNumber: toReaVal?.idValue, eoriNumber: toEoriVal?.idValue, exchSysCode: toExchVal?.idValue}"/>
         </actions>
     </service>
