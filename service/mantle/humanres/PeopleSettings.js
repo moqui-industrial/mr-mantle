@@ -9,7 +9,8 @@
 //   holding PEOPLE_CASE_HANDLE, working for the employer: HANDLER_NOT_ELIGIBLE otherwise); shown with the handlers' names, never a
 //   case.
 // The employer is one of the caller's People scope (ORGANIZATION_DENIED otherwise); a write names the revision it read
-// (expectedRevision: the later change of the employer's settings) and is refused when it changed since (REVISION_STALE).
+// (expectedRevision: the later change of the employer's settings; required for the intake handlers, checked when given for the
+// clocking default) and is refused when it changed since (REVISION_STALE).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js")
@@ -128,8 +129,10 @@ function storeSettings(p) {
         denied("PERMISSION_DENIED", "The clocking default is the People administrator's and the employer's HR editors'")
     if (intakeGiven && !configures(userScope, organizationPartyId))
         denied("PERMISSION_DENIED", "The confidential case intake is the People administrator's")
+    // the intake handlers replace the whole list, so a change of them names the revision it read; the clocking default is one value,
+    // which Who clocks sets without reading the rest, so its revision is checked when given
     const revision = revisionOf(organizationPartyId)
-    if (text(p.expectedRevision) && text(p.expectedRevision) !== revision)
+    if ((intakeGiven || text(p.expectedRevision)) && text(p.expectedRevision) !== revision)
         denied("REVISION_STALE", "The employer's settings changed since you read them (revision " + revision + ")")
     const reason = text(p.reason) || null
     const changed = []
@@ -151,15 +154,14 @@ function storeSettings(p) {
     }
     if (intakeGiven) {
         const ids = people.unique(cases().listOf(p.intakeHandlerIds))
+        // named only by the id given: a party who does not work for the employer is no one the caller may read
         for (const partyId of ids)
-            if (!cases().eligibleHandler(partyId, organizationPartyId)) {
-                const name = people.personNames([partyId])[partyId] || partyId
+            if (!cases().eligibleHandler(partyId, organizationPartyId))
                 denied(
                     "HANDLER_NOT_ELIGIBLE",
-                    name +
+                    partyId +
                         " cannot take this employer's cases: an enabled account holding PEOPLE_CASE_HANDLE, working for it, is needed"
                 )
-            }
         write(INTAKE, ids.join(","))
     }
     const names = people.organizationNames([organizationPartyId])

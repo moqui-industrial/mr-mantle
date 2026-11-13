@@ -1470,7 +1470,8 @@ along with this software (see the LICENSE.md file). If not, see
             the employer alone, each one an enabled account holding PEOPLE_CASE_HANDLE working for the employer
             (HANDLER_NOT_ELIGIBLE). Refuses a caller without the right for a setting given (PERMISSION_DENIED), an employer outside
             their scope (ORGANIZATION_DENIED), nothing to change (NOTHING_TO_CHANGE) and a stale expectedRevision
-            (REVISION_STALE). Answers the employer's settings as get#Settings does and the settings changed.</description>
+            (REVISION_STALE: required with the intake handlers, which replace the whole list; checked when given with the
+            clocking default). Answers the employer's settings as get#Settings does and the settings changed.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="clocking"/>

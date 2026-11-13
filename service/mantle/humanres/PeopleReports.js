@@ -842,6 +842,16 @@ const reports = [
     }
 ]
 const readable = (report, caps) => report.needs.some(capability => caps[capability])
+// The employers a report reads for the caller: their People scope's (a staff read's), and for the expense claims also the employers
+// whose claims they manage (PEOPLE_EXPENSE_MANAGE is no staff read, so an expense manager without one has no People scope: Expense.js
+// expenseScope reads their employers so).
+function employersFor(report, userScope) {
+    const caps = userScope.capabilities
+    if (report.reportId !== "expenses" || !caps.expenseManage || !ec.user.userId) return userScope.organizationPartyIds
+    const info = lib.call("mantle.party.PartyServices.get#PartyOrganizationInfo")
+    const managed = people.employers({staff: true, allOrganizations: caps.allOrganizations}, info).organizationPartyIds
+    return unique((caps.hrView ? userScope.organizationPartyIds : []).concat(managed))
+}
 
 // get#Options: the reports the caller reads (with the options each takes) and the employers of their scope; a caller who reads
 // none is refused (PERMISSION_DENIED), so Insights' catalog hides People's entries from them.
@@ -850,7 +860,8 @@ function options(p) {
     const caps = userScope.capabilities
     const list = reports.filter(report => readable(report, caps))
     if (!list.length) denied("PERMISSION_DENIED", "People reports need HR, recruiting, development, expense or payroll access")
-    const names = people.organizationNames(userScope.organizationPartyIds)
+    const scopeIds = unique(list.flatMap(report => employersFor(report, userScope)))
+    const names = people.organizationNames(scopeIds)
     return {
         reports: list.map(report => ({
             reportId: report.reportId,
@@ -859,7 +870,7 @@ function options(p) {
             options: report.options,
             pay: !!report.pay
         })),
-        employers: userScope.organizationPartyIds
+        employers: scopeIds
             .map(organizationPartyId => ({
                 organizationPartyId,
                 organizationName: names[organizationPartyId] || organizationPartyId
@@ -899,8 +910,9 @@ function run(p) {
             report.pay ? "The payroll register needs PAYROLL_VIEW" : report.title + " is not available to you"
         )
     const organizationPartyId = text(p.organizationPartyId) || null
-    people.requireOrganization(userScope, organizationPartyId)
-    const employers = organizationPartyId ? [organizationPartyId] : userScope.organizationPartyIds
+    const scopeIds = employersFor(report, userScope)
+    people.requireOrganization({organizationPartyIds: scopeIds}, organizationPartyId)
+    const employers = organizationPartyId ? [organizationPartyId] : scopeIds
     const found = {capped: false}
     const answer = employers.length ? report.run({employers, p, found, userScope}) : {rows: [], totals: {}, columns: []}
     const columns = (answer.columns || []).map(([name, title]) => ({name, title}))

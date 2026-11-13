@@ -97,6 +97,16 @@ spec({
         state.caseUser = user("CASE", ["PEOPLE_CASE_HANDLE"], state.CASE)
         state.dir = user("DIR", ["PEOPLE_DIRECTORY_VIEW"], state.DIR)
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.HRB)
+        // an expense manager with no staff read (as Accounting's payables clerk), an agent of A (not employed, so no headcount)
+        state.EXP = person("EXP")
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtAgent",
+            fromPartyId: state.EXP,
+            toPartyId: orgA,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
+        state.exp = user("EXP", ["PEOPLE_EXPENSE_MANAGE"], state.EXP)
     }
 })
 
@@ -210,7 +220,7 @@ feature("qualification expiry leaves out the renewed and a number; leave balance
     }
 })
 
-feature("the payroll register is a payroll reader's alone", {
+feature("the payroll register is a payroll reader's alone; the expense claims an expense manager's employers'", {
     when() {
         const parameters = {reportId: "payrollRegister", fromDate: "2026-01-01", thruDate: "2026-12-31"}
         return {
@@ -218,10 +228,14 @@ feature("the payroll register is a payroll reader's alone", {
             payRegister: run(state.pay, R + "run#Report", parameters),
             hrOptions: run(state.hr, R + "get#Options"),
             payOptions: run(state.pay, R + "get#Options"),
-            dirOptions: run(state.dir, R + "get#Options")
+            dirOptions: run(state.dir, R + "get#Options"),
+            expOptions: run(state.exp, R + "get#Options"),
+            expClaims: run(state.exp, R + "run#Report", {reportId: "expenses", fromDate: "2026-01-01", thruDate: "2026-12-31"}),
+            expOther: run(state.exp, R + "run#Report", {reportId: "expenses", organizationPartyId: orgB}),
+            expHeadcount: run(state.exp, R + "run#Report", {reportId: "headcount"})
         }
     },
-    then({hrRegister, payRegister, hrOptions, payOptions, dirOptions}) {
+    then({hrRegister, payRegister, hrOptions, payOptions, dirOptions, expOptions, expClaims, expOther, expHeadcount}) {
         code(hrRegister) == "PERMISSION_DENIED"
         hrRegister.rows == null
         payRegister.error == ""
@@ -232,6 +246,13 @@ feature("the payroll register is a payroll reader's alone", {
         payOptions.reports.map(report => report.reportId) == ["payrollRegister"]
         hrOptions.employers.map(row => row.organizationPartyId) == [orgA]
         code(dirOptions) == "PERMISSION_DENIED"
+        // the expense claims of the employers an expense manager manages, though PEOPLE_EXPENSE_MANAGE is no staff read
+        expOptions.reports.map(report => report.reportId) == ["expenses"]
+        expOptions.employers.map(row => row.organizationPartyId) == [orgA]
+        expClaims.error == ""
+        expClaims.organizationPartyIds == [orgA]
+        code(expOther) == "ORGANIZATION_DENIED"
+        code(expHeadcount) == "PERMISSION_DENIED"
     }
 })
 
@@ -252,8 +273,15 @@ feature("the clocking default is HR's and the administrator's, the case intake t
         ).map(row => row.newValueText + " " + row.changeReason)
         const hrIntake = run(state.hr, S + "store#Settings", {organizationPartyId: orgA, intakeHandlerIds: [state.CASE]})
         const before = run(state.admin, S + "get#Readiness", {organizationPartyId: orgA})
-        const ineligible = run(state.admin, S + "store#Settings", {organizationPartyId: orgA, intakeHandlerIds: [state.ben]})
         const settings = run(state.admin, S + "get#Settings", {organizationPartyId: orgA})
+        const revision = settings.employers?.[0]?.revision
+        const ineligible = run(state.admin, S + "store#Settings", {
+            organizationPartyId: orgA,
+            intakeHandlerIds: [state.ben],
+            expectedRevision: revision
+        })
+        // the intake list is replaced whole, so a change of it names the revision it read
+        const unread = run(state.admin, S + "store#Settings", {organizationPartyId: orgA, intakeHandlerIds: [state.CASE]})
         const stale = run(state.admin, S + "store#Settings", {
             organizationPartyId: orgA,
             intakeHandlerIds: [state.CASE],
@@ -262,7 +290,7 @@ feature("the clocking default is HR's and the administrator's, the case intake t
         const named = run(state.admin, S + "store#Settings", {
             organizationPartyId: orgA,
             intakeHandlerIds: state.CASE,
-            expectedRevision: settings.employers?.[0]?.revision
+            expectedRevision: revision
         })
         const after = run(state.admin, S + "get#Readiness", {organizationPartyId: orgA})
         const otherEmployer = run(state.hr, S + "store#Settings", {organizationPartyId: orgB, clocking: "Y"})
@@ -274,6 +302,7 @@ feature("the clocking default is HR's and the administrator's, the case intake t
             hrIntake,
             before: intakeOf(before),
             ineligible,
+            unread,
             settings,
             stale,
             named,
@@ -283,7 +312,21 @@ feature("the clocking default is HR's and the administrator's, the case intake t
             checks: after.checks || []
         }
     },
-    then({hrClocking, audit, hrIntake, before, ineligible, settings, stale, named, after, otherEmployer, hrSettings, checks}) {
+    then({
+        hrClocking,
+        audit,
+        hrIntake,
+        before,
+        ineligible,
+        unread,
+        settings,
+        stale,
+        named,
+        after,
+        otherEmployer,
+        hrSettings,
+        checks
+    }) {
         hrClocking.error == ""
         hrClocking.changed == ["PeopleClocking"]
         hrClocking.settings.clocking == "Y"
@@ -293,6 +336,8 @@ feature("the clocking default is HR's and the administrator's, the case intake t
         before.reasonCode == "NO_CASE_HANDLER"
         // Ben left A, so he cannot take its cases
         code(ineligible) == "HANDLER_NOT_ELIGIBLE"
+        !ineligible.error.includes("Report BEN")
+        code(unread) == "REVISION_STALE"
         settings.employers[0].intakeCandidates.map(row => row.partyId) == [state.CASE]
         code(stale) == "REVISION_STALE"
         named.error == ""
