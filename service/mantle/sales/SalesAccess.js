@@ -169,23 +169,9 @@ function contactAccounts(userScope, partyId) {
 }
 // The organization a new record is for when none is named: the active one, else the scope's only one, else the only one of the
 // scope the caller works for themselves (an agent or employee: a representative of Retail whose scope also holds Retail's rollup
-// children, P4 review); null when that leaves a choice.
+// children, P4 review); null when that leaves a choice. The rule is Mantle's, for every app (FacilityScope.js defaultOrganization).
 function defaultOrganization(userScope) {
-    if (userScope.activeOrganizationPartyId) return userScope.activeOrganizationPartyId
-    const ids = userScope.organizationPartyIds
-    if (ids?.length === 1) return ids[0]
-    if ((ids != null && !ids.length) || !userScope.partyId) return null
-    let query = lib
-        .find("mantle.party.PartyRelationship")
-        .condition("fromPartyId", userScope.partyId)
-        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
-        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
-        .selectField("toPartyId")
-    if (ids != null) query = query.condition("toPartyId", "in", Array.from(ids))
-    const own = Array.from(new Set(Array.from(query.list()).map(row => row.toPartyId))).filter(
-        partyId => ids != null || isInternal(partyId)
-    )
-    return own.length === 1 ? own[0] : null
+    return ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js").defaultOrganization(userScope)
 }
 // The organization an account write is for: the one named, which must be in the scope, else the default one (defaultOrganization).
 // Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
