@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P26 (design-people §8 PayslipDetail StatementOutput, §15 the payslip, §1.4 notification topics): a final payslip
+        issued (PayrollResultServices issue#Payslip) tells its person, and them alone (directOnly: a subscription to every message of
+        the topic receives none), that it is available: the message holds payslipId, organizationName, periodText and payDateText,
+        never an amount; its link needs a sign-in and no attachment is mailed. The app that shows it sets the link (IronStone
+        People: BossSetupData.xml, the person's own payslip in their self-service). -->
+    <moqui.security.user.NotificationTopic topic="PayslipIssued" inboxEnumId="NinNotifications"
+            description="Your payslip is available" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your payslip from ${organizationName} for ${periodText} is available"/>
+</entity-facade-xml>

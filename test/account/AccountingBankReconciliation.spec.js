@@ -129,9 +129,15 @@ feature("a statement with a duplicate and a malformed row imports the rest and l
             amountColumn: "Value",
             descriptionColumn: "What"
         })
-        return {first, before, second, committed, again, review, preview, after: lines(f.bankId)}
+        // the import as Admin's Imports lists it (find#StatementImportRuns, mr-boss impl-admin P15): a summary, no line of it
+        const listed = Array.from(native("find#StatementImportRuns", {targetId: "statementImports"}).runList).find(
+            run => run.runId === second.statementImportId
+        )
+        return {first, before, second, committed, again, review, preview, listed, after: lines(f.bankId)}
     },
-    then({first, before, second, committed, again, review, preview, after}) {
+    then({first, before, second, committed, again, review, preview, listed, after}) {
+        listed.state == "complete" && listed.fileLabel == "october.csv" && listed.appliedCount == 1 && listed.errorCount == 1
+        listed.ownerParameters.statementImportId == second.statementImportId && !JSON.stringify(listed).includes("Bank fee")
         first.newCount == 2
         second.newCount == 1 && second.duplicateCount == 1 && second.rejectedCount == 1
         committed.committedCount == 1 && committed.duplicateCount == 1 && committed.rejectedCount == 1

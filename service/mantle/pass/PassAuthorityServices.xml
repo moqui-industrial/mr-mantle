@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- No copyright or license for configuration file, details here are not considered a creative work. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
-  <!-- One PASS operation for the host's PassAuthority gRPC service (mr-moqui plans/Edge-Node.md §5.5), which has checked
+  <!-- One PASS operation for the host's PassAuthority gRPC service (mr-moqui plans/archive/Edge-Node.md §5.5), which has checked
        the client (clientVerified): its secret on the gRPC listener, or the edge link. The REST servlet (script/PassApi.js)
        calls the same function. No transaction of its own: each operation's service has its own, as under the servlet, so
        a refusal is its error envelope rather than a rolled-back call. -->

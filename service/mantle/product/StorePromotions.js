@@ -385,6 +385,13 @@ function getPromotion(p) {
 // store#Promotion: a new promotion of a store with its registered rule, or a change of one (its store and rule are fixed:
 // start a new promotion for another). A stale row is refused; a change of its dates or limits names its reason in the audit
 // log.
+// A promotion with a start date is a marker on its store's organization's time series, from its start to its end, written
+// after the commit (BusinessEvents.js); there is no start event, so the marker is the dated promotion as stored.
+function promotionStarts(storePromotionId) {
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/BusinessEvents.js")
+        .register("PromotionStart", storePromotionId)
+}
 function storePromotion(p) {
     const s = scope("edit")
     const values = {}
@@ -432,9 +439,12 @@ function storePromotion(p) {
         }
         withReasons(update)
         call("update#" + PROMOTION, update)
+        if (changed.includes("fromDate") || changed.includes("thruDate") || changed.includes("itemDescription"))
+            promotionStarts(promotion.storePromotionId)
         return {storePromotionId: promotion.storePromotionId, changed}
     }
     const created = call("create#" + PROMOTION, Object.assign({requireCode: "N", freeGroundShipping: "N"}, values))
+    if (values.fromDate) promotionStarts(created.storePromotionId)
     return {storePromotionId: created.storePromotionId, changed: Object.keys(values)}
 }
 

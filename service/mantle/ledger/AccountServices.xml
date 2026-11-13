@@ -39,7 +39,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
             <set field="scope" from="policy.organization(context, 'glPost')"/>
             <set field="changeReason" from="policy.reason(context)"/>
-            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="scope.organizationPartyId"/>
             </entity-find-one>
             <if condition="glAccountId">
@@ -140,7 +140,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
             <set field="scope" from="policy.organization(context, 'glPost')"/>
             <set field="changeReason" from="policy.reason(context)"/>
-            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="scope.organizationPartyId"/>
             </entity-find-one>
             <entity-find-one entity-name="mantle.ledger.account.GlAccount" value-field="account" disable-authz="true">

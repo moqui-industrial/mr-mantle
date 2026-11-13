@@ -154,6 +154,26 @@ feature("independent checks report required data, identifiers, units, category a
         before == after
     }
 })
+feature("a severity narrows the issues and their counts while validity still reflects every issue", {
+    when() {
+        return as("chk_reader", () => {
+            const productIds = ["CHK_EMPTY", "CHK_GOOD", "CHK_KIT", "CHK_CURRENCY"]
+            return {
+                all: call(S + "validate#Catalog", {productIds}),
+                warnings: call(S + "validate#Catalog", {productIds, severity: "warning"})
+            }
+        })
+    },
+    then({all, warnings}) {
+        all.issueRows.some(r => r.severity === "error")
+        warnings.issueRows.length > 0
+        warnings.issueRows.every(r => r.severity === "warning")
+        warnings.issueCount == warnings.issueRows.length
+        warnings.issueCount < all.issueCount
+        warnings.incompleteCount == 0
+        warnings.valid == false
+    }
+})
 feature("price and cost checks require their own permissions and expose only readable source evidence", {
     when() {
         return {

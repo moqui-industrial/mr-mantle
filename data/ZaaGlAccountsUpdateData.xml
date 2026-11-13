@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Accounting data updates, run on every seed load and with nothing to do once done. -->
+<entity-facade-xml type="seed">
+    <!-- payroll's posting mappings (PtPayrollPayment, a receivable InvoicePayroll) that ZaaGlAccountsInstallData.xml has for a new
+        database, added to DefaultSettings and the organizations of an existing one where missing, and the payroll payments made
+        before the payrollOrigin mark marked (People P27 and its review, AC-23: migrate#PayrollOrigin) -->
+    <mantle.account.PayrollOriginServices.migrate-PayrollOrigin/>
+</entity-facade-xml>

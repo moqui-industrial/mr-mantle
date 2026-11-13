@@ -831,6 +831,52 @@ feature("export a book as Google Contacts CSV and as vCard 4.0; another user can
     },
 })
 
+// the export target contactBookVCard (org.moqui.admin.DataTransferServices; mr-boss impl-admin P16): its services check the
+// caller's own permission on the book, whatever grant the dispatch runs under
+feature("the export target of a book: the caller's own books, the field groups asked for and no other; another user's book refused", {
+    when() {
+        const X = "mantle.party.ContactImportServices."
+        const out = as("cbk.avery", () => ({
+            scopes: call(X + "find#ContactExportScopes", { targetId: "contactBookVCard" }).scopeList,
+            count: call(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId, fieldList: ["name"], countOnly: true }),
+            names: call(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId, fieldList: ["name", "emails"] }),
+            all: call(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId,
+                fieldList: ["name", "organization", "emails", "phones", "addresses", "websites", "groups", "birthday", "notes"] }),
+            favorites: call(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId, fieldList: ["name"],
+                selection: { favoritesOnly: "Y" }, countOnly: true }),
+            past: call(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId, fieldList: ["name"], maxRows: 1 }),
+        }))
+        out.blakeScopes = as("cbk.blake", () => call(X + "find#ContactExportScopes", { targetId: "contactBookVCard" }).scopeList)
+        out.blake = as("cbk.blake", () => errorOf(X + "export#ContactBookTransfer", { targetId: "contactBookVCard", scopeKey: defaultBookId, fieldList: ["name"] }))
+        out.registered = ec.entity.find("moqui.server.TransferTarget").condition("targetId", "contactBookVCard").one()?.exportService
+        return out
+    },
+    then({ scopes, count, names, all, favorites, past, blakeScopes, blake, registered }) {
+        registered == "mantle.party.ContactImportServices.export#ContactBookTransfer"
+        scopes.some((scope) => scope.scopeKey === defaultBookId && scope.title === "My Contacts (personal)")
+        !blakeScopes.some((scope) => scope.scopeKey === defaultBookId)
+        blake.includes("not found")
+        count.rowCount >= 5
+        count.fileText == null
+        favorites.rowCount < count.rowCount
+        // past the bound the count alone: the caller refuses it whole
+        past.rowCount == count.rowCount
+        past.fileText == null
+        // only the groups asked for are written beside the name
+        names.contentType == "text/vcard"
+        names.rowCount == count.rowCount
+        names.fileText.includes("FN:Gina Googler")
+        names.fileText.includes("gina.googler@example.com")
+        !names.fileText.includes("BDAY:")
+        !names.fileText.includes("NOTE:")
+        !names.fileText.includes("ORG:")
+        !names.fileText.includes("TEL")
+        all.fileText.includes("BDAY:19850412")
+        all.fileText.includes("NOTE:Met at the fair\\, 2024")
+        all.fileText.includes("ORG:Googler Widgets")
+    },
+})
+
 feature("deleting a personal book moves its only-here personal contacts to the default book", {
     when() {
         at(12)

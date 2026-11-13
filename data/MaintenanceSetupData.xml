@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- The maintenance, work process, resource booking and resource policy permissions (IronStone Maintenance design §1.1;
+        impl-maintenance P1, §4): the Mantle maintenance services check them (mantle/work/MaintenanceAccess.js names each), each
+        granted to ADMIN here, as FACILITY_EDIT is (MantleSetupData.xml). An application grants them to its own groups. Broad
+        work view, assigned-work view and own-request view are separate permissions, and a write permission alone opens no
+        list. FACILITY_EDIT, which facility writes check (FacilityServices.store#Facility), is MantleSetupData's. -->
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_VIEW" description="Maintenance View (work orders, equipment and reports of the user's organizations)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_ASSIGNED_VIEW" description="Maintenance Assigned View (the work and steps assigned to the user)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_ASSIGNED_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_REQUEST" description="Maintenance Request (report a problem)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_REQUEST" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_REQUEST_VIEW_OWN" description="Maintenance Request View Own (follow the user's own requests)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_REQUEST_VIEW_OWN" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_PLAN" description="Maintenance Plan (create, triage, assign, schedule and generate work)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_PLAN" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_EXECUTE" description="Maintenance Execute (record assigned work, evidence and own time)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_EXECUTE" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_SUPERVISE" description="Maintenance Supervise (approve, waive, accept, close, cancel and correct)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_SUPERVISE" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_COST_VIEW" description="Maintenance Cost View (labor, parts and outside-service cost)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_COST_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_RESOURCE_VIEW" description="Maintenance Resource View (equipment and facilities)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_RESOURCE_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_RESOURCE_EDIT" description="Maintenance Resource Edit (equipment identity, meters and custody)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_RESOURCE_EDIT" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_SETTINGS_EDIT" description="Maintenance Settings Edit (work policy, team defaults and lookups)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_SETTINGS_EDIT" fromDate="0"/>
+    <!-- the app's own import permission, which the equipment import target names with MAINTENANCE_RESOURCE_EDIT (impl-maintenance
+        §4, P18) -->
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_IMPORT" description="Maintenance Import (the equipment import)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_IMPORT" fromDate="0"/>
+    <!-- a maintenance reader's scope in every internal organization, as PEOPLE_ALL_ORGANIZATIONS widens People's; it reads nothing
+        by itself, and FACILITY_ALL_ORGANIZATIONS (facility and stock work) does not widen Maintenance (the user's call,
+        impl-maintenance P1 review, Nov 11, 2026) -->
+    <moqui.security.UserPermission userPermissionId="MAINTENANCE_ALL_ORGANIZATIONS" description="Maintenance work in every organization"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MAINTENANCE_ALL_ORGANIZATIONS" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="WORK_PROCESS_VIEW" description="Work Process View (process templates)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="WORK_PROCESS_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="WORK_PROCESS_EDIT" description="Work Process Edit (author process templates)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="WORK_PROCESS_EDIT" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="WORK_PROCESS_APPROVE" description="Work Process Approve (approve and retire process templates)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="WORK_PROCESS_APPROVE" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="RESOURCE_BOOKING_VIEW_ASSIGNED" description="Resource Booking View Assigned (the bookings of resources the user approves)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_BOOKING_VIEW_ASSIGNED" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="RESOURCE_BOOKING_APPROVE" description="Resource Booking Approve (decide the bookings of resources the user approves)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_BOOKING_APPROVE" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="RESOURCE_POLICY_VIEW" description="Resource Policy View (booking policies and blackouts)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_POLICY_VIEW" fromDate="0"/>
+    <moqui.security.UserPermission userPermissionId="RESOURCE_POLICY_EDIT" description="Resource Policy Edit (booking policies and blackouts)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_POLICY_EDIT" fromDate="0"/>
+    <!-- impl-maintenance P15 (design §7.1): a managed resource's soft conflict is booked over only by this permission, where its
+        policy allows an override, with a reason; allowConflicts alone is no authority -->
+    <moqui.security.UserPermission userPermissionId="RESOURCE_BOOKING_OVERRIDE" description="Resource Booking Override (book a managed resource over another booking, with a reason, where its policy allows)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="RESOURCE_BOOKING_OVERRIDE" fromDate="0"/>
+</entity-facade-xml>

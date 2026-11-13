@@ -27,140 +27,207 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========================================================= -->
 
     <entity entity-name="PartySkill" package="mantle.humanres.ability" use="nontransactional">
+        <description>A party's current level of a skill. IronStone People (design §10, PE-14; impl-people P18) keeps each
+            evaluation as a PartySkillEvaluation and the accepted level here: an evaluation (sourceEnumId SksEvaluated, or
+            SksManagerEvaluated for a manager's evaluation of a report) sets it, a self-declaration (SksSelfDeclared) only where
+            no evaluation has (mantle.humanres.DevelopmentServices.store#Skill). A row with no source was recorded before People
+            (Projects' skills, a rating) and counts as recorded by staff.</description>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
         <field name="rating" type="number-integer"/>
-        <field name="skillLevel" type="number-integer"/>
+        <field name="skillLevel" type="number-integer"><description>The level, a SkillLevel value's number (enumCode, 1 to 5)</description></field>
         <field name="startedUsingDate" type="date-time"/>
         <field name="yearsExperience" type="number-integer"/>
+        <field name="sourceEnumId" type="id"><description>Where the level comes from (SkillSource): self-declared,
+            evaluated or a manager's evaluation; empty for a level recorded before People</description></field>
+        <field name="partySkillEvaluationId" type="id"><description>The evaluation the level is from</description></field>
+        <field name="evaluatedDate" type="date-time"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">
             <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="SkillSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.ability.PartySkillEvaluation"/>
 
         <seed-data>
             <!-- Skill Type -->
             <moqui.basic.EnumerationType description="Skill Type" enumTypeId="SkillType"/>
+            <!-- where a skill level comes from (impl-people P18): a self-declared level satisfies no requirement -->
+            <moqui.basic.EnumerationType description="Skill Source" enumTypeId="SkillSource"/>
+            <moqui.basic.Enumeration enumId="SksSelfDeclared" enumTypeId="SkillSource" description="Self-declared" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="SksEvaluated" enumTypeId="SkillSource" description="Evaluated" sequenceNum="2"/>
+            <!-- a manager's evaluation of a report (the user's call of Nov 12, 2026): meets a requirement as an evaluation does -->
+            <moqui.basic.Enumeration enumId="SksManagerEvaluated" enumTypeId="SkillSource" description="Manager's evaluation" sequenceNum="3"/>
         </seed-data>
     </entity>
+    <entity entity-name="PartySkillEvaluation" package="mantle.humanres.ability" cache="never">
+        <description>One evaluation of a party's skill (IronStone People design §10, PE-14; impl-people P18): a self-declaration
+            or an evaluation by an assessor, with its level, date and evidence (text, and a qualification it rests on). Kept as
+            history, never changed or deleted; PartySkill holds the accepted level. Written through
+            mantle.humanres.DevelopmentServices.store#Skill.</description>
+        <field name="partySkillEvaluationId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="skillTypeEnumId" type="id"/>
+        <field name="sourceEnumId" type="id"/>
+        <field name="skillLevel" type="number-integer"/>
+        <field name="evaluationDate" type="date-time"/>
+        <field name="assessorPartyId" type="id"><description>Who evaluated: the person themselves for a self-declaration</description></field>
+        <field name="evaluatedByUserId" type="id"/>
+        <field name="evidence" type="text-long"/>
+        <field name="partyQualificationId" type="id"><description>A qualification of the person the evaluation rests on</description></field>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="SkillType" related="moqui.basic.Enumeration">
+            <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="SkillSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="Assessor" related="mantle.party.Party">
+            <key-map field-name="assessorPartyId"/></relationship>
+        <relationship type="one" title="EvaluatedBy" related="moqui.security.UserAccount">
+            <key-map field-name="evaluatedByUserId"/></relationship>
+        <relationship type="one" related="mantle.humanres.ability.PartyQualification"/>
+        <index name="PTY_SKL_EVAL_PARTY"><index-field name="partyId"/><index-field name="skillTypeEnumId"/></index>
+    </entity>
 
-    <!-- not yet used so commented for now:
-    <entity entity-name="PartyQualification" package="mantle.humanres.ability" use="nontransactional">
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="qualificationTypeEnumId" type="id" is-pk="true"/>
-        <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="description" type="text-medium"/>
-        <field name="title" type="text-medium"><description>Title of degree or job</description></field>
-        <field name="statusId" type="id"><description>Status e.g. completed, part-time etc.</description></field>
-        <field name="verificationStatusId" type="id"/>
+    <entity entity-name="PartyQualification" package="mantle.humanres.ability" cache="never">
+        <description>A person's qualification: a degree, certificate, licence, work experience, identity document or work permit
+            (IronStone People design §10 Qualifications, PE-14; impl-people P18; refined from the commented sketch, F6). Each has
+            its own identity (a renewal is a new row naming the one it renews, so earlier evidence stays), a type, issuer,
+            reference (the document or certificate number), valid dates and a verification state: submitted (QlVerPending),
+            verified, rejected or revoked by an authorized verifier, never by the person (the state audit-logged with the
+            verifier's reason). An identity document or work permit (QualIdentityDocument, QualWorkPermit and the types under
+            them) needs an expiry, and its reference is read only by the person and HR of an employer of theirs. Its files are on
+            its own content host (PartyQualificationContent, PE-01), never on the Party: the person and HR read them. Staffing
+            reads only whether a verified qualification is valid or expiring (mantle.humanres.DevelopmentServices
+            .check#Qualifications). Written through DevelopmentServices store#Qualification and verify#Qualification.</description>
+        <field name="partyQualificationId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="qualificationTypeEnumId" type="id"/>
+        <field name="title" type="text-medium"><description>Its name, such as the degree or certificate</description></field>
+        <field name="issuerName" type="text-medium"/>
+        <field name="referenceNumber" type="text-medium" ai-opt-out="true"><description>The document or certificate number;
+            restricted for an identity document or work permit, and kept from every model tool (PE-21)</description></field>
+        <field name="fromDate" type="date-time"><description>Issued, or valid from</description></field>
+        <field name="thruDate" type="date-time"><description>Expires: required for an identity document or work permit</description></field>
+        <field name="verificationStatusId" type="id" enable-audit-log="true"/>
+        <field name="submittedByUserId" type="id"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="verifiedByUserId" type="id"/>
+        <field name="verifiedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"><description>Why it was rejected or revoked</description></field>
+        <field name="renewsQualificationId" type="id"><description>The earlier qualification of the same person and type this
+            one renews</description></field>
+        <field name="reminderThruDate" type="date-time"><description>The expiry the person was last reminded of, so a reminder
+            is sent once per expiry</description></field>
+        <field name="comments" type="text-medium"/>
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
             <key-map field-name="qualificationTypeEnumId"/></relationship>
-        <relationship type="one" title="PartyQualification" related="moqui.basic.StatusItem"/>
         <relationship type="one" title="PartyQualificationVerification" related="moqui.basic.StatusItem">
             <key-map field-name="verificationStatusId"/></relationship>
+        <relationship type="one-nofk" title="Renews" related="mantle.humanres.ability.PartyQualification">
+            <key-map field-name="renewsQualificationId" related="partyQualificationId"/></relationship>
+        <index name="PTY_QUAL_PARTY"><index-field name="partyId"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Qualification Type" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualDegree" description="Degree" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualCertification" description="Certification" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualExperience" description="Work experience" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualBTech" parentEnumId="DEGREE" description="Bachelor of Technology" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualMBA" parentEnumId="DEGREE" description="Master of Business Administration" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualMSC" parentEnumId="DEGREE" description="Master of Science" enumTypeId="QualificationType"/>
-            <moqui.basic.Enumeration enumId="QualBSC" parentEnumId="DEGREE" description="Bachelor of Science" enumTypeId="QualificationType"/>
-
-            <moqui.basic.StatusType description="Party Qualification Status" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Completed" sequenceNum="11" statusId="QualCompleted" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Incomplete" sequenceNum="12" statusId="QualIncomplete" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Deferred" sequenceNum="13" statusId="QualDeferred" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Full-time" sequenceNum="21" statusId="QualFulltime" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Part-time" sequenceNum="22" statusId="QualParttime" statusTypeId="PartyQualification"/>
-            <moqui.basic.StatusItem description="Contractor" sequenceNum="23" statusId="QualContractor" statusTypeId="PartyQualification"/>
+            <moqui.basic.Enumeration enumId="QualDegree" description="Degree" enumTypeId="QualificationType" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="QualCertification" description="Certification" enumTypeId="QualificationType" sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="QualLicence" description="Licence" enumTypeId="QualificationType" sequenceNum="3"/>
+            <moqui.basic.Enumeration enumId="QualExperience" description="Work experience" enumTypeId="QualificationType" sequenceNum="4"/>
+            <!-- restricted, with a required expiry: the reference read only by the person and HR -->
+            <moqui.basic.Enumeration enumId="QualIdentityDocument" description="Identity document" enumTypeId="QualificationType" sequenceNum="5"/>
+            <moqui.basic.Enumeration enumId="QualWorkPermit" description="Work permit" enumTypeId="QualificationType" sequenceNum="6"/>
 
             <moqui.basic.StatusType description="Party Qualification Verification Status" statusTypeId="PartyQualificationVerification"/>
-            <moqui.basic.StatusItem description="Not verified" sequenceNum="1" statusId="QlVerNotVerified" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Waiting for verification" sequenceNum="1" statusId="QlVerPending" statusTypeId="PartyQualificationVerification"/>
             <moqui.basic.StatusItem description="Verified" sequenceNum="2" statusId="QlVerVerified" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Rejected" sequenceNum="3" statusId="QlVerRejected" statusTypeId="PartyQualificationVerification"/>
+            <moqui.basic.StatusItem description="Revoked" sequenceNum="4" statusId="QlVerRevoked" statusTypeId="PartyQualificationVerification"/>
+            <!-- its note and message notices go to their named recipients alone (the user's call of Nov 12, 2026, People follow-up 1) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.ability.PartyQualification" ownerText="IronStone People: a qualification"/>
         </seed-data>
     </entity>
-    <entity entity-name="PartyResume" package="mantle.humanres.ability" use="nontransactional">
-        <field name="resumeId" type="id" is-pk="true"/>
-        <field name="partyId" type="id"/>
+    <entity entity-name="PartyQualificationContent" package="mantle.humanres.ability" cache="never">
+        <description>A file of a qualification: a certificate, a scan of a document (IronStone People PE-01; impl-people P18).
+            The qualification is People's content host, so the file is never on the person's broadly visible Party record;
+            get#RecordLinkInfo and RecordFiles admit it only to the person and a People HR reader of an employer of theirs
+            (mantle.humanres.DevelopmentServices.check#QualificationAccess), and it has no Records-drive folder, so nothing shares
+            it. Written through mantle.humanres.DevelopmentServices.create#QualificationContent.</description>
+        <field name="partyQualificationContentId" type="id" is-pk="true"/>
+        <field name="partyQualificationId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
         <field name="contentLocation" type="text-medium"/>
-        <field name="resumeDate" type="date-time"/>
-        <field name="resumeText" type="text-very-long"/>
-        <relationship type="one" related="mantle.party.Party"/>
-    </entity>
-    <entity entity-name="PerformanceReview" package="mantle.humanres.ability" use="nontransactional">
-        <field name="performanceReviewId" type="id" is-pk="true"/>
-        <field name="employeePartyId" type="id"/>
-        <field name="managerPartyId" type="id"/>
-        <field name="paymentId" type="id"/>
-        <field name="emplPositionId" type="id"/>
-        <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="comments" type="text-medium"/>
-        <relationship type="one" title="Employee" related="mantle.party.Party">
-            <key-map field-name="employeePartyId"/></relationship>
-        <relationship type="one" title="Manager" related="mantle.party.Party">
-            <key-map field-name="managerPartyId"/></relationship>
-        <relationship type="one" related="mantle.account.payment.Payment"/>
-        <relationship type="one" related="mantle.humanres.position.EmplPosition"/>
-    </entity>
-    <entity entity-name="PerformanceReviewItem" package="mantle.humanres.ability" use="nontransactional">
-        <field name="performanceReviewId" type="id" is-pk="true"/>
-        <field name="performanceReviewItemSeqId" type="id" is-pk="true"/>
-        <field name="reviewItemTypeEnumId" type="id"/>
-        <field name="reviewRatingEnumId" type="id"/>
-        <field name="comments" type="text-medium"/>
-        <relationship type="one" related="PerformanceReview"/>
-        <relationship type="one" title="PerformanceReviewItemType" related="moqui.basic.Enumeration">
-            <key-map field-name="reviewItemTypeEnumId"/></relationship>
-        <relationship type="one" title="PerformanceReviewRating" related="moqui.basic.Enumeration">
-            <key-map field-name="reviewRatingEnumId"/></relationship>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.ability.PartyQualification"/>
+        <relationship type="one" title="QualificationContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
         <seed-data>
-            <moqui.basic.EnumerationType description="Performance Review Item Type" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritTechnical" description="Technical skills" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritResponsibility" description="Responsibility" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritAttitude" description="Attitude" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritComm" description="Communication skills" enumTypeId="PerformanceReviewItemType"/>
-            <moqui.basic.Enumeration enumId="PritJobSat" description="Job Satisfaction" enumTypeId="PerformanceReviewItemType"/>
-
-            <moqui.basic.EnumerationType description="Performance Review Rating" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFail" sequenceNum="1" description="Fails to Meet Expectations" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtInconsistent" sequenceNum="2" description="Inconsistently Fulfills" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFulfill" sequenceNum="3" description="Fulfilled Expectations" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtFreqExceed" sequenceNum="4" description="Frequently Exceeds" enumTypeId="PerformanceReviewRating"/>
-            <moqui.basic.Enumeration enumId="PrfRtConsExceed" sequenceNum="5" description="Consistently Exceeds" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.EnumerationType description="Qualification Content Type" enumTypeId="QualificationContentType"/>
+            <moqui.basic.Enumeration description="Certificate" enumId="QlcntCertificate" enumTypeId="QualificationContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Document" enumId="QlcntDocument" enumTypeId="QualificationContentType" sequenceNum="2"/>
         </seed-data>
     </entity>
-    <entity entity-name="PerformanceNote" package="mantle.humanres.ability" use="nontransactional">
-        <field name="employeePartyId" type="id" is-pk="true"/>
-        <field name="noteDate" type="date-time" is-pk="true"/>
-        <field name="noteText" type="text-very-long"/>
-        <relationship type="one" title="Employee" related="mantle.party.Party">
-            <key-map field-name="employeePartyId"/></relationship>
-    </entity>
-    <entity entity-name="PersonTraining" package="mantle.humanres.ability" use="nontransactional">
-        <field name="partyId" type="id" is-pk="true"/>
-        <field name="trainingClassId" type="id" is-pk="true"/>
-        <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
-        <field name="workEffortId" type="id"/>
-        <field name="approverPartyId" type="id"/>
-        <field name="trainingApproved" type="text-indicator" enable-audit-log="true"/>
-        <field name="reason" type="text-medium"/>
+    <entity entity-name="PartyResume" package="mantle.humanres.ability" cache="never">
+        <description>A line of a person's resume (IronStone People design §4 Employee360 SkillsAndReviews; impl-people P18;
+            refined from the commented sketch, F6): earlier work or education, with the organization, the role and the dates.
+            Read with the person's development record (the person, HR and development staff of an employer of theirs) and
+            changed by the person and an HR or development editor (mantle.humanres.DevelopmentServices.store#ResumeLine).</description>
+        <field name="partyResumeId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="resumeLineTypeEnumId" type="id"/>
+        <field name="organizationName" type="text-medium"><description>The employer, school or other organization</description></field>
+        <field name="title" type="text-medium"><description>The role or course</description></field>
+        <field name="fromDate" type="date"/>
+        <field name="thruDate" type="date"/>
+        <field name="description" type="text-long"/>
         <relationship type="one" related="mantle.party.Party"/>
-        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
-        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
-        <relationship type="one" title="Approver" related="mantle.party.Party">
-            <key-map field-name="approverPartyId"/></relationship>
+        <relationship type="one" title="ResumeLineType" related="moqui.basic.Enumeration">
+            <key-map field-name="resumeLineTypeEnumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Resume Line Type" enumTypeId="ResumeLineType"/>
+            <moqui.basic.Enumeration enumId="RltExperience" description="Experience" enumTypeId="ResumeLineType" sequenceNum="1"/>
+            <moqui.basic.Enumeration enumId="RltEducation" description="Education" enumTypeId="ResumeLineType" sequenceNum="2"/>
+            <moqui.basic.Enumeration enumId="RltOther" description="Other" enumTypeId="ResumeLineType" sequenceNum="3"/>
+        </seed-data>
     </entity>
-    <entity entity-name="TrainingClass" package="mantle.humanres.ability" use="nontransactional">
+
+    <!-- the review sketches (PerformanceReview, PerformanceReviewItem, PerformanceNote) are refined in PeopleReviewEntities.xml
+        (impl-people P20; F6); the training sketch is refined below (P19) -->
+
+    <!-- training (IronStone People design §10 Training and TrainingDetail, §15 the completion certificate, PE-14, PE-15;
+        impl-people P19; refined from the commented PersonTraining and TrainingClass sketches, F6): a course of an employer, its
+        sessions (each a WepTraining event of Commons' calendar with its session facts), a person's enrollment in a session with its
+        own identity, and each assessment of it. Written through mantle.humanres.DevelopmentServices (Training.js). -->
+    <entity entity-name="TrainingClass" package="mantle.humanres.ability" cache="never">
+        <description>A course an employer offers: its title, kind, what passing it grants (a qualification type, valid for
+            validityMonths from the completion; never an identity document or work permit) and whether its completion needs an
+            assessment (a response of a form of the training assessment purpose). Ended (thruDate), it takes no new session; its
+            sessions and enrollments stay. Changed by a development editor of the employer (store#TrainingClass).</description>
         <field name="trainingClassId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer that offers it</description></field>
+        <field name="title" type="text-medium"/>
         <field name="trainingClassTypeEnumId" type="id"/>
-        <field name="description" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="qualificationTypeEnumId" type="id"><description>The qualification passing grants (verified, once per
+            enrollment); empty grants none</description></field>
+        <field name="validityMonths" type="number-integer"><description>How long the granted qualification is valid; empty
+            for no expiry</description></field>
+        <field name="assessmentRequired" type="text-indicator"><description>Y: a completion needs the session's assessment form
+            answered</description></field>
+        <field name="assessmentFormId" type="id"><description>The default assessment form of its sessions (DbfpTrainingAssessment)</description></field>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" title="TrainingClassType" related="moqui.basic.Enumeration">
             <key-map field-name="trainingClassTypeEnumId"/></relationship>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
+        <relationship type="one-nofk" title="Assessment" related="moqui.screen.form.DbForm">
+            <key-map field-name="assessmentFormId" related="formId"/></relationship>
         <seed-data>
             <moqui.basic.EnumerationType description="Training Class Type" enumTypeId="TrainingClassType"/>
             <moqui.basic.Enumeration enumId="TrctBasic" description="Basic Training" enumTypeId="TrainingClassType"/>
@@ -169,7 +236,118 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="TrctImprovement" description="Improvement Training" enumTypeId="TrainingClassType"/>
         </seed-data>
     </entity>
-    -->
+    <entity entity-name="TrainingSession" package="mantle.humanres.ability" cache="never">
+        <description>A session of a course: the facts of a WepTraining event (the WorkEffort keyed here, a private event of
+            Commons' calendar whose attendees are its trainer and the people enrolled), its employer, trainer, seats and
+            assessment form. Cancelled with its event (WeCancelled). Scheduled and changed by a development editor of the
+            employer (store#Training).</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="trainingClassId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="trainerPartyId" type="id"><description>Who trains and assesses: a person working for the employer</description></field>
+        <field name="capacity" type="number-integer"><description>The seats: enrolled and waiting requests together</description></field>
+        <field name="assessmentFormId" type="id"><description>The published form of the training assessment purpose its results
+            answer (the employer's); empty: a result is the outcome and score alone</description></field>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Trainer" related="mantle.party.Party">
+            <key-map field-name="trainerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Assessment" related="moqui.screen.form.DbForm">
+            <key-map field-name="assessmentFormId" related="formId"/></relationship>
+        <index name="TRN_SESSION_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <!-- the session's event is changed only on the session (DevelopmentServices.store#Training: its dates, trainer,
+                revision and places), never on Commons' event screens or over CalDAV (impl-people P19 review, R1) -->
+            <mantle.work.calendar.EventManager eventManagerId="PeopleTrainingSession" entityName="mantle.humanres.ability.TrainingSession"
+                    purposeEnumId="WepTraining" managedByText="its People training session"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PersonTraining" package="mantle.humanres.ability" cache="never">
+        <description>A person's enrollment in a training session, with its own identity: requested by the person (waiting for a
+            People approval of kind PakTraining, PeopleTrainingApproval) or enrolled by a development editor of the employer;
+            approved, refused or withdrawn; the attendance the trainer records; completed once by a passing assessment, which
+            grants the course's qualification once (partyQualificationId) and issues the completion certificate, stored when
+            issued (certificateLocation, its PDF, and certificateHtmlLocation, the page html-print shows, never rendered
+            again). A failed assessment is kept (PersonTrainingResult) and another attempt follows. The status is
+            audit-logged.</description>
+        <field name="personTrainingId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"/>
+        <field name="partyRelationshipId" type="id"><description>The employment the training is for</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The department the request routes by</description></field>
+        <field name="workEffortId" type="id"><description>The session</description></field>
+        <field name="trainingClassId" type="id"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="reason" type="text-medium"><description>Why the place is asked for</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decisionReason" type="text-medium"/>
+        <field name="attendedFlag" type="text-indicator" enable-audit-log="true"/>
+        <field name="attendedHours" type="number-decimal"/>
+        <field name="attendanceByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="partyQualificationId" type="id"><description>The qualification its completion granted, once</description></field>
+        <field name="certificateLocation" type="text-medium"/>
+        <field name="certificateHtmlLocation" type="text-medium"/>
+        <field name="certificateIssuedDate" type="date-time"/>
+        <field name="operationKey" type="id-long"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="Employment" related="mantle.party.PartyRelationship">
+            <key-map field-name="partyRelationshipId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.humanres.ability.TrainingClass"/>
+        <relationship type="one" title="PersonTrainingStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.ability.PartyQualification"/>
+        <index name="PRS_TRN_SESSION"><index-field name="workEffortId"/></index>
+        <index name="PRS_TRN_PARTY"><index-field name="partyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Person Training Status" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsRequested" description="Waiting for approval" sequenceNum="1" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsEnrolled" description="Enrolled" sequenceNum="2" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsCompleted" description="Completed" sequenceNum="3" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsRefused" description="Refused" sequenceNum="4" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsWithdrawn" description="Withdrawn" sequenceNum="5" enumTypeId="PersonTrainingStatus"/>
+            <moqui.basic.Enumeration enumId="PtsCancelled" description="Session cancelled" sequenceNum="6" enumTypeId="PersonTrainingStatus"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PersonTrainingResult" package="mantle.humanres.ability" cache="never">
+        <description>One assessment of an enrollment, kept: passed or failed, with its score, the assessor (the session's trainer
+            or a development editor of the employer, never the person), the date, evidence and, when the session has an
+            assessment form, the response to it (formResponseId, kept as submitted through its FormInvitation). A failed one
+            is followed by another attempt; the passing one completes the enrollment. Written through complete#Training.</description>
+        <field name="personTrainingResultId" type="id" is-pk="true"/>
+        <field name="personTrainingId" type="id"/>
+        <field name="resultEnumId" type="id"/>
+        <field name="score" type="number-decimal"/>
+        <field name="assessedDate" type="date-time"/>
+        <field name="assessorPartyId" type="id"/>
+        <field name="assessedByUserId" type="id"/>
+        <field name="evidence" type="text-long" ai-opt-out="true"/>
+        <field name="formId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="invitationId" type="id"/>
+        <field name="operationKey" type="id-long"/>
+        <relationship type="one" related="mantle.humanres.ability.PersonTraining"/>
+        <relationship type="one" title="TrainingResult" related="moqui.basic.Enumeration">
+            <key-map field-name="resultEnumId"/></relationship>
+        <relationship type="one" title="Assessor" related="mantle.party.Party">
+            <key-map field-name="assessorPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse"/>
+        <index name="PRS_TRN_RES_ENR"><index-field name="personTrainingId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Training Result" enumTypeId="TrainingResult"/>
+            <moqui.basic.Enumeration enumId="TrrPassed" description="Passed" sequenceNum="1" enumTypeId="TrainingResult"/>
+            <moqui.basic.Enumeration enumId="TrrFailed" description="Failed" sequenceNum="2" enumTypeId="TrainingResult"/>
+        </seed-data>
+    </entity>
 
     <!-- ========================================================= -->
     <!-- mantle.humanres.employment -->
@@ -252,6 +430,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id"/>
         <field name="terminationReasonEnumId" type="id" enable-audit-log="update"/>
         <field name="terminationTypeEnumId" type="id" enable-audit-log="update"/>
+        <field name="clockingEnabled" type="text-indicator" enable-audit-log="update"><description>This employment's exception to
+            its employer's clocking default (IronStone People P13, mantle.humanres.AttendanceServices store#Clocking; the
+            employer's default is its PartySetting PeopleClocking): Y, the person clocks in and out for it (their self-service
+            offers the clock and record#Punch takes it); N, they do not, whatever the employer's default; empty, the employer's
+            default applies. Attendance.js isClockingOn is the one rule every caller reads.</description></field>
         <!-- not yet used: <field name="jobRequisitionId" type="id"/> -->
 
         <field name="identityTypeEnumId" type="id"/>
@@ -304,6 +487,9 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="taxWorkContactMechId"/></relationship>
 
         <seed-data>
+            <!-- its note and message notices go to their named recipients alone (the user's call of Nov 12, 2026, People follow-up 1) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.employment.Employment" ownerText="IronStone People: an employment"/>
+
             <!-- Termination Type -->
             <moqui.basic.EnumerationType description="Termination Type" enumTypeId="TerminationType"/>
             <moqui.basic.Enumeration description="Resigned" enumId="TtResigned" enumTypeId="TerminationType"/>
@@ -313,6 +499,13 @@ along with this software (see the LICENSE.md file). If not, see
 
             <!-- Termination Reason -->
             <moqui.basic.EnumerationType description="Termination Reason" enumTypeId="TerminationReason"/>
+            <!-- generic reasons for leaving (IronStone People's separation offers them; the People administrator ends or adds
+                values in Lookups) -->
+            <moqui.basic.Enumeration description="Resignation" enumId="TrResignation" sequenceNum="1" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="End of contract" enumId="TrEndOfContract" sequenceNum="2" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Dismissal" enumId="TrDismissal" sequenceNum="3" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Retirement" enumId="TrRetirement" sequenceNum="4" enumTypeId="TerminationReason"/>
+            <moqui.basic.Enumeration description="Redundancy" enumId="TrRedundancy" sequenceNum="5" enumTypeId="TerminationReason"/>
 
             <!-- Identity Type -->
             <moqui.basic.EnumerationType description="Identity Type" enumTypeId="IdentityType"/>
@@ -352,6 +545,202 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Resident Citizen ID Card" enumId="EatResCitizenId" enumTypeId="EmplAuthzType"/>
         </seed-data>
     </entity>
+    <entity entity-name="EmploymentContent" package="mantle.humanres.employment" cache="never">
+        <description>A file of an employment: a contract, a letter, an identity or right-to-work document (IronStone People design
+            §13 RecordFiles, PE-01; impl-people P2). The employment is People's content host, keyed by its partyRelationshipId, so an
+            HR file is never on the person's broadly visible Party record; get#RecordLinkInfo and RecordFiles admit it only to a
+            People HR reader of the employer (mantle.humanres.PeopleServices.check#EmploymentAccess), and it has no Records-drive
+            folder, so nothing shares it. Written through mantle.humanres.PeopleServices.create#EmploymentContent.</description>
+        <field name="employmentContentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment"/>
+        <relationship type="one" title="EmploymentContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Content Type" enumTypeId="EmploymentContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="EmcntDocument" enumTypeId="EmploymentContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Contract" enumId="EmcntContract" enumTypeId="EmploymentContentType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Letter" enumId="EmcntLetter" enumTypeId="EmploymentContentType" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Identity or right to work" enumId="EmcntIdentity" enumTypeId="EmploymentContentType"
+                    sequenceNum="4"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentAssignment" package="mantle.humanres.employment" cache="never">
+        <description>A dated assignment inside an employment (IronStone People design §4, PE-02; impl-people P6): the department,
+            primary position, manager, work location and working schedule (P9) of the employment from fromDate until thruDate, and
+            its state (working, or on a leave of absence). A transfer, a manager change or a leave ends the assignment in effect and starts the next, so
+            history is kept and the payroll identity (the employment) is not split; one primary assignment at a time, inside the
+            employment's dates. The assignment is the source of the employment's manager (per employment: a person employed by two
+            employers has a manager at each), its department membership (a dated PrtMember row from role Assignee to the
+            department) and its position occupancy (a dated EmplPositionParty row), which mantle.humanres.PeopleServices hire#Employee
+            and apply#EmploymentChange keep as projections in the same transaction; the reporting line is a PrtManager row from the
+            manager to the person. partyId and organizationPartyId are the employment's, kept here for the reads by person and
+            employer. Written only by PeopleServices (Employment.js) and OrganizationServices (a manager change, a unit's
+            closure).</description>
+        <field name="employmentAssignmentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment (PrtEmployee relationship and Employment)</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The legal employer</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="isPrimary" type="text-indicator" default="'Y'"/>
+        <field name="stateEnumId" type="id"><description>EmploymentAssignmentState: working, or on a leave of absence</description></field>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>A department (OrgDepartment) of the employer</description></field>
+        <field name="emplPositionId" type="id" enable-audit-log="true"><description>The primary position held</description></field>
+        <field name="managerPartyId" type="id" enable-audit-log="true"><description>The manager at the employer</description></field>
+        <field name="facilityId" type="id" enable-audit-log="true"><description>The work location, a facility of the employer</description></field>
+        <field name="workingScheduleId" type="id" enable-audit-log="true"><description>The working schedule followed (impl-people P9,
+            mantle.humanres.ScheduleServices.assign#Schedule): its intervals are the person's capacity (ResourceServices
+            get#PartyCapacity) before their own working hours and the timesheet policy</description></field>
+        <field name="holidayCategoryId" type="id" enable-audit-log="true"><description>A holiday calendar in place of the schedule's
+            (WorkEffortCategory of type WcatHoliday), for this employment</description></field>
+        <field name="employmentChangeId" type="id"><description>The hire or change that started it</description></field>
+        <field name="comments" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Department" related="mantle.party.Party" short-alias="department">
+            <key-map field-name="departmentPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Manager" related="mantle.party.Party" short-alias="manager">
+            <key-map field-name="managerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.position.EmplPosition" short-alias="position"/>
+        <relationship type="one-nofk" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one-nofk" related="mantle.humanres.schedule.WorkingSchedule" short-alias="schedule"/>
+        <relationship type="one-nofk" title="HolidayCalendar" related="mantle.work.effort.WorkEffortCategory" short-alias="holidayCalendar">
+            <key-map field-name="holidayCategoryId" related="workEffortCategoryId"/></relationship>
+        <relationship type="one" title="EmploymentAssignmentState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.employment.EmploymentChange" short-alias="change"/>
+        <index name="EMPL_ASSGN_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="EMPL_ASSGN_PARTY"><index-field name="partyId"/><index-field name="organizationPartyId"/></index>
+        <index name="EMPL_ASSGN_MGR"><index-field name="managerPartyId"/></index>
+        <index name="EMPL_ASSGN_DEPT"><index-field name="departmentPartyId"/></index>
+        <index name="EMPL_ASSGN_SCHED"><index-field name="workingScheduleId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Assignment State" enumTypeId="EmploymentAssignmentState"/>
+            <moqui.basic.Enumeration enumId="EasActive" description="Working" sequenceNum="1" enumTypeId="EmploymentAssignmentState"/>
+            <moqui.basic.Enumeration enumId="EasLeave" description="On leave of absence" sequenceNum="2"
+                    enumTypeId="EmploymentAssignmentState"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentChange" package="mantle.humanres.employment" cache="never">
+        <description>A hire or a dated change of an employment (IronStone People design §4 HireEmployee and EmploymentChange, PE-02;
+            impl-people P6), a fact of its own: what changes (a transfer, a manager change, a leave of absence, a separation), from
+            when, the new terms (with the working schedule, P9), why, who asked and when, the operation key a retry answers with, and its state. A transfer and a
+            separation wait for approval (a PeopleApproval of kind PakEmploymentChange, bound to this row and the employment's
+            revision, so a change of the employment meanwhile supersedes it) and are applied by the last approval; a hire, a
+            manager change and a leave of absence are applied at once. Applied, the change has started the assignment
+            employmentAssignmentId (a separation ends the employment's). P23: a pay change (payroll's part of a change: a new salary
+            from the date, asked by a payroll editor) waits for approval too (its own kind, PakPayChange, the first salary
+            included), and once applied has started the EmploymentSalary row from its date; its salary fields are read only by a payroll reader of the
+            employer and the approver of its step. Written only by PeopleServices (Employment.js).</description>
+        <field name="employmentChangeId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="changeKindEnumId" type="id"><description>EmploymentChangeKind</description></field>
+        <field name="statusId" type="id"/>
+        <field name="effectiveDate" type="date-time"/>
+        <field name="returnDate" type="date-time"><description>A leave of absence's end, when known</description></field>
+        <field name="departmentPartyId" type="id"/>
+        <field name="emplPositionId" type="id"/>
+        <field name="managerPartyId" type="id"/>
+        <field name="facilityId" type="id"/>
+        <field name="workingScheduleId" type="id"><description>The schedule the assignment follows (P9)</description></field>
+        <field name="holidayCategoryId" type="id"><description>The assignment's holiday calendar in place of the schedule's (P9)</description></field>
+        <field name="terminationReasonEnumId" type="id"/>
+        <field name="terminationTypeEnumId" type="id"/>
+        <field name="salaryAmount" type="currency-amount" ai-opt-out="true"><description>A pay change's new salary (P23)</description></field>
+        <field name="salaryCurrencyUomId" type="id"/>
+        <field name="salaryPeriodTypeId" type="id"><description>The salary's pay frequency, a Payroll time period type</description></field>
+        <field name="payGradeId" type="id"><description>A pay change's pay grade, when it names one</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="employmentRevision" type="text-short"><description>The employment's revision the change was asked at</description></field>
+        <field name="operationKey" type="text-short"><description>The requester's key: a retry with it answers the first</description></field>
+        <field name="requestedByUserId" type="id"/>
+        <field name="requestedDate" type="date-time"/>
+        <field name="appliedDate" type="date-time"/>
+        <field name="employmentAssignmentId" type="id"><description>The assignment the applied change started</description></field>
+        <field name="withdrawnDate" type="date-time"><description>An applied change dated later withdrawn before its date (by HR,
+            or by a separation dated before it): its assignment never took effect (impl-people P7, F131)</description></field>
+        <field name="withdrawnByUserId" type="id"/>
+        <field name="withdrawReason" type="text-long"/>
+        <field name="supersededByChangeId" type="id"><description>The separation that withdrew it</description></field>
+        <field name="priorThruDate" type="date-time"><description>A separation's: the employment's end before it (empty: open),
+            which a separation set for a later date and withdrawn before it gives back (the user's call, Nov 11)</description></field>
+        <field name="causedByChangeId" type="id"><description>A report's manager change made by its manager's separation, withdrawn
+            with it</description></field>
+        <field name="reroutedDate" type="date-time"><description>A separation's or manager change's: when the employer's waiting
+            People decisions were routed again on or after its date (at once for one in effect, else by the daily job,
+            F134)</description></field>
+        <field name="accessRequested" type="text-indicator"><description>A hire's: Y when HR asked for the person's account (the
+            provisioning request after commit; nobody gets a login merely to be paid)</description></field>
+        <field name="accessOperationId" type="id"><description>The Admin lifecycle operation of the hire's provisioning or the
+            separation's access end (UserLifecycleOperation)</description></field>
+        <field name="accessRequestFailure" type="text-long"><description>Why the last provisioning or access end request failed,
+            empty once one is made; the hire or change stands and the request is retried by its key</description></field>
+        <field name="accessRequestDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" title="EmploymentChangeKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="changeKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="EmploymentChange" related="moqui.basic.StatusItem" short-alias="status">
+            <key-map field-name="statusId"/></relationship>
+        <relationship type="one-nofk" title="RequestedBy" related="moqui.security.UserAccount" short-alias="requestedBy">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <index name="EMPL_CHG_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="EMPL_CHG_OPKEY"><index-field name="operationKey"/></index>
+        <index name="EMPL_CHG_KIND"><index-field name="changeKindEnumId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Employment Change Kind" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckHire" description="Hire" sequenceNum="1" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckTransfer" description="Transfer" sequenceNum="2" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckManager" description="Manager change" sequenceNum="3" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckLeave" description="Leave of absence" sequenceNum="4" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckReturn" description="Return from leave" sequenceNum="5" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckSeparation" description="Separation" sequenceNum="6" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckReorganization" description="Reorganization" sequenceNum="7"
+                    enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckSchedule" description="Working schedule" sequenceNum="8" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckPayChange" description="Pay change" sequenceNum="9" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.StatusType description="Employment Change" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchRequested" description="Waiting for approval" sequenceNum="1" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchApplied" description="Applied" sequenceNum="2" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchRefused" description="Refused" sequenceNum="3" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchSuperseded" description="Superseded" sequenceNum="4" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusItem statusId="EchWithdrawn" description="Withdrawn" sequenceNum="5" statusTypeId="EmploymentChange"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchApplied" transitionName="Apply"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchRequested" toStatusId="EchSuperseded" transitionName="Supersede"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EchApplied" toStatusId="EchWithdrawn" transitionName="Withdraw"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="EmploymentDraft" package="mantle.humanres.employment" cache="never">
+        <description>An unfinished hire or employment change of one HR user (IronStone People's HireEmployee and EmploymentChange
+            wizards; style-guide §3.10: a wizard that can be abandoned saves a draft record; the user's call, Nov 11): what the
+            wizard's steps have taken so far (draftJson, the parameters of preview#Hire or preview#EmploymentChange only), from
+            fromDate, with the operation key its hire or change is made with, so a retry answers the first. Owned by its user
+            (userId): only they read, change or discard it (mantle.humanres.PeopleServices get#, store# and delete#EmploymentDraft,
+            Employment.js), and it is discarded when the hire or change is made. A change's draft is of one employment and kind;
+            a hire's of an employer. Not a business record: never read by another user, an export or a search.</description>
+        <field name="employmentDraftId" type="id" is-pk="true"/>
+        <field name="userId" type="id"><description>The owner: the HR user who started it</description></field>
+        <field name="draftKind" type="text-short"><description>hire, or change</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="partyRelationshipId" type="id"><description>A change's employment</description></field>
+        <field name="changeKind" type="text-short"><description>A change's kind: transfer, manager, leave, return or separation</description></field>
+        <field name="draftJson" type="text-very-long"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="fromDate" type="date-time"><description>When it was started</description></field>
+        <relationship type="one-nofk" related="moqui.security.UserAccount" short-alias="user"/>
+        <index name="EMPL_DRAFT_USER"><index-field name="userId"/><index-field name="draftKind"/></index>
+    </entity>
     <entity entity-name="EmploymentApplication" package="mantle.humanres.employment" use="nontransactional">
         <field name="employmentApplicationId" type="id" is-pk="true"/>
         <field name="emplPositionId" type="id"/>
@@ -383,6 +772,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Personal Referral" enumId="EarbPersonal" enumTypeId="EmploymentApplicationReferredBy"/>
             <moqui.basic.Enumeration description="Internet" enumId="EarbInternet" enumTypeId="EmploymentApplicationReferredBy"/>
             <moqui.basic.Enumeration description="Advertisement" enumId="EarbAdvertisement" enumTypeId="EmploymentApplicationReferredBy"/>
+            <!-- its note and message notices go to their named recipients alone (the user's call of Nov 12, 2026, People follow-up 1) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.employment.EmploymentApplication" ownerText="IronStone People: an application"/>
         </seed-data>
     </entity>
     <entity entity-name="EmploymentBenefit" package="mantle.humanres.employment" use="nontransactional">
@@ -390,7 +781,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="benefitTypeId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time"/>
-        <field name="cost" type="currency-amount"/>
+        <field name="cost" type="currency-amount" ai-opt-out="true"/>
         <field name="actualEmployerPaidPercent" type="number-float"/>
         <field name="availableTime" type="number-integer"/>
         <relationship type="one" related="mantle.humanres.employment.Employment"/>
@@ -427,6 +818,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Personal" enumId="ElrPersonal" enumTypeId="EmploymentLeaveReason"/>
         </seed-data>
     </entity>
+    <!-- IronStone People P26 (design-people §8.4, §5 Q8): the legacy pay history is read only, by its own key, labelled historical
+        and never recalculated (mantle.humanres.PayrollResultServices find#Payslips and get#Payslip); its amounts are opted out of AI -->
     <entity entity-name="EmploymentPayHistory" package="mantle.humanres.employment" use="transactional">
         <field name="partyRelationshipId" type="id" is-pk="true"/>
         <field name="payDate" type="date" is-pk="true"/>
@@ -434,15 +827,15 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="invoiceId" type="id"/>
         <field name="internalPayroll" type="text-indicator"><description>If Y is included in year end tax reporting,
             otherwise considered external pay used only for YTD calculations in payroll adjustments</description></field>
-        <field name="payAmount" type="number-decimal"/>
-        <field name="taxablePayAmount" type="number-decimal"/>
-        <field name="socialTaxablePayAmount" type="number-decimal"/>
-        <field name="medicalTaxablePayAmount" type="number-decimal"/>
-        <field name="netPayAmount" type="number-decimal"/>
-        <field name="disposablePayAmount" type="number-decimal"/>
-        <field name="taxableYtdIncome" type="number-decimal"/>
-        <field name="socialTaxableYtdIncome" type="number-decimal"/>
-        <field name="medicalTaxableYtdIncome" type="number-decimal"/>
+        <field name="payAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="taxablePayAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="socialTaxablePayAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="medicalTaxablePayAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="netPayAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="disposablePayAmount" type="number-decimal" ai-opt-out="true"/>
+        <field name="taxableYtdIncome" type="number-decimal" ai-opt-out="true"/>
+        <field name="socialTaxableYtdIncome" type="number-decimal" ai-opt-out="true"/>
+        <field name="medicalTaxableYtdIncome" type="number-decimal" ai-opt-out="true"/>
         <field name="currencyUomId" type="id"/>
         <relationship type="one" related="mantle.humanres.employment.Employment"/>
         <relationship type="one" related="mantle.party.time.TimePeriod"/>
@@ -458,7 +851,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="adjCalcServiceId" type="id"/>
         <field name="itemTypeEnumId" type="id"/>
         <field name="quantity" type="number-decimal"/>
-        <field name="amount" type="number-decimal"/>
+        <field name="amount" type="number-decimal" ai-opt-out="true"/>
         <field name="isEmployerPaid" type="text-indicator"/>
         <field name="taxAuthorityId" type="id"/>
         <field name="payeePartyId" type="id"/>
@@ -476,10 +869,11 @@ along with this software (see the LICENSE.md file). If not, see
             filter and sort (filter by fromDate, thruDate; sort by ascending fromDate; use first result).</description>
         <field name="partyRelationshipId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (IronStone People
+            P23 review): a salary ends when the next starts, by an approved pay change or a data repair, with its reason</description></field>
         <field name="payGradeId" type="id"/>
         <field name="comments" type="text-medium"/>
-        <field name="amount" type="currency-amount" enable-audit-log="true"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true" enable-audit-log="true"/>
         <field name="currencyUomId" type="id"/>
         <field name="timePeriodTypeId" type="id"/>
         <relationship type="one" related="mantle.humanres.employment.Employment"/>
@@ -737,6 +1131,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionId" type="id" is-pk="true"/>
         <field name="pseudoId" type="text-short" default="emplPositionId"/>
         <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id" enable-audit-log="true"><description>The department of the seat, an
+            OrgDepartment organization that rolls up (PrtOrgRollup) to organizationPartyId, the legal employer (IronStone People,
+            mantle.humanres.PositionServices.store#Position)</description></field>
         <field name="emplPositionClassId" type="id" enable-audit-log="true"/>
         <field name="description" type="text-medium"/>
         <field name="statusId" type="id"/>
@@ -755,6 +1152,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="standardHoursPerWeek" type="number-integer"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Department" related="mantle.party.Party">
+            <key-map field-name="departmentPartyId"/></relationship>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass"/>
         <relationship type="one" title="EmplPosition" related="moqui.basic.StatusItem" short-alias="status"/>
         <relationship type="one" related="mantle.humanres.rate.PayGrade"/>
@@ -785,7 +1184,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="emplPositionClassId" type="id" is-pk="true"/>
         <field name="title" type="text-medium"/>
         <field name="description" type="text-long"/>
-        <!-- FUTURE: associate skills with position class -->
+        <field name="thruDate" type="date-time"><description>When the class was ended: an ended class keeps its positions and
+            history and is offered for no new position (mantle.humanres.PositionServices.store#JobClass)</description></field>
         <seed-data>
             <!-- Work Type -->
             <moqui.basic.EnumerationType description="Work Type" enumTypeId="WorkType"/>
@@ -825,11 +1225,27 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
     </entity>
     <entity entity-name="EmplPositionClassSkill" package="mantle.humanres.position" use="configuration">
+        <description>A skill a job class requires (IronStone People design §5 JobClassDetail Requirements, §10, PE-14;
+            impl-people P4, P18): the least level, whether a verified qualification of a type must prove it, whether it is
+            required or desired, and the dates it is required between. Each period is its own row, keyed by its start
+            (fromDate, the user's call of Nov 12, 2026), so the requirement's history is kept: a change starts a new row, a
+            requirement removed ends its row (thruDate), never deleted, and a skill required again starts a new one
+            (mantle.humanres.PositionServices.store#JobRequirement). Readers take the row in effect at their date
+            (mantle.humanres.DevelopmentServices check#Qualifications and get#SkillsMatrix, PositionServices get#JobClass).</description>
         <field name="emplPositionClassId" type="id" is-pk="true"/>
         <field name="skillTypeEnumId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="minimumLevel" type="number-integer"><description>The least level, a SkillLevel value's number; empty
+            for any level</description></field>
+        <field name="qualificationTypeEnumId" type="id"><description>A qualification type a verified, valid qualification of
+            which must prove the skill (a certificate or licence)</description></field>
+        <field name="requiredFlag" type="text-indicator"><description>Y required (the default), N desired</description></field>
+        <field name="thruDate" type="date-time"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass"/>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration" short-alias="skillTypeEnum">
             <key-map field-name="skillTypeEnumId"/></relationship>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
     </entity>
     <entity entity-name="EmplPositionClassParty" package="mantle.humanres.position" use="nontransactional">
         <description>An alternative to EmplPosition and Employment to represent an employee in a position class for
@@ -902,14 +1318,19 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payGradeId" type="id" is-pk="true"/>
         <field name="description" type="text-medium"/>
         <field name="comments" type="text-medium"/>
+        <field name="organizationPartyId" type="id"><description>The employer that owns the grade: read by that employer's
+            readers and changed by its payroll editors. Empty for a grade shared by every employer, changed only with
+            PEOPLE_ALL_ORGANIZATIONS (IronStone People, mantle.humanres.PayrollSetupServices)</description></field>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
     </entity>
     <entity entity-name="PayGradeSalary" package="mantle.humanres.rate" use="configuration">
         <field name="payGradeId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time"/>
-        <field name="amount" type="currency-amount"/>
-        <field name="minAmount" type="currency-amount"/>
-        <field name="maxAmount" type="currency-amount"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="minAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="maxAmount" type="currency-amount" ai-opt-out="true"/>
         <field name="currencyUomId" type="id"/>
         <field name="timePeriodTypeId" type="id"/>
         <relationship type="one" related="mantle.humanres.rate.PayGrade"/>
@@ -933,8 +1354,12 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="workTypeEnumId" type="id"/>
         <field name="payGradeId" type="id"/>
         <field name="emplPositionClassId" type="id"/>
+        <!-- the organization a labor costing rate (RaprCost) is of, empty for a rate shared by every organization (People P10, the
+            user's call of Nov 11, 2026: RateServices.get#CostingRate prefers the employer's row, then a shared one); the rates of
+            the other purposes (Projects' client billing and worker pay) leave it empty and their lookup reads none -->
+        <field name="organizationPartyId" type="id"/>
         <!-- what we're looking for -->
-        <field name="rateAmount" type="number-decimal"/>
+        <field name="rateAmount" type="number-decimal" ai-opt-out="true"/>
 
         <relationship type="one" title="RateType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="rateTypeEnumId"/></relationship>
@@ -947,6 +1372,8 @@ along with this software (see the LICENSE.md file). If not, see
 
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId"/></relationship>
 
         <relationship type="one" related="mantle.humanres.rate.PayGrade" short-alias="payGrade"/>
         <relationship type="one" related="mantle.humanres.position.EmplPositionClass" short-alias="positionClass"/>
@@ -1057,6 +1484,9 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Rate Purpose" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprClient" description="Client Billing" enumTypeId="RatePurpose"/>
             <moqui.basic.Enumeration enumId="RaprVendor" description="Worker/Vendor Payment" enumTypeId="RatePurpose"/>
+            <!-- the one labor costing purpose (People P10, design-people PE-23): the cost of an hour by position class and work
+                type, never of a person, maintained by finance administration and read by RateServices.get#CostingRate -->
+            <moqui.basic.Enumeration enumId="RaprCost" description="Labor Costing" enumTypeId="RatePurpose"/>
             <!-- Default no charge client rate, always 0 -->
             <mantle.humanres.rate.RateAmount rateAmountId="NoChargeClient" rateTypeEnumId="RatpNoCharge" ratePurposeEnumId="RaprClient"
                     timePeriodUomId="TF_hr" workEffortId="" partyId="" emplPositionClassId=""

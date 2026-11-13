@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance settings (IronStone Maintenance design §9 Settings and Lookups, §13.2 MaintenanceSettingsServices; impl-maintenance
+    P3, P18): an organization's work policy (MaintenancePolicy), a dated row a change ends and starts, in MaintenanceWork.js; the
+    lookups (Maintenance's fixed kinds and its vocabularies, failure modes with their applicability) and the setup readiness, in
+    MaintenanceSettings.js (P18); P11's cost threshold is two
+    of the policy's fields, its estimate in MaintenanceCosts.js. Teams join in P8. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="MaintenancePolicy" allow-remote="false">
+        <description>The work policy in effect for one of the user's organizations (MAINTENANCE_SETTINGS_EDIT or any maintenance
+            read; ORGANIZATION_DENIED outside the scope), or the defaults when it has none (fromDate empty): approval threshold
+            zero hours, a supervisor closes, no default type or team, production requests and warranty repairs not managed, no
+            self-approval, no voice note transcription, the qualification check warning (qualificationBlocks false, P8), and preventive work made on its day when a plan names no lead days
+            (pmLeadDays, P14), and no cost threshold. The cost threshold (approvalThresholdCost and its currency, P11) is
+            answered to a settings editor or a cost reader only, in the policy and in planned and ended.
+            planned: the policies set to start later (P18), in their order; ended: the last ten that ended, newest first (a
+            withdrawn plan, ended at its own start, is in neither). canEdit says whether the user may change it.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="policy" type="Map"/>
+            <parameter name="planned" type="List"/>
+            <parameter name="ended" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('getPolicy', context)"/>
+            <set field="policy" from="answer.policy"/>
+            <set field="planned" from="answer.planned"/>
+            <set field="ended" from="answer.ended"/>
+            <set field="canEdit" from="answer.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenancePolicy" allow-remote="false">
+        <description>An organization's work policy from fromDate, now when not given and never earlier (DATE_INVALID; P18)
+            (MAINTENANCE_SETTINGS_EDIT; the organization in the user's scope), ending the row in effect then; a policy planned
+            to start later refuses it (PLAN_PENDING, naming the plan's date) unless withdrawPlanned, which withdraws the plan (ended
+            at its own start; the user's call of Nov 12) and one planned for that very time is changed in place. Each
+            field not given is kept from the policy in effect at fromDate, so a call changes only what it names (P18). The approval threshold in hours (zero or more, VALUE_INVALID), the closure policy, the
+            default maintenance type and team (a team the organization owns, TEAM_UNAVAILABLE), and whether its production
+            requests and warranty repairs become managed work, whether a procedure's last author may approve it
+            (procedureSelfApproval, off by default; impl-maintenance P6), and whether a checklist step's voice note is transcribed
+            (voiceNoteTranscription, off by default; impl-maintenance P7 review), and the approval threshold's cost half
+            (approvalThresholdCost, zero or more, VALUE_INVALID; empty unsets it, not compared; approvalThresholdCurrencyUomId, a
+            currency, VALUE_INVALID, empty: the organization's base currency; impl-maintenance P11): planned work whose estimated
+            cost is above it, or cannot be priced, needs a supervisor's approval; and the qualification check of assignment and
+            Start (qualificationBlocks: warn by default, Y blocks; impl-maintenance P8).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="withdrawPlanned" type="Boolean" default="false"/>
+            <parameter name="approvalThresholdHours"/>
+            <parameter name="closurePolicyEnumId"/>
+            <parameter name="defaultMaintenanceTypeEnumId"/>
+            <parameter name="defaultTeamPartyId"/>
+            <parameter name="productionRequestsManaged"/>
+            <parameter name="warrantyRepairsManaged"/>
+            <parameter name="procedureSelfApproval"/>
+            <parameter name="pmLeadDays"><description>The days ahead preventive work is made for a plan whose terms name none
+                (P14; 0 to 365, empty: on the day)</description></parameter>
+            <parameter name="voiceNoteTranscription"/>
+            <parameter name="qualificationBlocks"><description>P8: Y refuses assigning or starting work with a technician missing or
+                expired on its qualifications; N (the default) warns</description></parameter>
+            <parameter name="approvalThresholdCost"><description>P11: the estimated cost above which planned work needs a supervisor
+                (empty: not compared)</description></parameter>
+            <parameter name="approvalThresholdCurrencyUomId"><description>P11: the cost threshold's currency (empty: the
+                organization's base currency)</description></parameter>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceWork.js').execute('storePolicy', context)"/>
+            <set field="fromDate" from="answer.fromDate"/>
+        </actions>
+    </service>
+
+    <!-- impl-maintenance P8 (design §9 Teams; review Y4): the teams are People's, Maintenance's are only their dispatch defaults -->
+    <service verb="find" noun="MaintenanceTeams" allow-remote="false">
+        <description>The maintenance teams of the caller's organizations (organizationPartyId narrows them, teamPartyId reads one):
+            People's OrgTeam organizations with their dated PrtMember rows (a member's from role Assignee, the lead's Manager; those in
+            effect and starting later, every one with includeEnded) and the dispatch defaults in effect. Read by a maintenance
+            reader, planner, supervisor or settings editor (PERMISSION_DENIED otherwise); an organization out of scope
+            ORGANIZATION_DENIED, a team RECORD_UNAVAILABLE. Memberships are written by People's OrganizationServices.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="teamList" type="List"><description>teamPartyId, teamName, organizationPartyId, organizationName,
+                memberCount, leadName, members [{partyId, personName, roleTypeId, roleText, fromDate, thruDate, fromDateText,
+                thruDateText, current, stateText}], defaults {fromDate, fromDateText, facilityId, facilityName,
+                defaultAssigneePartyId, defaultAssigneeName, intakeTag, projectWorkEffortId, projectName, comments} or null</description></parameter>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceDispatch.js').execute('findTeams', context)"/>
+            <set field="teamList" from="answer.teamList"/>
+            <set field="canEdit" from="answer.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceTeamDefaults" allow-remote="false">
+        <description>A team's dispatch and intake defaults from now (MAINTENANCE_SETTINGS_EDIT; the row in effect ends then, nothing
+            is deleted): facilityId (the resource scope, a facility of the team's organization: FACILITY_INVALID), defaultAssigneePartyId
+            (a current member: ASSIGNEE_INVALID), intakeTag (the intake address's plus-tag: the team's
+            PartySetting MntIntakePlusTag, which the mail intake reads, set or cleared when given, not dated; TAG_INVALID, TAG_TAKEN) and
+            projectWorkEffortId (PROJECT_INVALID). A field not given is kept from the row in effect, an empty one cleared. A team out
+            of scope: RECORD_UNAVAILABLE. The defaults grant no permission.</description>
+        <in-parameters>
+            <parameter name="teamPartyId" required="true"/>
+            <parameter name="facilityId"/>
+            <parameter name="defaultAssigneePartyId"/>
+            <parameter name="intakeTag"/>
+            <parameter name="projectWorkEffortId"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="teamPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceDispatch.js').execute('storeTeamDefaults', context)"/>
+            <set field="teamPartyId" from="answer.teamPartyId"/>
+            <set field="fromDate" from="answer.fromDate"/>
+        </actions>
+    </service>
+    <!-- ===== P18: lookups and the setup readiness (design §9 Lookups and Readiness; MaintenanceSettings.js) ===== -->
+    <service verb="find" noun="MaintenanceLookups" allow-remote="false">
+        <description>Maintenance's lookups, a whitelist of Enumeration families: the vocabularies (work types, severities, hold and
+            cancel reasons, outcomes, failure modes), whose values are added and ended, and the fixed kinds (kinds, sources,
+            resource dispositions), renamed and reordered only; each family with its value count. With enumTypeId, its values in
+            order, current unless includeEnded, each with how many records hold it (useCount), its end (stateText), its
+            applicability (a failure mode's asset classes and models in effect, appliesText "All equipment" with none) and
+            whether the caller may change and end it; with assetId, a failure mode applying to that equipment alone (the
+            equipment in the caller's scope, RECORD_UNAVAILABLE). Read by a maintenance reader or MAINTENANCE_SETTINGS_EDIT
+            (PERMISSION_DENIED otherwise); refuses another family (FAMILY_INVALID).</description>
+        <in-parameters>
+            <parameter name="enumTypeId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+            <parameter name="assetId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="families" type="List"><description>enumTypeId, title, fixed, kindText, valueCount</description></parameter>
+            <parameter name="values" type="List"><description>enumId, enumTypeId, description, enumCode, sequenceNum, useCount, ended,
+                thruDateText, stateText, applicability (applicabilityId, classEnumId, productId, appliesText, fromDateText,
+                thruDateText, current), appliesText, canEdit, canEnd, revision</description></parameter>
+            <parameter name="enumTypeId"/>
+            <parameter name="fixed" type="Boolean"/>
+            <parameter name="applicability" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceSettings.js').execute('findLookups', context)"/>
+            <set field="families" from="found.families"/>
+            <set field="values" from="found.values"/>
+            <set field="enumTypeId" from="found.enumTypeId"/>
+            <set field="fixed" from="found.fixed"/>
+            <set field="applicability" from="found.applicability"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceLookup" allow-remote="false">
+        <description>A new value of one of Maintenance's vocabularies (its name, code and order), a value's new name, code or order,
+            or its end (end true: from now; thruDate: from then, now or later, DATE_INVALID before): an ended value stays for the
+            records that hold it and is offered for no new one; nothing is deleted. A failure mode also takes an applicability row
+            (addClassEnumId, an asset class, or addProductId, a model; APPLICABILITY_INVALID for both, APPLICABILITY_EXISTS for one
+            in effect) and ends one (endApplicabilityId). Refuses a caller without MAINTENANCE_SETTINGS_EDIT (PERMISSION_DENIED),
+            a family not Maintenance's (FAMILY_INVALID), a new or ended value of a fixed kind (FAMILY_FIXED), a value of another
+            family (RECORD_UNAVAILABLE), no name (DESCRIPTION_REQUIRED), a name a current value of the family has
+            (DUPLICATE_VALUE), an order that is not a whole number from 0 to 9999 (SEQUENCE_INVALID), an ended value (VALUE_ENDED)
+            and, for a change of the value itself, a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="enumTypeId" required="true"/>
+            <parameter name="enumId"/>
+            <parameter name="description"/>
+            <parameter name="enumCode"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="addClassEnumId"/>
+            <parameter name="addProductId"/>
+            <parameter name="endApplicabilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="enumId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceSettings.js').execute('storeLookup', context)"/>
+            <set field="enumId" from="stored.enumId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="check" noun="MaintenanceReadiness" allow-remote="false">
+        <description>Maintenance's setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider
+            maintenance.readiness) with no adapter: called with providerKey and an organizationPartyId (or none, for each
+            organization of the caller's scope that uses Maintenance: a work policy, a procedure, maintenance work or a
+            preventive plan), returns checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode,
+            message, the organization as subject and scope, and for a check that is not ready its owner's place as a route key
+            (fixRoute, with fixId where it names a record): approved procedures (maintenanceProcedures), an approver for each
+            resource approved by people (maintenanceResources), a technician who may issue parts (adminGroups), the maintenance
+            expense mapping (accountingPostingDefaults), a labor costing rate for each technician (accountingCostingPolicies),
+            and the preventive generation job generate_MaintenanceWorkOrders: ready with no active plan, "not configured" while
+            it is not there, paused, not run or failed (adminJob with the job's name). One check that fails is unavailable by
+            name and the others go on. Changes nothing. Refuses a caller without MAINTENANCE_SETTINGS_EDIT (PERMISSION_DENIED)
+            and an organization outside their scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="providerKey"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="checks" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceSettings.js').execute('readiness', context).checks"/>
+        </actions>
+    </service>
+</services>

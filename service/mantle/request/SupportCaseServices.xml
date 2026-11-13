@@ -72,6 +72,14 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="reason"/>
         </out-parameters>
         <actions>
+            <!-- IronStone People P21 (F20): a confidential case (RqtHrCase) is never a support case, whatever its parties and the
+                organization's service policy -->
+            <entity-find-one entity-name="mantle.request.Request" value-field="ruleRequest" disable-authz="true">
+                <field-map field-name="requestId"/></entity-find-one>
+            <if condition="ruleRequest?.requestTypeEnumId == 'RqtHrCase'">
+                <set field="isCase" from="false"/><set field="created" from="false"/><set field="reason" value="CONFIDENTIAL_CASE"/>
+                <return/>
+            </if>
             <set field="cases" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js')"/>
             <set field="out" from="cases.execute('ensure', context)"/>
             <set field="isCase" from="!!out.isCase"/>

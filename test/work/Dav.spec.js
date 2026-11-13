@@ -322,3 +322,89 @@ feature("a phone moves a booked event: into a clash with the room's other bookin
         booking.statusId == "WefAssigned"
     },
 })
+
+// a phone's new rule for a series that books a managed room, with no new time, is checked over its range (impl-maintenance P15): an
+// unbounded one runs past the room's horizon, the change is refused and the event keeps no rule
+feature("a phone makes a booked event of a managed room repeat without end: refused, the event as it was", {
+    when() {
+        const path = `/dav/calendars/dv.ana/${s.calendarId}/phone-event-2.ics`
+        const row = ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", s.calendarId)
+                .condition("universalId", "phone-event-2@example.com").one()
+        call("create#mantle.work.effort.ResourceBookingPolicy", { facilityId: "DV_ROOM", fromDate: new Date(Date.now() - hour), bookable: "Y",
+                approvalModeEnumId: "RbamAutomatic", bookingHorizonDays: 400, revision: 1 })
+        // in a transaction of its own: check#ResourceBookings refuses ("… booked at most 400 days ahead", which the server answers 409)
+        // and the change rolls back
+        let refusal = ""
+        ec.message.pushErrors()
+        try {
+            ec.service.sync().name(DAV).parameters({ method: "PUT", path, body: ics("phone-event-2@example.com", "Standup moved", "20270614T190000Z",
+                "20270614T200000Z", ["RRULE:FREQ=DAILY"]), headers: { Authorization: `Basic ${base64(`dv.ana:${s.password}`)}` } })
+                .requireNewTransaction(true).call()
+            refusal = ec.message.getErrorsString()
+        } catch (error) {
+            refusal = String(error.message)
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+        const rule = ec.entity.find("mantle.work.effort.WorkEffortRecurrence").condition("workEffortId", row.workEffortId).one()
+        return { refusal, rule }
+    },
+    then({ refusal, rule }) {
+        refusal.includes("check#ResourceBookings")
+        rule == null
+    },
+})
+
+// Commons calendar editors (Nov 12, 2026): an invitation an attendee puts in a calendar of their own is there to be seen. The
+// attendee's phone reads it and is refused (403) a change, under its name or another with its UID; its delete takes it out of
+// the attendee's calendar and leaves the event as it was (the review's fix: it was refused); the organizer's delete still
+// cancels it
+feature("an attendee's phone reads an invitation put in their own calendar, is refused its change and deletes it from that calendar only; the organizer's delete cancels it", {
+    when() {
+        const benPartyId = call("mantle.party.PartyServices.create#Person", { firstName: "Ben", lastName: "Davspec" }).partyId
+        call("mantle.party.PartyServices.create#PartyUserAccount", { partyId: benPartyId, emailAddress: "dv.ben@example.com",
+                username: "dv.ben", newPassword: "moqui1!!", newPasswordVerify: "moqui1!!", timeZone: "America/Chicago" })
+        const anaPath = `/dav/calendars/dv.ana/${s.calendarId}/phone-event-3.ics`
+        const created = dav("PUT", anaPath, ics("phone-event-3@example.com", "Budget review", "20270616T150000Z", "20270616T160000Z"), { "If-None-Match": "*" })
+        const eventId = ec.entity.find("mantle.work.calendar.CalendarWorkEffortDetail").condition("calendarId", s.calendarId)
+                .condition("universalId", "phone-event-3@example.com").one().workEffortId
+        call("mantle.work.WorkEffortServices.add#WorkEffortParty", { workEffortId: eventId, partyId: benPartyId, roleTypeId: "Assignee", statusId: "WeptOffered" })
+        login("dv.ben", "moqui1!!")
+        let benPassword, benCalendarId, added
+        try {
+            benPassword = call("org.moqui.impl.UserServices.create#UserAppPassword", { name: "Ben's phone" }).password
+            benCalendarId = call("mantle.work.CalendarServices.ensure#UserDefaultCalendar", {}).calendarId
+            added = call("mantle.work.CalendarServices.add#CalendarEvent", { calendarId: benCalendarId, workEffortId: eventId }).added
+        } finally { login("john.doe") }
+        const benDav = (method, path, body, headers) => call(DAV, { method, path, body: body ?? null,
+            headers: Object.assign({ Authorization: `Basic ${base64(`dv.ben:${benPassword}`)}` }, headers || {}) })
+        const benPath = `/dav/calendars/dv.ben/${benCalendarId}/${eventId}.ics`
+        const event = () => ec.entity.find("mantle.work.effort.WorkEffort").condition("workEffortId", eventId).one()
+        const got = benDav("GET", benPath)
+        const moved = benDav("PUT", benPath, ics("phone-event-3@example.com", "Budget review moved", "20270617T150000Z", "20270617T160000Z"))
+        const otherName = benDav("PUT", `/dav/calendars/dv.ben/${benCalendarId}/ben-copy.ics`,
+                ics("phone-event-3@example.com", "Budget review moved", "20270617T150000Z", "20270617T160000Z"))
+        const deleted = benDav("DELETE", benPath)
+        const afterBen = event()
+        const benEvents = ec.entity.find("mantle.work.calendar.CalendarWorkEffort").condition("calendarId", benCalendarId).count()
+        const organizerDeleted = dav("DELETE", anaPath)
+        const afterAna = event()
+        return { created, added, got, moved, otherName, deleted, afterBen, benEvents, organizerDeleted, afterAna }
+    },
+    then({ created, added, got, moved, otherName, deleted, afterBen, benEvents, organizerDeleted, afterAna }) {
+        created.status == 201
+        added == true
+        got.status == 200
+        got.body.includes("SUMMARY:Budget review")
+        moved.status == 403
+        otherName.status == 403
+        deleted.status == 204
+        afterBen.workEffortName == "Budget review"
+        Number(String(afterBen.estimatedStartDate)) == Date.UTC(2027, 5, 16, 15, 0, 0)
+        afterBen.statusId != "WeCancelled"
+        benEvents == 0
+        organizerDeleted.status == 204
+        afterAna.statusId == "WeCancelled"
+    },
+})

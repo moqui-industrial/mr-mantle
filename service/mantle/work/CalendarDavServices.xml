@@ -21,7 +21,11 @@ along with this software (see the LICENSE.md file). If not, see
         is matched by its UID, after the bookings of an event it moves are checked (check#ResourceBookings); a task a phone
         changes goes through the task services (update#Task, set#TaskStatus along its status flow); an event a phone deletes is
         cancelled, or only taken out of this calendar when it is in another too. Not carried over CalDAV: attendees and
-        organizer written by a client (the app's own are served), and the instances a client removes from a series. -->
+        organizer written by a client (the app's own are served), and the instances a client removes from a series.
+        Projected collections (impl-people P12, F22, F67; CX-SYNC): each CalendarProjection row (seeded by its owner's component)
+        is a read-only VEVENT collection projected-{projectionId}, listed for a user its owner service admits and answered by it
+        (define#ProjectionOwner): the kind reads no record of the owner, and a write to one is refused (the DAV server refuses a
+        read-only collection first). People's Team absence is the first. -->
 
     <service verb="get" noun="CalendarObjectTags">
         <description>The objects of a calendar for CalDAV: each event series (not cancelled) by its name (the davName a
@@ -98,7 +102,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The user's tasks for CalDAV's Tasks collection: the WetTask work efforts the user's party is assigned to
             now, not cancelled, and completed or closed ones only for 30 days after they were completed, each named by its
             UID (universalId, else workEffortId) with .ics, an entity tag over the task and the user's assignment, and the
-            collection's ctag.</description>
+            collection's ctag. A protected task (People's offboarding and separation tasks, ChecklistStep isProtected, and the
+            tasks linked to a confidential case, P21; IronStone People design §12, F22) is left out, so a phone never lists, reads or
+            changes it. A template and a step of managed work (a maintenance work order's, or of a process whose policy guards
+            execution) are left out too, and a managed root (a maintenance work order) is listed read only (readOnly): a PUT or
+            DELETE of it is refused (403) before anything changes, and its status changes only through its own lifecycle (IronStone
+            Maintenance design §13.3; impl-maintenance P3, F63).</description>
         <out-parameters>
             <parameter name="objectList" type="List"/>
             <parameter name="ctag"/>
@@ -120,12 +129,24 @@ along with this software (see the LICENSE.md file). If not, see
             const since = Date.now() - 30 * 86400000
             const tasks = ids.length ? Array.from(ec.entity.find('mantle.work.effort.WorkEffort').condition(cf.makeCondition('workEffortId', 'in', ids))
                     .condition('workEffortTypeEnumId', 'WetTask').condition(cf.makeCondition('statusId', 'not-equals', 'WeCancelled', true)).list()) : []
+            // People's protected tasks are left out (impl-people P7, F22)
+            // P21: and the tasks linked to a confidential case (PeopleCases.js protectedTaskIds)
+            const protectedIds = new Set(tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                    .protectedTaskIds(tasks.map((task) => task.workEffortId)) : [])
+            // a template and the steps of managed work are left out, and a managed root is read only (impl-maintenance P3, F63)
+            const managed = new Set(tasks.length ? ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+                    .managedIds(tasks.map((task) => task.workEffortId)) : [])
             for (const task of tasks) {
+                if (protectedIds.has(task.workEffortId)) continue
+                if (task.isTemplate === 'Y') continue
+                const isRoot = !task.rootWorkEffortId || task.rootWorkEffortId === task.workEffortId
+                if (managed.has(task.workEffortId) && !isRoot) continue
                 const done = ['WeComplete', 'WeClosed'].includes(task.statusId)
                 if (done && (millis(task.actualCompletionDate) ?? millis(task.lastUpdatedStamp) ?? 0) < since) continue
                 const uid = task.universalId || null
                 const name = uid && /^[A-Za-z0-9@._:+-]+$/.test(uid) ? `${uid}.ics` : `${task.workEffortId}.ics`
                 objectList.push({workEffortId: task.workEffortId, name: name, uid: uid || `mantle-task-${task.workEffortId}`,
+                    readOnly: managed.has(task.workEffortId),
                     etag: hash([task.workEffortId, task.workEffortName, task.description, task.statusId, task.priority, task.percentComplete,
                         millis(task.estimatedStartDate), millis(task.estimatedCompletionDate), millis(task.actualCompletionDate),
                         millis(task.lastUpdatedStamp), millis(assigned.get(task.workEffortId).lastUpdatedStamp)].map((part) => String(part ?? '')).join('|'))})
@@ -134,10 +155,78 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="define" noun="ProjectionOwner" type="interface">
+        <description>What a projected collection's owner service answers (CalendarProjection.ownerServiceName), as the user:
+            admitted, whether the user sees the collection at all; and without checkOnly its events from start to end (epoch
+            millis; the owner's own window when none) as the ICalendar tool's event maps (uid, sequence, summary, status, allDay,
+            start and end in millis, or startDate and endDate days for an all-day event, timeZone, lastModified). The owner decides
+            what each user sees; the projection kind adds nothing to it.</description>
+        <in-parameters>
+            <parameter name="checkOnly" type="Boolean"/>
+            <parameter name="start" type="Long"/>
+            <parameter name="end" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="eventList" type="List"/>
+        </out-parameters>
+    </service>
+    <service verb="get" noun="ProjectionObjects">
+        <description>A projected collection's objects (collectionId projected-{projectionId}, its CalendarProjection not disabled)
+            for the user: its owner service's events (none when it does not admit the user), each named by its uid with an entity
+            tag over it, and the collection's ctag; admitted false for a user the owner does not admit or an unknown projection.
+            A failure of the owner is logged and answers nothing.</description>
+        <in-parameters>
+            <parameter name="collectionId" required="true"/>
+            <parameter name="checkOnly" type="Boolean"/>
+            <parameter name="start" type="Long"/>
+            <parameter name="end" type="Long"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="projection" type="Map"/>
+            <parameter name="objectList" type="List"/>
+            <parameter name="ctag"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            admitted = false; projection = null; objectList = []; ctag = null
+            const hash = (text) => {
+                let a = 0x811c9dc5, b = 0x9747b28c
+                for (let i = 0; i < text.length; i++) { const c = text.charCodeAt(i); a = Math.imul(a ^ c, 16777619); b = Math.imul(b ^ c, 2246822519) }
+                return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0')
+            }
+            const projectionId = String(collectionId).startsWith('projected-') ? String(collectionId).substring(10) : ''
+            const row = projectionId ? ec.entity.find('mantle.work.calendar.CalendarProjection').condition('projectionId', projectionId).disableAuthz().one() : null
+            if (row == null || row.disabled === 'Y' || !row.ownerServiceName) return
+            projection = {projectionId: row.projectionId, title: row.title, description: row.description ?? null, sequenceNum: row.sequenceNum ?? null}
+            let out = null
+            ec.message.pushErrors()
+            try {
+                out = ec.service.sync().name(row.ownerServiceName).parameters({checkOnly: !!checkOnly, start: start ?? null, end: end ?? null}).call()
+                if (ec.message.hasError()) { ec.logger.error(`Projected calendar ${projectionId}: ${ec.message.getErrorsString()}`); out = null }
+            } catch (error) {
+                ec.logger.error(`Projected calendar ${projectionId} was not answered: ${error.message}`); out = null
+            } finally { ec.message.clearErrors(); ec.message.popErrors() }
+            if (!out?.admitted) return
+            admitted = true
+            for (const event of Array.from(out.eventList || [])) {
+                const uid = String(event.uid || '')
+                if (!/^[A-Za-z0-9@._:+-]+$/.test(uid)) continue
+                objectList.push({name: `${uid}.ics`, uid: uid, event: event,
+                    start: event.allDay ? (event.startDate ? Date.parse(event.startDate + 'T00:00:00Z') : null) : event.start ?? null,
+                    end: event.allDay ? (event.endDate ? Date.parse(event.endDate + 'T00:00:00Z') : null) : event.end ?? null,
+                    etag: hash([uid, event.summary, event.allDay, event.start, event.end, event.startDate, event.endDate, event.lastModified, event.status]
+                        .map((part) => String(part ?? '')).join('|'))})
+            }
+            ctag = hash(`${collectionId}|` + objectList.map((object) => `${object.name}:${object.etag}`).sort().join('|'))
+        ]]></script></actions>
+    </service>
+
     <service verb="get" noun="DavCollections">
         <description>The CalDAV collections of the user: each calendar the user may view (not free/busy only), read only
             below edit permission and for a subscription, named with its owner when shared; and Tasks (collectionId tasks,
-            VTODO). With collectionId only that one.</description>
+            VTODO); and each projected collection whose owner admits the user (projected-{projectionId}, VEVENT, read only;
+            P12). With collectionId only that one.</description>
         <in-parameters><parameter name="collectionId"/></in-parameters>
         <out-parameters><parameter name="collectionList" type="List"/></out-parameters>
         <actions><script><![CDATA[
@@ -159,6 +248,19 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 collectionList.push({collectionId: 'tasks', name: ec.l10n.localize('Tasks'), description: ec.l10n.localize('The tasks assigned to you'),
                     order: order + 1, components: 'VTODO', ctag: tags.ctag, readOnly: false})
+            }
+            // the projected collections (P12): each whose owner admits the user, read only
+            if (!collectionId || String(collectionId).startsWith('projected-')) {
+                const projections = Array.from(ec.entity.find('mantle.work.calendar.CalendarProjection').orderBy(['sequenceNum', 'projectionId']).disableAuthz().list())
+                        .filter((row) => row.disabled !== 'Y' && (!collectionId || collectionId === `projected-${row.projectionId}`))
+                let extra = order + 1
+                for (const row of projections) {
+                    const found = ec.service.sync().name('mantle.work.CalendarDavServices.get#ProjectionObjects').parameters({collectionId: `projected-${row.projectionId}`}).call()
+                    if (!found?.admitted) continue
+                    extra++
+                    collectionList.push({collectionId: `projected-${row.projectionId}`, name: ec.l10n.localize(row.title || row.projectionId),
+                        description: row.description ? ec.l10n.localize(row.description) : null, order: extra, components: 'VEVENT', ctag: found.ctag, readOnly: true})
+                }
             }
         ]]></script></actions>
     </service>
@@ -182,6 +284,22 @@ along with this software (see the LICENSE.md file). If not, see
             const tool = withData ? ec.factory.getTool('ICalendar') : null
             if (withData && tool == null) { ec.message.addError('The ICalendar tool is not available'); return }
             const millis = (value) => value == null || value === '' ? null : (value instanceof Date ? value.getTime() : (/^-?\d+$/.test(String(value)) ? Number(String(value)) : Date.parse(String(value))))
+            // a projected collection (P12): its owner's events, read only
+            if (String(collectionId).startsWith('projected-')) {
+                if (componentType && componentType !== 'VEVENT') return
+                const found = ec.service.sync().name('mantle.work.CalendarDavServices.get#ProjectionObjects').parameters({collectionId: collectionId,
+                        start: start ?? null, end: end ?? null}).call()
+                if (!found?.admitted) { ec.message.addError(`Calendar ${collectionId} not found`); return }
+                for (const object of Array.from(found.objectList || [])) {
+                    if (names && !names.has(object.name)) continue
+                    if (start != null && object.end != null && object.end < start) continue
+                    if (end != null && object.start != null && object.start >= end) continue
+                    const entry = {name: object.name, etag: object.etag, componentType: 'VEVENT'}
+                    if (withData) entry.data = tool.write({calendarObject: true, timeZone: ec.user.timeZone, events: [object.event]})
+                    objectList.push(entry)
+                }
+                return
+            }
             if (collectionId === 'tasks') {
                 if (componentType && componentType !== 'VTODO') return
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
@@ -249,9 +367,12 @@ along with this software (see the LICENSE.md file). If not, see
             refused with status 409 and nothing changes. A new start or end of an event that holds a meeting room or equipment
             (a current booking) is checked first as a move on the screens is (EventServices.check#ResourceBookings with the
             new time and checkOnly): a clash with another booking of it is refused with 409 and nothing changes; once stored,
-            a booking of a resource with approvers is asked again (check#ResourceBookings). ifMatch and ifNoneMatch are the
-            client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change, 400 for text that
-            holds no event or to-do (or several UIDs). Another refusal of a service it calls is an error: the whole change
+            a booking of a resource with approvers is asked again (check#ResourceBookings), and a series booking a managed resource
+            (impl-maintenance P15) is checked again over its stored range (a rule changed with no new time). ifMatch and ifNoneMatch are the
+            client's preconditions; status is 412 when one fails, 403 for a calendar the user may not change or an event of it
+            the user may not change (EventServices.check#EventAccess: one the calendar only shows, put there by an attendee, or one
+            an application keeps; Commons calendar editors, Nov 12, 2026), 400 for text that holds no event or to-do (or several
+            UIDs). Another refusal of a service it calls is an error: the whole change
             rolls back and the DAV server answers by it (409, 403 for access).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
@@ -275,6 +396,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ifMatch && (!existing || (bare(ifMatch) !== '*' && bare(ifMatch) !== existing.etag))) return true
                 return false
             }
+            // a projected collection is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const parsed = tool.parse(String(data))
             const toDate = (value) => value == null ? null : new Date(Number(value))
             if (collectionId === 'tasks') {
@@ -284,6 +407,8 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.work.CalendarDavServices.get#TaskObjectTags').call()
                 const existing = Array.from(tags.objectList || []).find((object) => object.name === objectName)
                 if (failsPreconditions(existing)) { status = 412; return }
+                // a maintenance work order is changed only through its lifecycle (impl-maintenance P3, F63)
+                if (existing?.readOnly) { status = 403; return }
                 const statusOf = {'NEEDS-ACTION': null, 'IN-PROCESS': 'WeInProgress', COMPLETED: 'WeComplete', CANCELLED: 'WeCancelled'}
                 const due = todo.dueDate ? ec.l10n.parseTimestamp(`${todo.dueDate} 00:00:00.000`, 'yyyy-MM-dd HH:mm:ss.SSS') : toDate(todo.due)
                 const fields = {workEffortName: todo.summary || ec.l10n.localize('(no title)'), description: todo.description ?? null,
@@ -353,6 +478,17 @@ along with this software (see the LICENSE.md file). If not, see
             const seriesRow = Array.from(ec.entity.find('mantle.work.calendar.CalendarWorkEffortDetail').condition('calendarId', collectionId).condition('universalId', uid).list())
                     .find((row) => ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('toWorkEffortId', row.workEffortId)
                         .condition('workEffortAssocTypeEnumId', 'WeatRecurrenceInstance').count() === 0) ?? null
+            // an event of the calendar the user may not change (one it only shows, one its organizer or an application keeps) is
+            // refused before anything is checked or stored
+            for (const id of Array.from(new Set([existing?.workEffortId, seriesRow?.workEffortId].filter((id) => id)))) {
+                const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: id, permission: 'check'}).call()
+                if (ec.message.hasError()) return
+                if (!eventAccess?.canEdit) {
+                    status = 403
+                    ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${id} is not changed by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                    return
+                }
+            }
             if (seriesRow != null) {
                 // the series and the instances it changed on their own, by their recurrence start (store#CalendarFeedEvents' keys)
                 const overrideOf = new Map(Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', seriesRow.workEffortId)
@@ -405,6 +541,19 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: workEffortId, allowConflicts: true}).call()
                 if (ec.message.hasError()) return
             }
+            // a series of a managed resource (impl-maintenance P15) is checked again over its stored range, whose rule the client may
+            // have changed with no new time: one past the horizon, overlapping itself or clashing is an error, and the change rolls back
+            if (seriesRow != null && !moved.includes(seriesRow.workEffortId)) {
+                const policies = ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js')
+                const managed = Array.from(ec.entity.find('mantle.work.effort.WorkEffortFacility').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId && booking.statusId !== 'WefRequestDenied' && policies.policyAt({facilityId: booking.facilityId}))
+                    || Array.from(ec.entity.find('mantle.work.effort.WorkEffortAssetAssign').condition('workEffortId', seriesRow.workEffortId).list())
+                        .some((booking) => booking.statusId !== 'WeaaRequestDenied' && booking.thruDate == null && policies.policyAt({assetId: booking.assetId}))
+                if (managed) {
+                    ec.service.sync().name('mantle.work.EventServices.check#ResourceBookings').parameters({workEffortId: seriesRow.workEffortId, reapprove: false}).call()
+                    if (ec.message.hasError()) return
+                }
+            }
             const after = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
             const object = after.find((candidate) => candidate.uid === uid)
             if (object == null) { status = 409; return }
@@ -424,9 +573,12 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="delete" noun="DavObject">
         <description>A CalDAV client's delete: an event series of a calendar (edit permission) is cancelled with its changed
-            instances, or only taken out of this calendar when it is in another; a task leaves the Tasks collection by the
-            end of the user's assignment (the task stays for the others on it). status 412 when ifMatch fails, 404 when the
-            name is not there, 403 when the calendar may not be changed.</description>
+            instances, or only taken out of this calendar when another calendar holds it for its editors (one that only shows it,
+            CalendarWorkEffort.viewOnly, does not count); a task leaves the Tasks collection by the end of the user's assignment
+            (the task stays for the others on it). An event the calendar only shows (an attendee's invitation put there to be
+            seen) is taken out of it and stays as it was. status 412 when ifMatch fails, 404 when the name is not there, 403 when
+            the calendar may not be changed, or the event may not be changed by the user and the calendar does not only show it
+            (EventServices.check#EventAccess: one an application keeps; Commons calendar editors, Nov 12, 2026).</description>
         <in-parameters>
             <parameter name="collectionId" required="true"/>
             <parameter name="objectName" required="true"/>
@@ -435,6 +587,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="status" type="Integer"/></out-parameters>
         <actions><script><![CDATA[
             status = null
+            // a projected collection is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const cf = ec.entity.conditionFactory
             const bare = (tag) => String(tag || '').trim().replace(/^W\//, '').replace(/"/g, '')
             if (collectionId === 'tasks') {
@@ -442,6 +596,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .find((candidate) => candidate.name === objectName)
                 if (object == null) { status = 404; return }
                 if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
+                // a maintenance work order's assignments are its schedule's (impl-maintenance P3, F63)
+                if (object.readOnly) { status = 403; return }
                 const partyId = ec.user.userAccount?.partyId
                 for (const row of Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', object.workEffortId)
                         .condition('partyId', partyId).condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())) {
@@ -455,9 +611,25 @@ along with this software (see the LICENSE.md file). If not, see
             const object = Array.from(ec.service.sync().name('mantle.work.CalendarDavServices.get#CalendarObjectTags').parameters({calendarId: collectionId}).call().objectList || [])
                     .find((candidate) => candidate.name === objectName)
             if (object == null) { status = 404; return }
+            const eventAccess = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: object.workEffortId, permission: 'check'}).call()
+            if (ec.message.hasError()) return
+            if (!eventAccess?.canEdit) {
+                // an event the calendar only shows (an attendee put it there to see it) is taken out of it, the event as it was;
+                // any other the user may not change is refused
+                const shownOnly = !eventAccess?.managedBy && ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('calendarId', collectionId)
+                        .condition('workEffortId', object.workEffortId).one()?.viewOnly === 'Y'
+                if (!shownOnly) {
+                    status = 403
+                    ec.logger.info(`CalDAV ${collectionId}/${objectName}: event ${object.workEffortId} is not deleted by ${ec.user.username}${eventAccess?.managedBy ? '; it is changed on ' + eventAccess.managedBy : ''}`)
+                    return
+                }
+                if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
+                ec.service.sync().name('mantle.work.CalendarServices.remove#CalendarEvent').parameters({calendarId: collectionId, workEffortId: object.workEffortId}).call()
+                return
+            }
             if (ifMatch && bare(ifMatch) !== '*' && bare(ifMatch) !== object.etag) { status = 412; return }
             const elsewhere = ec.entity.find('mantle.work.calendar.CalendarWorkEffort').condition('workEffortId', object.workEffortId)
-                    .condition(cf.makeCondition('calendarId', 'not-equals', collectionId)).count() > 0
+                    .condition(cf.makeCondition('calendarId', 'not-equals', collectionId)).condition(cf.makeCondition('viewOnly', 'not-equals', 'Y', true)).count() > 0
             if (elsewhere) {
                 ec.service.sync().name('mantle.work.CalendarServices.remove#CalendarEvent').parameters({calendarId: collectionId, workEffortId: object.workEffortId}).call()
                 return

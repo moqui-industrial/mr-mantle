@@ -237,7 +237,7 @@ function logReason(fields, why) {
     ec.context.putAll(Object.fromEntries(fields.map(name => [name + "_changeReason", why])))
 }
 function lockOrganization(organizationPartyId) {
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
 }
 
 // store#ScorecardPolicy: a dated change of the period, minimum sample and due-date basis; the row in effect ends where the

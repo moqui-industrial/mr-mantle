@@ -1,0 +1,599 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's attendance (IronStone People design §6 Attendance and TimeImport, §3 SelfService's Clock, §16.2 AttendanceServices,
+    PE-05, PE-19; impl-people P13; Attendance.js): evidence of presence, apart from work allocation and payable time. Raw punches
+    (AttendancePunch) are recorded once by their source key and never changed: the person's own clock in self-service (record#Punch:
+    the worker is the session's, never a parameter; the time is the server's; only for an employment that clocks: its employer's
+    default, the PartySetting PeopleClocking, unless HR set the employment apart, store#Clocking; Attendance.js isClockingOn) and the device files an HR officer imports (preview#Import, import#Records: each row in its own
+    transaction, known source keys skipped, bad rows named; PEOPLE_IMPORT beside PEOPLE_HR_VIEW and PEOPLE_HR_EDIT of the employer).
+    Each punch counts on its employment's day in the zone of its working schedule; an out-punch on the day of the in-punch it closes,
+    so an overnight shift is its start day's; a day says what is missing (find#Attendance, get#Day). A correction asks for a day's
+    worked intervals with a reason and waits for a People approval (PeopleAttendanceApproval, decide#Correction); approved, it is the
+    day's attendance, and the punches stay as they were. Nothing here approves timesheets or makes pay. Each service checks the
+    caller's People scope (People.js) and the People permissions itself, then reads and writes with authorization off, and names no
+    application group. P30 adds the clocking kiosk: a worker's punch at a registered shared device by badge and PIN, only in that
+    device's request (record#KioskPunch), and the badges HR issues, prints once and revokes (KioskIdentity.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="record" noun="Punch" allow-remote="false">
+        <description>The caller clocks in or out, now (the server's time), for their own employment (PEOPLE_SELF_SERVICE): the worker
+            is the session's and never a parameter; partyRelationshipId only chooses among the caller's own current employments (another
+            is refused as missing, RECORD_UNAVAILABLE), and with none named their only one with clocking on is used. The employment must
+            have clocking on (CLOCKING_OFF); one clocking for several employers names it (EMPLOYMENT_REQUIRED). The direction is the one
+            asked (directionEnumId AtdIn or AtdOut), else the other of the caller's state; clocking in while in (ALREADY_IN) or out
+            while out (NOT_IN) is refused. The punch counts on the day of the employment's working schedule zone (an out-punch on the day
+            of the in-punch it closes). A retry with the same operationKey answers the first punch (repeated).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendancePunchId"/>
+            <parameter name="attendanceDayId"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="directionText"/>
+            <parameter name="punchDateText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('recordSelfPunch', context)"/>
+            <set field="attendancePunchId" from="out.attendancePunchId"/>
+            <set field="attendanceDayId" from="out.attendanceDayId"/>
+            <set field="directionEnumId" from="out.directionEnumId"/>
+            <set field="directionText" from="out.directionText"/>
+            <set field="punchDateText" from="out.punchDateText"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyClock" allow-remote="false">
+        <description>The caller's own clock (PEOPLE_SELF_SERVICE; no party parameter): each of their current employments with its
+            employer, whether clocking is on, whether they are clocked in and since when, the last punch, today's time and the action
+            the clock offers; clocking is true when any employment has it on. Nothing for a caller without self-service.</description>
+        <out-parameters>
+            <parameter name="clocking" type="Boolean"/>
+            <parameter name="employments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('myClock', context)"/>
+            <set field="clocking" from="out.clocking"/>
+            <set field="employments" from="out.employments"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ClockOffer" allow-remote="false">
+        <description>Whether the caller clocks for a current employment of their own (PEOPLE_SELF_SERVICE and a person; no party
+            parameter): the condition-service of the quick create Clock in, which the shell asks on each page load. Answers false
+            for anyone else.</description>
+        <implements service="org.moqui.ui.ShellServices.offer#QuickCreate"/>
+        <actions>
+            <set field="offer" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('offerClock', context).offer"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Clocking" allow-remote="false">
+        <description>An employment's clocking set by an HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; another is
+            refused as missing, RECORD_UNAVAILABLE), with the reason kept by the field's audit row: clockingEnabled Y (it clocks)
+            or N (it does not), each an exception to the employer's default (its PartySetting PeopleClocking), or empty to follow
+            that default (CLOCKING_INVALID otherwise). Answers whether it clocks now, its own setting and the employer's default.
+            Turning it off keeps every punch.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="clockingEnabled"><description>Y, N, or empty to follow the employer's default</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="clockingEnabled" type="Boolean"><description>Whether the employment clocks now</description></parameter>
+            <parameter name="clockingSetting"><description>Its own setting, Y or N, or none when it follows the employer</description></parameter>
+            <parameter name="employerDefault" type="Boolean"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('storeClocking', context)"/>
+            <set field="clockingEnabled" from="out.clockingEnabled"/>
+            <set field="clockingSetting" from="out.clockingSetting"/>
+            <set field="employerDefault" from="out.employerDefault"/>
+            <set field="changed" from="out.changed"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Clocking" allow-remote="false">
+        <description>Who clocks: the current employments of the employers an HR reader reads (PEOPLE_HR_VIEW; one employer when
+            organizationPartyId names it, ORGANIZATION_DENIED outside the scope) that clock, by their own setting or the employer's
+            default, and those set apart from it, each with the person, the employer, whether it clocks (clockingEnabled), its own
+            setting (clockingSetting Y, N or none) and the employer's default, how in words, whether they are clocked in now and
+            whether the caller may change it. Paged.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="clocking" type="List"/>
+            <parameter name="clockingCount" type="Integer"/>
+            <parameter name="clockingPageIndex" type="Integer"/>
+            <parameter name="clockingPageSize" type="Integer"/>
+            <parameter name="clockingPageMaxIndex" type="Integer"/>
+            <parameter name="clockingPageRangeLow" type="Integer"/>
+            <parameter name="clockingPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('findClocking', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Attendance" allow-remote="false">
+        <description>The attendance days the caller reads: their own (PEOPLE_SELF_SERVICE; mine for those alone), their live reports'
+            at the line's employers (PEOPLE_TEAM_VIEW) and an HR reader's employers' (PEOPLE_HR_VIEW); with toDecide, the days whose
+            waiting correction the caller decides now (PEOPLE_REQUEST_APPROVE). Narrowed to a person, an employer, an employment, days
+            fromDate through thruDate and exceptionsOnly (a missing or repeated punch not corrected, or a correction asked). Newest
+            first, paged (an export, pageNoLimit, every row up to 5000); each with the person, employer, day, first in and last out
+            (an overnight shift's out marked +1), punches, time worked, what is missing in words, state, whether the caller decides
+            it and whether they may correct it. Refuses a caller with none of the four permissions (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="exceptionsOnly" type="Boolean"/>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="toDecide" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="days" type="List"/>
+            <parameter name="daysCount" type="Integer"/>
+            <parameter name="daysPageIndex" type="Integer"/>
+            <parameter name="daysPageSize" type="Integer"/>
+            <parameter name="daysPageMaxIndex" type="Integer"/>
+            <parameter name="daysPageRangeLow" type="Integer"/>
+            <parameter name="daysPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('findAttendance', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Day" allow-remote="false">
+        <description>An attendance day the caller reads (the person, their manager at the employer, HR of the employer, an approver
+            of its correction; another is refused as missing, RECORD_UNAVAILABLE): the day as find#Attendance shows it, its raw punches
+            (direction, time, source, the source system and its key), its corrections (intervals, time, reason, who asked, state and
+            approval) and what the caller may do: canCorrect (the person, their manager or an HR editor, while no correction waits),
+            canDecide (an approver of the step waiting), canWithdraw (the person or who asked, while it waits).</description>
+        <in-parameters><parameter name="attendanceDayId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="day" type="Map"/>
+            <parameter name="punches" type="List"/>
+            <parameter name="corrections" type="List"/>
+            <parameter name="waitingCorrectionId"/>
+            <parameter name="access" type="List"/>
+            <parameter name="canCorrect" type="Boolean"/>
+            <parameter name="canDecide" type="Boolean"/>
+            <parameter name="canWithdraw" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('getDay', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="request" noun="Correction" allow-remote="false">
+        <description>A correction of an employment's day asked: the day (attendanceDayId, or partyRelationshipId and attendanceDate
+            for a day with no punch), the intervals worked (intervals, a list of {fromTime, thruTime} as HH:mm of the day, a thru at
+            or before the from ending the next day; or fromTime and thruTime with fromTime2 and thruTime2) and the reason. Asked by
+            the person (PEOPLE_SELF_SERVICE), their manager at the employer (PEOPLE_TEAM_VIEW) or an HR editor of the employer; another
+            reader is refused (PERMISSION_DENIED), another day as missing (RECORD_UNAVAILABLE). Sent for a People approval of kind
+            PakAttendance (the PeopleAttendanceApproval topic to the first step's approvers; the person's manager unless a rule says
+            otherwise; never the requester or the person). The punches are kept as they are. Refuses: DATE_REQUIRED, DATE_FUTURE,
+            DATE_OUTSIDE, REASON_REQUIRED, INTERVALS_REQUIRED, TIME_INVALID, INTERVALS_OVERLAP, CORRECTION_PENDING (one waits for the
+            day). A retry with the same operationKey answers the first (repeated).</description>
+        <in-parameters>
+            <parameter name="attendanceDayId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="attendanceDate"/>
+            <parameter name="intervals" type="List"><parameter name="interval" type="Map"/></parameter>
+            <parameter name="fromTime"/>
+            <parameter name="thruTime"/>
+            <parameter name="fromTime2"/>
+            <parameter name="thruTime2"/>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendanceCorrectionId"/>
+            <parameter name="attendanceDayId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('requestCorrection', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="Correction" allow-remote="false">
+        <description>An attendance correction decided, under its employment's lock. approve or refuse: the step waiting, through
+            PeopleApprovalServices.record#Decision at the correction's revision (sourceRevision from a notice); the last approval
+            makes it the day's attendance (the day corrected, its time the correction's; the punches unchanged); a refusal needs a
+            reason. withdraw: the person or who asked, while it waits (its approval superseded). One who reads nothing of it is
+            answered as for a missing one (RECORD_UNAVAILABLE). A decision retried answers the first (repeated). Refuses:
+            DECISION_INVALID, NOT_YOURS, NOT_PENDING and record#Decision's refusals (NOT_APPROVER, SELF_APPROVAL, ALREADY_DECIDED,
+            SOURCE_CHANGED, REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="attendanceCorrectionId" required="true"/>
+            <parameter name="decision"><description>approve (the default), refuse or withdraw</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendanceCorrectionId"/>
+            <parameter name="attendanceDayId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('decideCorrection', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="Correction" allow-remote="false">
+        <description>The PeopleAttendanceApproval topic's approve service, which approve#NotificationMessage calls as the user
+            deciding the notice: decide#Correction at the correction and revision in the message (a notice of an earlier revision is
+            refused); refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('approveNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Correction" allow-remote="false">
+        <description>The PeopleAttendanceApproval topic's refuse service, with the reason (the topic requires one): as
+            approve#Correction, the correction refused (the day keeps its punches' time, or an earlier approved correction's).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('refuseNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+
+    <service verb="preview" noun="Import" allow-remote="false">
+        <description>A device file of attendance events for an employer read and previewed (TimeImport's first step): the caller holds
+            PEOPLE_IMPORT, PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED) and edits the employer (ORGANIZATION_DENIED). The file
+            (importFile, or importText) is delimited text (a comma, a semicolon or delimiter tab) with a header line and at most 5000
+            rows and 1 MiB; its columns are named by workerColumn (worker), timeColumn (time), directionColumn (direction), keyColumn
+            (id, the event's own key, optional) and deviceColumn (device, optional). A worker is named by People's person id
+            (workerIdKind partyId) or work email (workEmail); a time is yyyy-MM-dd HH:mm[:ss] in timeZone (or with its offset); a
+            direction is in or out. Each row is resolved to the worker's employment by the employer at that time and its source key
+            (the employer, the source system and the event's key, else the worker, instant and direction) and kept with its outcome:
+            ready, known (recorded already), duplicate (repeated in the file) or refused with its reason (WORKER_UNKNOWN,
+            WORKER_AMBIGUOUS, NOT_EMPLOYED, EMPLOYMENT_AMBIGUOUS, TIME_INVALID, TIME_FUTURE, DIRECTION_INVALID, ROW_INVALID). Nothing is
+            recorded. Refuses the file: ORGANIZATION_REQUIRED, SOURCE_REQUIRED, ZONE_INVALID, WORKER_KIND_INVALID, FILE_REQUIRED,
+            FILE_TOO_LARGE, FILE_UNREADABLE, COLUMN_MISSING.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="importFile" type="FileItem"/>
+            <parameter name="importText" allow-html="any"/>
+            <parameter name="fileName"/>
+            <parameter name="sourceSystem"/>
+            <parameter name="timeZone"/>
+            <parameter name="workerIdKind"/>
+            <parameter name="delimiter"/>
+            <parameter name="workerColumn"/>
+            <parameter name="timeColumn"/>
+            <parameter name="directionColumn"/>
+            <parameter name="keyColumn"/>
+            <parameter name="deviceColumn"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendanceImportId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="rowCount" type="Integer"/>
+            <parameter name="readyCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('previewImport', context)"/>
+            <set field="attendanceImportId" from="out.attendanceImportId"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="rowCount" from="out.rowCount"/>
+            <set field="readyCount" from="out.readyCount"/>
+            <set field="skippedCount" from="out.skippedCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+        </actions>
+    </service>
+    <service verb="import" noun="Records" allow-remote="false">
+        <description>A previewed attendance import recorded (TimeImport's second step), by the same permissions and employer as its
+            preview (another import is refused as missing, RECORD_UNAVAILABLE): its ready rows in time order by employment, each in
+            its own transaction as a raw punch (AtsImport, the source system and the event's key) on its employment's day; a source key
+            recorded by then is skipped, a row that fails is named with its reason and the rest go on. It approves nothing. An import
+            recorded already answers as it ended (repeated).</description>
+        <in-parameters><parameter name="attendanceImportId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="attendanceImportId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="importedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('importRecords', context)"/>
+            <set field="attendanceImportId" from="out.attendanceImportId"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="importedCount" from="out.importedCount"/>
+            <set field="skippedCount" from="out.skippedCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Import" allow-remote="false">
+        <description>An attendance import an HR reader of its employer reads (PEOPLE_HR_VIEW; another is refused as missing,
+            RECORD_UNAVAILABLE): the file, employer, source system, zone, state, counts, who read it and when, whether the caller may
+            import it now, and its rows (all, an outcome, or problems: refused and failed), each with the line, what it named (worker,
+            person, time, direction, key, device) and its outcome with its reason.</description>
+        <in-parameters>
+            <parameter name="attendanceImportId" required="true"/>
+            <parameter name="outcome"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendanceImport" type="Map"/>
+            <parameter name="rows" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('getImport', context)"/>
+            <set field="attendanceImport" from="out.attendanceImport"/>
+            <set field="rows" from="out.rows"/>
+        </actions>
+    </service>
+    <!-- the time-and-attendance import's result contract for the framework's org.moqui.admin.DataTransferServices (the target
+        timeAndAttendance, data/PeopleAttendanceSetupData.xml) -->
+    <service verb="find" noun="ImportRuns" allow-remote="false">
+        <description>The attendance imports of the employers an HR reader reads (PEOPLE_HR_VIEW and People's scope), newest first, as
+            summaries: the file's name, the employer, previewed or imported, the rows read, imported, skipped and refused, who read or
+            recorded it and when, and the parameters that open it in TimeImport. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions>
+            <set field="runList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('findImportRuns', context).runList"/>
+        </actions>
+    </service>
+
+    <!-- P30, the clocking kiosk (design-people §6 ClockingKiosk, §15 the badge, PE-05; impl-people P30): a worker clocks in and out at a
+        registered shared device by badge and PIN (record#KioskPunch, only in that device's request, as its display account with
+        PEOPLE_KIOSK_PUNCH), HR issues, prints, revokes, resets and reads the badges, and the worker sets their own PIN
+        (KioskIdentity.js). -->
+    <service verb="record" noun="KioskPunch" allow-remote="false">
+        <description>A worker clocks in or out now (the server's time) at a registered clocking device: only in the device's own request,
+            whose display account is the user and holds PEOPLE_KIOSK_PUNCH (DEVICE_REQUIRED, PERMISSION_DENIED). The worker is the one
+            the badge's number (badgeText, typed or scanned) and the PIN prove: an unknown number (BADGE_UNKNOWN), a revoked badge
+            (BADGE_REVOKED), one stopped by a day's wrong PINs (BADGE_DISABLED), a locked one (PIN_LIMITED), one whose worker has
+            not set their PIN in self-service yet (PIN_NOT_SET) and a wrong PIN (PIN_WRONG; the fifth in a row locks the badge for
+            fifteen minutes, each lockout after twice as long until a right PIN; the twentieth within a day, here or in
+            self-service, stops it until HR resets its PIN or issues a new one, and tells the employer's HR editors,
+            PeopleKioskBadgeDisabled, naming the person, never the number or a PIN) are refused and counted at the device;
+            after many refusals at the device lately its next proof is checked only once a growing pause after the last refusal has
+            passed (KIOSK_WAIT, at most a few seconds, nothing looked up or counted), and a burst tells the HR editors of its
+            organizations at most hourly (PeopleKioskRefusals); the employment must be current (EMPLOYMENT_ENDED) and with an organization of the display account's (ORGANIZATION_DENIED),
+            and clock (CLOCKING_OFF). The direction is the one asked, else the other of the worker's state (ALREADY_IN, NOT_IN). A
+            retry with the same operationKey at the device answers the first punch (repeated). Answers the worker's name, the
+            direction and the time; the punch is at the device's site and names the device and the badge.</description>
+        <in-parameters>
+            <parameter name="badgeText"/>
+            <parameter name="pin"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendancePunchId"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="directionText"/>
+            <parameter name="punchTimeText"/>
+            <parameter name="personName"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('recordKioskPunch', context)"/>
+            <set field="attendancePunchId" from="out.attendancePunchId"/>
+            <set field="directionEnumId" from="out.directionEnumId"/>
+            <set field="directionText" from="out.directionText"/>
+            <set field="punchTimeText" from="out.punchTimeText"/>
+            <set field="personName" from="out.personName"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="KioskBadge" allow-remote="false">
+        <description>The scan-input resolver of a clocking device (only in a registered device's request with PEOPLE_KIOSK_PUNCH): the
+            scanned or typed text, when it is a badge's number, answered as the badge read with nothing looked up, so a scan tells
+            nothing of whom it belongs to; record#KioskPunch checks it with the PIN. No match otherwise.</description>
+        <in-parameters>
+            <parameter name="scanText" required="true"/>
+            <parameter name="allowedTypes" type="List"/>
+            <parameter name="scanId"/>
+        </in-parameters>
+        <out-parameters><parameter name="matches" type="List"/><parameter name="parsed" type="Map"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('resolveBadge', context)"/>
+            <set field="matches" from="out.matches"/>
+            <set field="parsed" from="out.parsed"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="KioskBadge" allow-remote="false">
+        <description>A new clocking badge of a current employment (EMPLOYMENT_ENDED), issued by an HR editor of the employer
+            (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; anyone else is refused as missing, RECORD_UNAVAILABLE), with a one-time PIN of 4 to 8
+            digits (PIN_INVALID) or none, kept only as its hash: it only lets the worker set their own PIN in self-service
+            (set#MyKioskPin) and never works at a kiosk, where the badge works once the worker has set theirs. The employment's
+            badge before it is revoked. The badge's number is made when its issuer prints it (print#KioskBadge).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="oneTimePin"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="kioskBadgeId"/>
+            <parameter name="replacedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('issueBadge', context)"/>
+            <set field="kioskBadgeId" from="out.kioskBadgeId"/>
+            <set field="replacedCount" from="out.replacedCount"/>
+        </actions>
+    </service>
+    <service verb="print" noun="KioskBadge" allow-remote="false">
+        <description>A badge's number made and printed, once, by its issuer (NOT_ISSUER), still an HR editor of the employer, within
+            fifteen minutes of the issue (PRINT_EXPIRED): its Code 128 barcode as SVG, the number in groups of four for typing, the
+            person, the employer and when it was issued. The number is kept only as its hash, so a second print is refused (PRINTED)
+            and a lost badge is revoked and another issued; a revoked badge is not printed (BADGE_REVOKED).</description>
+        <in-parameters><parameter name="kioskBadgeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="personName"/>
+            <parameter name="organizationName"/>
+            <parameter name="numberText"/>
+            <parameter name="barcodeSvg"/>
+            <parameter name="issuedDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('printBadge', context)"/>
+            <set field="personName" from="out.personName"/>
+            <set field="organizationName" from="out.organizationName"/>
+            <set field="numberText" from="out.numberText"/>
+            <set field="barcodeSvg" from="out.barcodeSvg"/>
+            <set field="issuedDateText" from="out.issuedDateText"/>
+        </actions>
+    </service>
+    <service verb="revoke" noun="KioskBadge" allow-remote="false">
+        <description>A badge revoked by an HR editor of the employer (anyone else is refused as missing, RECORD_UNAVAILABLE), with a
+            reason: every kiosk refuses it from then on. A revoked badge answers as it is (repeated).</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="reason" allow-html="none"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="revoked" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('revokeBadge', context)"/>
+            <set field="revoked" from="out.revoked"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="reset" noun="KioskPin" allow-remote="false">
+        <description>A badge's PIN reset by an HR editor of the employer (anyone else is refused as missing, RECORD_UNAVAILABLE) for a
+            worker who forgot it, with a new one-time PIN of 4 to 8 digits (PIN_INVALID) or none: the worker's PIN, its wrong count,
+            its lockouts and its lock are cleared and a badge stopped by a day's wrong PINs starts again (those before the reset no
+            longer count toward the day's limit), so the badge works at no kiosk until the worker sets their PIN again in
+            self-service. A revoked badge is not reset (BADGE_REVOKED).</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="oneTimePin"/>
+        </in-parameters>
+        <out-parameters><parameter name="reset" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('resetPin', context)"/>
+            <set field="reset" from="out.reset"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyKioskBadges" allow-remote="false">
+        <description>The caller's own clocking badges in use (PEOPLE_SELF_SERVICE; their own current employments' badges not
+            revoked; it takes no party): each one's employer, state, whether its PIN is set and whether setting it asks the PIN they
+            have (their own, or the one-time PIN HR gave them). Never a number or a PIN; nothing for a caller without
+            self-service.</description>
+        <out-parameters><parameter name="badges" type="List"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('myBadges', context)"/>
+            <set field="badges" from="out.badges"/>
+        </actions>
+    </service>
+    <service verb="set" noun="MyKioskPin" allow-remote="false">
+        <description>The caller sets or changes the PIN of their own badge in use (anyone else's, or a revoked one, is refused as
+            missing, RECORD_UNAVAILABLE): the new PIN of 4 to 8 digits (PIN_INVALID), not the one-time PIN HR gave (PIN_REUSED), so
+            HR never learns it; the PIN they have now (their own, else the one-time PIN when HR gave one) is asked, a wrong one
+            counted on the badge as at a kiosk (PIN_WRONG; the fifth in a row locks it, PIN_LIMITED, each lockout twice as long; the
+            twentieth within a day stops it until HR resets its PIN, BADGE_DISABLED, and tells HR). Kept only as its argon2 hash; the
+            badge works at a kiosk from then on.</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="currentPin"/>
+            <parameter name="newPin" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="pinSet" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('setMyPin', context)"/>
+            <set field="pinSet" from="out.pinSet"/>
+        </actions>
+    </service>
+    <service verb="prune" noun="KioskAttempts" allow-remote="false" authenticate="anonymous-all" transaction-timeout="1800">
+        <description>The daily job's prune: clocking kiosk attempts (and the devices' notice marks) older than 90 days deleted, a
+            batch at a time each in a transaction of its own; a failing batch deleted row by row, a failing row logged by its id and
+            left for the next run.</description>
+        <out-parameters>
+            <parameter name="deletedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('pruneAttempts', context)"/>
+            <set field="deletedCount" from="out.deletedCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="KioskBadge" allow-remote="false">
+        <description>An employment's clocking badge as an HR reader of the employer reads it (PEOPLE_HR_VIEW; anyone else is refused as
+            missing, RECORD_UNAVAILABLE), never its number or PIN: the latest badge, or the one asked by kioskBadgeId (BadgePrint's
+            page), with its state (issued and not printed, active, locked after wrong PINs, stopped after a day's wrong PINs, waiting
+            for the worker's PIN, revoked), when it was issued, printed, its PIN set and last used, and whether the reader prints it
+            now; whether the reader issues a badge (an HR editor, a current employment), revokes this one and resets its
+            PIN.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"><description>The employment, for its latest badge</description></parameter>
+            <parameter name="kioskBadgeId"><description>Instead: the badge itself</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="badge" type="Map"/>
+            <parameter name="canIssue" type="Boolean"/>
+            <parameter name="canRevoke" type="Boolean"/>
+            <parameter name="canResetPin" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('getBadge', context)"/>
+            <set field="badge" from="out.badge"/>
+            <set field="canIssue" from="out.canIssue"/>
+            <set field="canRevoke" from="out.canRevoke"/>
+            <set field="canResetPin" from="out.canResetPin"/>
+        </actions>
+    </service>
+</services>

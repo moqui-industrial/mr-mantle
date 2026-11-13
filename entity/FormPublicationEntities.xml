@@ -69,6 +69,51 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
 
+    <entity entity-name="FormPurpose" package="mantle.party" cache="never">
+        <description>The registration of a purpose of the survey builder's forms (impl-people P16, F51, F62;
+            mantle.party.FormDefinitions): a DbForm of a registered purpose is built and read through
+            mantle.party.FormDefinitionServices (FormDefinitions.js), which check the permission that edits it (editPermission)
+            and the one that also reads it (viewPermission), each a permission or a comma list of them any one of which admits,
+            and the organization it is owned by: one the scope service names
+            (scopeServiceName answers organizationPartyIds for the user; empty, the user's own internal organizations). A
+            publication of such a form (FormPublication, its invitation links) takes only the access kinds accessEnumIds lists
+            (a comma list of FormPublicationAccess ids); none means the form is answered only by the respondents an app's own
+            service assigns, with no public or invitation link, its answers read through that app's service of the record they
+            belong to. formNoun is the word the builder's messages use (template, form). Customer Service registers its case
+            templates and case feedback, People its private purposes (impl-people P16), Marketing its own.</description>
+        <field name="purposeEnumId" type="id" is-pk="true"/>
+        <field name="publicationPurposeEnumId" type="id"/>
+        <field name="editPermission" type="text-medium"/>
+        <field name="viewPermission" type="text-medium"/>
+        <field name="scopeServiceName" type="text-medium"/>
+        <field name="accessEnumIds" type="text-medium"/>
+        <field name="formNoun" type="text-short"/>
+        <field name="ownServices" type="text-indicator"><description>Y: its forms are built only through its app's own services,
+            which add the app's rules (Customer Service's case templates and case feedback: CaseTemplateServices and
+            CaseFeedbackServices, the customer audience and the rating); FormDefinitionServices reads them and refuses to make or
+            change one (PURPOSE_UNAVAILABLE, impl-people P16 review)</description></field>
+        <relationship type="one-nofk" title="DbFormPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="FormPublicationPurpose" related="moqui.basic.Enumeration" short-alias="publicationPurpose">
+            <key-map field-name="publicationPurposeEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <!-- Customer Service's: case templates (an agent's and a customer's fields; edited with SUPPORT_POLICY_EDIT, read by
+                agents) and case feedback (a resolved case's customer, invited by a link) -->
+            <mantle.party.FormPurpose purposeEnumId="DbfpCaseTemplate" editPermission="SUPPORT_POLICY_EDIT"
+                    viewPermission="SUPPORT_CASE_EDIT" formNoun="template" ownServices="Y"/>
+            <mantle.party.FormPurpose purposeEnumId="DbfpCaseFeedback" publicationPurposeEnumId="FppCaseFeedback"
+                    editPermission="SUPPORT_POLICY_EDIT" viewPermission="SUPPORT_CASE_EDIT" accessEnumIds="FpaInvited" formNoun="form" ownServices="Y"/>
+        </seed-data>
+    </entity>
+
+    <!-- impl-people P16 review (design-people PE-21): a form's answers are the respondent's own text (an interview scorecard's
+        evidence, a review, an exit interview, a customer's comment), read through the service of the record they belong to, so the
+        text reaches no model tool: Assist's data reads never read, find or sort by it and Update with AI refuses it (the screens
+        that show answers mark their fields and sections ai-opt-out too) -->
+    <extend-entity entity-name="FormResponseAnswer" package="moqui.screen.form">
+        <field name="valueText" type="text-long" ai-opt-out="true"/>
+    </extend-entity>
+
     <entity entity-name="FormInvitation" package="mantle.party" cache="never">
         <description>One recipient's invitation to answer a publication once: the recipient (partyId, the party the answer is
             of: a case's customer) and who it is sent to (contactPartyId, emailAddress), its context record (contextEntityName

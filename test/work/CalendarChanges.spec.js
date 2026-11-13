@@ -1,6 +1,6 @@
 // The calendar gaps of IronStone M7 on the Mantle side (mantle.work.EventServices and CalendarServices): changing or
 // cancelling one occurrence, this and following, or all of a recurring event (update#EventOccurrence,
-// cancel#EventOccurrence), the user's declined invitations and the location and organizer in get#FullCalendarData, the
+// cancel#EventOccurrence, restore#EventOccurrence), the user's declined invitations and the location and organizer in get#FullCalendarData, the
 // invitation digest (get#InvitationDigest), optional attendees in the iCalendar maps, the cancel to a removed attendee
 // (remove#EventAttendee), the bookings checked again when an event moves (check#ResourceBookings), an event seen through a
 // shared calendar in get#RecordLinkInfo, and who may fetch a calendar subscription. New spec, no Groovy original.
@@ -358,6 +358,35 @@ feature("cancel#EventOccurrence: this occurrence by EXDATE, a changed instance c
         afterFollowing.map((entry) => entry[1]) == ["2027-06-07T15:00:00", "2027-06-28T16:00:00"]
         single.cancelledWorkEffortIds == [we.single]
         workEffort(we.single).statusId == "WeCancelled"
+    },
+})
+
+feature("restore#EventOccurrence: an instance's EXDATE taken off, a changed instance restored to its status, a single event; an attendee and a live event refused", {
+    when() {
+        setTime(10.5)
+        const params = { workEffortId: we.weekly, instanceStart: "2027-06-21 15:00", notify: "Y" }
+        const attendee = as("Umar", () => errorOf(`${EV}.restore#EventOccurrence`, params))
+        const third = as("Tara", () => call(`${EV}.restore#EventOccurrence`, params))
+        const changed = as("Tara", () => call(`${EV}.restore#EventOccurrence`, { workEffortId: we.override }))
+        const again = as("Tara", () => errorOf(`${EV}.restore#EventOccurrence`, { workEffortId: we.override }))
+        const single = as("Tara", () => call(`${EV}.restore#EventOccurrence`, { workEffortId: we.single }))
+        return { attendee, third, changed, again, single, exdates: recurrenceOf(we.weekly).exdates, weeks: sixWeeks() }
+    },
+    then({ attendee, third, changed, again, single, exdates, weeks }) {
+        attendee.includes("may change it")
+        third.exdate == "20270621T200000Z"
+        third.restoredWorkEffortIds == []
+        third.notifiedCount == 1
+        third.message.startsWith("Event restored: ")
+        changed.exdate == "20270614T200000Z"
+        changed.restoredWorkEffortIds == [we.override]
+        workEffort(we.override).statusId != "WeCancelled"
+        again.includes("This event is not cancelled")
+        exdates == null
+        single.restoredWorkEffortIds == [we.single]
+        workEffort(we.single).statusId == "WeInPlanning"
+        weeks.map((entry) => entry[1]) == ["2027-06-07T15:00:00", "2027-06-14T16:00:00", "2027-06-21T15:00:00", "2027-06-28T16:00:00"]
+        weeks[1][0] == "Weekly sync (late)"
     },
 })
 

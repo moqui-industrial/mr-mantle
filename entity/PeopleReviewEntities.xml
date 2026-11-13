@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's reviews and goals (IronStone People design §11 ReviewCycles, Reviews, ReviewDetail and Goals, §15 the review release,
+    PE-16, PE-01, PE-21; impl-people P20), refined from the commented PerformanceReview, PerformanceReviewItem and PerformanceNote
+    sketches of HumanResourcesEntities.xml (F6): a dated review template of an employer (the steps it asks for, their review forms
+    and its release policy); a review cycle of an employer or a unit, started into one review per person; a person's review, its
+    steps (the person's self assessment, the reviewer's assessment and the feedback the reviewer asks of colleagues, each locked on
+    submission) and the reviewer's private notes; the review's files (its content host); and a goal, a WorkEffort of the WetGoal type
+    and WepGoal purpose with its measure. The criteria of an assessment are the questions of the step's review form (a FormResponse
+    of the DbfpReview purpose, People's Forms), so the sketch's PerformanceReviewItem is not built; its rating scale is the overall
+    rating. Written through mantle.humanres.ReviewServices (Reviews.js), which checks every reader. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+
+    <entity entity-name="ReviewTemplate" package="mantle.humanres.ability" cache="never">
+        <description>How an employer's reviews run: the steps they ask for (the person's self assessment, the reviewer's assessment
+            always, and whether the reviewer may ask colleagues for feedback), the review form each step answers (a published form of
+            the DbfpReview purpose of the employer; none: the step is a written summary and the reviewer's rating) and the release
+            policy (whether finalizing waits for a People approval of kind PakReview, and whether the feedback is part of what the
+            person reads once released). Dated: ended (thruDate) it starts no new cycle; changed only while no started cycle uses it
+            (a later version is another template). Changed by a development editor of the employer (store#ReviewTemplate).</description>
+        <field name="reviewTemplateId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="templateName" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="selfAssessment" type="text-indicator"><description>Y: the person assesses themselves first</description></field>
+        <field name="feedbackAllowed" type="text-indicator"><description>Y: the reviewer may ask colleagues for feedback</description></field>
+        <field name="feedbackReleased" type="text-indicator"><description>Y: the feedback, with who gave it, is part of what the
+            person reads once released; N (the default): the reviewer's and development's alone. No feedback is anonymous.</description></field>
+        <field name="approvalRequired" type="text-indicator"><description>Y: finalizing waits for a People approval (PakReview,
+            PeopleReviewStep: the employer's HR officers unless a rule says otherwise, never the reviewer or the person)</description></field>
+        <field name="selfFormId" type="id"/>
+        <field name="managerFormId" type="id"/>
+        <field name="feedbackFormId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="SelfForm" related="moqui.screen.form.DbForm">
+            <key-map field-name="selfFormId" related="formId"/></relationship>
+        <relationship type="one-nofk" title="ManagerForm" related="moqui.screen.form.DbForm">
+            <key-map field-name="managerFormId" related="formId"/></relationship>
+        <relationship type="one-nofk" title="FeedbackForm" related="moqui.screen.form.DbForm">
+            <key-map field-name="feedbackFormId" related="formId"/></relationship>
+        <index name="REV_TMPL_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+
+    <entity entity-name="ReviewCycle" package="mantle.humanres.ability" cache="never">
+        <description>A review period of an employer, or of one of its units and the units under it: its template, the period
+            reviewed and the due dates of the self and reviewer assessments. A draft is changed and started by a development editor
+            of the employer (store#Cycle, start#Cycle): starting makes one review for each current employee in its scope, each in
+            its own transaction (a person with no reviewer is named and left out; a later start adds the people left out). Closed
+            only when each review is released, acknowledged or excluded (an exclusion names its reason). The state is
+            audit-logged.</description>
+        <field name="reviewCycleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The unit reviewed (and the units under it); empty: the whole employer</description></field>
+        <field name="cycleName" type="text-medium"/>
+        <field name="reviewTemplateId" type="id"/>
+        <field name="periodFromDate" type="date"/>
+        <field name="periodThruDate" type="date"/>
+        <field name="selfDueDate" type="date"/>
+        <field name="managerDueDate" type="date"/>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="startedDate" type="date-time"/>
+        <field name="closedDate" type="date-time"/>
+        <field name="closeReason" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Department" related="mantle.party.Party">
+            <key-map field-name="departmentPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.humanres.ability.ReviewTemplate"/>
+        <relationship type="one" title="ReviewCycleStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="statusEnumId"/></relationship>
+        <index name="REV_CYCLE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Review Cycle Status" enumTypeId="ReviewCycleStatus"/>
+            <moqui.basic.Enumeration enumId="RcsDraft" description="Draft" sequenceNum="1" enumTypeId="ReviewCycleStatus"/>
+            <moqui.basic.Enumeration enumId="RcsActive" description="In progress" sequenceNum="2" enumTypeId="ReviewCycleStatus"/>
+            <moqui.basic.Enumeration enumId="RcsClosed" description="Closed" sequenceNum="3" enumTypeId="ReviewCycleStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PerformanceReview" package="mantle.humanres.ability" cache="never">
+        <description>A person's review in a cycle (refined from the sketch, F6), for one employment: its reviewer (the manager of
+            the employment's live reporting line when the cycle started; reassigned by development or when the reviewer leaves or the
+            line changes, audit-logged with the reason), its state (audit-logged), the overall rating the reviewer gave, and its
+            release: the employee-visible assessment rendered once when released and stored (its page and PDF), never rendered
+            again, and the person's acknowledgment. The reviewer's private notes (PerformanceNote) are never part of it.</description>
+        <field name="performanceReviewId" type="id" is-pk="true"/>
+        <field name="reviewCycleId" type="id"/>
+        <field name="partyId" type="id"><description>The person reviewed</description></field>
+        <field name="partyRelationshipId" type="id"><description>The employment reviewed</description></field>
+        <field name="organizationPartyId" type="id"/>
+        <field name="departmentPartyId" type="id"><description>The person's department when the review started (approvals route by it)</description></field>
+        <field name="managerPartyId" type="id" enable-audit-log="true"><description>The reviewer</description></field>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="ratingEnumId" type="id"><description>The reviewer's overall rating (PerformanceReviewRating)</description></field>
+        <field name="finalizedDate" type="date-time"/>
+        <field name="releasedDate" type="date-time"/>
+        <field name="releasedByUserId" type="id"/>
+        <field name="releaseLocation" type="text-medium"><description>The released review's PDF, stored when released</description></field>
+        <field name="releaseHtmlLocation" type="text-medium"><description>The released review's page, stored when released</description></field>
+        <field name="acknowledgedDate" type="date-time"/>
+        <field name="acknowledgementComment" type="text-long" ai-opt-out="true"/>
+        <field name="excludedReason" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.ability.ReviewCycle"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="Employment" related="mantle.party.PartyRelationship">
+            <key-map field-name="partyRelationshipId"/></relationship>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Manager" related="mantle.party.Party">
+            <key-map field-name="managerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PerformanceReviewStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one-nofk" title="PerformanceReviewRating" related="moqui.basic.Enumeration">
+            <key-map field-name="ratingEnumId"/></relationship>
+        <index name="PRF_REV_CYCLE"><index-field name="reviewCycleId"/></index>
+        <index name="PRF_REV_PARTY"><index-field name="partyId"/></index>
+        <index name="PRF_REV_MANAGER"><index-field name="managerPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Performance Review Status" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvInProgress" description="Assessing" sequenceNum="1" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvApproval" description="Waiting for approval" sequenceNum="2" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvFinalized" description="Finalized" sequenceNum="3" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvReleased" description="Released" sequenceNum="4" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvAcknowledged" description="Acknowledged" sequenceNum="5" enumTypeId="PerformanceReviewStatus"/>
+            <moqui.basic.Enumeration enumId="PrvExcluded" description="Excluded" sequenceNum="6" enumTypeId="PerformanceReviewStatus"/>
+
+            <!-- the sketch's rating scale, the reviewer's overall rating -->
+            <moqui.basic.EnumerationType description="Performance Review Rating" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.Enumeration enumId="PrfRtFail" sequenceNum="1" description="Fails to meet expectations" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.Enumeration enumId="PrfRtInconsistent" sequenceNum="2" description="Inconsistently fulfills" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.Enumeration enumId="PrfRtFulfill" sequenceNum="3" description="Fulfills expectations" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.Enumeration enumId="PrfRtFreqExceed" sequenceNum="4" description="Frequently exceeds" enumTypeId="PerformanceReviewRating"/>
+            <moqui.basic.Enumeration enumId="PrfRtConsExceed" sequenceNum="5" description="Consistently exceeds" enumTypeId="PerformanceReviewRating"/>
+            <!-- the review is People's content host (its files and notes): their mention and follower notices go to their named
+                recipients alone (the user's call of Nov 12, 2026, People follow-up 1; impl-people P20 review) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.ability.PerformanceReview" ownerText="IronStone People: a performance review"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PerformanceReviewStep" package="mantle.humanres.ability" cache="never">
+        <description>A step of a review, with its own identity: the person's self assessment, the reviewer's assessment, or
+            feedback the reviewer (or development) asked of a colleague. Each is its assignee's to answer once, on the step's review
+            form when the template names one (a FormResponse its FormInvitation locks) with a written summary and, for the reviewer,
+            a rating; submission locks it. A step returned (by the reviewer or development, with the reason) is waiting again; a
+            step cancelled names why (feedback withdrawn, its giver left, the review excluded). The state is audit-logged.</description>
+        <field name="performanceReviewStepId" type="id" is-pk="true"/>
+        <field name="performanceReviewId" type="id"/>
+        <field name="stepKindEnumId" type="id"/>
+        <field name="partyId" type="id"><description>Who answers it; empty for a reviewer's step with no reviewer yet</description></field>
+        <field name="statusEnumId" type="id" enable-audit-log="true"/>
+        <field name="dueDate" type="date"/>
+        <field name="formId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="invitationId" type="id"/>
+        <field name="ratingEnumId" type="id"/>
+        <field name="summary" type="text-very-long" ai-opt-out="true"><description>The written assessment or feedback</description></field>
+        <field name="submittedDate" type="date-time"/>
+        <field name="submittedByUserId" type="id"/>
+        <field name="returnedDate" type="date-time"/>
+        <field name="returnReason" type="text-medium"/>
+        <field name="requestedByPartyId" type="id"><description>Feedback: who asked for it</description></field>
+        <field name="requestedDate" type="date-time"/>
+        <field name="cancelReason" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.ability.PerformanceReview"/>
+        <relationship type="one" title="PerformanceReviewStepKind" related="moqui.basic.Enumeration">
+            <key-map field-name="stepKindEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.Party"/>
+        <relationship type="one" title="PerformanceReviewStepStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse"/>
+        <index name="PRF_STEP_REVIEW"><index-field name="performanceReviewId"/></index>
+        <index name="PRF_STEP_PARTY"><index-field name="partyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Performance Review Step Kind" enumTypeId="PerformanceReviewStepKind"/>
+            <moqui.basic.Enumeration enumId="RskSelf" description="Self assessment" sequenceNum="1" enumTypeId="PerformanceReviewStepKind"/>
+            <moqui.basic.Enumeration enumId="RskManager" description="Reviewer's assessment" sequenceNum="2" enumTypeId="PerformanceReviewStepKind"/>
+            <moqui.basic.Enumeration enumId="RskFeedback" description="Feedback" sequenceNum="3" enumTypeId="PerformanceReviewStepKind"/>
+            <moqui.basic.EnumerationType description="Performance Review Step Status" enumTypeId="PerformanceReviewStepStatus"/>
+            <moqui.basic.Enumeration enumId="RssWaiting" description="Waiting" sequenceNum="1" enumTypeId="PerformanceReviewStepStatus"/>
+            <moqui.basic.Enumeration enumId="RssSubmitted" description="Submitted" sequenceNum="2" enumTypeId="PerformanceReviewStepStatus"/>
+            <moqui.basic.Enumeration enumId="RssCancelled" description="Cancelled" sequenceNum="3" enumTypeId="PerformanceReviewStepStatus"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PerformanceNote" package="mantle.humanres.ability" cache="never">
+        <description>A reviewer's private note on a review (refined from the sketch, F6): read and changed only by its author,
+            never by the person, a later reviewer, development, HR or an approver; never in the released review, an export, Chatter,
+            a notification, the search index or a model's input (ai-opt-out). Written through store#ReviewNote.</description>
+        <field name="performanceNoteId" type="id" is-pk="true"/>
+        <field name="performanceReviewId" type="id"/>
+        <field name="partyId" type="id"><description>The person reviewed</description></field>
+        <field name="authorPartyId" type="id"/>
+        <field name="authorUserId" type="id"/>
+        <field name="noteDate" type="date-time"/>
+        <field name="noteText" type="text-very-long" ai-opt-out="true"/>
+        <relationship type="one" related="mantle.humanres.ability.PerformanceReview"/>
+        <relationship type="one" title="Author" related="mantle.party.Party">
+            <key-map field-name="authorPartyId" related="partyId"/></relationship>
+        <index name="PRF_NOTE_REVIEW"><index-field name="performanceReviewId"/></index>
+    </entity>
+
+    <entity entity-name="PerformanceReviewContent" package="mantle.humanres.ability" cache="never">
+        <description>A file of a review (IronStone People PE-01): evidence the review's people share. The review is People's content
+            host, so the file is never on the person's broadly visible Party record; get#RecordLinkInfo and RecordFiles admit it
+            only to the review's reviewer and development readers of its employer, and to the person once the review is released
+            (mantle.humanres.ReviewServices.check#ReviewAccess); no Records-drive folder maps it. Written through
+            mantle.humanres.ReviewServices.create#ReviewContent.</description>
+        <field name="performanceReviewContentId" type="id" is-pk="true"/>
+        <field name="performanceReviewId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.ability.PerformanceReview"/>
+        <relationship type="one" title="PerformanceReviewContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Performance Review Content Type" enumTypeId="PerformanceReviewContentType"/>
+            <moqui.basic.Enumeration description="Evidence" enumId="PrcntEvidence" enumTypeId="PerformanceReviewContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Other" enumId="PrcntOther" enumTypeId="PerformanceReviewContentType" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PersonGoal" package="mantle.humanres.ability" cache="never">
+        <description>A goal's measure and owner, keyed by its WorkEffort (IronStone People design §11 Goals, PE-16): a WorkEffort of
+            the WetGoal type and the WepGoal purpose (its title, description, period in estimatedStartDate and
+            estimatedCompletionDate, percentComplete and state: WeInProgress open, WeComplete closed with its outcome, WeCancelled),
+            never a WetTask, so it is in no task list (CalDAV Tasks, Today's and My tasks), no project and no search index. The
+            measure: what is measured, the target and the actual value with their unit, and the outcome agreed when it closes;
+            the parent goal is the WorkEffort's parentWorkEffortId. Read by the person, the manager of a live reporting line at the
+            employer, the reviewer of the review it was agreed in and development readers of the employer; changed by the person,
+            that manager and development editors (store#Goal). A linked task's completion is evidence, never the goal met.</description>
+        <field name="workEffortId" type="id" is-pk="true"/>
+        <field name="partyId" type="id"><description>Whose goal it is</description></field>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="performanceReviewId" type="id"><description>The review it was agreed in, if any</description></field>
+        <field name="measureText" type="text-medium"/>
+        <field name="targetValue" type="number-decimal"/>
+        <field name="actualValue" type="number-decimal"/>
+        <field name="unitText" type="text-short"/>
+        <field name="progressNote" type="text-long"/>
+        <field name="outcomeEnumId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" related="mantle.humanres.ability.PerformanceReview"/>
+        <relationship type="one-nofk" title="GoalOutcome" related="moqui.basic.Enumeration">
+            <key-map field-name="outcomeEnumId"/></relationship>
+        <index name="PRS_GOAL_PARTY"><index-field name="partyId"/></index>
+        <index name="PRS_GOAL_REVIEW"><index-field name="performanceReviewId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Goal Outcome" enumTypeId="GoalOutcome"/>
+            <moqui.basic.Enumeration enumId="GloMet" description="Met" sequenceNum="1" enumTypeId="GoalOutcome"/>
+            <moqui.basic.Enumeration enumId="GloPartly" description="Partly met" sequenceNum="2" enumTypeId="GoalOutcome"/>
+            <moqui.basic.Enumeration enumId="GloMissed" description="Not met" sequenceNum="3" enumTypeId="GoalOutcome"/>
+        </seed-data>
+    </entity>
+</entities>

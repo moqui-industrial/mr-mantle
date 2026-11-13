@@ -13,10 +13,20 @@
 // the sale's customer) itself. Its completion tells the case's agent and resolves nothing. A replacement goes through a return
 // (ReturnPolicyServices). Every service checks its permission and the case's organization (SupportCases.caseOf) and reads and
 // writes with artifact authorization off. Refusals carry reason codes (EntityLib.denied).
+//
+// Maintenance's customer repair (impl-maintenance P12, crosscut §4.6, MT-10; the owner contract of Customer Service's repair): when
+// the organization's MaintenancePolicy manages warranty repairs, link#WarrantyWork makes the repair a managed work order (its task
+// the root, MaintenanceWork.js adoptForOwner), and update#WarrantyWork moves a managed repair through
+// transition#MaintenanceWorkOrder, under the caller's own maintenance permission, instead of moving the AssetMaintenance itself;
+// with the policy off both do what they did. check#WarrantyRepair answers Maintenance's Start and parts issue whether the claim
+// still allows the repair (the link's rule on its current decision and consent), and send#InterventionReport mails the report
+// Maintenance stored on the work order through Customer Service's own mail draft. Nothing here closes the case or bills.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const time = ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
 const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
+const maintenanceWork = () => ec.resource.script("component://mr-mantle/service/mantle/work/MaintenanceWork.js")
+const confirmations = () => ec.resource.script("component://mr-mantle/service/mantle/order/OrderConfirmations.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -38,7 +48,9 @@ const REQUEST = "mantle.request.Request",
     INVOICE = "mantle.account.invoice.Invoice",
     RETURN = "mantle.order.return.ReturnHeader",
     FACILITY = "mantle.facility.Facility",
-    PRODUCT = "mantle.product.Product"
+    PRODUCT = "mantle.product.Product",
+    WORK_ORDER = "mantle.work.maintenance.MaintenanceWorkOrder",
+    WORK_CONTENT = "mantle.work.effort.WorkEffortContent"
 const claimType = "RqtWarranty"
 const serviceAgreementType = "AgrService"
 const warrantyTerm = "TtWarranty"
@@ -860,9 +872,28 @@ function linkWork(p) {
         }).assetMaintenanceId
     }
     linkRecord(theCase.requestId, MAINTENANCE, assetMaintenanceId)
-    const result = {assetMaintenanceId, taskWorkEffortId}
+    // impl-maintenance P12: the repair a managed work order where the organization's policy manages warranty repairs
+    const workEffortId = manageRepair(theCase.organizationPartyId, assetMaintenanceId)
+    const result = {assetMaintenanceId, taskWorkEffortId, workEffortId}
     if (operation) lib.complete(operation, MAINTENANCE, assetMaintenanceId, result)
     return result
+}
+// The repair made a managed work order once (adopt#MaintenanceRecord's owner path: its task the root, the asset the customer's,
+// the claim's organization the work's), when the organization's MaintenancePolicy manages warranty repairs: its root, or null
+// with the policy off. An adoption refused is logged and the repair stays Customer Service's, as Manufacturing's handoff does.
+function manageRepair(organizationPartyId, assetMaintenanceId) {
+    const work = maintenanceWork()
+    if (!work.policyOf(organizationPartyId).warrantyRepairsManaged) return null
+    ec.message.pushErrors()
+    try {
+        return work.adoptForOwner({assetMaintenanceId, organizationPartyId}).workEffortId
+    } catch (error) {
+        ec.logger.error("Warranty repair " + assetMaintenanceId + " was not made a work order: " + error.message)
+        return null
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
 }
 // The status steps from one maintenance status to another (the Default flow), and the task's status for each.
 const maintenanceSteps = {
@@ -884,6 +915,9 @@ function updateWork(p) {
     if (!maintenance || !evidence.maintenanceIds.includes(assetMaintenanceId))
         denied("MAINTENANCE_UNAVAILABLE", "Maintenance " + (assetMaintenanceId || "") + " is not a repair of this claim")
     assetOf(theCase, maintenance.assetId)
+    // impl-maintenance P12: a managed repair moves through its work order's lifecycle, under the caller's maintenance permission
+    const managed = Array.from(find(WORK_ORDER, {assetMaintenanceId}).limit(1).list())[0]
+    if (managed) return updateManaged(p, maintenance, managed)
     const steps = maintenanceSteps[p.statusId]?.[maintenance.statusId]
     if (!steps)
         denied(
@@ -915,6 +949,213 @@ function updateWork(p) {
         }
     }
     return {statusId: p.statusId}
+}
+// The work order's actions for a repair's move, from the root's status: in process is Start, finished Start and Complete (the
+// outcome and the equipment's state given), cancelled (before it starts) Cancel with its reason. transition#MaintenanceWorkOrder
+// checks the caller's maintenance permission and the work's gates; an agent without them is refused there.
+const managedSteps = {
+    AsMntInProcess: {WeApproved: ["start"]},
+    AsMntCompleted: {WeApproved: ["start", "complete"], WeInProgress: ["complete"]},
+    AsMntCancelled: {WeInPlanning: ["cancel"], WeApproved: ["cancel"], WeOnHold: ["cancel"]}
+}
+function updateManaged(p, maintenance, managed) {
+    const root = one(WORK, {workEffortId: managed.workEffortId})
+    const actions = managedSteps[p.statusId]?.[root?.statusId]
+    if (!actions)
+        denied(
+            "STATUS_INVALID",
+            "The repair's work order " +
+                managed.workEffortId +
+                " is " +
+                statusText(root?.statusId) +
+                " and cannot become " +
+                (statusText(p.statusId) || "that")
+        )
+    for (const action of actions)
+        call("mantle.work.MaintenanceServices.transition#MaintenanceWorkOrder", {
+            workEffortId: managed.workEffortId,
+            action,
+            outcomeEnumId: text(p.outcomeEnumId),
+            dispositionEnumId: text(p.dispositionEnumId),
+            cancelReasonEnumId: text(p.cancelReasonEnumId)
+        })
+    const result = text(p.comments)
+    if (result)
+        call("update#" + MAINTENANCE, {
+            assetMaintenanceId: maintenance.assetMaintenanceId,
+            comments: [maintenance.comments, result].filter(Boolean).join("\n")
+        })
+    return {
+        statusId: one(MAINTENANCE, {assetMaintenanceId: maintenance.assetMaintenanceId}).statusId,
+        workEffortId: managed.workEffortId
+    }
+}
+
+// ===== Maintenance's customer repair: the claim's standing, the summary and the intervention report (impl-maintenance P12) =====
+// The warranty claims that link a repair, open ones first.
+function claimsOfRepair(assetMaintenanceId) {
+    if (blank(assetMaintenanceId)) return []
+    const requestIds = rows(RECORD, {recordEntityName: MAINTENANCE, recordId: assetMaintenanceId}).map(row => row.requestId)
+    if (!requestIds.length) return []
+    return Array.from(
+        find(REQUEST).condition("requestId", "in", requestIds).condition("requestTypeEnumId", claimType).list()
+    ).sort((a, b) => Number(closedStatuses.includes(a.statusId)) - Number(closedStatuses.includes(b.statusId)))
+}
+const chargeableDecision = decision =>
+    decision?.chargeEstimate != null && toDecimal(String(decision.chargeEstimate)).compare(toDecimal("0")) > 0
+// Whether a claim allows its repair to go on now: link#WarrantyWork's rule on the claim's current decision (covered, partial or
+// goodwill, or a chargeable repair whose consent is recorded) and an open case; a change of the claim's evidence supersedes the
+// decision, and a new decision without the consent withdraws it. null when it does, else {reasonCode, message}.
+function claimBlocker(request) {
+    if (closedStatuses.includes(request.statusId))
+        return {reasonCode: "CASE_CLOSED", message: "Claim " + request.requestId + " is closed"}
+    const current = currentDecisionOf(request.requestId, number(request.claimRevision))
+    if (!current)
+        return {
+            reasonCode: "NOT_DECIDED",
+            message: "Claim " + request.requestId + " has no current decision; Customer Service decides it again first"
+        }
+    const chargeable = chargeableDecision(current)
+    if (!approvedDecisions.includes(current.decisionEnumId) && !chargeable)
+        return {reasonCode: "NOT_APPROVED", message: "Claim " + request.requestId + " was rejected"}
+    if (chargeable && blank(current.customerConsentRef))
+        return {
+            reasonCode: "CONSENT_REQUIRED",
+            message: "The customer's consent to the charge on claim " + request.requestId + " is not recorded"
+        }
+    return null
+}
+// check#WarrantyRepair: whether the claims linking a repair still allow it (Maintenance's Start and parts issue). A repair no claim
+// links is allowed (it is no warranty repair). No case detail is answered.
+function checkRepair(p) {
+    for (const request of claimsOfRepair(text(p.assetMaintenanceId))) {
+        const blocker = claimBlocker(request)
+        if (blocker) return Object.assign({allowed: false, requestId: request.requestId}, blocker)
+    }
+    return {allowed: true, reasonCode: null, message: "", requestId: null}
+}
+// The customer repair's safe summary for Maintenance's work order (WorkOrderDetail, the intervention report), read after
+// Maintenance's own check of the work: the claim, its customer, the decision's outcome and coverage end, whether a charge has the
+// customer's consent (never the amount), the claim's standing, and the asset's owner and serial. null when no claim links it.
+function repairSummary(assetMaintenanceId) {
+    const request = claimsOfRepair(assetMaintenanceId)[0]
+    if (!request) return null
+    const parties = rows(REQUEST_PARTY, {requestId: request.requestId}).filter(row => lib.active(row))
+    const customerPartyId = parties.find(row => row.roleTypeId === "Customer")?.partyId || null
+    const organizationPartyId = parties.find(row => row.roleTypeId === "OrgInternal")?.partyId || null
+    const current = currentDecisionOf(request.requestId, number(request.claimRevision))
+    const chargeable = chargeableDecision(current)
+    const maintenance = one(MAINTENANCE, {assetMaintenanceId})
+    const asset = maintenance?.assetId ? one(ASSET, {assetId: maintenance.assetId}) : null
+    const blocker = claimBlocker(request)
+    return {
+        requestId: request.requestId,
+        requestName: request.requestName || request.requestId,
+        claimStatusText: statusText(request.statusId),
+        claimOpen: !closedStatuses.includes(request.statusId),
+        customerPartyId,
+        customerName: partyName(customerPartyId),
+        decisionText: current ? enumText(current.decisionEnumId) : "Not decided",
+        coverageEndText: current?.coverageEndDate ? dayText(ms(current.coverageEndDate), zoneOf(organizationPartyId)) : "",
+        chargeable,
+        consentText: !current
+            ? ""
+            : !chargeable
+              ? "No charge"
+              : current.customerConsentRef
+                ? "The customer agreed"
+                : "Not agreed yet",
+        allowed: !blocker,
+        reasonCode: blocker?.reasonCode || null,
+        blockerText: blocker?.message || "",
+        assetOwnerName: asset ? partyName(asset.ownerPartyId) : "",
+        assetText: assetText(asset),
+        productText: productText(asset?.productId)
+    }
+}
+// send#InterventionReport: the intervention report Maintenance stored on the repair's work order (the latest
+// WectInterventionReport), with the customer's acknowledgment when one is stored, mailed to an address of the case's customer or
+// of its contacts as a mail client draft of an account the user sends from, filed on the case (as send#CaseSummary does).
+function sendReport(p) {
+    requirePermission("SUPPORT_CASE_EDIT")
+    const theCase = claimOf(p.requestId)
+    cases().refuseMerged(theCase)
+    const assetMaintenanceId = text(p.assetMaintenanceId)
+    if (!assetMaintenanceId || !evidenceOf(theCase.requestId).maintenanceIds.includes(assetMaintenanceId))
+        denied("MAINTENANCE_UNAVAILABLE", "Maintenance " + (assetMaintenanceId || "") + " is not a repair of this claim")
+    const managed = Array.from(find(WORK_ORDER, {assetMaintenanceId}).limit(1).list())[0]
+    if (!managed) denied("NOT_MANAGED", "Repair " + assetMaintenanceId + " is no work order; it has no intervention report")
+    const latest = typeId =>
+        rows(WORK_CONTENT, {workEffortId: managed.workEffortId, contentTypeEnumId: typeId})
+            .filter(row => row.contentLocation)
+            .sort((a, b) => ms(b.contentDate) - ms(a.contentDate))[0] || null
+    const report = latest("WectInterventionReport")
+    if (!report)
+        denied(
+            "REPORT_REQUIRED",
+            "Maintenance has not stored the intervention report of work order " + managed.workEffortId + " yet"
+        )
+    const recipient = String(p.toAddress || "")
+        .trim()
+        .toLowerCase()
+    if (!recipient) denied("RECIPIENT_REQUIRED", "Give the address to send the report to")
+    const operation = lib.operation(p, "InterventionReportSend", theCase.organizationPartyId, {
+        requestId: theCase.requestId,
+        assetMaintenanceId,
+        workEffortContentId: report.workEffortContentId,
+        recipient,
+        emailAccountId: p.emailAccountId || null,
+        note: p.note || null
+    })
+    if (operation.old) return lib.previous(operation)
+    if (!confirmations().allowedRecipients([theCase.customerPartyId]).has(recipient))
+        denied(
+            "RECIPIENT_UNCHECKED",
+            recipient + " is not an address of " + partyName(theCase.customerPartyId) + " or of its contacts"
+        )
+    const account = confirmations().senderAccount(p.emailAccountId, theCase.organizationPartyId)
+    const fileName = location => String(location).split("/").pop()
+    const attachmentList = [report, latest("WectAcknowledgment")].filter(Boolean).map(row => ({
+        attachmentLocation: String(row.contentLocation),
+        fileName: fileName(row.contentLocation),
+        contentType: ec.resource.getContentType(fileName(row.contentLocation)) || "application/pdf"
+    }))
+    const escapeHtml = value =>
+        String(value).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c])
+    const body =
+        (p.note ? "<p>" + escapeHtml(p.note).replace(/\n/g, "<br>") + "</p>" : "") +
+        "<p>" +
+        escapeHtml(
+            ec.l10n.localize("The intervention report of your repair, claim") +
+                " " +
+                theCase.requestId +
+                ", " +
+                ec.l10n.localize("is attached.")
+        ) +
+        "</p>"
+    const draft = lib.call("org.moqui.mail.EmailClientServices.save#Draft", {
+        emailAccountId: account.emailAccountId,
+        toAddresses: recipient,
+        subject:
+            p.subject || ec.l10n.localize("Intervention report") + " · " + (theCase.request.requestName || theCase.requestId),
+        body,
+        attachmentList
+    })
+    const sent = lib.call("mantle.party.CommunicationServices.send#EmailDraft", {
+        emailMessageId: draft.emailMessageId,
+        recordEntityName: REQUEST,
+        recordId: theCase.requestId
+    })
+    const result = {
+        requestId: theCase.requestId,
+        workEffortId: managed.workEffortId,
+        workEffortContentId: report.workEffortContentId,
+        emailMessageId: draft.emailMessageId,
+        recipient,
+        status: sent.sent ? "sent" : sent.sendError ? "failed" : "queued"
+    }
+    lib.complete(operation, "moqui.basic.email.EmailMessage", draft.emailMessageId, result)
+    return Object.assign(result, {alreadyApplied: false})
 }
 
 // ===== notify#WarrantyWorkFinished =====
@@ -1078,6 +1319,12 @@ function decisionRow(row, revision) {
 // The repairs a claim links, with their task.
 function repairRows(evidence) {
     if (!evidence.maintenanceIds.length) return []
+    const managedOf = Object.fromEntries(
+        Array.from(find(WORK_ORDER).condition("assetMaintenanceId", "in", evidence.maintenanceIds).list()).map(row => [
+            row.assetMaintenanceId,
+            row
+        ])
+    )
     return Array.from(find(MAINTENANCE).condition("assetMaintenanceId", "in", evidence.maintenanceIds).list())
         .sort((a, b) => ms(b.maintenanceDate) - ms(a.maintenanceDate))
         .map(row => {
@@ -1087,7 +1334,21 @@ function repairRows(evidence) {
                       lib.active(r)
                   )?.partyId
                 : null
+            // impl-maintenance P12: a managed repair's work order, its safe summary and whether its report is stored
+            const managed = managedOf[row.assetMaintenanceId] || null
+            const root = managed ? one(WORK, {workEffortId: managed.workEffortId}) : null
             return {
+                workEffortId: managed?.workEffortId || null,
+                managed: !!managed,
+                workStatusText: root ? statusText(root.statusId) : "",
+                outcomeText: managed ? enumText(managed.outcomeEnumId) : "",
+                finishedText: root?.actualCompletionDate ? lib.dateText(root.actualCompletionDate) : "",
+                reportStored:
+                    !!managed &&
+                    find(WORK_CONTENT, {
+                        workEffortId: managed.workEffortId,
+                        contentTypeEnumId: "WectInterventionReport"
+                    }).count() > 0,
                 assetMaintenanceId: row.assetMaintenanceId,
                 statusId: row.statusId,
                 statusText: statusText(row.statusId),
@@ -1394,6 +1655,8 @@ const operations = {
     linkWork,
     updateWork,
     notifyFinished,
+    checkRepair,
+    sendReport,
     storeAgreement,
     get,
     find: findClaims,
@@ -1402,6 +1665,8 @@ const operations = {
 ;({
     stateTexts,
     coverageOf,
+    // impl-maintenance P12: for MaintenanceRepairs.js, after Maintenance's own check of the work; never a service's parameters
+    repairSummary,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown warranty operation " + op)

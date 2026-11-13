@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance parts and stock (IronStone Maintenance design §3 PlannedParts and PartsUsed, MT-08, MT-09; impl-maintenance P9,
+    F30, F32). A planned part is a WorkEffortProduct row (WeptConsume) of the work order's root or step, its key (work effort,
+    product, from date) the line's identity; a change ends the row and starts the next (no maintenance material record,
+    impl-maintenance §4). An issue is a new AssetIssuance to the root or step each time, carrying the cost centre and the project
+    the work is charged to; a return is a new AssetReceipt naming its issuance (sourceAssetIssuanceId) at the returned asset's
+    acquireCost. Accounting's AC-24 (design-accounting PostingDefaults "Maintenance expense routing"): an issuance to a managed
+    maintenance work order or its step posts to the expense account of the MaintenanceCostPolicy in effect for the work's
+    organization, kind and facility, never to the same-owner WIP account, and its return's credit goes back the same way. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="WorkEffortProduct" package="mantle.work.effort">
+        <field name="quantityUomId" type="id"><description>The unit of estimatedQuantity; the product's stock unit when
+            empty (impl-maintenance F30)</description></field>
+        <field name="requiredDate" type="date-time"><description>When the part is needed</description></field>
+        <field name="sourceFacilityId" type="id"><description>The facility the part is to be issued from</description></field>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Source" related="mantle.facility.Facility" short-alias="sourceFacility">
+            <key-map field-name="sourceFacilityId" related="facilityId"/></relationship>
+    </extend-entity>
+    <extend-entity entity-name="AssetIssuance" package="mantle.product.issuance">
+        <field name="costCenterId" type="id"><description>The cost centre the issue is charged to (a maintenance issue: its
+            work order's, impl-maintenance F30)</description></field>
+        <field name="projectWorkEffortId" type="id"><description>The project the issue is charged to (a maintenance issue: its
+            work order's)</description></field>
+        <relationship type="one-nofk" title="CostCenter" related="mantle.party.Party" short-alias="costCenter">
+            <key-map field-name="costCenterId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Project" related="mantle.work.effort.WorkEffort" short-alias="project">
+            <key-map field-name="projectWorkEffortId" related="workEffortId"/></relationship>
+    </extend-entity>
+
+    <entity entity-name="MaintenanceCostPolicy" package="mantle.ledger.config" cache="never">
+        <description>Accounting's maintenance expense routing (AC-24): the expense account a part issued to an organization's
+            maintenance work posts to, from fromDate to thruDate, for a maintenance kind (empty: any) and a facility and the
+            facilities under it (empty: every facility). The most specific row in effect decides: the work's facility or its
+            nearest ancestor with a row before a row of every facility, and a row of the work's kind before one of any kind.
+            Rows are edited in Accounting's PostingDefaults (mapping kind maintenance); a row is ended, not rewritten. With no
+            row the issue is refused, and an issue that reaches posting anyway goes to the error journal named
+            MAINTENANCE_COST_UNMAPPED.</description>
+        <field name="maintenanceCostPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="maintenanceKindEnumId" type="id" enable-audit-log="true"/>
+        <field name="facilityId" type="id" enable-audit-log="true"/>
+        <field name="glAccountId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="MaintenanceKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="maintenanceKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="mantle.facility.Facility" short-alias="facility"/>
+        <relationship type="one" related="mantle.ledger.account.GlAccount" short-alias="glAccount"/>
+        <index name="MNT_COST_POL_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+</entities>

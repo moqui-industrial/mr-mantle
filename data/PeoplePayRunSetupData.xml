@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P25 (design-people §8.2 step 5 Approve, PayRunDetail's Approval, §12 ApprovalPolicies): a payroll editor asks
+        approval of a calculated pay run (PayrollRunServices submit#Run), a People approval of kind PakPayrollRun bound to the run's
+        exact population, amounts and source revisions; with no rule the employer's payroll approvers decide (PAYROLL_APPROVE,
+        reading payroll), never one who selected or calculated the run or asked. approve#NotificationMessage and
+        refuse#NotificationMessage call the topic's approve and return services as the user (PayrollRunServices approve#Run and
+        return#Run over PeopleApprovalServices.record#Decision): the approval approves the run, a return (its reason required)
+        sends it back to review. The message holds peopleApprovalId, sourceRevision, payrollRunId, subjectText ("a pay run"),
+        groupName, periodText, organizationName and stepText: never a person or an amount. The app that shows them sets the link
+        (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayrollRun" description="Pay run" sequenceNum="12" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PayrollRunApproval" inboxEnumId="NinNotifications"
+            description="Pay runs to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollRunServices.approve#Run"
+            refuseServiceName="mantle.humanres.PayrollRunServices.return#Run" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${groupName}, ${periodText}, ${stepText})"/>
+</entity-facade-xml>

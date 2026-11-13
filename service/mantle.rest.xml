@@ -526,11 +526,13 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ========== Work Efforts ========== -->
     <resource name="workEfforts" description="Work Efforts - Projects, Tasks, Events, Production Runs, Shipment Loads, etc">
-        <method type="get"><entity name="workEfforts" operation="list"/></method>
+        <!-- no goal (People's WetGoal, its own services' alone; impl-people follow-up 2): listed, read and changed through a view and a
+            service that leave it out, and refused by the work services below (WorkEffortServices.check#WorkEffortOpen, clone#WorkEffort) -->
+        <method type="get"><entity name="mantle.work.effort.WorkEffortOutsideGoals" operation="list"/></method>
 
         <id name="workEffortId">
-            <method type="get"><entity name="workEfforts" masterName="default" operation="one"/></method>
-            <method type="patch"><entity name="workEfforts" operation="update"/></method>
+            <method type="get"><entity name="mantle.work.effort.WorkEffortOutsideGoals" operation="one"/></method>
+            <method type="patch"><service name="mantle.work.WorkEffortServices.update#WorkEffort"/></method>
 
             <resource name="project">
                 <method type="patch"><service name="mantle.work.ProjectServices.update#Project"/></method>

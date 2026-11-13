@@ -1460,12 +1460,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <iterate list="storeEmailList" entry="storeEmail">
                     <if condition="!storeEmail.emailTemplateId"><continue/></if>
 
-                    <!-- if email has already been sent (by orderId, emailTypeEnumId) don't send again -->
+                    <!-- if email has already been sent or is on its way (by orderId, emailTypeEnumId) don't send again: the
+                        tx-commit rule that calls this runs again from its ServiceOutbox row when its first run did not commit -->
                     <if condition="!forceByType">
                         <entity-find entity-name="mantle.order.OrderEmailMessageDetail" list="existingMessages">
                             <econdition field-name="orderId"/>
                             <econdition field-name="emailTypeEnumId"/>
-                            <econdition field-name="statusId" operator="in" value="ES_SENT,ES_RECEIVED,ES_VIEWED"/>
+                            <econdition field-name="statusId" operator="in" value="ES_READY,ES_SENT,ES_RECEIVED,ES_VIEWED"/>
                             <select-field field-name="emailMessageId"/>
                         </entity-find>
                         <if condition="(existingMessages?.length > 0)">
@@ -1491,8 +1492,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                             in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId, toAddresses:toAddresses,
                                 bccAddresses:bccAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
+                    <!-- the link in a transaction of its own, as send#EmailTemplate stores the message: a run that rolls back
+                        after the send still finds it, so a run again does not send a second time -->
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.order.OrderEmailMessage").parameter("orderId", orderId)
-                        .parameter("emailMessageId", sendOut.emailMessageId).parameter("orderRevision", orderHeader.orderRevision).disableAuthz().call() }</script>
+                        .parameter("emailMessageId", sendOut.emailMessageId).parameter("orderRevision", orderHeader.orderRevision)
+                        .requireNewTransaction(true).disableAuthz().call() }</script>
                     <set field="sentTo" from="toAddresses"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                 </iterate>
             </if>

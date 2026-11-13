@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P11 (design-people §7, PE-07): the daily leave accrual (mantle.humanres.LeaveServices.run#AccrualJob): each
+        policy assignment in its own transaction, keyed by employment, policy and period so a rerun posts nothing again, a failing
+        one logged by its employment and policy and the rest going on. The leave types, units, frequencies, block kinds and ledger
+        entry types are seeded with their entities (entity/PeopleLeaveEntities.xml). -->
+    <moqui.service.job.ServiceJob jobName="run_LeaveAccrual" description="Post each leave policy assignment's accruals and expiries that are due"
+            serviceName="mantle.humanres.LeaveServices.run#AccrualJob" cronExpression="0 30 0 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+    <!-- impl-people P12 (design-people §7 LeaveRequestDetail, §15 the leave decision statement): the person (and an HR officer who
+        asked for them) is told the outcome of their leave request: approved, refused, cancelled or the cancellation refused. The
+        message holds leaveRequestId, datesText and outcomeText, never the leave type or the reason. The app that shows them sets the
+        link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleLeaveDecision" inboxEnumId="NinNotifications"
+            description="Your leave request decided" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Your leave ${datesText}: ${outcomeText}"/>
+    <!-- impl-people P12 (CX-SYNC, PE-24; F22, F67): Team absence, the first projected CalDAV collection
+        (mantle.work.CalendarDavServices: collectionId projected-PeopleTeamAbsence, read only), answered by
+        LeaveServices.get#AbsenceProjection: the approved leave of the people the user's People scope shows (their own and their
+        colleagues', a manager's reports, an HR reader's employers'), each as "Out" with its days, never its type or reason -->
+    <mantle.work.calendar.CalendarProjection projectionId="PeopleTeamAbsence" title="Team absence"
+            description="Who is out: approved leave of you and the people you see in People" sequenceNum="10"
+            ownerServiceName="mantle.humanres.LeaveServices.get#AbsenceProjection"/>
+</entity-facade-xml>

@@ -21,7 +21,7 @@ function ensure(p) {
     }
     let year = basis.getUTCFullYear()
     if (basis < anchor(year, 0)) year--
-    lib.find("mantle.party.Party", {partyId: p.organizationPartyId}).forUpdate(true).one()
+    lib.find("mantle.party.Party", {partyId: p.organizationPartyId}).forNoKeyUpdate(true).one()
     function period(type, from, to, parent, num) {
         const existing = lib
             .rows("mantle.party.time.TimePeriod", {

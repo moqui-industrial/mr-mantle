@@ -238,8 +238,10 @@ function startChecks(run, op, partyId) {
     const down = []
     for (const row of equipment) {
         const asset = one(ASSET, {assetId: row.assetId})
+        // the outage in force (a corrected row is history, impl-maintenance P5)
         const outage = find(OUTAGE, {assetId: row.assetId, unavailabilityKindEnumId: "RukActual"})
             .condition("thruDate", "is-null", null)
+            .condition("supersededByUnavailabilityId", "is-null", null)
             .count()
         if ((asset && blockedEquipment.includes(asset.statusId)) || outage) down.push(asset?.assetName || row.assetId)
     }
@@ -1126,21 +1128,18 @@ function positionClassOf(entry) {
     }
     return null
 }
-// The costing rate of an entry (design Y2): a RaprProductionCost RateAmount in effect at its start matching its work type and
-// the person's position class (or naming neither), the most specific first; never a rate of the person or a work effort.
+// The costing rate of an entry (design Y2): the one labor costing purpose's row in effect at its start for its work type and the
+// person's position class (mantle.humanres.RateServices.get#CostingRate, People P10, whose rules are this lookup's of before:
+// matching or naming neither, the most specific first, then the newest; never a rate of the person or a work effort).
+// The person's employer's rows come before the shared ones (RateAmount.organizationPartyId, the user's call of Nov 11, 2026).
 function costingRate(entry) {
-    const at = entry.fromDate || ec.user.nowTimestamp
-    const classId = positionClassOf(entry)
-    const candidates = rows(RATE, {ratePurposeEnumId: "RaprProductionCost"}).filter(
-        row =>
-            lib.active(row, at) &&
-            !row.partyId &&
-            !row.workEffortId &&
-            (!row.workTypeEnumId || row.workTypeEnumId === entry.workTypeEnumId) &&
-            (!row.emplPositionClassId || row.emplPositionClassId === classId)
-    )
-    const rank = row => (row.workTypeEnumId ? 1 : 0) + (row.emplPositionClassId ? 1 : 0)
-    return candidates.sort((a, b) => rank(b) - rank(a) || lib.ms(b.fromDate) - lib.ms(a.fromDate))[0] || null
+    const found = call("mantle.humanres.RateServices.get#CostingRate", {
+        emplPositionClassId: positionClassOf(entry),
+        workTypeEnumId: entry.workTypeEnumId || null,
+        partyId: entry.partyId || null,
+        onDate: entry.fromDate || ec.user.nowTimestamp
+    })
+    return found.rateAmountId ? one(RATE, {rateAmountId: found.rateAmountId}) : null
 }
 const laborEventsOf = timeEntryId =>
     rows(EVENT, {sourceEntityName: TIME, sourceId: timeEntryId}).sort(
@@ -1164,19 +1163,27 @@ function laborRecorded(events) {
     return {net, basis, since: basis ? since : []}
 }
 // Whether a recording still fits its entry (F35): the same run and operation, and the rate it was valued at still the costing
-// rate's match for the entry's work type, position class and date. A RateAmount whose amount was corrected still fits (the
-// rate is frozen at the approval; P15's review re-records it); an unvalued recording stays for that review.
+// rate's match for the entry's work type, position class, date and (an organization's rate) the person's employer. A RateAmount
+// whose amount was corrected still fits (the rate is frozen at the approval; P15's review re-records it); an unvalued recording
+// stays for that review.
 function laborFits(basis, entry, run) {
     if (!run || basis.workEffortId !== run.workEffortId) return false
     if ((basis.operationWorkEffortId || null) !== (entry.workEffortId !== run.workEffortId ? entry.workEffortId : null))
         return false
     if (!basis.rateId) return true
     const row = one(RATE, {rateAmountId: basis.rateId})
+    const at = entry.fromDate || ec.user.nowTimestamp
     return (
         !!row &&
-        lib.active(row, entry.fromDate || ec.user.nowTimestamp) &&
+        lib.active(row, at) &&
         (!row.workTypeEnumId || row.workTypeEnumId === entry.workTypeEnumId) &&
-        (!row.emplPositionClassId || row.emplPositionClassId === positionClassOf(entry))
+        (!row.emplPositionClassId || row.emplPositionClassId === positionClassOf(entry)) &&
+        // an organization's costing rate fits while the person works for it at the entry's date
+        (!row.organizationPartyId ||
+            ec.resource
+                .script("component://mr-mantle/service/mantle/humanres/CostingRates.js")
+                .employersOf(entry.partyId, at)
+                .includes(row.organizationPartyId))
     )
 }
 // The labor event an entry needs now (record#ProductionCostEvent's TimeEntry source), or null when its events already match:

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Payroll localization (IronStone People design §8.4, PE-12; impl-people P22; PayrollLocalization.js): the registrations a pay
+    group binds to (mantle.humanres.payroll.PayrollLocalization, seed data: trusted deployed code, never named in a payroll form),
+    the calculation interface each registered service implements, and the one shipped localization, the synthetic,
+    non-statutory demonstration, which previews and can never make a group live. The build stays generic (impl-people §4, Nov 11,
+    2026): a real deployment needs a localized configuration and, in some cases, service changes. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="calculate" noun="Localization" type="interface">
+        <description>The calculation a registered localization implements (its calculationServiceName): side-effect free, it takes
+            the declared pay facts of one employment and period (each component's code, kind and amount, in the currency), the
+            accumulation bases and the employee's profile, and answers itemized employee and employer amounts, each with its
+            base, rate and explanation, and the findings that block a result or warn of one. It reads no record and writes none:
+            no invoice, payment or employee data. The caller has checked the reader's payroll scope.</description>
+        <in-parameters>
+            <parameter name="payrollLocalizationId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="currencyUomId" required="true"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="payFacts" type="List"><description>Maps of componentCode, componentKindEnumId, amount and reimbursement
+                (true for a line paying an expense claim, which is no pay to levy; impl-people P27)</description></parameter>
+            <parameter name="bases" type="Map"/>
+            <parameter name="profile" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="items" type="List"><description>itemCode, itemName, party (employee or employer), base, rate, amount,
+                explanation</description></parameter>
+            <parameter name="findings" type="List"><description>code, message, blocking</description></parameter>
+        </out-parameters>
+    </service>
+
+    <service verb="calculate" noun="Demonstration" allow-remote="false">
+        <description>The demonstration localization (PlzDemonstration): a flat levy on the earnings among the pay facts, 2% from
+            the employee and 1% from the employer, each rounded to the currency, and a finding (DEMONSTRATION_ONLY) that it is
+            synthetic and not any jurisdiction's law. For preview only; no group bound to it can be live. Refuses a caller without
+            PAYROLL_VIEW (PERMISSION_DENIED).</description>
+        <implements service="mantle.humanres.PayrollLocalizationServices.calculate#Localization"/>
+        <actions>
+            <set field="calculated" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollLocalization.js').execute('calculateDemonstration', context)"/>
+            <set field="items" from="calculated.items"/>
+            <set field="findings" from="calculated.findings"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Localizations" allow-remote="false">
+        <description>The registered payroll localizations, by name: each its jurisdictions, coverage dates, release, required setup,
+            outputs and whether it is a demonstration (never live). Refuses a caller without PAYROLL_VIEW
+            (PERMISSION_DENIED).</description>
+        <out-parameters>
+            <parameter name="localizations" type="List"><description>payrollLocalizationId, localizationName, jurisdictionText,
+                coverageFromDateText, coverageThruDateText, releaseVersion, isDemonstration, requiredSetup, supportedOutputs,
+                description</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="localizations" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollLocalization.js').execute('findLocalizations', context).localizations"/>
+        </actions>
+    </service>
+</services>

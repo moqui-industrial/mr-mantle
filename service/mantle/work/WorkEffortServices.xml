@@ -18,7 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Manual work and planning changes require an open project. Check the existing record's project and
             any requested destination project or parent before writing, including a move out of a closed project.
             Complete remains editable; only Closed is read only. Derived actuals and late time or billing do not call
-            this planning guard. Reading a closed project as a clone source is allowed.</description>
+            this planning guard. Reading a closed project as a clone source is allowed. A goal (People's WetGoal, changed through
+            mantle.humanres.ReviewServices alone) is no work: none of these changes one or puts work under one (GOAL_NOT_WORK).</description>
         <in-parameters>
             <parameter name="workEffortId"/>
             <parameter name="rootWorkEffortId"/>
@@ -32,8 +33,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const one = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).disableAuthz().one() : null
             const projects = new Set()
+            let goal = false
             const add = (id) => {
                 const row = one(id)
+                if (row?.workEffortTypeEnumId === 'WetGoal') goal = true
                 if (row?.workEffortTypeEnumId === 'WetProject') projects.add(row.workEffortId)
                 else if (row?.rootWorkEffortId) projects.add(row.rootWorkEffortId)
             }
@@ -45,6 +48,7 @@ along with this software (see the LICENSE.md file). If not, see
             const listed = Array.from(new Set(Array.from(workEffortIdList || []).filter((id) => id)))
             if (listed.length) for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', listed)
                     .selectField('workEffortId,workEffortTypeEnumId,rootWorkEffortId').disableAuthz().list()) {
+                if (row.workEffortTypeEnumId === 'WetGoal') goal = true
                 if (row.workEffortTypeEnumId === 'WetProject') projects.add(row.workEffortId)
                 else if (row.rootWorkEffortId) projects.add(row.rootWorkEffortId)
             }
@@ -52,6 +56,11 @@ along with this software (see the LICENSE.md file). If not, see
                 .condition('workEffortContentId', workEffortContentId).disableAuthz().one()?.workEffortId)
             if (communicationEventId) for (const link of ec.entity.find('mantle.work.effort.WorkEffortCommEvent')
                 .condition('communicationEventId', communicationEventId).disableAuthz().list()) add(link.workEffortId)
+            // a goal is People's (impl-people follow-up 2): no generic work service changes it or puts work under it
+            if (goal) {
+                ec.message.addError('GOAL_NOT_WORK: ' + ec.l10n.localize('A goal is changed in Goals, not as work'))
+                return
+            }
             if (projects.size && ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', 'in', Array.from(projects))
                     .condition('workEffortTypeEnumId', 'WetProject').condition('statusId', 'WeClosed').disableAuthz().count() > 0) {
                 // the code stays outside localize so callers can match it in every language
@@ -86,8 +95,16 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a maintenance procedure and its steps) is not copied
+                field by field: new work is made of a procedure by instantiate#WorkProcess, and a procedure is cloned as a new draft by
+                store#WorkProcess; this service is also on the /mantle REST API. Projects' and Commons' copies are unchanged. -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:baseWorkEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId" from="baseWorkEffortId"/></entity-find-one>
+            <!-- a goal is People's, never copied as work (impl-people follow-up 2) -->
+            <if condition="workEffort?.workEffortTypeEnumId == 'WetGoal' || workEffortTypeEnumId == 'WetGoal'">
+                <return error="true" message="GOAL_NOT_WORK: A goal is changed in Goals, not as work"/></if>
 
             <entity-set value-field="workEffort" include="nonpk" set-if-empty="false"/>
             <if condition="clearDates">
@@ -210,6 +227,24 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
+    <service verb="update" noun="WorkEffort">
+        <description>Changes a work effort's fields as given (Mantle's REST PATCH /workEfforts/{workEffortId}). A goal (People's
+            WetGoal, changed through mantle.humanres.ReviewServices alone) is not changed here, nor is a work effort made one
+            (GOAL_NOT_WORK); a work effort that does not exist is refused (WORK_EFFORT_NOT_FOUND).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
+        </in-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/>
+            <if condition="workEffort == null">
+                <return error="true" message="WORK_EFFORT_NOT_FOUND: Work effort ${workEffortId} not found"/></if>
+            <if condition="workEffort.workEffortTypeEnumId == 'WetGoal' || workEffortTypeEnumId == 'WetGoal'">
+                <return error="true" message="GOAL_NOT_WORK: A goal is changed in Goals, not as work"/></if>
+            <service-call name="update#mantle.work.effort.WorkEffort" in-map="context"/>
+        </actions>
+    </service>
+
     <service verb="delete" noun="WorkEffort">
         <description>Delete a work effort if it has nothing related to it.</description>
         <in-parameters>
@@ -221,6 +256,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort">
                 <field-map field-name="workEffortId"/></entity-find-one>
@@ -281,6 +318,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList" limit="1">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -305,6 +344,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/>
                 <econdition field-name="workEffortId"/>
@@ -326,6 +367,8 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortParty" list="wepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="roleTypeId"/>
@@ -434,7 +477,8 @@ along with this software (see the LICENSE.md file). If not, see
             WepPhoneCall, WepEmail and WepToDo are the activities) and their events (WetEvent not cancelled; WepMeeting is a
             meeting) on which the user's party has a WorkEffortParty row in effect now that is not declined or unassigned,
             less those the user snoozed past now on that row (snoozedThruDate, snooze#UserTodayItem). A production run
-            (WepProductionRun) and the operations under it are left out: they are worked through an app's today-source.
+            (WepProductionRun) and the operations under it are left out: they are worked through an app's today-source; so is
+            managed work (a maintenance work order and its steps, ProcessServices.check#ManagedWork's rule).
 
             Days are those of the session's time zone: the user's UserAccount.timeZone once logged in, the server's for
             internal work with no user. The groups:
@@ -633,6 +677,16 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const [taskId, parentId] of parentIds) if (runParents.has(parentId)) runIds.add(taskId)
                 }
                 for (const id of runIds) byId.delete(id)
+                // managed work (a maintenance work order and its steps) is worked through its app's today-source, where it
+                // opens its work order and has no Mark done (impl-maintenance P3)
+                if (taskIds.length) for (const id of ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js')
+                        .managedIds(taskIds)) byId.delete(id)
+                // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
+                // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds)
+                // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)
+                if (taskIds.length && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').protectedTaskIds(taskIds).length > 0)
+                    for (const id of ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').hiddenTaskIds(taskIds, partyId))
+                        byId.delete(id)
                 for (const entry of byId.values()) {
                     if (entry.snoozedThru != null && entry.snoozedThru > nowMillis) continue
                     const workEffort = entry.workEffort
@@ -688,7 +742,11 @@ along with this software (see the LICENSE.md file). If not, see
                     const addLink = (workEffortId, recordEntityName, recordId) => {
                         if (!links[workEffortId]) links[workEffortId] = {recordEntityName: recordEntityName, recordId: recordId}
                     }
-                    for (const row of ec.entity.find('mantle.request.RequestWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
+                    // IronStone People P21: a task's confidential case is not its record here (its assignee reads nothing of it)
+                    const requestLinks = Array.from(ec.entity.find('mantle.request.RequestWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
+                    const caseIds = new Set(requestLinks.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                            .caseIds(requestLinks.map((row) => row.requestId)) : [])
+                    for (const row of requestLinks) if (!caseIds.has(row.requestId))
                         addLink(row.workEffortId, 'mantle.request.Request', row.requestId)
                     for (const row of ec.entity.find('mantle.work.effort.WikiPageWorkEffort').condition('workEffortId', 'in', workEffortIds).list())
                         addLink(row.workEffortId, 'moqui.resource.wiki.WikiPage', row.wikiPageId)
@@ -858,6 +916,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- managed work's parts are its owner's (a procedure's requirements, a work order's planned parts; impl-maintenance
+                P7, F159): refused here but through the owner (WorkProcesses.js asManagedOwner) -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <entity-find entity-name="mantle.work.effort.WorkEffortProduct" list="existingWepList">
                 <date-filter/><econdition field-name="workEffortId"/><econdition field-name="productId"/>
                 <econdition field-name="typeEnumId"/></entity-find>
@@ -884,7 +946,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="allDay" type="Boolean"/>
         </out-parameters>
         <actions>
-            <if condition="workEffort == null"><entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/></if>
+            <if condition="workEffort == null">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="workEffort"/>
+                <!-- a goal's period is People's (Mantle's REST /workEfforts/{id}/startEnd answers nothing for one) -->
+                <if condition="workEffort?.workEffortTypeEnumId == 'WetGoal'"><return/></if>
+            </if>
 
             <set field="allDay" from="false"/>
             <set field="startDate" from="workEffort.actualStartDate || workEffort.estimatedStartDate"/>
@@ -973,6 +1039,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- a file a check names as evidence is not changed (impl-maintenance P7, F69: EVIDENCE_PROTECTED) -->
+            <service-call name="mantle.work.ProcessServices.check#EvidenceChange" in-map="{workEffortContentId:workEffortContentId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffortContent" value-field="workEffortContent"/>
                 <service-call name="mantle.work.WorkEffortServices.save#WorkEffortContentFile" out-map="context"
@@ -991,6 +1060,9 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="contentLocation"/></out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <!-- a check's evidence and a stored checklist get no new bytes (impl-maintenance P7 review, F69: EVIDENCE_PROTECTED) -->
+            <service-call name="mantle.work.ProcessServices.check#EvidenceChange" in-map="{workEffortContentId:workEffortContentId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>

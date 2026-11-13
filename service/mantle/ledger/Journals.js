@@ -172,7 +172,7 @@ function post(p) {
             inputFingerprint: p.inputFingerprint,
             changeReason: why
         })
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     const operation = one(O, {operationKey: p.operationKey})
     if (operation) {
         if (
@@ -243,11 +243,11 @@ function reverse(p) {
     const initial = transaction(p, false),
         why = lib.reason(p)
     refuseClosingType(initial.acctgTransTypeEnumId)
-    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
     const tx = transaction(p)
     if (!p.reversalDate || !Number.isFinite(ms(p.reversalDate))) throw new Error("Choose a reversal date")
     if (!p.operationKey || p.operationKey.length > 40) throw new Error("An operation key is required")
-    find("mantle.party.Party", {partyId: tx.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: tx.organizationPartyId}).forNoKeyUpdate(true).one()
     const requestHash = hash({
         acctgTransId: tx.acctgTransId,
         reversalDate: p.reversalDate,

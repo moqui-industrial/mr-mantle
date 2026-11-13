@@ -33,4 +33,33 @@ along with this software (see the LICENSE.md file). If not, see
         them with their identity -->
     <mantle.product.store.StoreChannelConnector connectorId="EdiX12" description="EDI trading partner (X12)"
             systemMessageTypeId="EdiX12" messageKind="EdiX12" direction="both" mappingVersion="1" managedBy="edi"/>
+
+    <!-- Store channel messages as a registered operational recovery (the framework's moqui.server.RecoveryDescriptor;
+        mr-boss impl-admin P13, design-commerce §9): an administrator's message queue offers the retry of a failed channel
+        order or EDI interchange of a store integration through retry#StoreMessages, by the owner's own service, which
+        checks COMMERCE_CHANNEL_OPERATE and the store scope; nothing is reconciled or cancelled there, and no payload is
+        shown (no dataPermission). The import batch type (StoreChannelImport) is not registered: a batch is never retried. -->
+    <moqui.server.RecoveryDescriptor descriptorKey="storeChannelOrders" title="Store channel orders" ownerApp="Store channels"
+            targetKind="SystemMessage" targetKey="StoreChannelOrders" direction="in" retryMode="owner" sequenceNum="10"
+            managePermission="COMMERCE_CHANNEL_OPERATE" ownerRoute="storeIntegration"
+            describeService="mantle.product.StoreChannelServices.find#MessageRecoveryTargets"
+            recoverService="mantle.product.StoreChannelServices.recover#StoreMessage"
+            idempotencyNote="The message keeps its identity, and an order already made for it is never made again."/>
+    <moqui.server.RecoveryDescriptor descriptorKey="storeChannelEdi" title="Store EDI interchanges" ownerApp="Store channels"
+            targetKind="SystemMessage" targetKey="EdiX12" retryMode="owner" sequenceNum="20"
+            managePermission="COMMERCE_CHANNEL_OPERATE" ownerRoute="storeIntegration"
+            describeService="mantle.product.StoreChannelServices.find#MessageRecoveryTargets"
+            recoverService="mantle.product.StoreChannelServices.recover#StoreMessage"
+            idempotencyNote="The interchange is applied or sent again with its own control numbers."/>
+
+    <!-- mr-boss impl-admin P15 (design-admin §11.1; impl-commerce §7): ChannelImport as a registered target of the
+        framework's org.moqui.admin.DataTransferServices. Its batches stay SystemMessages committed through the channel
+        intake in Commerce's own wizard, so only the result contract is registered: the batches of the stores the caller
+        operates, each with the place that opens it. -->
+    <moqui.server.TransferTarget targetId="channelOrders" direction="import" targetMode="wizard" title="Channel orders"
+            description="Order files of a sales channel, previewed and committed in Commerce's ChannelImport"
+            effectsNote="Each order is received through the store's channel intake, as an order the channel sent."
+            ownerApp="Commerce" targetVersion="1" scopeLabel="Organization"
+            findService="mantle.product.StoreChannelServices.find#ChannelImportRuns"
+            ownerRoute="commerceChannelImport" sequenceNum="30"/>
 </entity-facade-xml>

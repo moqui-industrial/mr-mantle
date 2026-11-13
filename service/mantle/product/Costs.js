@@ -371,7 +371,7 @@ function print(p, approvedHeader = null, canonical = false) {
 }
 function approve(p) {
     const reviewedEstimate = get(p.productStandardCostId, "approve")
-    find("mantle.party.Party", {partyId: reviewedEstimate.estimate.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: reviewedEstimate.estimate.organizationPartyId}).forNoKeyUpdate(true).one()
     const g = locked(p.productStandardCostId, "approve", p.expectedRevision, true),
         h = g.estimate,
         why = policy().reason(p),

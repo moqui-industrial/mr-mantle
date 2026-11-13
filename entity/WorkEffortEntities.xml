@@ -133,10 +133,44 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="addedDate" type="date-time" default="ec.user.nowTimestamp"/>
         <field name="davName" type="text-medium"><description>The resource name a CalDAV client stored the event under
             (mantle.work.CalendarDavServices), when it is not workEffortId.ics</description></field>
+        <field name="viewOnly" type="text-indicator"><description>Y when the event was put in this calendar by someone who may not
+            change it (an attendee adding an invitation to a calendar of their own: add#CalendarEvent): the calendar shows it, and
+            its editors do not become the event's (check#EventAccess), nor its feed, import or CalDAV writes change it (impl-people
+            P19 review, Commons calendar editors, Nov 12, 2026); N when it was put there by someone who may change it, and on a
+            link migrate#CalendarViewOnlyLinks kept. Empty on a link made before then (marked by that migration) and on one a
+            feed, a CalDAV client, an outside invitation or demo data made for an event of the calendar's own</description></field>
         <relationship type="one" related="mantle.work.calendar.Calendar" short-alias="calendar"/>
         <relationship type="one" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
         <index name="CAL_WEFF_WEFF"><index-field name="workEffortId"/></index>
         <index name="CAL_WEFF_DAV"><index-field name="calendarId"/><index-field name="davName"/></index>
+    </entity>
+    <entity entity-name="CalendarProjection" package="mantle.work.calendar" cache="never">
+        <description>A projected CalDAV collection (mantle.work.CalendarDavServices; CX-SYNC, impl-people P12, F22, F67): a
+            read-only collection, collectionId projected-{projectionId}, answered by its owner's service
+            (ownerServiceName, implementing mantle.work.CalendarDavServices.define#ProjectionOwner), which decides who it admits
+            and what each sees. The kind reads no record of the owner itself. Seeded by the owner's component; disabled Y leaves
+            it out.</description>
+        <field name="projectionId" type="id" is-pk="true"/>
+        <field name="title" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="ownerServiceName" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
+    <entity entity-name="EventManager" package="mantle.work.calendar" cache="true">
+        <description>An application that keeps some events itself (impl-people P19 review, Commons calendar editors, Nov 12, 2026):
+            an event with a row of entityName whose fieldName (workEffortId when empty) is the event's workEffortId, and of
+            purposeEnumId when one is set, is changed only through that application's services, which check their own rules and
+            write it themselves or as the system (runAsSystem). mantle.work.EventServices.check#EventAccess answers managedBy
+            (managedByText: where it is changed, as "X is changed on {managedByText}") and refuses its edit to every user, so
+            Commons' event screens, the calendar, add#CalendarEvent and CalDAV do not change it; viewing stands. Seeded by the
+            owner's component beside its entity; disabled Y leaves it out.</description>
+        <field name="eventManagerId" type="id" is-pk="true"/>
+        <field name="entityName" type="text-medium"/>
+        <field name="fieldName" type="text-short"><description>The field holding the event's workEffortId; empty is workEffortId</description></field>
+        <field name="purposeEnumId" type="id"><description>When set, only events of this purpose (a quicker check)</description></field>
+        <field name="managedByText" type="text-medium"/>
+        <field name="disabled" type="text-indicator"/>
     </entity>
 
     <!-- ========================================================= -->
@@ -189,8 +223,11 @@ along with this software (see the LICENSE.md file). If not, see
             project's estimate unit, beside the hours of estimatedWorkTime</description></field>
         <field name="healthEnumId" type="id"><description>For a project: on track, at risk or off track, from its latest
             status update (WorkEffortUpdate)</description></field>
-        <field name="isTemplate" type="text-indicator"><description>Y for a project kept as a template to copy
-            (ProjectServices.clone#Project), left out of the lists of projects and work</description></field>
+        <field name="isTemplate" type="text-indicator"><description>Y for a work effort kept as a definition to copy, never
+            done itself, and left out of the lists of projects and work: a project template (ProjectServices.clone#Project), a
+            routing or operation template (Manufacturing), or a process template and its steps (ProcessServices: People's
+            checklists, Maintenance's procedures, each with a WorkEffortProcessPolicy; a list of one kind filters on its type,
+            purpose and policy too)</description></field>
 
         <field name="methodDraft" type="text-indicator" enable-audit-log="true"/>
         <field name="methodRemoved" type="text-indicator" enable-audit-log="true"/>
@@ -1067,7 +1104,15 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="estimatedNumPeople" type="number-decimal"/>
         <field name="estimatedDuration" type="number-decimal"/>
         <field name="estimatedCost" type="currency-amount"/>
+        <field name="minimumSkillLevel" type="number-integer"><description>The least level of the skill the work needs, a
+            SkillLevel value's number (IronStone People PE-14, impl-people P18, F7): mantle.humanres.DevelopmentServices
+            .check#Qualifications reads it for a work effort; shared with Maintenance's step requirements (MT-03)</description></field>
+        <field name="qualificationTypeEnumId" type="id"><description>A QualificationType a verified, valid qualification of which
+            must prove the skill for this work (impl-maintenance P8, design-maintenance §4.1: a step's required qualification, as a
+            job class requirement's): check#Qualifications reads it with the level</description></field>
         <relationship type="one" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one" title="QualificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="qualificationTypeEnumId"/></relationship>
         <relationship type="one" title="SkillType" related="moqui.basic.Enumeration">
             <key-map field-name="skillTypeEnumId"/></relationship>
     </entity>
@@ -1371,7 +1416,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="rateAmountId" type="id"><description>Client/customer hourly RateAmount reference</description></field>
         <field name="clientHourRate" type="number-decimal"/>
         <field name="vendorRateAmountId" type="id"><description>Vendor/worker hourly RateAmount reference</description></field>
-        <field name="vendorHourRate" type="number-decimal"/>
+        <field name="vendorHourRate" type="number-decimal" ai-opt-out="true"><description>The worker's rate, an employee's pay
+            rate copied on the entry: opted out of AI (IronStone People PE-21, the user's call of Nov 12, 2026), as a view's alias of
+            it is</description></field>
         <field name="fromDate" type="date-time"/>
         <field name="thruDate" type="date-time"/>
         <field name="hours" type="number-decimal"/>
@@ -1381,7 +1428,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="pieceRateAmountId" type="id"><description>Client/customer piece RateAmount reference</description></field>
         <field name="clientPieceRate" type="number-decimal"/>
         <field name="vendorPieceRateAmountId" type="id"><description>Vendor/worker piece RateAmount reference</description></field>
-        <field name="vendorPieceRate" type="number-decimal"/>
+        <field name="vendorPieceRate" type="number-decimal" ai-opt-out="true"><description>The worker's piece rate: opted out of
+            AI as vendorHourRate is</description></field>
         <field name="comments" type="text-long"/>
         <field name="facilityId" type="id"><description>Where the work was done; if null and workEffortId is set get from WorkEffort.facilityId</description></field>
         <field name="workEffortId" type="id"/>

@@ -127,6 +127,25 @@ feature(
 
 feature("the operator creates a child of its organization and finds both, not another; it cannot create outside its scope", {
     when() {
+        // a department under the organization (People's unit, OrgDepartment): never a child organization nor one of a user's
+        // organizations (impl-people P3, F49)
+        orgs.department = call("mantle.party.PartyServices.create#Organization", {
+            organizationName: "Org Rules Department",
+            roleTypeId: "OrgDepartment"
+        }).partyId
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtOrgRollup",
+            fromPartyId: orgs.department,
+            fromRoleTypeId: "OrgDepartment",
+            toPartyId: orgs.one,
+            toRoleTypeId: "OrgInternal",
+            fromDate: effectiveTime - dayMillis
+        })
+        const operatorParty = ec.entity
+            .find("moqui.security.UserAccount")
+            .condition("username", "ior.operator")
+            .disableAuthz()
+            .one().partyId
         return as("ior.operator", () => {
             const child = result(S + "create#InternalOrganization", {
                 organizationName: "Org Rules Child",
@@ -144,11 +163,15 @@ feature("the operator creates a child of its organization and finds both, not an
                 other: result(S + "get#InternalOrganization", {organizationPartyId: orgs.two}),
                 // ending its child's parent would make a top-level organization, out of its parent's administrators' scope
                 detach: result(S + "store#OrganizationParent", {organizationPartyId: orgs.child}),
-                member: as("ior.member", () => result(S + "find#InternalOrganizations", {}))
+                member: as("ior.member", () => result(S + "find#InternalOrganizations", {})),
+                userOrgIds: Array.from(
+                    result("mantle.party.PartyServices.get#PartyInternalOrgIds", {partyId: operatorParty}).userOrgIds || []
+                ),
+                children: Array.from(result(S + "get#InternalOrganization", {organizationPartyId: orgs.one}).children || [])
             }
         })
     },
-    then({child, found, topLevel, underOther, other, detach, member}) {
+    then({child, found, topLevel, underOther, other, detach, member, userOrgIds, children}) {
         child.applied && child.error == ""
         rollups(orgs.child).length == 1 && rollups(orgs.child)[0].toPartyId == orgs.one && rollups(orgs.child)[0].thruDate == null
         ids(found.organizationList).includes(orgs.one) && ids(found.organizationList).includes(orgs.child)
@@ -157,6 +180,9 @@ feature("the operator creates a child of its organization and finds both, not an
         topLevel.applied == false && topLevel.reasonCode == "PARENT_REQUIRED" && detach.reasonCode == "PARENT_REQUIRED"
         underOther.error.includes("RECORD_UNAVAILABLE") && other.error.includes("RECORD_UNAVAILABLE")
         member.error.includes("ADMIN_SETTINGS_VIEW")
+        userOrgIds.includes(orgs.one) && userOrgIds.includes(orgs.child) && !userOrgIds.includes(orgs.department)
+        found.organizationList.find(row => row.organizationPartyId == orgs.one).childCount == 1
+        ids(children) == [orgs.child]
     }
 })
 

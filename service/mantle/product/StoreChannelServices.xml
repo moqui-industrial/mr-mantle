@@ -151,7 +151,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="retry" noun="StoreMessages" allow-remote="false">
-        <description>An operator's retry of failed messages (systemMessageIds) and EDI documents (ediDocumentIds) of one integration, with a reason, each in its own transaction and keeping its identity: a channel order consumed again as the same message (an order already made is never made again), an EDI receipt consumed again from its kept bytes, an EDI document applied or sent again with its controls (X12.js). A conflict is kept as evidence and not retried (CONFLICT_REVIEW), nor a duplicate or an applied one (NOT_RETRYABLE). Keyed by operationKey on PostingOperation: a second submit answers the first result (alreadyApplied). The results name each item. COMMERCE_CHANNEL_OPERATE and the store scope; at most 100 at a time. To be registered as an Admin §14 recovery action when Admin builds it (impl-commerce §7).</description>
+        <description>An operator's retry of failed messages (systemMessageIds) and EDI documents (ediDocumentIds) of one integration, with a reason, each in its own transaction and keeping its identity: a channel order consumed again as the same message (an order already made is never made again), an EDI receipt consumed again from its kept bytes, an EDI document applied or sent again with its controls (X12.js). A conflict is kept as evidence and not retried (CONFLICT_REVIEW), nor a duplicate or an applied one (NOT_RETRYABLE). Keyed by operationKey on PostingOperation: a second submit answers the first result (alreadyApplied). The results name each item. COMMERCE_CHANNEL_OPERATE and the store scope; at most 100 at a time. Registered as an operational recovery action (find#MessageRecoveryTargets and recover#StoreMessage below; mr-boss impl-admin P13).</description>
         <in-parameters>
             <parameter name="systemMessageRemoteId" required="true"/>
             <parameter name="systemMessageIds"/>
@@ -194,6 +194,26 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="stateText" from="found.stateText"/>
             <set field="orderId" from="found.orderId"/>
             <set field="message" from="found.message"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="MessageRecoveryTargets" allow-remote="false">
+        <description>Store channel messages as a registered operational recovery (moqui.server.RecoveryDescriptor rows in data/StoreChannelSetupData.xml; the framework's org.moqui.admin.OperationServices): which of the given system messages are a store integration's, and for each whether retry#StoreMessages would take it now for this caller (retryEligible, with the reason when not), its state and its integration (ownerRef), answered only within the caller's own COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and store scope: a message of a store outside it is answered as held, with no state or detail. Nothing is reconciled or cancelled here and no payload is shown. It changes nothing.</description>
+        <implements service="org.moqui.admin.OperationServices.find#RecoveryTargets"/>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findMessageRecoveryTargets', context)"/>
+            <set field="targetList" from="found.targetList"/>
+        </actions>
+    </service>
+    <service verb="recover" noun="StoreMessage" allow-remote="false">
+        <description>The registered recovery action on one store channel message: a retry is retry#StoreMessages for that message, with the reason and the operation key (a repeat answers the first result), so its identity is kept and an order already made is never made again; anything else is not offered (NOT_OFFERED). COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and the store scope, checked by retry#StoreMessages: the registration adds no right.</description>
+        <implements service="org.moqui.admin.OperationServices.recover#OwnedTarget"/>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('recoverStoreMessage', context)"/>
+            <set field="applied" from="!!found.applied"/>
+            <set field="reasonCode" from="found.reasonCode"/>
+            <set field="reason" from="found.reason"/>
+            <set field="ownerStateText" from="found.ownerStateText"/>
         </actions>
     </service>
 
@@ -541,5 +561,22 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <script>result = ec.resource.script("component://mr-mantle/service/mantle/product/StoreFeeds.js").execute("getShopFeed", input)</script>
         </actions>
+    </service>
+    <!-- mr-boss impl-admin P15 (design-admin §11.1; impl-commerce §7): ChannelImport's result contract for the framework's
+        org.moqui.admin.DataTransferServices (the target channelOrders, data/StoreChannelSetupData.xml) -->
+    <service verb="find" noun="ChannelImportRuns" allow-remote="false">
+        <description>The channel import batches of the stores the caller operates (COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE
+            and the store scope, as get#ChannelImport), newest first, as summaries: the file's name and store, the
+            store's organization, staged, committing or committed, how many orders a commit took, who committed it, and
+            the parameters that open the batch in ChannelImport. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/StoreChannels.js').execute('findChannelImportRuns', context))</script></actions>
     </service>
 </services>

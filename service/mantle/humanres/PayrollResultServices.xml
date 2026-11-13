@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payslips (IronStone People design §8.1 Payslip and PayslipItem, §8.2 corrections, Payslips, PayslipDetail, §15 the
+    payslip; PE-10, PE-17; impl-people P26; PayrollResults.js): pay results with identities of their own, made when a pay run is
+    approved (preview slips in preview mode: payroll's alone, never issued and never an obligation, §5 Q3), each line explained from
+    its rule and sources, year to date derived from final and issued slips, corrections new slips linked to the original, which
+    stays. A payroll reader (PAYROLL_VIEW) of the employer reads them; the person reads their own issued slips alone; issuing a final
+    slip (its statement stored, the person told on PayslipIssued with no amount) and the slip's files are a payroll editor's
+    (PAYROLL_EDIT). Another's slip is a missing one. The legacy pay history is read only, by its own key, never recalculated. No
+    invoice or payment is made here. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Payslips" allow-remote="false">
+        <description>A payroll reader's payslips of the employers in their scope (PAYROLL_VIEW), newest pay date first, filtered by
+            employer, group, person, employment, run, period, state (withdrawn ones left out unless asked) or kind, or show
+            corrections or historical; with the legacy pay history (historical, by its own key) unless the list is of a run, a
+            group, a state, a kind or corrections. For a caller without PAYROLL_VIEW, or with mine: the caller's own issued slips alone (PEOPLE_SELF_SERVICE;
+            a supplied party never widens it) and their own employments' legacy pay history, historical (P26 review, the user's
+            call of Nov 12, 2026). Each: the person, employer, group, period, pay date, kind, state, gross and net, the
+            slip it corrects and its count of corrections. Refuses a caller with neither (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="partyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="payrollRunId"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="statusId"/>
+            <parameter name="runKindEnumId"/>
+            <parameter name="show"><description>corrections or historical</description></parameter>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payslips" type="List"><description>payslipId (or legacyKey and historical), organizationPartyId,
+                organizationName, partyId, personName, partyRelationshipId, payrollRunId, groupName, periodText, payDateText, kindText,
+                statusId, state, stateText, isPreview, grossText, netText, correctsPayslipId, correctionCount, issuedDateText</description></parameter>
+            <parameter name="payslipsCount" type="Integer"/>
+            <parameter name="payslipsPageIndex" type="Integer"/>
+            <parameter name="payslipsPageSize" type="Integer"/>
+            <parameter name="payslipsPageMaxIndex" type="Integer"/>
+            <parameter name="payslipsPageRangeLow" type="Integer"/>
+            <parameter name="payslipsPageRangeHigh" type="Integer"/>
+            <parameter name="canIssue" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('findPayslips', context)"/>
+            <set field="payslips" from="found.payslips"/>
+            <set field="payslipsCount" from="found.payslipsCount"/>
+            <set field="payslipsPageIndex" from="found.payslipsPageIndex"/>
+            <set field="payslipsPageSize" from="found.payslipsPageSize"/>
+            <set field="payslipsPageMaxIndex" from="found.payslipsPageMaxIndex"/>
+            <set field="payslipsPageRangeLow" from="found.payslipsPageRangeLow"/>
+            <set field="payslipsPageRangeHigh" from="found.payslipsPageRangeHigh"/>
+            <set field="canIssue" from="found.canIssue"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Payslip" allow-remote="false">
+        <description>A payslip as PayslipDetail shows it: for a payroll reader of its employer any slip, for the person their own issued
+            slip alone (a line its term keeps off the payslip left out of their view, never out of the totals). Its header (person,
+            employer, group, period, pay date, kind, state: a preview is payroll's alone and never issued, and one whose sources
+            changed since its run was approved says so), its lines grouped (earnings, deductions, employer costs, other values),
+            each with its amount (on a correction the change, what was paid before and now), its rule and its explanation; the
+            totals; the year to date derived from final and issued slips (the employer's fiscal or the calendar year, this slip
+            added); the correction chain (the original and its corrections, each standing or not) with the net effect; the inputs
+            its run took with their sources; the stored statement; and what the caller may do (issue a final slip, correct). With
+            legacyKey (partyRelationshipId|payDate), a legacy pay record as recorded, never recalculated (a payroll reader's of its
+            employer, or its own person's). Refuses
+            another's slip and a missing one alike (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payslipId"/>
+            <parameter name="legacyKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payslip" type="Map"/>
+            <parameter name="items" type="List"/>
+            <parameter name="totalsText" type="Map"/>
+            <parameter name="yearToDate" type="Map"/>
+            <parameter name="corrections" type="Map"/>
+            <parameter name="inputs" type="List"/>
+            <parameter name="canIssue" type="Boolean"/>
+            <parameter name="canCorrect" type="Boolean"/>
+            <parameter name="openCorrectionRunId"/>
+            <parameter name="file" type="Map"/>
+            <parameter name="settlement" type="Map"><description>Payroll's alone (P27): the slip's obligations (kindText, invoiceId,
+                amountText) and an overpayment it recovers (routeText, amountText, recoveredText, remainingText, invoiceId)</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('getPayslip', context)"/>
+            <set field="payslip" from="found.payslip"/>
+            <set field="items" from="found.items"/>
+            <set field="totalsText" from="found.totalsText"/>
+            <set field="yearToDate" from="found.yearToDate"/>
+            <set field="corrections" from="found.corrections"/>
+            <set field="inputs" from="found.inputs"/>
+            <set field="canIssue" from="found.canIssue"/>
+            <set field="canCorrect" from="found.canCorrect"/>
+            <set field="openCorrectionRunId" from="found.openCorrectionRunId"/>
+            <set field="file" from="found.file"/>
+            <set field="settlement" from="found.settlement"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyPayslip" allow-remote="false">
+        <description>The caller's own issued payslip (PEOPLE_SELF_SERVICE; no party is taken): payslipId's, else the latest issued;
+            or, with legacyKey (partyRelationshipId|payDate), their own employment's legacy pay record as recorded, historical and
+            never recalculated. Its header, the lines the payslip shows with their explanations, the totals, the year to date (issued
+            pay), its issued corrections (and its original once issued) with the net effect, and the inputs its run took. Never
+            another person's slip or record, a preview, a withdrawn slip or one not issued, whatever the caller's payroll rights or
+            parameters (RECORD_UNAVAILABLE). The person's own SelfService slip and the Assistant's tool (BOSS's AgentToolExposure
+            people_my_payslip, never MCP): the amounts are the person's own, returned to their own session (the user's call of Nov
+            12, 2026). The stored statement is named (file: its name, type and issue date), never where it is stored: the download
+            reads get#MyPayslipStatement.</description>
+        <in-parameters>
+            <parameter name="payslipId"/>
+            <parameter name="legacyKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payslip" type="Map"/>
+            <parameter name="items" type="List"/>
+            <parameter name="totalsText" type="Map"/>
+            <parameter name="yearToDate" type="Map"/>
+            <parameter name="corrections" type="Map"/>
+            <parameter name="inputs" type="List"/>
+            <parameter name="file" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('getMyPayslip', context)"/>
+            <set field="payslip" from="found.payslip"/>
+            <set field="items" from="found.items"/>
+            <set field="totalsText" from="found.totalsText"/>
+            <set field="yearToDate" from="found.yearToDate"/>
+            <set field="corrections" from="found.corrections"/>
+            <set field="inputs" from="found.inputs"/>
+            <set field="file" from="found.file"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyPayslipStatement" allow-remote="false">
+        <description>The stored statement of the caller's own issued payslip (PEOPLE_SELF_SERVICE), for its screen's download: its
+            location, file name and type. Another person's slip, one not issued and one with no statement are missing ones
+            (RECORD_UNAVAILABLE). Exposed to no Assistant or MCP tool (impl-people P26 review).</description>
+        <in-parameters><parameter name="payslipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="location"/>
+            <parameter name="fileName"/>
+            <parameter name="contentType"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('getMyPayslipStatement', context)"/>
+            <set field="location" from="found.location"/>
+            <set field="fileName" from="found.fileName"/>
+            <set field="contentType" from="found.contentType"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="Payslip" allow-remote="false">
+        <description>A final payslip issued (PAYROLL_VIEW and PAYROLL_EDIT at its employer): its statement rendered once now as the
+            person reads it and stored (its PDF, or its html-print page where the server has no PDF engine), never rendered again;
+            the person told on PayslipIssued (their own accounts alone, direct only; a title naming the employer and the period,
+            never an amount; the link needs a sign-in; no attachment is mailed). Refuses a preview or withdrawn slip (PREVIEW_ONLY:
+            preview mode makes no pay), a slip not final (NOT_FINAL) and another employer's slip (RECORD_UNAVAILABLE). A repeat
+            answers the first issue.</description>
+        <in-parameters>
+            <parameter name="payslipId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payslipId"/>
+            <parameter name="statusId"/>
+            <parameter name="issuedDateText"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('issuePayslip', context)"/>
+            <set field="payslipId" from="out.payslipId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="issuedDateText" from="out.issuedDateText"/>
+            <set field="repeated" from="out.repeated"/>
+            <set field="notifiedCount" from="out.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="check" noun="PayslipAccess" allow-remote="false">
+        <description>Whether the caller sees a payslip as a record and its files (the payslip content host, get#RecordLinkInfo): a
+            payroll reader of its employer alone (the person reads their own issued slip through get#MyPayslip, never payroll's
+            files of it); canEdit for a payroll editor of the employer. A missing slip and a call with no user are not
+            visible.</description>
+        <in-parameters><parameter name="payslipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('payslipAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="PayslipContent">
+        <description>A file of a payslip (PayslipContent, the record files of get#RecordLinkInfo): the row, and the uploaded file saved
+            through save#PayslipContentFile. Needs a payroll editor of the slip's employer (check#PayslipAccess: RECORD_UNAVAILABLE
+            outside it, PERMISSION_DENIED otherwise).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.payroll.PayslipContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="payslipId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="payslipContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollResults.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.payroll.PayslipContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.PayrollResultServices.save#PayslipContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="PayslipContentFile" allow-remote="false">
+        <description>Internal to create#PayslipContent, which checks the caller: the file of a PayslipContent row of that slip.</description>
+        <in-parameters>
+            <parameter name="payslipContentId" required="true"/>
+            <parameter name="payslipId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.payroll.PayslipContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.payslipId != payslipId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${payslipContentId} is not of payslip ${payslipId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/payslip/${payslipId}/content_${payslipContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.payroll.PayslipContent" disable-authz="true"
+                    in-map="{payslipContentId:payslipContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,74 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A work order's completed checklist and exception record (design-maintenance §12; mantle.work.ProcessServices, ProcessChecks.js
+     checklistHtml): printed from WorkOrderDetail's Procedure tab and stored as the root's WectCompletedChecklist content at close.
+     workEffortId, workEffortName, targetName, organizationName, procedureName, statusText, startedText, finishedText, outcomeText,
+     dispositionText, asOfText, printedBy, steps (name, indentMm, required, response, statusText, history: each check as a line
+     with its time, outcome, reading, state, who, findings, notes, correction and evidence; waivers) and exceptions (the failed
+     observations, unresolved checks and waivers). No cost. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Checklist')} ${workEffortId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 6mm; }
+h2 { font-size: 12pt; margin: 6mm 0 2mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 35mm; font-weight: bold; }
+.steps th { border-bottom: 1px solid #20252b; }
+.steps td { border-bottom: 1px solid #ddd; }
+.muted { color: #5b636b; }
+.line { display: block; }
+</style></head>
+<body>
+<h1>${ec.l10n.localize('Checklist')}: ${workEffortName}</h1>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Work order')}</th><td>${workEffortId}</td></tr>
+    <#if targetName><tr><th>${ec.l10n.localize('Target')}</th><td>${targetName}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Organization')}</th><td>${organizationName}</td></tr>
+    <#if procedureName><tr><th>${ec.l10n.localize('Procedure')}</th><td>${procedureName}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Status')}</th><td>${statusText}</td></tr>
+    <#if startedText><tr><th>${ec.l10n.localize('Started')}</th><td>${startedText}</td></tr></#if>
+    <#if finishedText><tr><th>${ec.l10n.localize('Finished')}</th><td>${finishedText}</td></tr></#if>
+    <#if outcomeText><tr><th>${ec.l10n.localize('Outcome')}</th><td>${outcomeText}<#if dispositionText> · ${dispositionText}</#if></td></tr></#if>
+    <tr><th>${ec.l10n.localize('As of')}</th><td>${asOfText} ${ec.l10n.localize('by')} ${printedBy}</td></tr>
+</tbody></table>
+<h2>${ec.l10n.localize('Steps')}</h2>
+<table class="steps">
+    <thead><tr>
+        <th>${ec.l10n.localize('Step')}</th>
+        <th>${ec.l10n.localize('State')}</th>
+        <th>${ec.l10n.localize('Checks and decisions')}</th>
+    </tr></thead>
+    <tbody>
+    <#list steps as step>
+        <tr>
+            <td style="padding-left: ${step.indentMm}mm">${step.name}<br><span class="muted">${step.required}<#if step.response> · ${step.response}</#if></span></td>
+            <td>${step.statusText}</td>
+            <td><#list step.history as line><span class="line">${line}</span></#list><#list step.waivers as line><span class="line">${line}</span></#list></td>
+        </tr>
+    </#list>
+    </tbody>
+</table>
+<h2>${ec.l10n.localize('Exceptions')}</h2>
+<#if exceptions.length>
+<table class="steps"><tbody>
+    <#list exceptions as line><tr><td>${line}</td></tr></#list>
+</tbody></table>
+<#else>
+<p class="muted">${ec.l10n.localize('No failed observation or waiver.')}</p>
+</#if>
+</body></html>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's working schedules (IronStone People design §6, WorkingSchedules and WorkingScheduleDetail, PE-06; impl-people P9): an
+    employer's dated working week in a time zone, with its holiday calendar (a WorkEffortCategory of type WcatHoliday, whose
+    WepHoliday events are its holidays), and its dated weekly intervals (WorkingScheduleLine). An employment follows a schedule
+    from a date through its assignment (EmploymentAssignment.workingScheduleId and its holiday override, holidayCategoryId,
+    mantle.humanres.ScheduleServices.assign#Schedule), and mantle.work.ResourceServices.get#PartyCapacity reads it before the
+    WetAvailable and timesheet policy fallback. Written only by ScheduleServices (Schedules.js); rows are ended, never
+    deleted. P14: an employment's dated shifts (ShiftAssignment), the roster's explicit overrides of the schedule on their days. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="WorkingSchedule" package="mantle.humanres.schedule" cache="never">
+        <description>A working week of an employer: its name, time zone (the zone its intervals are local times of and its days are
+            attributed in), its holiday calendar and its dates (in use from fromDate, ended at thruDate, never deleted). A copy is a
+            new schedule (copiedFromScheduleId), never the same identity. The zone does not change once the schedule is
+            assigned.</description>
+        <field name="workingScheduleId" type="id" is-pk="true"/>
+        <field name="scheduleName" type="text-medium" enable-audit-log="update"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="timeZone" type="text-short" enable-audit-log="update"><description>An IANA time zone name</description></field>
+        <field name="holidayCategoryId" type="id" enable-audit-log="update"><description>The holiday calendar (a WorkEffortCategory of
+            type WcatHoliday); none takes no holiday but the employer's own</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="description" type="text-medium"/>
+        <field name="copiedFromScheduleId" type="id"><description>The schedule this one was copied from</description></field>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="HolidayCalendar" related="mantle.work.effort.WorkEffortCategory" short-alias="holidayCalendar">
+            <key-map field-name="holidayCategoryId" related="workEffortCategoryId"/></relationship>
+        <relationship type="one-nofk" title="CopiedFrom" related="mantle.humanres.schedule.WorkingSchedule" short-alias="copiedFrom">
+            <key-map field-name="copiedFromScheduleId" related="workingScheduleId"/></relationship>
+        <relationship type="many" related="mantle.humanres.schedule.WorkingScheduleLine" short-alias="lines">
+            <key-map field-name="workingScheduleId"/></relationship>
+        <index name="WRK_SCHED_ORG"><index-field name="organizationPartyId"/></index>
+    </entity>
+    <entity entity-name="WorkingScheduleLine" package="mantle.humanres.schedule" cache="never">
+        <description>A weekly working interval of a schedule from fromDate until thruDate: the ISO day of the week it starts on (1
+            Monday to 7 Sunday), its start and end as local times (HH:mm) in the schedule's zone (an end at or before the start ends
+            the next day, so a night shift crosses midnight) and its unpaid break in minutes. Its hours are the actual instants
+            between start and end less the break, so a shift across a daylight saving change has its true length; it counts on the
+            day it starts. A schedule's lines in effect at the same time never overlap. A change from a date ends the line and
+            starts another, so a past week keeps its hours.</description>
+        <field name="workingScheduleLineId" type="id" is-pk="true"/>
+        <field name="workingScheduleId" type="id"/>
+        <field name="isoDay" type="number-integer"/>
+        <field name="startTime" type="text-short"><description>HH:mm, local in the schedule's zone</description></field>
+        <field name="endTime" type="text-short"><description>HH:mm; at or before startTime, the next day</description></field>
+        <field name="breakMinutes" type="number-integer"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one" related="mantle.humanres.schedule.WorkingSchedule" short-alias="schedule"/>
+        <index name="WRK_SCHED_LINE"><index-field name="workingScheduleId"/></index>
+    </entity>
+    <entity entity-name="ShiftAssignment" package="mantle.humanres.schedule" cache="never">
+        <description>A dated shift of an employment (impl-people P14, design-people §6 ShiftRoster): its start and end instants, the
+            time zone its local times are of and the day it counts on (shiftDate, the local day of its start in that zone), its unpaid
+            break and its work location. A draft is the roster's (its manager's or HR's) until published; a published shift is the
+            worker's, notified to them, read by capacity in place of their schedule's hours that day
+            (mantle.work.ResourceServices.get#PartyCapacity through Schedules.js scheduledDays) and by the My shifts projected calendar;
+            a removed one is cancelled, never deleted. Written only by ScheduleServices (Shifts.js): one person's shifts never
+            overlap, a shift lies within its employment, and none is set over approved leave.</description>
+        <field name="shiftAssignmentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="statusEnumId" type="id" enable-audit-log="update"><description>ShiftAssignmentStatus</description></field>
+        <field name="shiftDate" type="date"><description>The local day of the start in timeZone, the day it counts on</description></field>
+        <field name="startDate" type="date-time" enable-audit-log="update"/>
+        <field name="endDate" type="date-time" enable-audit-log="update"/>
+        <field name="timeZone" type="text-short"><description>An IANA time zone name: the working schedule's, else the roster's
+            user's</description></field>
+        <field name="breakMinutes" type="number-integer"/>
+        <field name="facilityId" type="id"><description>The work location, when it is not the assignment's</description></field>
+        <field name="comments" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <field name="operationKey" type="text-medium"><description>The creating request's key: a retry answers the first</description></field>
+        <relationship type="one" title="ShiftAssignmentStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.facility.Facility" short-alias="facility"/>
+        <index name="SHIFT_PARTY"><index-field name="partyId"/><index-field name="startDate"/></index>
+        <index name="SHIFT_ORG"><index-field name="organizationPartyId"/><index-field name="shiftDate"/></index>
+        <index name="SHIFT_EMPL"><index-field name="partyRelationshipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Shift Assignment Status" enumTypeId="ShiftAssignmentStatus"/>
+            <moqui.basic.Enumeration enumId="ShsDraft" description="Draft" sequenceNum="1" enumTypeId="ShiftAssignmentStatus"/>
+            <moqui.basic.Enumeration enumId="ShsPublished" description="Published" sequenceNum="2" enumTypeId="ShiftAssignmentStatus"/>
+            <moqui.basic.Enumeration enumId="ShsCancelled" description="Removed" sequenceNum="3" enumTypeId="ShiftAssignmentStatus"/>
+        </seed-data>
+    </entity>
+</entities>

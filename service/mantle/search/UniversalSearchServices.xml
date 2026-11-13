@@ -271,6 +271,11 @@ along with this software (see the LICENSE.md file). If not, see
                 keyNames.forEach((name, index) => { key[name] = body[name] != null ? body[name] : idParts[index] })
                 const current = ec.entity.find(document.primaryEntityName).condition(key).one()
                 if (current == null) continue
+                // IronStone People P21: a confidential case, and a message or note filed on one, is never a search result: its text
+                // is kept out of the index (PeopleCases.js documentData), and a hit of an older index is left out here, for everyone
+                if (hit.documentId === 'MantleRequest' && current.requestTypeEnumId === 'RqtHrCase') continue
+                if (hit.documentId === 'MantleCommunicationEvent' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                        .caseEvents([current.communicationEventId])[current.communicationEventId]) continue
                 // an invoice and a payment by their own reads, of their side (a receivable reader does not find a bill), as
                 // get#RecordLinkInfo has them; the organization limit above does not know the side (IronStone Accounting P21,
                 // F431, F438). A dropped hit makes the total the page's and the finance counts the page's (F439).
@@ -287,6 +292,30 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                     if (!readable) { financeDropped = true; continue }
                 }
+                // a ledger transaction of a payroll-origin invoice or payment only for a reader of payroll (People P27, AC-23: its
+                // payrollOrigin mark, PayrollOrigin.js)
+                if (hit.documentId === 'MantleAcctgTrans' && current.payrollOrigin === 'Y' &&
+                        !ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').canRead()) {
+                    financeDropped = true; continue }
+                // a person who is only an applicant only for a recruiter of their application's employer or its panel (People
+                // acceptance, PeopleReviewWalk; Recruiting.js hiddenApplicants): an unowned person is otherwise everyone's hit
+                if (hit.documentId === 'MantleParty' && current.partyTypeEnumId === 'PtyPerson' && ec.resource
+                        .script('component://mr-mantle/service/mantle/humanres/Recruiting.js').hiddenApplicants([current.partyId]).length) continue
+                // a protected People task (offboarding, an equipment return) only for an assignee who is not the person it is
+                // about (impl-people P7 review, F22; People's Checklists.js hiddenTaskIds, as get#RecordLinkInfo has it)
+                // (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds)
+                if (hit.documentId === 'MantleTask' && ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                        .protectedTaskIds([current.workEffortId]).length > 0
+                        && ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
+                            .hiddenTaskIds([current.workEffortId], userPartyId).length > 0) continue
+                // a maintenance work order and its steps only as Maintenance admits them, not to everyone of its organization
+                // (MaintenanceAccess.js workHidden, as get#RecordLinkInfo has it; impl-maintenance F69, P3 review)
+                if (hit.documentId === 'MantleTask' && ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
+                        .workHidden(current.workEffortId, userPartyId)) continue
+                // a reported maintenance problem only for its reporter, its people and Maintenance's (MaintenanceAccess.js
+                // requestHidden, as get#RecordLinkInfo has it; impl-maintenance P4 review)
+                if (hit.documentId === 'MantleRequest' && current.requestTypeEnumId === 'RqtMaintenance' && ec.resource
+                        .script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js').requestHidden(current, userPartyId)) continue
                 if (hit.documentId === 'MantleCommunicationEvent' && boundMailboxes.has(current.contactListId)) {
                     const was = ec.artifactExecution.disableAuthz()
                     try {
@@ -337,8 +366,12 @@ along with this software (see the LICENSE.md file). If not, see
             const finance = ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js').capabilities()
             const bothSides = finance.systemAdmin || finance.admin || finance.reportRead || (finance.arRead && finance.apRead)
             const sidedTypes = ['MantleInvoice', 'MantlePayment'].filter((type) => types.includes(type))
-            const liveTypes = (liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
-                    .concat(financeDropped || !bothSides ? sidedTypes : [])
+            // People P27 review (AC-23): a user without PAYROLL_VIEW, once there are payroll-origin documents, gets the page's counts of
+            // invoices, payments and transactions, so the index's counts never tell the payroll matches
+            const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
+            const payrollTypes = !origin.canRead() && origin.anyMarked() ? ['MantleInvoice', 'MantlePayment', 'MantleAcctgTrans'].filter((type) => types.includes(type)) : []
+            const liveTypes = [...new Set((liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
+                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes))]
             if (liveTypes.length) { total = results.length; totalRelation = 'gte' }
             // facets over the whole authorized match, not the page
             const facetList = facets ?? []

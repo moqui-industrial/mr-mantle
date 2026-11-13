@@ -609,9 +609,10 @@ feature("a case's work done leaves it open (a project's case too); Today leaves 
         const workEffortId = call(R + "make#RequestWorkItem", {requestId: state.projectCase}).workEffortId
         call("mantle.work.TaskServices.set#TaskStatus", {workEffortId, statusId: "WeInProgress"})
         call("mantle.work.TaskServices.set#TaskStatus", {workEffortId, statusId: "WeComplete"})
-        // Today: the assignee's due case is left out, a plain assigned request with a due date stays
-        const plain = request(state.agent, {assignToPartyId: state.agent2, responseRequiredDate: new Date(Date.now() + 3600000)})
-        call("update#" + REQUEST, {requestId: state.case, responseRequiredDate: new Date(Date.now() + 3600000)})
+        // Today: the assignee's due case is left out, a plain assigned request with a due date stays; both are due now,
+        // inside today whatever the hour (an hour on is tomorrow after 23:00), and one already due is still listed
+        const plain = request(state.agent, {assignToPartyId: state.agent2, responseRequiredDate: ec.user.nowTimestamp})
+        call("update#" + REQUEST, {requestId: state.case, responseRequiredDate: ec.user.nowTimestamp})
         const today = call(R + "get#UserTodayRequests", {partyId: state.agent2}).items.map(item => item.requestId)
         // a client contact who filed a case does not see it, and does see a plain request it filed
         const client = user("CLIENT", ["PROJECT_CLIENT"])

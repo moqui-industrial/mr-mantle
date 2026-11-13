@@ -2456,8 +2456,11 @@ along with this software (see the LICENSE.md file). If not, see
                     <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                             in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                 toAddresses:toAddresses, bodyParameters:bodyParameters, toUserId:toUserId}"/>
+                    <!-- the link in a transaction of its own, as send#EmailTemplate stores the message, so a run again of the
+                        tx-commit rule (from its ServiceOutbox row) finds it and does not send a second time -->
                     <script>if (sendOut.emailMessageId) { ec.service.sync().name("create#mantle.shipment.ShipmentEmailMessage")
-                            .parameter("shipmentId", shipmentId).parameter("emailMessageId", sendOut.emailMessageId).disableAuthz().call() }</script>
+                            .parameter("shipmentId", shipmentId).parameter("emailMessageId", sendOut.emailMessageId)
+                            .requireNewTransaction(true).disableAuthz().call() }</script>
                     <set field="sentTo" from="toAddresses"/><message>Email sent to ${sentTo}${sendOut.emailMessageId ? ', message ID ' + sendOut.emailMessageId : ''}</message>
                 </iterate>
             </if>

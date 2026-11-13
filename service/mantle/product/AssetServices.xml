@@ -3230,18 +3230,27 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ==================================== -->
 
     <service verb="replace" noun="AssetPartyAssignment">
+        <description>Ends the role's current holders of the asset other than newPartyId and starts newPartyId in the role, both at
+            effectiveDate (now when not given). Checks no permission or scope: a caller checks them first (Maintenance's
+            change#MaintenanceCustody, People's return#Equipment). effectiveDate is now or earlier, a later one refused
+            (DATE_FUTURE), since the end of a holding completes its return task when written (impl-maintenance F61).</description>
         <in-parameters>
             <parameter name="assetId" required="true"/>
             <parameter name="roleTypeId" required="true"/>
             <parameter name="newPartyId" required="true"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
         </in-parameters>
         <actions>
+            <if condition="!effectiveDate"><set field="effectiveDate" from="ec.user.nowTimestamp"/></if>
+            <!-- never later than now (a minute's clock skew allowed): the service is on the /mantle REST asset path too -->
+            <if condition="Number(effectiveDate) &gt; Number(ec.user.nowTimestamp) + 60000">
+                <return error="true" message="DATE_FUTURE: A custody change takes effect now or earlier"/></if>
             <entity-find entity-name="mantle.product.asset.AssetPartyAssignment" list="apaList">
                 <date-filter/><econdition field-name="assetId"/><econdition field-name="roleTypeId"/></entity-find>
             <set field="foundExisting" from="false"/>
             <iterate list="apaList" entry="apaValue">
                 <if condition="apaValue.partyId != newPartyId"><then>
-                    <set field="apaValue.thruDate" from="ec.user.nowTimestamp"/>
+                    <set field="apaValue.thruDate" from="effectiveDate"/>
                     <entity-update value-field="apaValue"/>
                 </then><else>
                     <set field="foundExisting" from="true"/>
@@ -3249,7 +3258,7 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
             <if condition="!foundExisting">
                 <service-call name="create#mantle.product.asset.AssetPartyAssignment" in-map="{assetId:assetId,
-                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:ec.user.nowTimestamp}"/>
+                    partyId:newPartyId, roleTypeId:roleTypeId, fromDate:effectiveDate}"/>
             </if>
         </actions>
     </service>

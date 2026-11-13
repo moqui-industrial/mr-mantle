@@ -64,7 +64,34 @@ function approved(p, ids) {
               ).map(row => row.timesheetId)
           )
         : new Set()
-    return list.filter(row => approvedIds.has(row.timesheetId))
+    const ready = list.filter(row => approvedIds.has(row.timesheetId))
+    if (p.direction !== "payable" || !ready.length) return ready
+    // a worker invoice and payroll never both take a time entry (impl-people P24, F44): time a pay input consumed is payroll's
+    const consumed = new Set(
+        Array.from(
+            call("mantle.humanres.PayrollInputServices.check#SourceUse", {
+                sourceEntityName: "mantle.work.time.TimeEntry",
+                sourceIdList: ready.map(row => row.timeEntryId)
+            }).consumedIdList || []
+        )
+    )
+    const unconsumed = consumed.size ? ready.filter(row => !consumed.has(row.timeEntryId)) : ready
+    if (!unconsumed.length) return unconsumed
+    // worker invoices are for contractors (the user's call of Nov 12, 2026): the time of an employee of the organization (on the
+    // entry's date or now) is payroll's, left out of the payable list as create#TimeEntryInvoiceItems refuses it (EMPLOYEE_TIME)
+    const employees = new Set(
+        Array.from(
+            call("mantle.humanres.EmploymentServices.get#PayRateAccess", {
+                organizationPartyId: p.organizationPartyId,
+                entryList: unconsumed.map(row => ({
+                    key: row.timeEntryId,
+                    partyId: row.partyId,
+                    date: row.fromDate ?? row.thruDate
+                }))
+            }).employeeKeys || []
+        ).map(String)
+    )
+    return employees.size ? unconsumed.filter(row => !employees.has(String(row.timeEntryId))) : unconsumed
 }
 function expenses(p, ids) {
     if (!ids.length || p.direction === "payable") return []

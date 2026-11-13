@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Preventive generation (IronStone Maintenance design §5.1, DueMaintenance, §1.2 notification topics; impl-maintenance P14):
+        the MaintenanceDue topic and the registrations of the generate_MaintenanceWorkOrders job (data/MaintenancePlanSetupData.xml)
+        for Admin's Jobs, Topics and recovery (owner contracts, impl-maintenance F52, F117), as the framework registers its own
+        message jobs (framework data/AdminConfigurationData.xml). Each ownerRoute is a key of mr-boss's Admin mount
+        (service/ironstone/admin/Admin.js mountRoutes: maintenanceDue, Maintenance's due list). -->
+
+    <!-- MaintenanceDue: preventive work made from a plan, told to the organization's maintenance planners (the one who made it
+        is not told). Its title names the plan, the due date and the work order, never a cost; an app sets its link. Its audience
+        is who plans maintenance work. -->
+    <moqui.security.user.NotificationTopic topic="MaintenanceDue" inboxEnumId="NinNotifications" description="Preventive work made from a plan"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Preventive work order ${workEffortId} made: ${scheduleName}${dueText ? ', due ' + dueText : ''}"/>
+    <moqui.server.TopicRegistration topic="MaintenanceDue" ownerApp="Maintenance" purpose="Preventive work made from a maintenance plan"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MAINTENANCE_PLAN" sequenceNum="11"/>
+
+    <!-- The job: its schedule, pause, priority and wait after an error, and its batch size, changed by an operations manager who
+        also holds MAINTENANCE_SETTINGS_EDIT; a recipient of its notification holds MAINTENANCE_SETTINGS_EDIT too (a run's
+        results and errors name plans). A run outside the schedule is safe to repeat: an obligation is generated once (its key is
+        unique) and a plan has at most one unresolved execution. -->
+    <moqui.server.JobRegistration jobName="generate_MaintenanceWorkOrders" ownerApp="Maintenance" title="Make preventive maintenance work"
+            description="Makes the work orders of the active preventive plans whose next obligation is due, each plan on its own"
+            managePermission="MAINTENANCE_SETTINGS_EDIT" scheduleEditable="Y" minIntervalMinutes="60" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="MAINTENANCE_SETTINGS_EDIT" ownerRoute="maintenanceDue"
+            sequenceNum="40"/>
+    <moqui.server.JobParameterDefinition jobName="generate_MaintenanceWorkOrders" parameterName="batchSize"
+            title="Plans taken per batch" description="Each plan is its own transaction; a run takes at most 5000 plans"
+            valueType="integer" minValue="1" maxValue="1000" sequenceNum="1"/>
+    <moqui.server.RecoveryDescriptor descriptorKey="maintenanceGenerationJob" title="Make preventive maintenance work" ownerApp="Maintenance"
+            targetKind="ServiceJob" targetKey="generate_MaintenanceWorkOrders" retryMode="native"
+            managePermission="MAINTENANCE_SETTINGS_EDIT" ownerRoute="maintenanceDue"
+            idempotencyNote="An obligation of a plan is generated once (its key is unique) and a plan has at most one open execution, so a run again makes only what is due and not yet made."
+            sequenceNum="40"/>
+</entity-facade-xml>

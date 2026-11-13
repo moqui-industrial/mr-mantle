@@ -686,7 +686,7 @@ function close(p) {
         op = lib.lib.operation(p, "PeriodClose", s.organizationPartyId, {timePeriodId: p.timePeriodId})
         if (op.old) return lib.lib.previous(op)
     }
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     const c = periodScope(p, "fiscalClose", true)
     if (c.period.isClosed === "Y") denied("PERIOD_CLOSED", "The period is already closed")
     const checkRows = checklistRows(c)
@@ -769,6 +769,8 @@ function close(p) {
     })
     const answer = {closeRunId: run.closeRunId, closingAcctgTransIdList: closingIds, summaryAccountCount: own.accountCount}
     if (op) lib.lib.complete(op, "mantle.ledger.transaction.AccountingCloseRun", run.closeRunId, answer)
+    // the close as a marker on the organization's time series, after the commit (BusinessEvents.js)
+    ec.resource.script("component://mr-mantle/service/mantle/party/BusinessEvents.js").register("PeriodClosed", run.closeRunId)
     return answer
 }
 
@@ -777,7 +779,7 @@ function close(p) {
 function reopen(p) {
     const s = lib.organization(p, "fiscalReopen")
     const reason = lib.reason(p)
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     const c = periodScope(p, "fiscalReopen", true)
     if (c.period.isClosed !== "Y") denied("PERIOD_OPEN", "The period is not closed")
     call("mantle.ledger.LedgerServices.reopen#FinancialTimePeriod", {timePeriodId: c.period.timePeriodId})

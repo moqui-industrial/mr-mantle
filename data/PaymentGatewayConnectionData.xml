@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Mantle's connection kinds for delegated connection administration (mr-boss plan/design-admin.md §8.1, §14; impl-admin P11):
+    the gateway configurations as kinds of the framework's connection registry, each through
+    mantle.account.GatewayConnectionServices.run#GatewayConnectionAdapter, the Mantle records that use a framework connection,
+    and who may call store#PaymentGatewayOrganization. Named to load after MantleSetupData.xml, whose entity filter sets the grants name. -->
+<entity-facade-xml type="seed">
+    <moqui.server.ConnectionAdapter adapterKey="paymentGateway" title="Payment gateway" adapterGroup="integration" creatable="Y"
+            organizationBinding="Y" sequenceNum="10" description="A payment provider's configuration and connection (PaymentGatewayConfig)"
+            adapterServiceName="mantle.account.GatewayConnectionServices.run#GatewayConnectionAdapter"/>
+    <moqui.server.ConnectionAdapter adapterKey="shippingGateway" title="Shipping gateway" adapterGroup="integration" creatable="Y"
+            sequenceNum="20" description="A carrier or label provider's configuration and connection (ShippingGatewayConfig)"
+            adapterServiceName="mantle.account.GatewayConnectionServices.run#GatewayConnectionAdapter"/>
+    <moqui.server.ConnectionAdapter adapterKey="taxGateway" title="Tax gateway" adapterGroup="integration" creatable="N"
+            sequenceNum="30" description="A sales tax calculation (TaxGatewayConfig)"
+            adapterServiceName="mantle.account.GatewayConnectionServices.run#GatewayConnectionAdapter"/>
+    <moqui.server.ConnectionConsumerProvider providerKey="MantleRemoteGateways" adapterKey="remote" sequenceNum="10"
+            serviceName="mantle.account.GatewayConnectionServices.find#RemoteConsumers"/>
+    <moqui.server.ConnectionConsumerProvider providerKey="MantleFacilityPrinters" adapterKey="printer" sequenceNum="10"
+            serviceName="mantle.account.GatewayConnectionServices.find#PrinterConsumers"/>
+
+    <!-- store#PaymentGatewayOrganization for every signed-in user: it refuses without ADMIN_CONNECTION_MANAGE and outside the
+        organizations the caller administers, which are the organization entity filters of the authorization the call runs
+        under, as mantle.party.IdentityServices (PartyAccessData.xml): an app screen's grant lends its own, this one carries
+        MANTLE_USER_ORG where no screen grant covers the call, and ADMIN's MANTLE_ACTIVE_ORG. The adapter and consumer
+        services are named in no grant: they are reached through the framework's connection services only. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleGatewayOrganizationServices" description="Mantle payment gateway organization bindings"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleGatewayOrganizationServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.account.GatewayConnectionServices.store#PaymentGatewayOrganization"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleGatewayOrgServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleGatewayOrganizationServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="MantleGatewayOrgServicesALL" entityFilterSetId="MANTLE_USER_ORG"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleGatewayOrgServicesADMIN" userGroupId="ADMIN"
+            artifactGroupId="MantleGatewayOrganizationServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
+    <moqui.security.ArtifactAuthzFilter artifactAuthzId="MantleGatewayOrgServicesADMIN" entityFilterSetId="MANTLE_ACTIVE_ORG"/>
+</entity-facade-xml>

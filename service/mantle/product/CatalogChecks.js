@@ -425,12 +425,13 @@ function validate(p) {
                 })
             }
         }
+    const shown = p.severity ? issues.filter(r => r.severity === p.severity) : issues
     return {
-        issueRows: issues,
+        issueRows: shown,
         checkedCount: productRows.length,
-        issueCount: issues.length,
-        incompleteCount: new Set(issues.filter(r => r.severity === "error" && r.productId).map(r => r.productId)).size,
-        missingPriceCount: new Set(issues.filter(r => r.checkId === "prices" && r.severity === "warning").map(r => r.productId))
+        issueCount: shown.length,
+        incompleteCount: new Set(shown.filter(r => r.severity === "error" && r.productId).map(r => r.productId)).size,
+        missingPriceCount: new Set(shown.filter(r => r.checkId === "prices" && r.severity === "warning").map(r => r.productId))
             .size,
         valid: !issues.some(r => r.severity === "error"),
         checkOptions: allowed,

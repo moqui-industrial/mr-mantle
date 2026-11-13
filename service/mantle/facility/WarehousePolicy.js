@@ -351,7 +351,7 @@ function storeDated(p, type) {
         if (!g.canManage) denied("POLICY_MANAGE_REQUIRED", "Warehouse manager authority is required")
         if (g.productId !== "_NA_") denied("POLICY_INVALID", "This policy is set for an organization or a facility")
     }
-    find("mantle.party.Party", {partyId: g.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: g.organizationPartyId}).forNoKeyUpdate(true).one()
     const key = {organizationPartyId: g.organizationPartyId, facilityId: g.facilityId, productId: g.productId, policyType: type},
         all = rows(W, key).sort((a, b) => ms(a.fromDate) - ms(b.fromDate)),
         old = all.find(r => current(r, now)),

@@ -40,7 +40,13 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="priority"/><order-by field-name="workEffortId"/>
             </entity-find>
             <set field="projectNames" from="{}"/>
+            <!-- a protected People task (offboarding, an equipment return; ChecklistStep isProtected) stays in the app, as CalDAV
+                leaves it out (impl-people P7 review, F22) -->
+            <!-- (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds) -->
+            <set field="protectedIds" from="assignedList.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                    .protectedTaskIds(Array.from(assignedList).map((row) => row.workEffortId)) : []"/>
             <iterate list="assignedList" entry="assigned">
+                <if condition="protectedIds.includes(assigned.workEffortId)"><continue/></if>
                 <if condition="taskList.some((task) => task.workEffortId == assigned.workEffortId)"><continue/></if>
                 <if condition="assigned.rootWorkEffortId &amp;&amp; projectNames[assigned.rootWorkEffortId] == null">
                     <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="project">
@@ -112,7 +118,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <select-field field-name="estimatedStartDate,estimatedCompletionDate,estimatedWorkTime,estimatedWorkDuration"/>
             </entity-find>
 
+            <!-- a protected People task stays out of a calendar (impl-people P7 review, F22) -->
+            <!-- (P21: a task linked to a confidential case too, PeopleCases.js protectedTaskIds) -->
+            <set field="protectedIds" from="workEffortList.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js')
+                    .protectedTaskIds(Array.from(workEffortList).map((row) => row.workEffortId)) : []"/>
             <iterate list="workEffortList" entry="workEffortDef">
+                <if condition="protectedIds.includes(workEffortDef.workEffortId)"><continue/></if>
                 <set field="workEffort" from="workEffortDef"/><!-- put it in the context -->
                 <set field="title" from="ec.resource.expand(titleGString, '')"/>
 
@@ -132,7 +143,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="Task">
-        <description>Create a Task in a Project.</description>
+        <description>Create a Task in a Project. Its parent, when given, is a task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
             <parameter name="rootWorkEffortId"><description>The ID of the Project</description></parameter>
@@ -161,6 +172,19 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- no task added to managed work (a process whose policy guards execution, a work order's tree; impl-people P7 review) -->
+            <if condition="parentWorkEffortId || rootWorkEffortId">
+                <service-call name="mantle.work.ProcessServices.check#ManagedWork"
+                        in-map="{workEffortIdList:[parentWorkEffortId, rootWorkEffortId].filter((id) => !!id)}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <if condition="!workEffortId &amp;&amp; rootWorkEffortId">
                 <!-- a bank of 1: the numbers have no gaps (create#Project starts them at 1) -->
                 <set field="seqName" value="Project_${rootWorkEffortId}"/>
@@ -179,6 +203,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="SimpleTask">
+        <description>Create a task outside a project. Its parent, when given, is a task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
             <parameter name="workEffortName" required="true"/>
@@ -201,6 +226,13 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <service-call name="create#mantle.work.effort.WorkEffort" out-map="context" in-map="Object.assign({}, context, {workEffortTypeEnumId:'WetTask'})"/>
             <if condition="assignToPartyId">
                 <service-call name="create#mantle.work.effort.WorkEffortParty" in-map="{workEffortId:workEffortId, partyId:assignToPartyId,
@@ -213,7 +245,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Updates a task. A new rootWorkEffortId moves it to that project with its sub-tasks (the whole subtree takes
             the new project, design-projects.md §5 "The work item tree"): its parent stays only when it is in the new project
             (else it becomes a top-level task there; a parentWorkEffortId given with it must be in the new project), and the
-            memberships of the subtree in the old project's milestones, releases, sprints and components end.</description>
+            memberships of the subtree in the old project's milestones, releases, sprints and components end. A parent given is a
+            task (PARENT_NOT_TASK).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
@@ -225,6 +258,15 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <!-- a task's parent is a task (impl-people follow-up 2: never a goal, an event, a project or a milestone) -->
+            <if condition="parentWorkEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="parentTask" disable-authz="true">
+                    <field-map field-name="workEffortId" from="parentWorkEffortId"/></entity-find-one>
+                <if condition="parentTask?.workEffortTypeEnumId != 'WetTask'">
+                    <return error="true" message="PARENT_NOT_TASK: ${parentWorkEffortId} is not a task, so no task goes under it"/></if>
+            </if>
             <set field="movedProject" from="false"/>
             <if condition="rootWorkEffortId">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="before"/>
@@ -482,6 +524,10 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen"
                     in-map="{workEffortId:workEffortId, targetWorkEffortId:toWorkEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a procedure and its steps) keeps its own
+                dependencies and time; its own services change them -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortIdList:[workEffortId, toWorkEffortId]}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             created = false
             const L = (text, values) => ec.resource.expand(ec.l10n.localize(text), '', values || {})
@@ -539,6 +585,10 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <!-- impl-maintenance P6 (F110): managed work (a work order's tree, a procedure and its steps) keeps its own
+                dependencies and time; its own services change them -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortIdList:[workEffortId, toWorkEffortId]}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             removed = false
             for (const row of ec.entity.find('mantle.work.effort.WorkEffortAssoc').condition('workEffortId', workEffortId).condition('toWorkEffortId', toWorkEffortId)
@@ -580,6 +630,8 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             movedList = []
@@ -767,6 +819,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.TaskServices.get#TaskStatusFlow" in-map="{workEffortId:workEffortId}" out-map="flow"/>
             <if condition="ec.message.hasError()"><return/></if>
             <set field="oldStatusId" from="flow.statusId"/>
@@ -814,6 +868,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="oldParentWorkEffortId"/><parameter name="sequenceNum" type="Long"/></out-parameters>
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
+            <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             const find = (id) => id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one() : null
@@ -1054,6 +1110,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
             const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
             if (task == null || task.workEffortTypeEnumId !== 'WetTask') { ec.message.addError(ec.resource.expand('Task ${workEffortId} not found', '', {workEffortId})); return }
@@ -1099,6 +1157,9 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
         <out-parameters><parameter name="newWorkEffortId"/></out-parameters>
         <actions>
+            <!-- a work effort of another type (an event, a goal) is passed over before the planning guard, which refuses a goal -->
+            <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="completed"/>
+            <if condition="completed?.workEffortTypeEnumId != 'WetTask'"><return/></if>
             <service-call name="mantle.work.WorkEffortServices.check#WorkEffortOpen" in-map="context"/>
             <if condition="ec.message.hasError()"><return/></if>
             <script><![CDATA[
@@ -1207,7 +1268,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Tells the users of a party newly assigned to a task of a project (WorkEffortParty Assignee, not by
             themselves) on the topic WorkItemAssigned: workEffortId, workEffortName, rootWorkEffortId, projectName, assignedByName,
             and the task as the record (the app's record link opens it). Run by the WorkEffortParty rule of WorkEffort.secas.xml;
-            a failure is logged, not the assignment's.</description>
+            a failure is logged, not the assignment's. A task of People's lifecycle work (its root's process policy People's, WppPeopleChecklist) goes to
+            mantle.humanres.PeopleServices.notify#PeopleTaskAssigned instead, whose title names nothing private. Managed work (a
+            maintenance work order's steps) is not told here: Maintenance tells its assignees on MaintenanceWork.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="partyId" required="true"/>
@@ -1216,6 +1279,16 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).one()
                 if (task == null || task.workEffortTypeEnumId !== 'WetTask' || !task.rootWorkEffortId) return
+                // managed work (a maintenance work order's steps) is told on its app's own topic (MaintenanceWork), not twice
+                if (ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').managedIds([workEffortId]).length) return
+                // People's lifecycle work (a checklist step, an equipment return) is told on its own topic, whose title names
+                // neither the task nor its root, which name the person and the change (impl-people P8)
+                if (ec.entity.find('mantle.work.effort.WorkEffortProcessPolicy').condition('workEffortId', task.rootWorkEffortId)
+                        .condition('processPolicyEnumId', 'WppPeopleChecklist').disableAuthz().count() > 0) {
+                    ec.service.sync().name('mantle.humanres.PeopleServices.notify#PeopleTaskAssigned')
+                            .parameters({workEffortId: workEffortId, partyId: partyId}).disableAuthz().call()
+                    return
+                }
                 const userIds = Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).selectField('userId')
                         .disableAuthz().list()).map((account) => account.userId).filter((userId) => userId !== ec.user.userId)
                 if (!userIds.length) return
@@ -1305,6 +1378,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId" default="ec.user.userAccount.partyId"/>
         </in-parameters>
         <actions>
+            <!-- impl-maintenance P6 (F110): this generic path (also on the /mantle REST API) takes no time on managed work: a work
+                order's time is recorded through MaintenanceServices' own entry points (F66), and a template takes none -->
+            <service-call name="mantle.work.ProcessServices.check#ManagedWork" in-map="{workEffortId:workEffortId}"/>
+            <if condition="ec.message.hasError()"><return/></if>
             <service-call name="mantle.work.TimeServices.store#TimeEntry" in-map="context" out-map="context"/>
         </actions>
     </service>

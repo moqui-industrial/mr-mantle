@@ -2,8 +2,8 @@
 // check#RecordNoteAccess, delete#CommunicationEventRows; mantle.request.RequestServices update#RequestComment,
 // delete#RequestComment): the author changes a note, which is marked edited and notifies only the users newly mentioned;
 // another user may not change it; a user in the ADMIN group deletes another's note; a note with replies and a message
-// are refused. The Mantle side of IronStone Chatter's edit and delete. New spec, no
-// Groovy original.
+// are refused. The Mantle side of IronStone Chatter's edit and delete. The notices of a note on a confidential record type
+// (ConfidentialRecordType) go to their named users alone. New spec, no Groovy original.
 function errorOf(name, params) {
     try { call(name, params) } catch (e) { ec.message.clearErrors(); return String(e.message) }
     return null
@@ -196,5 +196,39 @@ feature("a request comment: its author changes and deletes it through update#Req
         joins == 0
         note.deleted
         noteGone
+    },
+})
+
+// The user's call of Nov 12, 2026 (People follow-up 1): the notices of a note on a confidential record type
+// (ConfidentialRecordType: IronStone People's employment, application and qualification) go to the users told alone, so a
+// subscriber to every message of ChatterMention or RecordFollow (john.doe of the ADMIN group, as Tools sets it) receives none;
+// a note on another app's record (a Projects work effort) still reaches the subscriber
+feature("a mention or a follower notice of an employment note goes to its named users alone; one of a project note reaches a subscriber to every message", {
+    when() {
+        at(11)
+        const EMPLOYMENT = "mantle.humanres.employment.Employment"
+        const subscriptions = ["ChatterMention", "RecordFollow"].map((topic) => ({ topic, userId: "EX_JOHN_DOE" }))
+        for (const subscription of subscriptions)
+            ec.entity.makeValue("moqui.security.user.NotificationTopicUser").setAll(subscription).set("allNotifications", "Y").create()
+        call("create#mantle.party.communication.RecordFollower", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", userId: miaUserId,
+                notifyNotes: "Y", fromDate: ec.user.nowTimestamp })
+        const told = (name, params) => Array.from(call(`mantle.party.CommunicationServices.${name}`, Object.assign({ authorUserId: JOE,
+                body: "<p>About the review</p>" }, params)).notifiedUserIds || []).slice().sort().join()
+        try {
+            return {
+                employmentMention: told("notify#RecordMention", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", mentionUserIds: [miaUserId] }),
+                employmentFollow: told("notify#RecordFollowers", { recordEntityName: EMPLOYMENT, recordId: "RN-EMP1", kind: "notes" }),
+                projectMention: told("notify#RecordMention", { recordEntityName: WORK, recordId: "RN-T1", mentionUserIds: [miaUserId] }),
+                confidential: call("mantle.party.CommunicationServices.check#ConfidentialRecordType", { recordEntityName: "Employment" }).confidential,
+            }
+        } finally {
+            for (const subscription of subscriptions) ec.entity.find("moqui.security.user.NotificationTopicUser").condition(subscription).deleteAll()
+        }
+    },
+    then({ employmentMention, employmentFollow, projectMention, confidential }) {
+        employmentMention == miaUserId
+        employmentFollow == miaUserId
+        projectMention == ["EX_JOHN_DOE", miaUserId].sort().join()
+        confidential == true
     },
 })

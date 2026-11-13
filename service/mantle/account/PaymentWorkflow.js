@@ -100,6 +100,11 @@ function query(scope, kind, filters = {}) {
         )
         .condition(invoice ? "currencyUomId" : "amountUomId", scope.currencyUomId)
     q = privateQuery(q)
+    // People P27 review (AC-23): a payroll-origin invoice or payment (its payrollOrigin mark) is no open item, nor a linked record
+    // a payment's detail shows, for a user without PAYROLL_VIEW (PayrollOrigin.js)
+    const origin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
+    const originCondition = invoice ? origin.invoiceCondition() : origin.paymentCondition()
+    if (originCondition) q = q.condition(originCondition)
     if (invoice) q = q.condition("invoiceTypeEnumId", kind === "credit" ? "equals" : "not-equals", "InvoiceCreditMemo")
     else {
         const sourceField = scope.direction === "receivable" ? "toPartyId" : "fromPartyId"
@@ -449,6 +454,9 @@ function paymentQuery(scope, p = {}) {
         if (has("PAYABLE_VIEW")) sides.push(sideCondition(org, "payable"))
         q = q.condition(cf.makeCondition(sides, "or")).condition("paymentTypeEnumId", "not-equals", "PtInternalTransfer")
     }
+    // People P27 (AC-23): a payroll payment is a reader of payroll's, in every list and the detail this query authorizes
+    const payrollOrigin = ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").paymentCondition()
+    if (payrollOrigin) q = q.condition(payrollOrigin)
     const queue = p.queue || "all"
     if (!["all", "incoming", "outgoing", "toValidate", "unapplied", "refunds", "transfers"].includes(queue))
         denied("PAYMENT_QUEUE_INVALID", "Choose a payment queue")

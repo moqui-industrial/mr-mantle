@@ -1,0 +1,695 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's skills and qualifications (IronStone People design §10 SkillsMatrix and Qualifications, §4 Employee360
+    SkillsAndReviews, §16.2, PE-14, PE-01; impl-people P18; Development.js): a person's skill levels with each self-declaration and
+    evaluation kept, their qualifications (degrees, certificates, licences, identity documents and work permits) submitted and
+    verified by someone other than the person, renewed by a new row, with files on their own content host, and their resume
+    lines; the job classes' and work efforts' requirements they are checked against. Each service checks the caller's People
+    scope (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application
+    group. The levels of what a reader sees of a person: the person and HR of an employer of theirs everything (an identity
+    document's or work permit's reference and the files theirs alone); development every field but those references; a manager
+    and other staff readers the verified qualifications' validity only. check#Qualifications is the staffing answer (Maintenance's
+    technician assignment reads it, and Projects and Manufacturing may): qualified, expiring, missing or expired per requirement,
+    never a reference, issuer or file. P19's training (Training.js): courses, sessions (WepTraining events of Commons' calendar),
+    places asked for and approved (PeopleTrainingApproval) or made by development, attendance, assessments (a response of a
+    training assessment form) and the completion that grants a qualification once and issues its certificate. P20's reviews and
+    goals are ReviewServices (Reviews.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ===== qualifications ===== -->
+    <service verb="find" noun="Qualifications" allow-remote="false">
+        <description>The qualifications the caller reads, each as their level of projection shows it: the caller's own (mine, with
+            PEOPLE_SELF_SERVICE), one person's (partyId), one qualification (partyQualificationId), or those of everyone the
+            caller's scope reaches (a staff reader's employers' current employees, organizationPartyId narrowing them; a manager's
+            live reports). The person and HR of an employer of theirs read every field (the reference of an identity document or
+            work permit theirs alone); development every field but those references; a manager and other staff readers only
+            verified qualifications, as their type, dates and validity. show: all, waiting (submitted, not decided), valid,
+            expiring (verified, expiring within thirty days), expired, attention (verified and expiring or expired, not renewed by
+            a later verified one); qualificationTypeEnumId narrows to a type and those under it, term to the people named. Paged,
+            with an export (pageNoLimit). Refuses a caller who reads no one (PERMISSION_DENIED), a person or qualification not in
+            scope (RECORD_UNAVAILABLE), an employer outside it (ORGANIZATION_DENIED) and a show that is not one (SHOW_INVALID).</description>
+        <in-parameters>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="partyQualificationId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="show"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="qualifications" type="List"><description>partyQualificationId, partyId, personName,
+                qualificationTypeEnumId, typeText, restricted, fromDateText, thruDateText, verificationStatusId, verificationText,
+                validity and validityText (verified ones), canVerify, canChange, canReadFiles, revision; for the person, HR and
+                development also title, issuerName, referenceNumber (null where not theirs to read), submittedDateText,
+                verifiedDateText, decisionReason, comments, renewsQualificationId</description></parameter>
+            <parameter name="qualificationsCount" type="Integer"/>
+            <parameter name="qualificationsPageIndex" type="Integer"/>
+            <parameter name="qualificationsPageSize" type="Integer"/>
+            <parameter name="qualificationsPageMaxIndex" type="Integer"/>
+            <parameter name="qualificationsPageRangeLow" type="Integer"/>
+            <parameter name="qualificationsPageRangeHigh" type="Integer"/>
+            <parameter name="canSubmit" type="Boolean"><description>Whether the caller submits their own</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('findQualifications', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Qualification" allow-remote="false">
+        <description>A qualification submitted (partyId, the caller's own when empty), or one waiting or rejected changed and
+            submitted again (partyQualificationId, at the revision read): its type, title, issuer, reference, issued and expiry
+            dates and comments, and the earlier qualification it renews; it waits for verification. Submitted by the person, an HR
+            editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer of theirs, or a development editor (PEOPLE_DEVELOP_VIEW and
+            PEOPLE_DEVELOP_EDIT) for a type that is not an identity document or work permit. Refuses a person or qualification not
+            in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no type, not one or ended (TYPE_REQUIRED,
+            TYPE_INVALID, VALUE_ENDED), an identity document or work permit with no expiry (EXPIRY_REQUIRED), an expiry not after
+            the issue (DATES_INVALID), a renewal of another person's or kind's (RENEWAL_INVALID), a change of a verified or revoked
+            one, which is renewed instead (QUALIFICATION_DECIDED), and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="partyId"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="title"/>
+            <parameter name="issuerName"/>
+            <parameter name="referenceNumber"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="renewsQualificationId"/>
+            <parameter name="comments"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeQualification', context)"/>
+            <set field="partyQualificationId" from="stored.partyQualificationId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="verify" noun="Qualification" allow-remote="false">
+        <description>A waiting qualification verified (decision verify) or rejected (reject), or a verified one revoked (revoke),
+            at the revision read; the state is audit-logged with the reason. A verifier is an HR editor of an employer of the
+            person, or a development editor for a type that is not an identity document or work permit, and never the person.
+            Refuses one not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), the caller's own (SELF_APPROVAL), a
+            decision that is not one (DECISION_INVALID), verifying or rejecting one not waiting (NOT_PENDING), revoking one not
+            verified (NOT_VERIFIED), a rejection or revocation with no reason (REASON_REQUIRED) and a revision other than the one
+            read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="decision"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyQualificationId"/>
+            <parameter name="verificationStatusId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('verifyQualification', context)"/>
+            <set field="verificationStatusId" from="decided.verificationStatusId"/>
+            <set field="revision" from="decided.revision"/>
+        </actions>
+    </service>
+
+    <!-- the qualification's content host (PE-01; impl-people P18, as P2's employment host and F66) -->
+    <service verb="check" noun="QualificationAccess" allow-remote="false">
+        <description>Whether the caller reads a qualification's files: the person and an HR reader (PEOPLE_HR_VIEW) of an employer
+            of theirs in scope; canEdit for an HR editor of another person's, and for the person while it waits or was rejected.
+            Never refuses: a qualification that is not one, or not the caller's to read, answers recordVisible false, and so does a
+            call with no user. get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="partyQualificationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('qualificationAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+        </actions>
+    </service>
+    <service verb="create" noun="QualificationContent">
+        <description>A file of a qualification (PartyQualificationContent, the record files of get#RecordLinkInfo): the row, and
+            the uploaded file saved through save#QualificationContentFile. Needs the person while it waits or was rejected, or an HR
+            editor of an employer of theirs (check#QualificationAccess: RECORD_UNAVAILABLE outside the scope, PERMISSION_DENIED
+            otherwise).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.ability.PartyQualificationContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyQualificationContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.ability.PartyQualificationContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.DevelopmentServices.save#QualificationContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="QualificationContentFile" allow-remote="false">
+        <description>Internal to create#QualificationContent, which checks the caller: the file of a PartyQualificationContent row
+            of that qualification.</description>
+        <in-parameters>
+            <parameter name="partyQualificationContentId" required="true"/>
+            <parameter name="partyQualificationId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.ability.PartyQualificationContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.partyQualificationId != partyQualificationId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${partyQualificationContentId} is not of qualification ${partyQualificationId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/qualification/${partyQualificationId}/content_${partyQualificationContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.ability.PartyQualificationContent" disable-authz="true"
+                    in-map="{partyQualificationContentId:partyQualificationContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <!-- ===== the staffing check ===== -->
+    <service verb="check" noun="Qualifications" allow-remote="false">
+        <description>Whether people meet requirements at a date (asOfDate, the planned work date; now when empty): those of a job
+            class (emplPositionClassId), a work effort's skill standards (workEffortId, their minimumSkillLevel), or one skill
+            (skillTypeEnumId, minimumLevel) and qualification type (qualificationTypeEnumId); with none named, each person's own
+            job class's. For each person (partyIdList or partyId, up to 500) each requirement is qualified, expiring (a verified
+            qualification expiring within thirty days), missing or expired, with the reason in words ("Self-declared only",
+            "Waiting for verification", "Expired 2026-10-01", a level below the least), and the person's state is the worst of
+            the required ones. A self-declared level and an unverified, rejected or revoked qualification meet nothing. The
+            staffing projection, the same for every caller: never a reference, issuer, title, decision reason or file. A person
+            the caller's People scope does not admit answers state unavailable and nothing else; a caller with no People reach is
+            refused (PERMISSION_DENIED), and a job class that is not one (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="partyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="minimumLevel"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="asOfDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>partyId, personName, state, stateText, requirements: [{skillTypeEnumId,
+                skillName, minimumLevel, minimumLevelText, qualificationTypeEnumId, qualificationTypeName, required, state, stateText,
+                explanation, validThruText}]</description></parameter>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('checkQualifications', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <!-- ===== skills ===== -->
+    <service verb="store" noun="Skill" allow-remote="false">
+        <description>A person's level of a skill (skillLevel, a SkillLevel value's number) as a self-declaration (the person,
+            PEOPLE_SELF_SERVICE; the caller's own skill is always one) or an evaluation (a development editor, PEOPLE_DEVELOP_EDIT,
+            reading the person as a development reader of an employer of theirs or as their manager; or, the user's call of Nov 12,
+            2026, a manager of a live reporting line without PEOPLE_DEVELOP_EDIT, recorded as the manager's evaluation,
+            SksManagerEvaluated, which meets a requirement as an evaluation does), with its date (now when empty, never later),
+            evidence and a qualification of the person it rests on; each kept as a PartySkillEvaluation, the caller its assessor.
+            PartySkill takes an evaluation, and a self-declaration only where no evaluation or earlier recorded level has set it
+            (accepted says which). Refuses a person not in scope (RECORD_UNAVAILABLE), another caller (PERMISSION_DENIED), no skill, not one or
+            ended (SKILL_REQUIRED, SKILL_INVALID, VALUE_ENDED), a level that is not a current one (LEVEL_INVALID), a date after now
+            (DATE_INVALID), evidence that is not the person's (QUALIFICATION_INVALID) and a revision other than the one read
+            (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="skillLevel"/>
+            <parameter name="evaluationDate" type="Timestamp"/>
+            <parameter name="evidence"/>
+            <parameter name="partyQualificationId"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partySkillEvaluationId"/>
+            <parameter name="accepted" type="Boolean"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeSkill', context)"/>
+            <set field="partySkillEvaluationId" from="stored.partySkillEvaluationId"/>
+            <set field="accepted" from="stored.accepted"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SkillsMatrix" allow-remote="false">
+        <description>People by skill: the requirements of a job class (emplPositionClassId), else one skill (skillTypeEnumId), else
+            the requirements of the page's people's job classes and the skills they hold, as columns; each cell the person's level
+            (self-declared labelled so) and whether it meets the person's requirement (met, gap, held, none), a requirement a
+            qualification proves with that qualification's validity. The people: a development or HR reader's employers' current
+            employees (organizationPartyId narrows them) and a manager's live reports, narrowed to a unit and the units under it
+            (unitPartyId, current memberships), a job class and a name (term); paged by person. Refuses a caller who reads no one's
+            skills (PERMISSION_DENIED) and an employer outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="unitPartyId"/>
+            <parameter name="emplPositionClassId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="term"/>
+            <parameter name="asOfDate"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="columns" type="List"><description>skillTypeEnumId, skillName, minimumLevel, minimumLevelText,
+                qualificationTypeEnumId, qualificationTypeName, required</description></parameter>
+            <parameter name="rows" type="List"><description>partyId, personName, jobText, gapCount, canEvaluate, cells: [{skillTypeEnumId,
+                level, levelText, selfDeclared, sourceText, revision, minimumLevel, required, state, qualificationState,
+                stateText}]</description></parameter>
+            <parameter name="peopleCount" type="Integer"/>
+            <parameter name="peoplePageIndex" type="Integer"/>
+            <parameter name="peoplePageSize" type="Integer"/>
+            <parameter name="peoplePageMaxIndex" type="Integer"/>
+            <parameter name="peoplePageRangeLow" type="Integer"/>
+            <parameter name="peoplePageRangeHigh" type="Integer"/>
+            <parameter name="canEvaluate" type="Boolean"/>
+            <parameter name="levelOptions" type="List"/>
+            <parameter name="asOfText"/>
+            <parameter name="scopePartyIds" type="List"><description>Every person the filters keep, on every page: the people a
+                caller bounds a staffing search to (People's FindAvailable)</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('getSkillsMatrix', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+
+    <!-- ===== a person's development record (Employee360 SkillsAndReviews) ===== -->
+    <service verb="get" noun="PersonDevelopment" allow-remote="false">
+        <description>A person's skills (level, self-declared or evaluated, when), qualifications (as find#Qualifications projects
+            them for the caller, with their expiry) and resume lines, for Employee360's Skills and reviews: the person, a manager,
+            development and HR read the skills; the person, HR and development the resume; a manager and other staff readers the
+            verified qualifications alone. With what the caller may change: declare (the person), evaluate (a development editor,
+            or a manager of a live line), submit a qualification, change the resume. Refuses a person not in scope (RECORD_UNAVAILABLE); checkOnly answers
+            visible false instead.</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="checkOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visible" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="skills" type="List"/>
+            <parameter name="qualifications" type="List"/>
+            <parameter name="resumeLines" type="List"/>
+            <parameter name="showsSkills" type="Boolean"/>
+            <parameter name="showsResume" type="Boolean"/>
+            <parameter name="canDeclare" type="Boolean"/>
+            <parameter name="canEvaluate" type="Boolean"/>
+            <parameter name="canSubmit" type="Boolean"/>
+            <parameter name="canEditResume" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('personDevelopment', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ResumeLine" allow-remote="false">
+        <description>A resume line (PartyResume) added (partyId, the caller's own when empty), changed (partyResumeId) or removed
+            (remove) by the person or an HR or development editor of an employer of theirs: its type (experience, education,
+            other), organization, role, dates and description. Refuses a person or line not in scope (RECORD_UNAVAILABLE), another
+            caller (PERMISSION_DENIED), a type that is not one (TYPE_INVALID), no organization or role (DESCRIPTION_REQUIRED) and
+            an end before the start (DATES_INVALID).</description>
+        <in-parameters>
+            <parameter name="partyResumeId"/>
+            <parameter name="partyId"/>
+            <parameter name="resumeLineTypeEnumId"/>
+            <parameter name="organizationName"/>
+            <parameter name="title"/>
+            <parameter name="fromDate" type="Date"/>
+            <parameter name="thruDate" type="Date"/>
+            <parameter name="description"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyResumeId"/></out-parameters>
+        <actions>
+            <set field="partyResumeId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('storeResumeLine', context).partyResumeId"/>
+        </actions>
+    </service>
+
+    <!-- ===== expiry reminders (the daily ServiceJob send_QualificationExpiryReminders, PeopleDevelopmentSetupData.xml) ===== -->
+    <service verb="send" noun="ExpiryReminders" allow-remote="false" authenticate="anonymous-all" transaction-timeout="1800">
+        <description>Each verified qualification expiring within thirty days and not renewed by a later verified one, whose person
+            was not yet reminded of that expiry, reminded once (the QualificationExpiring topic, to the person's own accounts: its
+            type and expiry, never its reference) and marked (reminderThruDate); each in its own transaction, a failing one logged
+            by its id and the rest going on. A rerun sends nothing again for the same expiry.</description>
+        <out-parameters>
+            <parameter name="sentCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="sent" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Development.js').execute('sendExpiryReminders', context)"/>
+            <set field="sentCount" from="sent.sentCount"/>
+            <set field="failedCount" from="sent.failedCount"/>
+        </actions>
+    </service>
+
+    <!-- ===== training (impl-people P19; design §10 Training and TrainingDetail, §15; Training.js) ===== -->
+    <service verb="find" noun="Training" allow-remote="false">
+        <description>The training sessions the caller reads: a development reader's employers' (organizationPartyId narrows them), a
+            self-service employee's employers', the ones they train and the ones they hold a place in. show: upcoming (the default:
+            not cancelled, not ended), past (ended or cancelled), mine (their own places), training (as the trainer), due (their own
+            enrolled sessions and those they train, starting within seven days and not ended; Today's training due), all;
+            trainingClassId and term (the course's title) narrow them. Each: the course, employer, time, place, trainer, seats taken,
+            what passing grants, the state, the caller's own place and whether they may ask for one. Paged; for a development editor
+            the employers' courses (classes) too. Refuses an employer outside the scope (ORGANIZATION_DENIED) and a show that is not
+            one (SHOW_INVALID).</description>
+        <in-parameters>
+            <parameter name="show"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="trainingClassId"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sessions" type="List"><description>workEffortId, trainingClassId, title, typeText, organizationPartyId,
+                organizationName, startDate, startText, endText, whenText, location, facilityId, roomName, roomStatus (booked,
+                requested, refused), roomStatusText, trainerPartyId, trainerName, capacity,
+                enrolledCount, waitingCount, seatsLeft, seatsText, qualificationTypeEnumId, qualificationText, state (scheduled, running,
+                ended, cancelled), stateText, cancelled, myPersonTrainingId, myStatusEnumId, myStatusText, isTrainer, canRequest,
+                canManage, revision</description></parameter>
+            <parameter name="sessionsCount" type="Integer"/>
+            <parameter name="sessionsPageIndex" type="Integer"/>
+            <parameter name="sessionsPageSize" type="Integer"/>
+            <parameter name="sessionsPageMaxIndex" type="Integer"/>
+            <parameter name="sessionsPageRangeLow" type="Integer"/>
+            <parameter name="sessionsPageRangeHigh" type="Integer"/>
+            <parameter name="canSchedule" type="Boolean"/>
+            <parameter name="classes" type="List"><description>The courses of the employers a development editor administers, not
+                ended: trainingClassId, title, organizationPartyId, organizationName, typeText, description, qualificationTypeEnumId,
+                validityMonths, qualificationText, assessmentRequired, assessmentFormId, revision</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('findTraining', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Training" allow-remote="false">
+        <description>A session (workEffortId, or the session of personTrainingId) as the caller reads it: its line (as find#Training), its
+            description and assessment form; what they may do; the places they read (development and the trainer every one, an
+            approver the one they decide, the person their own), each with its state, attendance, attempts, last result and the
+            qualification it granted; and the assessments (development and the trainer every one with the assessor's answers and
+            evidence, the person their own outcome, score, date and assessor alone). The trainer reads no other session's, and
+            their own only while they work for its employer. Refuses
+            a session or place not in reach (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="personTrainingId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="session" type="Map"/>
+            <parameter name="isDevelop" type="Boolean"/>
+            <parameter name="isTrainer" type="Boolean"/>
+            <parameter name="canChange" type="Boolean"/>
+            <parameter name="canEnrollOthers" type="Boolean"/>
+            <parameter name="canRequest" type="Boolean"/>
+            <parameter name="canAssess" type="Boolean"/>
+            <parameter name="enrollments" type="List"><description>personTrainingId, partyId, personName, statusEnumId, statusText,
+                requestedDateText, reason, decisionReason, waitingText, peopleApprovalId, sourceRevision, canDecide, attendedFlag,
+                attendanceText, attendedHours, attemptCount, resultText, completedDateText, qualificationText, hasCertificate,
+                canWithdraw, canMarkAttendance, canAssess, revision</description></parameter>
+            <parameter name="results" type="List"><description>personTrainingResultId, personTrainingId, personName, resultEnumId,
+                resultText, score, scoreText, assessedDateText, assessorName; for development and the trainer evidence, answers and
+                answersText</description></parameter>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('getTraining', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="TrainingClass" allow-remote="false">
+        <description>A course added (organizationPartyId) or changed (trainingClassId, at the revision read), or ended (end; its
+            sessions and places stay), by a development editor (PEOPLE_DEVELOP_EDIT) of its employer: its title, kind
+            (TrainingClassType), description, what passing grants (a qualification type, valid validityMonths months, empty for no
+            expiry; never an identity document or work permit), whether its completion needs an assessment and its default
+            assessment form. Refuses a caller who is not one (PERMISSION_DENIED), no employer or one outside the scope
+            (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED), a course not in it (RECORD_UNAVAILABLE), no title (TITLE_REQUIRED), a kind
+            or type that is not one or ended (TYPE_INVALID, VALUE_ENDED), a restricted type (TYPE_RESTRICTED), a validity outside 1
+            to 120 months (VALIDITY_INVALID), a form not one of the employer's published training assessments (FORM_UNAVAILABLE)
+            and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="trainingClassId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="title"/>
+            <parameter name="trainingClassTypeEnumId"/>
+            <parameter name="description"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="validityMonths"/>
+            <parameter name="assessmentRequired"/>
+            <parameter name="assessmentFormId"/>
+            <parameter name="end"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="trainingClassId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('storeTrainingClass', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Training" allow-remote="false">
+        <description>A session of a course scheduled (trainingClassId) or changed (workEffortId, at the revision read), or cancelled
+            (cancel, with a reason), by a development editor of its employer: its start and end, place (facilityId: a bookable
+            meeting room, booked for it through mantle.work.EventServices.book#Resource as the system and named its place, so its
+            policy, clashes and blackouts apply; moved and cancelled with the session; or location, a free-text place off site;
+            People follow-up 3), description, trainer (a
+            person working for the employer now, never one holding a place in it), seats and assessment form (a published form of the
+            training assessment purpose of the employer; the course's when none is named; needed when the course needs an
+            assessment). The session is a WepTraining event made through Commons' event services (EventServices.create#Event: a
+            private event of the scheduler, its trainer and the people enrolled its attendees). A cancellation cancels the event and
+            every place (one waiting for approval superseded). Refuses a caller who is not one (PERMISSION_DENIED), a session or
+            course not in the scope (RECORD_UNAVAILABLE), an ended course (CLASS_ENDED), no start (START_REQUIRED), a new start in
+            the past (DATE_PAST), an end not after the start (DATES_INVALID), no trainer or one not working for the employer
+            (TRAINER_REQUIRED, NOT_EMPLOYED), a trainer holding a place (TRAINER_ENROLLED), seats below 1 or the places taken
+            (CAPACITY_INVALID), a form not one of the employer's published assessments (FORM_UNAVAILABLE), no form for a course
+            that needs one (FORM_REQUIRED), a change of a cancelled or ended session (SESSION_CLOSED), a revision other than the
+            one read (REVISION_CHANGED) and a room not bookable or not free then (ROOM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="trainingClassId"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="endDate" type="Timestamp"/>
+            <parameter name="location"/>
+            <parameter name="facilityId"><description>A bookable meeting room; empty for none, not given to keep it</description></parameter>
+            <parameter name="description"/>
+            <parameter name="trainerPartyId"/>
+            <parameter name="capacity"/>
+            <parameter name="assessmentFormId"/>
+            <parameter name="cancel"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('storeTraining', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="enroll" noun="Training" allow-remote="false">
+        <description>A place in a session: asked for by the person for themselves (PEOPLE_SELF_SERVICE and a current employment at the
+            session's employer; partyId empty or their own), waiting for a People approval of kind PakTraining
+            (PeopleTrainingApproval: the manager unless a rule says otherwise, never the person or who asked); or a current employee
+            of the employer enrolled by a development editor of it (partyId), enrolled at once. A person enrolled is an attendee of
+            the session's event, reminded a day before. Refuses a session not in reach (RECORD_UNAVAILABLE), one cancelled,
+            started or ended (SESSION_CLOSED), another person by one who is not a development editor of the employer
+            (PERMISSION_DENIED), a person not employed there now (NOT_EMPLOYED), the trainer (TRAINER_ENROLLED), a second place of
+            the person (ALREADY_ENROLLED) and no seat left (SESSION_FULL). A retry with the same operationKey answers the first
+            (repeated).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="partyId"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('enrollTraining', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="Enrollment" allow-remote="false">
+        <description>A place waiting decided, under its lock: approve or refuse (with a reason) the step waiting through
+            PeopleApprovalServices.record#Decision at the place's revision; the last approval enrolls the person (an attendee of the
+            session's event, reminded a day before), refused when no seat is left (SESSION_FULL) or once the session has started
+            (SESSION_CLOSED; a refusal may still follow); the person, and who asked for them, is told the outcome
+            (PeopleTrainingDecision: the course, the day and approved or refused, never the reason). withdraw: the person, who asked
+            or a development editor of the employer, while the place waits or is enrolled and the session has not ended (NOT_YOURS,
+            NOT_PENDING, SESSION_CLOSED), a waiting approval superseded. One who reads nothing of it is answered as for a missing
+            one (RECORD_UNAVAILABLE). A decision retried answers the first (repeated). Refuses as record#Decision does
+            (PERMISSION_DENIED, SELF_APPROVAL, NOT_APPROVER, REASON_REQUIRED, REVISION_CHANGED, SOURCE_CHANGED) and NOT_PENDING.</description>
+        <in-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="decision"/>
+            <parameter name="reason"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('decideEnrollment', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="Enrollment" allow-remote="false">
+        <description>The PeopleTrainingApproval topic's approve service (approve#NotificationMessage calls it as the user):
+            decide#Enrollment at the place and revision in the message; refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('approveEnrollmentNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Enrollment" allow-remote="false">
+        <description>The PeopleTrainingApproval topic's refuse service (refuse#NotificationMessage calls it as the user):
+            decide#Enrollment at the place and revision in the message, with the reason; refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('refuseEnrollmentNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="mark" noun="TrainingAttendance" allow-remote="false">
+        <description>A person enrolled marked attended (attended true, with attendedHours: more than 0 and at most the session's length;
+            the length when empty) or absent, by the session's trainer or a development editor of its employer, once the session has
+            started; never one's own place; the attendance audit-logged. Refuses a place not in reach (RECORD_UNAVAILABLE), a
+            caller who does not assess it (PERMISSION_DENIED), one's own (SELF_APPROVAL), a place not enrolled (NOT_ENROLLED), a
+            session not started (SESSION_NOT_STARTED), hours out of range (HOURS_INVALID) and a revision other than the one read
+            (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="attended"><description>Y or true: attended; N or false: absent</description></parameter>
+            <parameter name="attendedHours"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="attendedFlag"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('markAttendance', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="complete" noun="Training" allow-remote="false">
+        <description>An assessment of a person enrolled who attended, by the session's trainer or a development editor of its employer
+            (never one's own): outcome pass or fail, a score of 0 to 100, evidence, and the session's assessment form answered
+            (values: the form's field names and answers, checked against it; FORM_VALUES_INVALID), kept as a FormResponse its
+            FormInvitation locks. A failed assessment is kept and the place stays enrolled for another attempt; the passing one
+            completes the place once: it grants the course's qualification once (verified by the assessment, valid for the course's
+            months from now, renewing the person's earlier verified one of the type; check#Qualifications counts it) and issues the
+            completion certificate, stored when issued (get#TrainingCertificate). A completion retried answers the first (repeated),
+            as does a retry with the same operationKey. Refuses a place not in reach (RECORD_UNAVAILABLE), a caller who does not
+            assess it (PERMISSION_DENIED), one's own (SELF_APPROVAL), an outcome that is not one (OUTCOME_INVALID), a score out of
+            range (SCORE_INVALID), a failure after completion (ALREADY_COMPLETED), a place not enrolled (NOT_ENROLLED), one not
+            marked attended (ATTENDANCE_REQUIRED) and no answers when the session has a form (ASSESSMENT_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="outcome"/>
+            <parameter name="score"/>
+            <parameter name="evidence"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="personTrainingResultId"/>
+            <parameter name="resultEnumId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="partyQualificationId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('completeTraining', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="TrainingCertificate" allow-remote="false">
+        <description>A completed place's certificate as issued (stored when the passing assessment was recorded, never rendered again):
+            its page (printHtml, for html-print), its PDF's location and file name, to the person (PEOPLE_SELF_SERVICE) and a
+            development or HR reader of the employer. Refuses a place not in reach (RECORD_UNAVAILABLE) and one with no certificate
+            issued (CERTIFICATE_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="personTrainingId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="personTrainingId"/>
+            <parameter name="printHtml"/>
+            <parameter name="pdfLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="issuedDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').execute('trainingCertificate', context)"/>
+            <script>for (const key of Object.keys(found)) ec.context.put(key, found[key])</script>
+        </actions>
+    </service>
+</services>

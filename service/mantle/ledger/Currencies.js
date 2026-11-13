@@ -231,7 +231,7 @@ function convert(p) {
     const base = lib.preference(initial.organizationPartyId).baseCurrencyUomId
     if (!base || !initial.amountUomId || initial.amountUomId === base) return {converted: false}
     // the posting guard's lock order: the organization, then the transaction
-    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
     const tx = find(T, {acctgTransId: p.acctgTransId}).forUpdate(true).one()
     if (tx.isPosted === "Y" || tx.amountUomId === base) return {converted: false}
     // an application's posting held in the error journal and posted again books its realized difference (F418); the
@@ -696,7 +696,7 @@ function decideProposals(p, accept) {
 function decideProposal(p) {
     const scope = lib.organization(p, "admin")
     if (p.accept) ratesAdmin()
-    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: scope.organizationPartyId}).forNoKeyUpdate(true).one()
     const row = find(PROPOSAL, {rateProposalId: p.rateProposalId}).forUpdate(true).one()
     if (!row || row.organizationPartyId !== scope.organizationPartyId)
         denied("PROPOSAL_UNAVAILABLE", "The proposed rate is not available")

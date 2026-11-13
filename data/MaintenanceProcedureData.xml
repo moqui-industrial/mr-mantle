@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- Maintenance procedures (IronStone Maintenance design §4.1, §4.2, §12; impl-maintenance P6): the template status flow and
+        the WorkProcessApproval topic. A procedure is a template root (isTemplate Y, WetTask, WepMaintenance) with its steps and a
+        WorkEffortProcessPolicy of WppMaintenanceProcedure that guards execution (entity/WorkProcessEntities.xml), changed only
+        through mantle.work.ProcessServices (MaintenanceProcedures.js). -->
+
+    <!-- The template's states: Draft (WeInPlanning), Approved (WeApproved), Retired (WeClosed). The framework admits a move any
+        flow's row admits (impl-maintenance F65): Approve, the two Retire moves and the Default flow's rows are open moves already
+        (Default, WorkEffortOther), so they widen nothing; Amend (an approved definition changed goes back to Draft) is had only
+        by Manufacturing's production flow with PRODUCTION_SUPERVISE, so its row here needs WORK_PROCESS_EDIT. The services are the
+        gate: approve#WorkProcess (WORK_PROCESS_APPROVE, not the last author), retire#WorkProcess, and an author's change. -->
+    <moqui.basic.StatusFlow statusFlowId="WorkEffortProcedure" statusTypeId="WorkEffort" description="Maintenance procedure (template)"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeInPlanning" toStatusId="WeApproved" transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeApproved" toStatusId="WeInPlanning" transitionName="Amend"
+            userPermissionId="WORK_PROCESS_EDIT"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeApproved" toStatusId="WeClosed" transitionName="Retire"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="WorkEffortProcedure" statusId="WeInPlanning" toStatusId="WeClosed" transitionName="Retire"/>
+
+    <!-- WorkProcessApproval (design §1.2, design-drawers-commons §4): a procedure waiting for approval, sent to the approvers of its
+        organization (WORK_PROCESS_APPROVE; not its last author unless the organization's policy allows self-approval) when
+        request#WorkProcessApproval asks. Commons' approvals inbox shows it first; approve#NotificationMessage and
+        refuse#NotificationMessage call ProcessServices approve#WorkProcess and refuse#WorkProcess as the user deciding, which
+        check their own permission and scope (a notice is no authority). The message holds workEffortId, workEffortName,
+        workEffortApprovalId and organizationName; no cost. Registered for Admin's Topics (impl-maintenance F52). -->
+    <moqui.security.user.NotificationTopic topic="WorkProcessApproval" inboxEnumId="NinNotifications" description="Maintenance procedure to approve"
+            typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.work.ProcessServices.approve#WorkProcess"
+            refuseServiceName="mantle.work.ProcessServices.refuse#WorkProcess" refuseReasonRequired="Y"
+            titleTemplate="Approve procedure ${workEffortName} (${organizationName})"/>
+    <moqui.server.TopicRegistration topic="WorkProcessApproval" ownerApp="Maintenance" purpose="A maintenance procedure waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="WORK_PROCESS_APPROVE" sequenceNum="20"/>
+</entity-facade-xml>

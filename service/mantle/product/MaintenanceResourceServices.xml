@@ -1,0 +1,282 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Maintenance's equipment and facility records (IronStone Maintenance design §6, §13.2; impl-maintenance P2): the scoped finds,
+    the equipment writer, the meter writer, registrations, the guarded custody change, the equipment move and the preview of a
+    facility move or close, in MaintenanceResources.js. Each checks the maintenance permission and the organization
+    (mantle/work/MaintenanceAccess.js), never a group or a calling screen; a missing record and one outside the scope are refused
+    alike (RECORD_UNAVAILABLE). Facility writes are FacilityServices.store#Facility's and store#FacilityFeature's (FACILITY_EDIT). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="MaintenanceEquipment" allow-remote="false">
+        <description>The equipment of the user's maintenance scope (a resource read: MAINTENANCE_VIEW, _ASSIGNED_VIEW or
+            _RESOURCE_VIEW; PERMISSION_DENIED without), scoped in the query before paging: assets that are not stock, owned by
+            one of the user's organizations or held at one of their facilities for an owner that is no internal organization.
+            Found by id, name, serial, soft identifier or registration number, product, class, type, status, parent, facility
+            (with those inside it), custodian and supplier warranty (expiring within thirty days, or expired); equipment that
+            has left only with includeLeft. Each row carries its names, custodian and warranty state; no cost or book
+            value. A holder of MAINTENANCE_ALL_ORGANIZATIONS with an active organization lists its equipment alone (F83), but a
+            facility's equipment is read in the record check's scope.</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="productId"/>
+            <parameter name="classEnumId"/>
+            <parameter name="assetTypeEnumId"/>
+            <parameter name="statusId"/>
+            <parameter name="parentAssetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="custodianPartyId"/>
+            <parameter name="warranty"><description>expiring or expired</description></parameter>
+            <parameter name="includeLeft" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="equipmentList" type="List"/>
+            <parameter name="equipmentListCount" type="Integer"/>
+            <parameter name="equipmentListPageIndex" type="Integer"/>
+            <parameter name="equipmentListPageSize" type="Integer"/>
+            <parameter name="equipmentListPageMaxIndex" type="Integer"/>
+            <parameter name="equipmentListPageRangeLow" type="Integer"/>
+            <parameter name="equipmentListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('findEquipment', context)"/>
+            <set field="equipmentList" from="answer.equipmentList"/>
+            <set field="equipmentListCount" from="answer.equipmentListCount"/>
+            <set field="equipmentListPageIndex" from="answer.equipmentListPageIndex"/>
+            <set field="equipmentListPageSize" from="answer.equipmentListPageSize"/>
+            <set field="equipmentListPageMaxIndex" from="answer.equipmentListPageMaxIndex"/>
+            <set field="equipmentListPageRangeLow" from="answer.equipmentListPageRangeLow"/>
+            <set field="equipmentListPageRangeHigh" from="answer.equipmentListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="find" noun="MaintenanceFacilities" allow-remote="false">
+        <description>The facilities of the user's maintenance scope (a resource read), each in an organization's scope by its
+            owner or its nearest owning ancestor, found in the query before paging by name or id, type, organization, parent,
+            bookable, minimum capacity and a current room feature; closed ones only with includeClosed. With roots, the top of
+            the tree: the facilities whose parent is none or outside the scope, each such parent given once as an unnamed node
+            (hiddenAncestor, key hidden-n) with the facilities under it, never its name or id; with parentFacilityId, one level
+            (hidden-n names an unnamed node's); with facilityId, that facility alone. Rows carry the type, the organization, the
+            time zone (own or inherited), the state, the children and equipment counts and the current room features. A holder
+            of MAINTENANCE_ALL_ORGANIZATIONS with an active organization lists its facilities alone (F83), but a facility, or a
+            level under a facility, is read in the record check's scope.</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="text"/>
+            <parameter name="facilityTypeEnumId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="parentFacilityId"/>
+            <parameter name="bookable" type="Boolean"/>
+            <parameter name="minCapacity" type="BigDecimal"/>
+            <parameter name="featureEnumId"/>
+            <parameter name="includeClosed" type="Boolean" default="false"/>
+            <parameter name="roots" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="facilityList" type="List"/>
+            <parameter name="facilityListCount" type="Integer"/>
+            <parameter name="facilityListPageIndex" type="Integer"/>
+            <parameter name="facilityListPageSize" type="Integer"/>
+            <parameter name="facilityListPageMaxIndex" type="Integer"/>
+            <parameter name="facilityListPageRangeLow" type="Integer"/>
+            <parameter name="facilityListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('findFacilities', context)"/>
+            <set field="facilityList" from="answer.facilityList"/>
+            <set field="facilityListCount" from="answer.facilityListCount"/>
+            <set field="facilityListPageIndex" from="answer.facilityListPageIndex"/>
+            <set field="facilityListPageSize" from="answer.facilityListPageSize"/>
+            <set field="facilityListPageMaxIndex" from="answer.facilityListPageMaxIndex"/>
+            <set field="facilityListPageRangeLow" from="answer.facilityListPageRangeLow"/>
+            <set field="facilityListPageRangeHigh" from="answer.facilityListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceEquipment" allow-remote="false">
+        <description>Register equipment (no assetId) or change one piece of the user's (MAINTENANCE_RESOURCE_EDIT). New equipment
+            names an internal organization of the scope as owner (OWNER_UNAVAILABLE; the active one when not given), a facility
+            of the scope and a type that is not stock (TYPE_INVALID), and is registered through
+            EquipmentServices.create#Equipment (status in use, no quantity). A change goes through AssetServices.update#Asset
+            with only the identity, name, comments, parent, class and supplier warranty given: never quantity, owner, location,
+            cost or book fields (not AssetRecordServices.update#AssetMetadata, which is Warehouse's, impl-maintenance F17). A
+            parent is equipment of the scope and never the equipment or one under it (PARENT_CYCLE); expectedRevision refuses a
+            change since it was read (RECORD_CHANGED).</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="assetName"/>
+            <parameter name="comments" allow-html="safe"/>
+            <parameter name="serialNumber"/>
+            <parameter name="softIdentifier"/>
+            <parameter name="classEnumId"/>
+            <parameter name="assetTypeEnumId"/>
+            <parameter name="parentAssetId"/>
+            <parameter name="warrantyThruDate" type="Date"/>
+            <parameter name="warrantyPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="productId"/>
+            <parameter name="facilityId"/>
+            <parameter name="acquiredDate" type="Timestamp"/>
+            <parameter name="receivedDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assetId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('storeEquipment', context)"/>
+            <set field="assetId" from="saved.assetId"/>
+            <set field="created" from="saved.created"/>
+        </actions>
+    </service>
+    <service verb="record" noun="MaintenanceMeter" allow-remote="false">
+        <description>A meter reading of one piece of the user's equipment, the one meter writer (design §5.1, impl-maintenance
+            F19, F70): MAINTENANCE_RESOURCE_EDIT, or MAINTENANCE_EXECUTE with the work (workEffortId, the step it was taken in)
+            assigned to the user, or MAINTENANCE_SUPERVISE with work of the user's organizations (the supervisor who completes it;
+            impl-maintenance P14 review). The meter is one of the equipment model's (productMeterId, or productMeterTypeId) or a meter
+            type for equipment whose model has none (METER_UNAVAILABLE), in its unit (UNIT_MISMATCH). The reading time is now
+            or earlier (DATE_FUTURE) and no other reading of the equipment has it (READING_EXISTS: a reading is never
+            overwritten). On a cumulative meter a reading below the one before or above the one after is READING_DECREASING
+            unless the reason is a reset; a correction changes a reading taken (correctReadingDate). A reset and a correction
+            need changeReason (REASON_REQUIRED), kept by the audit log with the value.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="productMeterId"/>
+            <parameter name="productMeterTypeId"/>
+            <parameter name="meterValue" type="BigDecimal" required="true"/>
+            <parameter name="meterUomId"/>
+            <parameter name="readingDate" type="Timestamp"/>
+            <parameter name="readingReasonEnumId"><description>AmrReading (default), AmrWork (the default in work), AmrReset or
+                AmrCorrection.</description></parameter>
+            <parameter name="changeReason"/>
+            <parameter name="correctReadingDate" type="Timestamp"/>
+            <parameter name="workEffortId"/>
+            <parameter name="assetMaintenanceId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assetId"/>
+            <parameter name="readingDate" type="Timestamp"/>
+            <parameter name="corrected" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('recordMeter', context)"/>
+            <set field="readingDate" from="saved.readingDate"/>
+            <set field="corrected" from="saved.corrected"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MaintenanceRegistration" allow-remote="false">
+        <description>A registration of one piece of the user's equipment (MAINTENANCE_RESOURCE_EDIT), over AssetRegistration: a
+            new one, or a change to one (assetRegSeqId). Needs a registration or license number (NUMBER_REQUIRED); through is
+            not before from (DATES_INVALID).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="assetRegSeqId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="registrationDate" type="Timestamp"/>
+            <parameter name="govAgencyPartyId"/>
+            <parameter name="registrationNumber"/>
+            <parameter name="licenseNumber"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="assetId"/>
+            <parameter name="assetRegSeqId"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('storeRegistration', context)"/>
+            <set field="assetRegSeqId" from="saved.assetRegSeqId"/>
+        </actions>
+    </service>
+    <service verb="change" noun="MaintenanceCustody" allow-remote="false">
+        <description>The guarded custody change (design §6; impl-maintenance F18, F61): a new holder of a role (Custodian by
+            default) of one piece of the user's equipment (MAINTENANCE_RESOURCE_EDIT), from an effective date now or earlier
+            (DATE_FUTURE) and not before a current holder's start or inside another holder's ended holding
+            (DATE_BEFORE_HOLDING). The role's current holders end and the
+            new one starts at that date, through AssetServices.replace#AssetPartyAssignment; People's rule on the end of a
+            holding then completes a separation's return task, as for People's and Warehouse's changes. The new holder is one
+            of the scope's internal organizations, a person one of them employs now, or the asset's own owner organization (a
+            customer's equipment); anything else is HOLDER_UNAVAILABLE, a party that is no enabled person or organization
+            PARTY_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="newPartyId" required="true"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="endedCount" type="Integer"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('changeCustody', context)"/>
+            <set field="endedCount" from="saved.endedCount"/>
+            <set field="effectiveDate" from="saved.effectiveDate"/>
+        </actions>
+    </service>
+    <service verb="move" noun="MaintenanceEquipment" allow-remote="false">
+        <description>One piece of the user's equipment to another facility (and an open location there) of the scope:
+            MAINTENANCE_RESOURCE_EDIT, and to write Warehouse's STOCK_MOVE with both facilities in the user's facility scope
+            (FacilityScope.js; RECORD_UNAVAILABLE). With preview nothing is written and the answer is the effect: facilities,
+            organizations and time zones before and after, the child equipment that stays where it is and the bookings to come
+            (counted). A move that would pass the equipment to another organization (a customer's equipment held at another
+            organization's site) is ORGANIZATION_CHANGE; to where it is, SAME_LOCATION. AssetServices.move#Asset makes a new
+            asset for a move to another facility (stock), so the asset's facility and location, both audit-logged, are written
+            directly after the checks, and the asset leaves any container. Equipment only: stock and an asset with no type are
+            refused (RECORD_UNAVAILABLE), and no ledger posting follows (a fixed asset's book is by organization, which a move
+            never changes).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="toFacilityId" required="true"/>
+            <parameter name="toLocationSeqId"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="effect" type="Map"/>
+            <parameter name="moved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="saved" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('moveEquipment', context)"/>
+            <set field="effect" from="saved.effect"/>
+            <set field="moved" from="saved.moved"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="MaintenanceFacilityChange" allow-remote="false">
+        <description>What a move of one of the user's facilities under another parent, or its close, changes, before
+            FacilityServices.store#Facility makes it (a resource read; nothing written): its organization and time zone before
+            and after (each inherited from the nearest ancestor that has one), the facilities inside it that go with it, the
+            equipment there and in them, and the bookings of it and its rooms from now on (counted, never named). Refuses a
+            parent inside it (PARENT_CYCLE) and a facility or parent outside the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="facilityId" required="true"/>
+            <parameter name="parentFacilityId"/>
+            <parameter name="closedDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="effect" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="effect" from="ec.resource.script('component://mr-mantle/service/mantle/product/MaintenanceResources.js')
+                    .execute('previewFacilityChange', context).effect"/>
+        </actions>
+    </service>
+</services>

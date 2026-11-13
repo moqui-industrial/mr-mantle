@@ -255,6 +255,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Accessory" enumId="PatAccessory" enumTypeId="ProductAssocType"/>
             <moqui.basic.Enumeration description="Add On For" enumId="PatAddOn" enumTypeId="ProductAssocType"/>
             <moqui.basic.Enumeration description="Repair Service" enumId="PatRepairService" enumTypeId="ProductAssocType"/>
+            <!-- a part an equipment model uses in its maintenance (impl-maintenance P2, F20) -->
+            <moqui.basic.Enumeration description="Spare Part" enumId="PatSparePart" enumTypeId="ProductAssocType"/>
 
             <moqui.basic.Enumeration description="Cross-Sell (Complementary)" enumId="PatCrossSell" enumTypeId="ProductAssocType"/>
             <moqui.basic.Enumeration description="Also Bought" enumId="PatAlsoBought" enumTypeId="ProductAssocType"/>
@@ -388,6 +390,16 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Meta-Description" enumId="PcntMetaDescription" enumTypeId="ProductContentType"/>
         </seed-data>
     </entity>
+
+    <view-entity entity-name="ProductContentAndOwner" package="mantle.product">
+        <description>Catalog content with its master owner for scoped content queries.</description>
+        <member-entity entity-alias="CNT" entity-name="mantle.product.ProductContent"/>
+        <member-entity entity-alias="PRD" entity-name="mantle.product.Product" join-from-alias="CNT">
+            <key-map field-name="productId"/>
+        </member-entity>
+        <alias-all entity-alias="CNT"/>
+        <alias entity-alias="PRD" name="ownerPartyId"/>
+    </view-entity>
 
     <entity entity-name="ProductDbForm" package="mantle.product">
         <field name="productDbFormId" type="id" is-pk="true"/>
@@ -870,6 +882,16 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Image - Original" enumId="PcctImageOriginal" enumTypeId="ProductCategoryContentType"/>
         </seed-data>
     </entity>
+    <view-entity entity-name="ProductCategoryContentAndOwner" package="mantle.product.category">
+        <description>Category content with its master owner for scoped content queries.</description>
+        <member-entity entity-alias="CNT" entity-name="mantle.product.category.ProductCategoryContent"/>
+        <member-entity entity-alias="CAT" entity-name="mantle.product.category.ProductCategory" join-from-alias="CNT">
+            <key-map field-name="productCategoryId"/>
+        </member-entity>
+        <alias-all entity-alias="CNT"/>
+        <alias entity-alias="CAT" name="ownerPartyId"/>
+    </view-entity>
+
     <entity entity-name="ProductCategoryParty" package="mantle.product.category">
         <field name="productCategoryId" type="id" is-pk="true"/>
         <field name="partyId" type="id" is-pk="true"/>

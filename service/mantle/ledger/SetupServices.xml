@@ -91,7 +91,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
             <set field="scope" from="policy.organization(context, 'admin')"/>
             <set field="changeReason" from="policy.reason(context)"/>
-            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="scope.organizationPartyId"/>
             </entity-find-one>
             <entity-find-one entity-name="mantle.ledger.config.PartyAcctgPreference" value-field="oldPreference"
@@ -602,7 +602,7 @@ along with this software (see the LICENSE.md file). If not, see
                     from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingActivation.js')"/>
             <set field="organizationPartyId" from="policy.organization(context, 'admin').organizationPartyId"/>
             <!-- lock order: the organization, then its run -->
-            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="organizationPartyId"/>
             </entity-find-one>
             <entity-find entity-name="mantle.ledger.config.AccountingSetupRun" list="runList" for-update="true"
@@ -899,7 +899,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- an import locks the organization, which serializes every writer of its setup run; a check takes no
                 lock -->
             <if condition="!verifyOnly">
-                <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true"
+                <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true"
                         disable-authz="true">
                     <field-map field-name="partyId" from="organizationPartyId"/>
                 </entity-find-one>
@@ -1074,7 +1074,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="policy" from="ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingPolicy.js')"/>
             <set field="activation" value="component://mr-mantle/service/mantle/ledger/AccountingActivation.js"/>
             <set field="organizationPartyId" from="policy.organization(context, 'admin').organizationPartyId"/>
-            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="organization" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="organizationPartyId"/>
             </entity-find-one>
             <entity-find entity-name="mantle.ledger.config.AccountingSetupRun" list="runList" for-update="true"
@@ -1148,5 +1148,21 @@ along with this software (see the LICENSE.md file). If not, see
                 {organizationPartyId:organizationPartyId, setupRunId:setupRunId, acctgTransId:acctgTransId,
                     statusId:statusId})</script>
         </actions>
+    </service>
+    <!-- mr-boss impl-admin P15 (design-admin §11.1): the opening open items import's result contract for the framework's
+        org.moqui.admin.DataTransferServices (the target openingOpenItems, data/AccountingSetupData.xml) -->
+    <service verb="find" noun="OpenItemImportRuns" allow-remote="false">
+        <description>The last import of opening open items of each organization the caller administers in Accounting
+            (finance administration, as import#OpenItems): the setup run keeps the latest result only, so an
+            organization answers at most one run, with its counts and the parameter that opens Setup. None otherwise.</description>
+        <in-parameters>
+            <parameter name="targetId"/>
+            <parameter name="scopeKey"/>
+            <parameter name="fromDate" type="Long"/>
+            <parameter name="thruDate" type="Long"/>
+            <parameter name="maxRows" type="Integer"/>
+        </in-parameters>
+        <out-parameters><parameter name="runList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/ledger/AccountingActivation.js').execute('openItemImportRuns', context))</script></actions>
     </service>
 </services>

@@ -78,12 +78,15 @@ function organization(organizationPartyId, permission, lock = false) {
         if ((!financeAdmin && !permitted.includes(organizationPartyId)) || (activeOrgId && activeOrgId !== organizationPartyId))
             denied("ORGANIZATION_DENIED", "The organization is not available")
     }
-    if (lock) find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    if (lock) find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     return organizationPartyId
 }
 function invoice(p, permission = null, lock = false) {
     let record = one(invoiceEntity, {invoiceId: p.invoiceId})
     if (!record) denied("INVOICE_UNAVAILABLE", "Invoice is not available")
+    // People P27 (AC-23, the payroll-origin projection): an invoice a pay run's finalization made is missing to a user without
+    // PAYROLL_VIEW, for every read and operation through here
+    ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js").requireInvoice(record.invoiceId)
     let organizationPartyId = p.organizationPartyId || record.financeOrganizationPartyId
     if (!organizationPartyId) {
         const internalFrom = one("mantle.party.PartyRole", {partyId: record.fromPartyId, roleTypeId: "OrgInternal"})

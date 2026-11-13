@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The KioskIdentity spec's clocking device (test only, never mounted): its spec-local route group admits this screen and its punch
+    transition, which calls mantle.humanres.AttendanceServices.record#KioskPunch in the device's request, as its display account, and
+    answers the result or the refusal as JSON. Authorization is not what the spec tests (the service's own checks are), so the call
+    runs with it off, in a transaction of its own. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false" standalone="true" default-menu-title="Kiosk spec">
+    <transition name="punch">
+        <actions><script><![CDATA[
+            const given = name => (typeof ec.context[name] === 'undefined' ? null : ec.context[name])
+            let out = {}
+            let error = ''
+            ec.message.pushErrors()
+            try {
+                out = ec.service.sync().name('mantle.humanres.AttendanceServices.record#KioskPunch')
+                    .parameters({badgeText: given('badgeText'), pin: given('pin'), directionEnumId: given('directionEnumId'),
+                        operationKey: given('operationKey')})
+                    .disableAuthz().requireNewTransaction(true).call() || {}
+                if (ec.message.hasError()) error = ec.message.getErrorsString()
+            } catch (e) {
+                error = String(e.message || e)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            ec.web.sendJsonResponse({out, error, userId: ec.user.userId || null})
+        ]]></script></actions>
+        <default-response type="none"/>
+    </transition>
+    <widgets>
+        <label text="Kiosk spec"/>
+    </widgets>
+</screen>

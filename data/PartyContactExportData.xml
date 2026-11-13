@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The export target of contact books (mantle.party.ContactImportServices; mr-boss impl-admin P16, design-admin §11
+    DataExport, §16 "Business export"): a registration of the framework's org.moqui.admin.DataTransferServices, which
+    dispatches an export to its owner's service as the exporter. A contact book the exporter may view, as vCard 4.0: the
+    scopes are the books the caller owns or is given a share of, the fields the groups of a card's fields (the name
+    always; birthdays and notes only when asked for), and the one selection option all contacts or the favorites. The
+    services check the caller's own permission on the book and never write a contact another user owns privately; the
+    registration asks for ADMIN_TRANSFER_RUN besides, and ADMIN_TRANSFER_VIEW to read the records of others' exports of a
+    book the reader may view. No field names a permission of its own: what a viewer of a book reads of a contact is the
+    whole card (Commons' own export gives the same). -->
+<entity-facade-xml type="seed">
+    <moqui.server.TransferTarget targetId="contactBookVCard" direction="export" targetMode="file" title="Contact book (vCard)"
+            description="The contacts of a contact book you may view, as a vCard file other address books read"
+            ownerApp="Commons" targetVersion="1" scopeLabel="Contact book"
+            columnsJson="[{&quot;name&quot;:&quot;name&quot;,&quot;label&quot;:&quot;Name&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;organization&quot;,&quot;label&quot;:&quot;Organization and title&quot;},{&quot;name&quot;:&quot;emails&quot;,&quot;label&quot;:&quot;Email addresses&quot;},{&quot;name&quot;:&quot;phones&quot;,&quot;label&quot;:&quot;Phone numbers&quot;},{&quot;name&quot;:&quot;addresses&quot;,&quot;label&quot;:&quot;Postal addresses&quot;},{&quot;name&quot;:&quot;websites&quot;,&quot;label&quot;:&quot;Websites&quot;},{&quot;name&quot;:&quot;groups&quot;,&quot;label&quot;:&quot;Groups and favorites&quot;},{&quot;name&quot;:&quot;birthday&quot;,&quot;label&quot;:&quot;Birthdays&quot;,&quot;selected&quot;:false},{&quot;name&quot;:&quot;notes&quot;,&quot;label&quot;:&quot;Notes&quot;,&quot;selected&quot;:false}]"
+            optionsJson="[{&quot;name&quot;:&quot;favoritesOnly&quot;,&quot;label&quot;:&quot;Contacts&quot;,&quot;type&quot;:&quot;option&quot;,&quot;default&quot;:&quot;N&quot;,&quot;options&quot;:[{&quot;value&quot;:&quot;N&quot;,&quot;label&quot;:&quot;Every contact of the book&quot;},{&quot;value&quot;:&quot;Y&quot;,&quot;label&quot;:&quot;Favorites only&quot;}]}]"
+            exportService="mantle.party.ContactImportServices.export#ContactBookTransfer"
+            scopeService="mantle.party.ContactImportServices.find#ContactExportScopes"
+            maxRows="5000" maxBytes="2097152"
+            exportPermission="ADMIN_TRANSFER_RUN" viewPermission="ADMIN_TRANSFER_VIEW"
+            ownerRoute="commonsContacts" sequenceNum="50"/>
+</entity-facade-xml>

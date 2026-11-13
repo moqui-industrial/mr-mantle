@@ -8,4 +8,9 @@
 # in ./moq test-apps went from 357.2 s (Wave 9) to 369.8 s (Wave 10), 12.6 s, rounded up.
 # Nov 6, 2026: raised by Commerce P8–P12's and Shop P7's measured share (the user's agreement, impl-commerce): mr-mantle's
 # feature time in ./moq test-apps went from 369.8 s (Wave 10) to 379.7 s (Wave 15), 9.9 s, rounded up.
-server = 393
+# Nov 12, 2026: raised by Maintenance's measured share (the user's agreement, impl-maintenance §4 and its final suites): its
+# twenty-one regression specs' feature time in the final ./moq test-apps, 47.6 s, rounded up.
+# Nov 13, 2026: raised to the final ./moq test-apps of People's build (the user's agreement, impl-people §4 and its Final
+# suites note): 554.6 s of feature time, People's thirty-nine regression specs 111.8 s of it, the rest other apps' changes
+# since Maintenance's raise (CalcGrid among them), rounded up.
+server = 555

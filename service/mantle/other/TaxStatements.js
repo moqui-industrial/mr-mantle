@@ -11,7 +11,7 @@ const vendorForm = "UsaIrs1099Misc"
 const issuedStatuses = ["InvoiceFinalized", "InvoiceSent", "InvoiceAcked", "InvoicePmtRecvd", "InvoiceWriteOff"]
 // Card and third-party network payments are reported by the network (1099-K), not on the payer's 1099-MISC.
 const networkInstruments = ["PiCreditCard", "PiDebitCard", "PiPayPalAccount", "PiAmazonPay", "PiGiftCard", "PiBitcoinWallet"]
-const lockParty = partyId => find("mantle.party.Party", {partyId}).forUpdate(true).one()
+const lockParty = partyId => find("mantle.party.Party", {partyId}).forNoKeyUpdate(true).one()
 
 // The period of a statement, which must be one of the organization's (its party).
 function period(timePeriodId, organizationPartyId) {

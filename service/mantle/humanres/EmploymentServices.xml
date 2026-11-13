@@ -24,10 +24,13 @@ along with this software (see the LICENSE.md file). If not, see
             lockedPartyIds the employees whose pay rate the user may not read or set (empty with the permission). For time
             entries (entryList of {key, partyId, date}: the entry's id, its person and its date, fromDate else thruDate) the
             worker counts as an employee when employed on the entry's date or now, so an employee's past pay stays hidden after
-            the employment ends: employeeKeys, hiddenKeys and lockedKeys. One query for all the people. Answers only: it adds no
-            error, so a caller asks it in its own transaction.</description>
+            the employment ends: employeeKeys, hiddenKeys and lockedKeys. With organizationPartyId only the employments at that
+            employer count (the worker invoice's refusal of an employee's time, InvoiceServices create#TimeEntryInvoiceItems and
+            ApprovedTimeBilling: worker invoices are for contractors, the user's call of Nov 12, 2026). One query for all the
+            people. Answers only: it adds no error, so a caller asks it in its own transaction.</description>
         <in-parameters>
             <parameter name="partyIdList" type="List"/>
+            <parameter name="organizationPartyId"><description>Only employments at this employer</description></parameter>
             <parameter name="entryList" type="List"><parameter name="entry" type="Map"><description>key, partyId, date</description></parameter></parameter>
         </in-parameters>
         <out-parameters>
@@ -55,8 +58,10 @@ along with this software (see the LICENSE.md file). If not, see
                     .concat(entries.map((entry) => String(entry.partyId)))))
             // every employment of the people, ended ones too, in one query
             const spans = new Map()
-            if (people.length) for (const row of Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtEmployee')
-                    .condition('fromPartyId', 'in', people).selectField('fromPartyId,fromDate,thruDate').disableAuthz().list())) {
+            let employmentFind = ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtEmployee')
+                    .condition('fromPartyId', 'in', people).selectField('fromPartyId,fromDate,thruDate').disableAuthz()
+            if (organizationPartyId) employmentFind = employmentFind.condition('toPartyId', organizationPartyId)
+            if (people.length) for (const row of Array.from(employmentFind.list())) {
                 if (!spans.has(row.fromPartyId)) spans.set(row.fromPartyId, [])
                 spans.get(row.fromPartyId).push([millis(row.fromDate), millis(row.thruDate)])
             }
@@ -73,6 +78,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="Employment">
+        <description>An employment: the PrtEmployee relationship from the employee to the employer and its Employment row. Refuses
+            an overlapping employment of the two (a PrtEmployee relationship: another relationship between them, a contractor's or a
+            contact's, does not count, impl-people F3) and a position not of the employer. IronStone People hires through
+            mantle.humanres.PeopleServices.hire#Employee, which checks the caller and calls this.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.party.PartyRelationship" include="nonpk"/>
             <auto-parameters entity-name="mantle.humanres.employment.Employment" include="nonpk"/>
@@ -85,7 +94,11 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
         <actions>
+            <!-- one employment at a time per person and employer: an overlapping PrtEmployee relationship is refused; a contractor's
+                (PrtAgent), a contact's or another relationship between the two is not an employment and does not block a hire
+                (IronStone People PE-02, impl-people F3) -->
             <entity-find entity-name="mantle.party.PartyRelationship" list="partyRelList">
+                <econdition field-name="relationshipTypeEnumId" value="PrtEmployee"/>
                 <econdition field-name="fromPartyId" from="fromPartyId"/>
                 <econdition field-name="toPartyId" from="toPartyId"/>
                 <econditions combine="or">
@@ -159,6 +172,8 @@ along with this software (see the LICENSE.md file). If not, see
 
             <entity-find entity-name="mantle.party.PartyRelationship" list="partyRelList">
                 <econdition field-name="partyRelationshipId" operator="not-equals" from="partyRelationshipId"/>
+                <!-- of PrtEmployee alone, as create#Employment (F3) -->
+                <econdition field-name="relationshipTypeEnumId" value="PrtEmployee"/>
                 <econdition field-name="fromPartyId" from="fromPartyId"/>
                 <econdition field-name="toPartyId" from="toPartyId"/>
                 <econditions combine="or">
@@ -221,14 +236,34 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="create" noun="EmploymentSalary">
         <description>Create an EmploymentSalary record, getting defaults and checking against min/max amounts on
-            PayGrade record from EmplPosition for Employment.</description>
+            PayGrade record from EmplPosition for Employment (a warning outside the band). Extended in IronStone People P23 (F4)
+            and its review (the user's call of Nov 12, 2026): needs PAYROLL_EDIT (PERMISSION_DENIED) and a payroll reader of the
+            employment's employer (PAYROLL_VIEW in their People scope; else RECORD_UNAVAILABLE); sets an employment's first salary
+            only: an employment with a salary changes it through the People pay change (PeopleServices.apply#EmploymentChange,
+            changeKind pay), which is approved before it applies (PAY_CHANGE_REQUIRED). A holder of PAYROLL_REPAIR (ADMIN's)
+            sets one at any employer for data repair, with comments as its reason (REASON_REQUIRED), kept in the audit log. The
+            salary in effect on fromDate ends there (dated rows, never two in effect); a salary from the same moment
+            (SALARY_EXISTS) or one from a later date set already (SALARY_SCHEDULED) is refused (PayrollAssignments.js
+            writeSalary, which the approved pay change applies through). P24 review (the user's call of Nov 12, 2026): a first salary
+            asked by a payroll editor waits for approval like any pay change: it is asked as one (PeopleServices.apply#EmploymentChange,
+            changeKind pay, comments its reason, else "First salary"; the pay change's checks of the currency and the pay frequency)
+            and written when the employer's payroll approvers approve it (employmentChangeId, applied false); only a holder of
+            PAYROLL_REPAIR writes at once (applied true).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <auto-parameters entity-name="mantle.humanres.employment.EmploymentSalary" include="nonpk"/>
             <parameter name="fromDate" default="ec.user.nowTimestamp"/>
         </in-parameters>
-        <out-parameters><parameter name="fromDate"/></out-parameters>
+        <out-parameters>
+            <parameter name="fromDate"/>
+            <parameter name="applied" type="Boolean"><description>The salary was written (a repair); else it waits as the pay
+                change employmentChangeId</description></parameter>
+            <parameter name="employmentChangeId"/>
+            <parameter name="waitingText"/>
+        </out-parameters>
         <actions>
+            <!-- P23: the caller first, so a refused caller reads nothing of the grade's band in a warning -->
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('salaryAccess', context)</script>
             <entity-find-one entity-name="mantle.humanres.employment.Employment" value-field="employment"/>
             <if condition="!timePeriodTypeId"><set field="timePeriodTypeId" from="employment.timePeriodTypeId"/></if>
             <if condition="!payGradeId">
@@ -254,7 +289,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </if>
 
-            <service-call name="create#mantle.humanres.employment.EmploymentSalary" in-map="context" out-map="context"/>
+            <set field="written" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('createSalary', context)"/>
+            <set field="fromDate" from="written.fromDate"/>
+            <set field="applied" from="!!written.applied"/>
+            <set field="employmentChangeId" from="written.employmentChangeId"/>
+            <set field="waitingText" from="written.waitingText"/>
         </actions>
     </service>
 

@@ -33,7 +33,7 @@ function repost(p) {
     // nothing posted yet, or a new received date: the legacy path posts it as of its date
     if (!history.length || receipt.receivedDate == null || lib.ms(history[0].transactionDate) !== lib.ms(receipt.receivedDate))
         return false
-    lib.find("mantle.party.Party", {partyId: asset.ownerPartyId}).forUpdate(true).one()
+    lib.find("mantle.party.Party", {partyId: asset.ownerPartyId}).forNoKeyUpdate(true).one()
     const mapped =
         lib.call("mantle.ledger.AssetAutoPostServices.get#AssetTypeGlAccount", {
             organizationPartyId: asset.ownerPartyId,

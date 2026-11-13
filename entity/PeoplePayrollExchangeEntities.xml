@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payroll exchange (IronStone People design §8.4 external processing and migration, PayrollExchange, §15 the payroll
+    history and provider exchange; PE-19; impl-people P28; PayrollExchange.js): a batch of one of three kinds, previewed, reconciled
+    and then executed, each row with its own outcome:
+    - an export of a pay group's period's approved inputs for an external processor, with its manifest (the source identities,
+      the counts and the totals), written through the framework's export target payrollExchangeInputs so Admin's Exports lists it;
+    - an import of payroll history from a former system: each row a legacy pay record (Mantle's EmploymentPayHistory, internal
+      payroll N, read only and never recalculated), never an obligation, refused where People already paid the employment that
+      day or the record exists with other amounts, so history and People's own pay never count the same amounts twice;
+    - an import of an external processor's signed-off results for a pay group in external processing: a pay run of the period
+      (its exchangeBatchId) whose employments carry the provider's lines, then approved and finalized as any run, so its slips and
+      obligations are made by the same path as native pay; its live results are refused until the group is live and Accounting's
+      payroll-origin projection is in place, as finalization is (impl-people §4, F30).
+    A file replayed (the same kind, scope and content) answers the batch it made. Written only by
+    mantle.humanres.PayrollExchangeServices, which checks PAYROLL_VIEW and PAYROLL_EDIT (and PEOPLE_IMPORT for an import) and the
+    employer first; amounts are opted out of AI. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PayrollExchangeBatch" package="mantle.humanres.payroll" cache="never">
+        <description>One payroll exchange: its kind (PayrollExchangeKind: an export of approved inputs, an import of history, an
+            import of an external processor's results), the employer, the pay group and period (an export's and results'), the
+            cutover day (history before it), the currency, the source or destination system, the file (its name and the hash of its
+            content: batchKey, unique, makes a file replayed answer this batch), the totals its sender signed off (expected count,
+            gross and net, compared at reconciliation), its state (previewed, reconciled at a revision, executed), its counts, the
+            manifest (an export's source identities and totals; an import's reconciliation), and what it made: the export's record
+            (transferId, the framework's TransferBatch) and stored file, or the results' pay run.</description>
+        <field name="payrollExchangeBatchId" type="id" is-pk="true"/>
+        <field name="exchangeKindEnumId" type="id"><description>PayrollExchangeKind</description></field>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="cutoverDate" type="date"><description>History: the day People's own pay starts; history is before it</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="sourceSystem" type="text-medium"><description>The former system or the processor</description></field>
+        <field name="fileName" type="text-medium"/>
+        <field name="fileHash" type="text-medium"/>
+        <field name="batchKey" type="text-medium"><description>kind, employer, group, period and the content's hash: unique</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollExchange</description></field>
+        <field name="expectedCount" type="number-integer"><description>Employees (results) or records (history) the sender signed off</description></field>
+        <field name="expectedGross" type="currency-amount" ai-opt-out="true"/>
+        <field name="expectedNet" type="currency-amount" ai-opt-out="true"/>
+        <field name="rowCount" type="number-integer"/>
+        <field name="readyCount" type="number-integer"/>
+        <field name="appliedCount" type="number-integer"/>
+        <field name="skippedCount" type="number-integer"/>
+        <field name="errorCount" type="number-integer"/>
+        <field name="manifestJson" type="text-very-long" ai-opt-out="true"/>
+        <field name="reconcileRevision" type="text-medium"><description>What the reconciliation saw (each row's outcome, the totals):
+            an execution at another is refused</description></field>
+        <field name="transferId" type="id-long"><description>An export's record kept by the framework (moqui.server.TransferBatch)</description></field>
+        <field name="contentLocation" type="text-medium"><description>An export's file, stored</description></field>
+        <field name="manifestLocation" type="text-medium"><description>An export's manifest, stored</description></field>
+        <field name="payrollRunId" type="id"><description>The pay run results were imported into</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="reconciledByUserId" type="id"/>
+        <field name="reconciledDate" type="date-time"/>
+        <field name="executedByUserId" type="id"/>
+        <field name="executedDate" type="date-time"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
+        <relationship type="one" title="PayrollExchangeKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="exchangeKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollExchangeRow" short-alias="rows">
+            <key-map field-name="payrollExchangeBatchId"/></relationship>
+        <index name="PAY_XCHG_KEY" unique="true"><index-field name="batchKey"/></index>
+        <index name="PAY_XCHG_ORG"><index-field name="organizationPartyId"/><index-field name="createdDate"/></index>
+        <index name="PAY_XCHG_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Exchange Kind" enumTypeId="PayrollExchangeKind"/>
+            <moqui.basic.Enumeration enumId="PxkExport" description="Export of approved inputs" sequenceNum="1" enumTypeId="PayrollExchangeKind"/>
+            <moqui.basic.Enumeration enumId="PxkHistory" description="Import of payroll history" sequenceNum="2" enumTypeId="PayrollExchangeKind"/>
+            <moqui.basic.Enumeration enumId="PxkResults" description="Import of a processor's results" sequenceNum="3"
+                    enumTypeId="PayrollExchangeKind"/>
+            <moqui.basic.StatusType description="Payroll Exchange" statusTypeId="PayrollExchange"/>
+            <moqui.basic.StatusItem statusId="PxbPreviewed" description="Previewed" sequenceNum="1" statusTypeId="PayrollExchange"/>
+            <moqui.basic.StatusItem statusId="PxbReconciled" description="Reconciled" sequenceNum="2" statusTypeId="PayrollExchange"/>
+            <moqui.basic.StatusItem statusId="PxbExecuted" description="Done" sequenceNum="3" statusTypeId="PayrollExchange"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PxbPreviewed" toStatusId="PxbReconciled" transitionName="Reconcile"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PxbReconciled" toStatusId="PxbExecuted" transitionName="Execute"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollExchangeRow" package="mantle.humanres.payroll" cache="never">
+        <description>A row of a payroll exchange: its line in the file (none for an export's), what it named (the worker, a component
+            or input, a pay day, amounts), what it was resolved to (the person, the employment, the component, the pay input an
+            export carries and its source key) and its outcome: ready, known (made already: skipped), duplicate (repeated in the
+            file), refused with its reason, exported, applied (with what it made, resultRef) or failed with its reason. Results' rows
+            of one employee are applied together, in a transaction of their own.</description>
+        <field name="payrollExchangeBatchId" type="id" is-pk="true"/>
+        <field name="rowSeqId" type="id" is-pk="true"/>
+        <field name="lineNumber" type="number-integer"/>
+        <field name="workerText" type="text-medium"/>
+        <field name="partyId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="componentText" type="text-medium"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="payrollInputId" type="id"><description>An export's input</description></field>
+        <field name="sourceKey" type="text-medium"><description>An export's input's entitlement; an import's record key</description></field>
+        <field name="payDate" type="date"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="grossAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="netAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="outcome" type="text-short"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="message" type="text-medium"/>
+        <field name="resultRef" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollExchangeBatch" short-alias="batch"/>
+        <index name="PAY_XCHG_ROW_EMPL"><index-field name="partyRelationshipId"/></index>
+    </entity>
+    <extend-entity entity-name="PayrollGroup" package="mantle.humanres.payroll">
+        <field name="externalProcessing" type="text-indicator" enable-audit-log="update"><description>Y: the group's pay is
+            calculated by an external processor (impl-people P28): its approved inputs are exported, its results imported through
+            the payroll exchange; its runs are never calculated natively, and it may be live with no localization once Accounting's
+            payroll-origin projection is in place</description></field>
+    </extend-entity>
+    <extend-entity entity-name="PayrollRun" package="mantle.humanres.payroll">
+        <field name="exchangeBatchId" type="id"><description>The payroll exchange whose external results the run carries: its
+            employments are never calculated here, and its approval binds the results as imported</description></field>
+    </extend-entity>
+</entities>

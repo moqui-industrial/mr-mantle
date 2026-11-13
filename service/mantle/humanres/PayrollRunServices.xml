@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's pay runs (IronStone People design §8.1 PayrollRun and PayrollRunEmployment, §8.2 steps 1 to 5, PayRuns, PayRunDetail;
+    PE-10; impl-people P25; PayrollRuns.js): a pay group's run for one of its prepared periods, its population employment by
+    employment, each employment calculated in its own transaction in bounded calls that resume pending and failed ones, review, and
+    approval by a distinct payroll approver (a People approval of kind PakPayrollRun, the PayrollRunApproval topic) bound to the
+    exact population, amounts and source revisions. Read with PAYROLL_VIEW, prepared with PAYROLL_VIEW and PAYROLL_EDIT, decided with
+    PAYROLL_APPROVE; another employer's run is a missing one. No invoice or payment is made (design §2): P27's finalize#Run makes
+    the obligations. The legacy payroll services and PayrollAdjustment rows are not read. impl-people P26 (design §8.2 corrections):
+    off-cycle runs (the period's approved adjustments no run took) and correction runs (create#Correction: a slip's employment
+    recalculated, its change paid on a new slip linked to the original, which stays); an approved run's calculated employments
+    become payslips (PayrollResults.js: preview slips in preview mode), withdrawn when its approval is taken back. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Runs" allow-remote="false">
+        <description>The pay runs of the employers in the caller's payroll scope (PAYROLL_VIEW), newest period first, filtered by
+            employer, group and state (cancelled ones left out unless asked): each its group, period, pay date, kind, worker count,
+            excluded, error and pending counts, the gross and net of its calculated employments, and its state. show attention:
+            the runs that need payroll's work (an employee in error, pending while calculating, returned by the approver, or an
+            approval that no longer holds). Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="statusId"/>
+            <parameter name="show"><description>attention</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="runs" type="List"><description>payrollRunId, organizationPartyId, organizationName, payrollGroupId,
+                groupName, timePeriodId, periodText, payDateText, kindText, workerCount, excludedCount, errorCount, pendingCount,
+                grossText, netText, statusId, state, stateText, attention</description></parameter>
+            <parameter name="runsCount" type="Integer"/>
+            <parameter name="runsPageIndex" type="Integer"/>
+            <parameter name="runsPageSize" type="Integer"/>
+            <parameter name="runsPageMaxIndex" type="Integer"/>
+            <parameter name="runsPageRangeLow" type="Integer"/>
+            <parameter name="runsPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('findRuns', context)"/>
+            <set field="runs" from="found.runs"/>
+            <set field="runsCount" from="found.runsCount"/>
+            <set field="runsPageIndex" from="found.runsPageIndex"/>
+            <set field="runsPageSize" from="found.runsPageSize"/>
+            <set field="runsPageMaxIndex" from="found.runsPageMaxIndex"/>
+            <set field="runsPageRangeLow" from="found.runsPageRangeLow"/>
+            <set field="runsPageRangeHigh" from="found.runsPageRangeHigh"/>
+            <set field="canCreate" from="found.canCreate"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Run" allow-remote="false">
+        <description>A run of a pay group in the caller's payroll scope for one of its prepared periods (PAYROLL_VIEW and
+            PAYROLL_EDIT): the group's employer and currency, the period's pay date unless another is given, an optional source
+            cutoff and description. A regular run (the default) selects its population at once (the employments the group pays on a
+            day of the period, each pending), one live a group and period. An off-cycle run (P26; any number a period, any pay date)
+            pays the period's approved adjustments no run took: its population is the employments that have them (or those of
+            partyRelationshipIds), with no salary or structure line. Refuses: another employer's group (RECORD_UNAVAILABLE), a
+            period not prepared for it (PERIOD_UNAVAILABLE), an ended group (GROUP_ENDED), a correction (KIND_NOT_AVAILABLE: made
+            from its slip, create#Correction), a regular run of a period whose inputs a live regular run took (INPUTS_CONSUMED) or
+            with a live regular run already (RUN_EXISTS), an off-cycle run with no adjustment to pay (NOTHING_TO_PAY). An operation
+            key answers a retry with the first run.</description>
+        <in-parameters>
+            <parameter name="payrollGroupId" required="true"/>
+            <parameter name="timePeriodId" required="true"/>
+            <parameter name="payDate"/>
+            <parameter name="runKindEnumId"/>
+            <parameter name="partyRelationshipIds"><description>An off-cycle run's employments (those with an adjustment to pay
+                when empty)</description></parameter>
+            <parameter name="cutoffDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="selectedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('createRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="repeated" from="out.repeated"/>
+            <set field="selectedCount" from="out.selectedCount"/>
+        </actions>
+    </service>
+    <service verb="select" noun="Employments" allow-remote="false">
+        <description>A run's population (PAYROLL_VIEW and PAYROLL_EDIT): brought in step with the group (an employment the group
+            now pays joins pending, one it no longer pays leaves), employments excluded with a reason (excludeIds, exclusionReason:
+            REASON_REQUIRED; kept in the run and the approval, out of its totals) or included again (includeIds), and the pay date
+            changed. Each change is reviewed again: an approval no longer holds and a request waiting is superseded. Refuses a run
+            finalizing, finalized or cancelled (RUN_CLOSED), an approved run whose slip a correction corrects (RUN_CORRECTED, P26
+            review) and an employment not in the run (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="excludeIds"/>
+            <parameter name="includeIds"/>
+            <parameter name="exclusionReason"/>
+            <parameter name="payDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="addedCount" type="Integer"/>
+            <parameter name="removedCount" type="Integer"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="includedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('selectEmployments', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="addedCount" from="out.addedCount"/>
+            <set field="removedCount" from="out.removedCount"/>
+            <set field="excludedCount" from="out.excludedCount"/>
+            <set field="includedCount" from="out.includedCount"/>
+        </actions>
+    </service>
+    <service verb="calculate" noun="Run" allow-remote="false" transaction-timeout="600">
+        <description>A run's pending and failed employments calculated, and those whose sources changed since they were
+            calculated (PAYROLL_VIEW and PAYROLL_EDIT), each in its own transaction under the employment's lock: one that fails is
+            left in error with its reason code and message (SALARY_MISSING, RATE_MISSING, NO_ASSIGNMENT, NO_SCHEDULE, MISSING_INPUT,
+            CYCLIC_DEPENDENCY, CURRENCY_MISMATCH, NEGATIVE_NET and the like) while the others are calculated. Bounded: at most
+            batchSize a call (100 by default, 500 at most), stopping after a minute; the rest stay pending and a later call resumes
+            them. A calculated employment whose sources are as they were is not calculated again, so a repeated call makes no
+            second result. The calculation (PayrollRuns.js): the period split where the assignment, salary or pay rates change, each
+            segment prorated by the group's policy and computed from the structure's published terms, the lines summed or taken
+            once, adjustments added, each money line rounded to the currency, the localization once, net and employer cost. The
+            inputs a calculation takes are marked with the run. No invoice or payment is made. The run is in review once nothing
+            is pending. P26: an off-cycle run's employment pays its adjustments alone (NOTHING_TO_PAY when none is left); a
+            correction run's pays the change from what its original slip and the corrections before it paid (NO_CHANGE when
+            nothing changed, ORIGINAL_WITHDRAWN when the original was withdrawn); an approved run with nothing to calculate keeps
+            its approval and slips, and one whose slip a correction corrects is not recalculated (RUN_CORRECTED).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="batchSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="processedCount" type="Integer"/>
+            <parameter name="calculatedCount" type="Integer"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="remainingCount" type="Integer"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('calculateRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="processedCount" from="out.processedCount"/>
+            <set field="calculatedCount" from="out.calculatedCount"/>
+            <set field="errorCount" from="out.errorCount"/>
+            <set field="remainingCount" from="out.remainingCount"/>
+            <set field="statusId" from="out.statusId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Run" allow-remote="false">
+        <description>A run as PayRunDetail shows it (PAYROLL_VIEW): its header (group, period, pay date, kind, state, the group's
+            readiness), the progress counts (pending, calculated, error, excluded, changed since calculated) and percent, the totals
+            of the calculated employments, the approval (state, who decides, decisions) and whether an approval still holds, the
+            steps done, what the caller may do, the population (paged, by state and name) with each employment's totals, variance
+            from the group's previous run and reason; with partyRelationshipId, that employment's result lines with their
+            explanations, how its period was split and the inputs it took. Refuses another employer's run
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="state"/>
+            <parameter name="term"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="run" type="Map"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="progressPercent" type="Integer"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="totalsText" type="Map"/>
+            <parameter name="approval" type="Map"/>
+            <parameter name="approvalHolds" type="Boolean"/>
+            <parameter name="steps" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canCancel" type="Boolean"/>
+            <parameter name="canCalculate" type="Boolean"/>
+            <parameter name="canSubmit" type="Boolean"/>
+            <parameter name="canDecide" type="Boolean"/>
+            <parameter name="canFinalize" type="Boolean"/>
+            <parameter name="employment" type="Map"/>
+            <parameter name="employments" type="List"/>
+            <parameter name="employmentsCount" type="Integer"/>
+            <parameter name="employmentsPageIndex" type="Integer"/>
+            <parameter name="employmentsPageSize" type="Integer"/>
+            <parameter name="employmentsPageMaxIndex" type="Integer"/>
+            <parameter name="employmentsPageRangeLow" type="Integer"/>
+            <parameter name="employmentsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('getRun', context)"/>
+            <set field="run" from="found.run"/>
+            <set field="counts" from="found.counts"/>
+            <set field="progressPercent" from="found.progressPercent"/>
+            <set field="totals" from="found.totals"/>
+            <set field="totalsText" from="found.totalsText"/>
+            <set field="approval" from="found.approval"/>
+            <set field="approvalHolds" from="found.approvalHolds"/>
+            <set field="steps" from="found.steps"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="canCancel" from="found.canCancel"/>
+            <set field="canCalculate" from="found.canCalculate"/>
+            <set field="canSubmit" from="found.canSubmit"/>
+            <set field="canDecide" from="found.canDecide"/>
+            <set field="canFinalize" from="found.canFinalize"/>
+            <set field="employment" from="found.employment"/>
+            <set field="employments" from="found.employments"/>
+            <set field="employmentsCount" from="found.employmentsCount"/>
+            <set field="employmentsPageIndex" from="found.employmentsPageIndex"/>
+            <set field="employmentsPageSize" from="found.employmentsPageSize"/>
+            <set field="employmentsPageMaxIndex" from="found.employmentsPageMaxIndex"/>
+            <set field="employmentsPageRangeLow" from="found.employmentsPageRangeLow"/>
+            <set field="employmentsPageRangeHigh" from="found.employmentsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="Run" allow-remote="false">
+        <description>Approval asked of a run in review (PAYROLL_VIEW and PAYROLL_EDIT; NOT_IN_REVIEW otherwise): a People approval
+            of kind PakPayrollRun at the run's revision (its population, amounts and source fingerprints), sent to the employer's
+            payroll approvers unless a rule says otherwise, never one who selected or calculated it. Refuses a run with an employee
+            pending (CALCULATION_INCOMPLETE) or in error (UNITS_UNRESOLVED: fix and calculate again, or exclude with a reason), none
+            calculated (NOTHING_CALCULATED), results whose sources changed since (SOURCE_CHANGED), or a request waiting at this
+            revision (APPROVAL_PENDING).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="justification"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="waitingText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('submitRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="peopleApprovalId" from="out.peopleApprovalId"/>
+            <set field="waitingText" from="out.waitingText"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Correction" allow-remote="false">
+        <description>A correction of a payslip (PAYROLL_VIEW and PAYROLL_EDIT; impl-people P26, design §8.2): a run of its own, kind
+            correction, for the slip's group, period and employment, with the reason (the changed source or rule) and a pay date
+            (the original's when empty: a slip of the same day keeps its own identity). A correction of a correction corrects its
+            original. It is calculated (the employment as it is now, less what the original and the corrections before it paid),
+            asked, approved and slipped as any run; its slip names the original, which stays as it was. Refuses a slip outside the
+            payroll scope (RECORD_UNAVAILABLE), a withdrawn original (SLIP_WITHDRAWN), no reason (REASON_REQUIRED), a correction of
+            the slip already open (CORRECTION_EXISTS) and an employment the group no longer pays in the period (NOT_IN_GROUP), unless
+            the employment ended by the period's last day (P27, the user's call of Nov 12, 2026: a backdated separation is
+            corrected to what it pays now, nothing before the leaving day, and the overpayment recovered at finalization). An
+            operation key answers a retry with the first run. A correction of an off-cycle slip recalculates its adjustments alone.
+            Once a correction (not cancelled) corrects a slip, the slip's run keeps its approval: calculating it with work to do or
+            selecting it is refused (RUN_CORRECTED), so the original never changes. No invoice or payment is made.</description>
+        <in-parameters>
+            <parameter name="payslipId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="payDate"/>
+            <parameter name="description"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="originalPayslipId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('createCorrection', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="originalPayslipId" from="out.originalPayslipId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Run" allow-remote="false">
+        <description>A run not approved cancelled with the reason (PAYROLL_VIEW and PAYROLL_EDIT; impl-people P25 review): a draft,
+            calculating or in review, a request waiting for its approval superseded. The inputs its calculation took are released
+            and its regular key freed, so the group's period may be run again; its population and draft results stay, read as a
+            cancelled run's. Refuses an approved, finalizing or finalized run (RUN_NOT_CANCELLABLE: an approved one is returned or
+            calculated again first), no reason (REASON_REQUIRED) and another employer's run (RECORD_UNAVAILABLE). A repeat answers
+            the cancellation. No invoice or payment is made or undone.</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="releasedCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('cancelRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="releasedCount" from="out.releasedCount"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="Run" allow-remote="false">
+        <description>The approver's approval of a run (PAYROLL_VIEW and PAYROLL_APPROVE; also the PayrollRunApproval topic's
+            approve service, which approve#NotificationMessage calls as the user with the record and message), at the revision
+            read (the notice's sourceRevision): through PeopleApprovalServices.record#Decision, the last approval approves the run at
+            that revision. Refuses who selected, calculated or asked (SELF_APPROVAL), anyone not the step's approver (NOT_APPROVER),
+            a run changed since the request (SOURCE_CHANGED), a notice of another record (SOURCE_INVALID) and another employer's
+            run (RECORD_UNAVAILABLE). P26: the approval makes the run's calculated employments payslips (preview slips in preview
+            mode), and nobody whose own pay the run holds decides it (SELF_APPROVAL). No invoice or payment is made.</description>
+        <in-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="approved" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('approveRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="approved" from="out.approved"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="return" noun="Run" allow-remote="false">
+        <description>The approver's return of a run to review with the reason (REASON_REQUIRED; PAYROLL_VIEW and PAYROLL_APPROVE;
+            also the PayrollRunApproval topic's refuse service, which refuse#NotificationMessage calls as the user): the request is
+            refused and the run shows the reason until it is calculated again. Refused as approve#Run is.</description>
+        <in-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="approved" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('returnRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="approved" from="out.approved"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <!-- impl-people P27 (design §8.2 steps 6 and 7, §8.3, §9's payroll route; PayrollObligations.js) -->
+    <service verb="finalize" noun="Run" allow-remote="false" transaction="ignore">
+        <description>An approved run of a live pay group finalized (PAYROLL_VIEW and PAYROLL_EDIT), under locks: the approval still
+            holding (APPROVAL_NO_LONGER_HOLDS) and every amount's account mapped, with each employer contribution's payee
+            (ACCOUNT_MAPPING_MISSING), first, the run then Finalizing; every step commits in a transaction of its own (the service
+            holds none), so the run never goes back to Approved behind an employment made final; then each employment
+            in its own transaction: its slip made final, the inputs its calculation took finalized, its net pay a draft invoice from
+            the person through Mantle's invoice services (earnings on their expense accounts, deductions and the localization's
+            employee amount withheld on their liability accounts; a reimbursement left out), each expense claim it reimburses linked
+            as it is (no second expense), an overpayment (a negative correction) to recover by deductions on the next regular runs
+            or, once the person has left, as a receivable; one that fails is left pending with its reason while the others go on.
+            Once every employment is final, one invoice for each payee and liability account (the localization payee's amounts, and
+            each deduction's or employer contribution's payee named by its term: the withheld amounts on the liability account, the
+            employer's on their expense account), each in its own transaction, then the run's invoices released to Accounting
+            (received) and the run finalized; until then nothing is released. Then each final slip's statement is issued
+            (issue#Payslip: the stored PDF and the person's direct-only notice), each in its own transaction, one that fails counted
+            (issueFailedCount) and left final. A retry finds what was made (each obligation's unique key) and finishes the rest; a
+            finalized run answers as it is (repeated), issuing any statement still not issued. No ledger
+            entry, approval for payment or payment is made here. Refuses a run not approved (NOT_APPROVED), a pay group that is not
+            live (NOT_LIVE, naming each reason: every group of this build, the demonstration localization never being live), and
+            another employer's run (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="finalizedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="obligationCount" type="Integer"/>
+            <parameter name="message"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="issuedCount" type="Integer"><description>Statements issued by this call</description></parameter>
+            <parameter name="issueFailedCount" type="Integer"><description>Statements that failed to issue (their slips stay
+                final)</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('finalizeRun', context)"/>
+            <set field="issuedCount" from="out.issuedCount ?? 0"/>
+            <set field="issueFailedCount" from="out.issueFailedCount ?? 0"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="complete" from="out.complete"/>
+            <set field="finalizedCount" from="out.finalizedCount ?? 0"/>
+            <set field="failedCount" from="out.failedCount ?? 0"/>
+            <set field="obligationCount" from="out.obligationCount"/>
+            <set field="message" from="out.message"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Settlement" allow-remote="false">
+        <description>A run's settlement as payroll reads it (PAYROLL_VIEW): each obligation (net pay, a payee's amounts, an expense
+            claim settled, a receivable) with its invoice, the invoice's state and posting, what is unpaid and the payments applied
+            with their states (a returned payment shown as such: Accounting's, never a second payment status); for each person the
+            wage net, the reimbursement still due on their claims and the total payment instruction; the overpayments to recover with
+            what is recovered and what remains; and why a finalization is still pending. Refuses another employer's run
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="finalizedDateText"/>
+            <parameter name="pendingText"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="obligations" type="List"><description>payrollObligationId, obligationKindEnumId, kindText, partyId,
+                payeeName, personName, amountText, invoiceId, invoiceStateText, postedText, unpaidText, paymentsText, returned,
+                settled</description></parameter>
+            <parameter name="people" type="List"><description>partyId, personName, wageNetText, reimbursementDueText,
+                instructionText</description></parameter>
+            <parameter name="recoveries" type="List"><description>payrollRecoveryId, payslipId, personName, routeText, amountText,
+                recoveredText, remainingText, invoiceId, recovered</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('getSettlement', context)"/>
+            <set field="payrollRunId" from="found.payrollRunId"/>
+            <set field="statusId" from="found.statusId"/>
+            <set field="complete" from="found.complete"/>
+            <set field="finalizedDateText" from="found.finalizedDateText"/>
+            <set field="pendingText" from="found.pendingText"/>
+            <set field="failedCount" from="found.failedCount"/>
+            <set field="obligations" from="found.obligations"/>
+            <set field="people" from="found.people"/>
+            <set field="recoveries" from="found.recoveries"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Obligation" allow-remote="false">
+        <description>An invoice a pay run's obligation names (one its finalization made: net pay, a payee's amounts, a receivable;
+            or an expense claim it settled), as payroll reads it on People's InvoiceDetail (PAYROLL_VIEW at the employer): the
+            obligation (kind, run, slip, person, payee, amount), the invoice's header, state and posting, its lines with their
+            accounts and the payments applied. Read and reconcile only. Refuses an invoice no obligation names or another
+            employer's (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="obligation" type="Map"/>
+            <parameter name="invoice" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="payments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollObligations.js').execute('getObligation', context)"/>
+            <set field="obligation" from="found.obligation"/>
+            <set field="invoice" from="found.invoice"/>
+            <set field="lines" from="found.lines"/>
+            <set field="payments" from="found.payments"/>
+        </actions>
+    </service>
+</services>

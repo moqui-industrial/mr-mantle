@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P20 (design-people §11 Goals, PE-16): a goal is a WorkEffort of its own type and the WepGoal purpose (Mantle had
+        no goal enumeration), never a WetTask: the task lists (CalDAV's Tasks collection, Today's and My tasks), the project rollups
+        and the search index read WetTask, WetProject and WetEvent work efforts only, so a goal reaches none of them -->
+    <moqui.basic.Enumeration enumId="WetGoal" description="Goal" enumTypeId="WorkEffortType"/>
+    <moqui.basic.Enumeration enumId="WepGoal" description="Goal" parentEnumId="WetGoal" enumTypeId="WorkEffortPurpose"/>
+
+    <!-- impl-people P20 (design-people §11 ReviewDetail, §12 ApprovalPolicies; F42): a review whose template asks for approval is
+        finalized only after a People approval of kind PakReview (ReviewServices.change#ReviewState finalize), sent to the approvers of
+        the step waiting (the employer's HR officers unless a rule says otherwise; never the reviewer who asked or the person
+        reviewed; with none it waits). approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse
+        services as the user, which decide it at the review's revision in the message (change#ReviewState over
+        PeopleApprovalServices.record#Decision): the last approval finalizes the review, a refusal (its reason required) returns the
+        reviewer's assessment to them. The message holds peopleApprovalId, performanceReviewId, sourceRevision, partyId, personName,
+        subjectText (the cycle: a lock-screen-safe title names no person, design-people §1.4), organizationName, departmentName and
+        stepText: never a rating, an answer or a note.
+        The app that shows them sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakReview" description="Review" sequenceNum="9" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeopleReviewStep" inboxEnumId="NinNotifications"
+            description="Review to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.ReviewServices.approve#ReviewStep"
+            refuseServiceName="mantle.humanres.ReviewServices.refuse#ReviewStep" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+    <!-- impl-people P20: a review step given to someone (a self assessment, a reviewer's assessment, feedback asked for, a step
+        returned with its reason kept on the review) and a review released to its person (the availability notice of design §15).
+        The message holds performanceReviewId and noticeText, a sentence naming the cycle and the due date or the release, never
+        the person reviewed (a lock-screen-safe title, design-people §1.4), a rating, an answer, a summary or a note. The app that
+        shows it sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleReviewUpdate" inboxEnumId="NinNotifications"
+            description="Review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${noticeText}"/>
+</entity-facade-xml>

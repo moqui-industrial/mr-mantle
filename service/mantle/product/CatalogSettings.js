@@ -147,7 +147,7 @@ function catalogSettings(p) {
 }
 function storeCatalogSettings(p) {
     const organizationPartyId = organization(p, "admin").organizationPartyId
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     const old = catalogSettings({organizationPartyId})
     if (Number(p.expectedVersion || 0) !== Number(old.versionSeqId))
         throw new Error("Catalog settings changed; reload before saving")
@@ -217,7 +217,7 @@ function variantSettings(p) {
 }
 function storeVariantSettings(p) {
     const organizationPartyId = organization(p, "admin").organizationPartyId
-    find("mantle.party.Party", {partyId: organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
     const old = variantSettings({organizationPartyId}),
         data = parse(p.settingsJson, p.settings || {}),
         now = ms(ec.user.nowTimestamp),

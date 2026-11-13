@@ -189,7 +189,7 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{organizationPartyId: organizationPartyId}"/>
             <if condition="!access.canEdit"><return error="true" message="Changing the Constitution of organization ${organizationPartyId} needs ORG_CONSTITUTION_EDIT for that organization"/></if>
             <!-- lock the organization's row so two saves are one after the other -->
-            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
             <service-call name="mantle.party.ConstitutionServices.get#OrganizationConstitution" out-map="current"
                     in-map="{organizationPartyId: organizationPartyId}"/>
@@ -229,7 +229,7 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.party.ConstitutionServices.check#OrganizationConstitutionAccess" out-map="access"
                     in-map="{organizationPartyId: organizationPartyId}"/>
             <if condition="!access.canEdit"><return error="true" message="Changing the Constitution of organization ${organizationPartyId} needs ORG_CONSTITUTION_EDIT for that organization"/></if>
-            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-update="true" disable-authz="true">
+            <entity-find-one entity-name="mantle.party.Party" value-field="orgParty" for-no-key-update="true" disable-authz="true">
                 <field-map field-name="partyId" from="organizationPartyId"/></entity-find-one>
             <service-call name="mantle.party.ConstitutionServices.get#OrganizationConstitution" out-map="current"
                     in-map="{organizationPartyId: organizationPartyId}"/>

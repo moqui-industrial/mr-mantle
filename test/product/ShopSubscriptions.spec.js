@@ -98,7 +98,8 @@ const staffIds = {
     reader: prefix + "_READER",
     limited: prefix + "_LIMITED",
     outsider: prefix + "_OUTSIDER",
-    catalog: prefix + "_CATALOG"
+    catalog: prefix + "_CATALOG",
+    otherCatalog: prefix + "_CATALOG_OTHER"
 }
 function staff(userId, organizationPartyId, permissions) {
     make("mantle.party.Party", {partyId: userId, partyTypeEnumId: "PtyPerson"})
@@ -316,6 +317,7 @@ spec({
             })
             staff(staffIds.outsider, prefix + "_ORG2", manage)
             staff(staffIds.catalog, ids.org, ["PRODUCT_CATALOG_VIEW"])
+            staff(staffIds.otherCatalog, prefix + "_ORG2", ["PRODUCT_CATALOG_VIEW"])
             make(SUB + "SubscriptionResource", {
                 subscriptionResourceId: prefix + "_RES_X",
                 description: "Uninstalled access",
@@ -334,6 +336,47 @@ spec({
     },
     cleanupSpec() {
         login("john.doe")
+    }
+})
+
+feature("paid-access reads require catalog ownership or an authorized store", {
+    when() {
+        system(() => {
+            for (const [productId, ownerPartyId] of [
+                [prefix + "_FOREIGN_ACCESS", prefix + "_ORG2"],
+                [prefix + "_SHARED_ACCESS", "_NA_"]
+            ]) {
+                make("mantle.product.Product", {productId, ownerPartyId, productTypeEnumId: "PtDigital"})
+                make(SUB + "ProductSubscriptionResource", {
+                    productId,
+                    subscriptionResourceId: ids.resource,
+                    fromDate: 0,
+                    availableTime: 3,
+                    availableTimeUomId: "TF_mon"
+                })
+            }
+        })
+        const read = (user, productId = ids.product) => asStaff(user, R + "get#ProductPaidAccess", {productId})
+        return {
+            own: read(staffIds.catalog),
+            shared: read(staffIds.catalog, prefix + "_SHARED_ACCESS"),
+            foreign: read(staffIds.catalog, prefix + "_FOREIGN_ACCESS"),
+            otherCatalog: read(staffIds.otherCatalog),
+            store: read(staffIds.operator),
+            otherStore: read(staffIds.outsider),
+            limited: read(staffIds.limited),
+            nonholder: read(ids.unverified)
+        }
+    },
+    then(r) {
+        r.own.terms.length == 1 && r.own.canEdit == false
+        r.shared.terms.length == 1
+        r.store.terms.length == 1 && r.store.canEdit == true
+        code(r.foreign) == "RECORD_UNAVAILABLE"
+        code(r.otherCatalog) == "RECORD_UNAVAILABLE"
+        code(r.otherStore) == "RECORD_UNAVAILABLE"
+        code(r.limited) == "RECORD_UNAVAILABLE"
+        code(r.nonholder) == "PERMISSION_DENIED"
     }
 })
 

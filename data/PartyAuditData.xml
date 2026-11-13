@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Change evidence of the records that belong to an internal organization (mantle.party.IdentityServices
+    find#IdentityChanges; mr-boss impl-admin P17, design-admin §12 AuditChanges), named to load after MantleSetupData (its
+    filter sets): the organization filters of the audit-log views (entity/IdentityEntities.xml), and the projections the
+    framework's org.moqui.admin.AuditServices answers through Mantle's source, each within the caller's organizations. The
+    framework registers its own records of the whole instance (its data/AdminAuditData.xml); a user's account, its
+    memberships, invitations and lifecycle belong to the organizations the user works for, which only Mantle knows. -->
+<entity-facade-xml type="seed">
+    <!-- an audit row of an organization's record is read under an app's organization filters, as the record is -->
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDACCOUN" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogAccountOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDACCOUN" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogAccountOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDMEMBER" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogMemberOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDMEMBER" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogMemberOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDORG" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDORG" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDRELATI" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogRelationshipOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDRELATI" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogRelationshipOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDINVITA" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogInvitationOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDINVITA" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogInvitationOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDLIFECY" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogLifecycleOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDLIFECY" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogLifecycleOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_USER_ORG_AUDACTOR" entityFilterSetId="MANTLE_USER_ORG"
+            entityName="mantle.party.AuditLogActorOrganization" filterMap="({organizationPartyId: (filterOrgIds || []).concat(['_NA_'])})"/>
+    <moqui.security.EntityFilter entityFilterId="MANTLE_ACTIVE_ORG_AUDACTOR" entityFilterSetId="MANTLE_ACTIVE_ORG"
+            entityName="mantle.party.AuditLogActorOrganization" filterMap="({organizationPartyId: activeOrgId})"/>
+
+    <!-- a user's account (the framework's audit log on its fields, impl-admin F23; the services' own rows for what changes
+        no field): shown to the audit reader of an organization the user works for. Allowed addresses are a marker. -->
+    <moqui.server.AuditProjection auditProjectionId="AccountUsername" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="username" category="identity" description="Username" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="601"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountFullName" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="userFullName" category="identity" description="User's name" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="602"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountEmail" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="emailAddress" category="identity" description="User's email address" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="603"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDisabled" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="disabled" category="identity" description="Account disabled" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="604"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountTerminateDate" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="terminateDate" category="identity" description="Account's end date" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="605"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountPasswordChange" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="requirePasswordChange" category="identity" description="Password change required" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="606"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountAuthFlow" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="externalAuthFlowId" category="identity" description="Account's identity provider" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="607"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountIpAllowed" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="ipAllowed" category="identity" description="Account's allowed addresses" valueMode="marker"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="608"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountSessions" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="sessions" category="identity" description="User's sessions ended" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="609"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountAccess" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="access" category="identity" description="User's access revoked" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="610"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountPasswordReset" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="passwordReset" category="identity" description="Password reset sent" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="611"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountFactorReset" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="factorReset" category="identity" description="Sign-in factor reset" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="612"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountSignInLock" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="signInLock" category="identity" description="Sign-in lock released" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="613"/>
+    <!-- a membership in a group, by its member; a user's topic subscription an administrator set (named, never shown) -->
+    <moqui.server.AuditProjection auditProjectionId="GroupMemberFrom" changedEntityName="moqui.security.UserGroupMember"
+            changedFieldName="fromDate" category="access" description="User added to a group" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="group" primaryKeyTitle="Group" secondaryKeyKind="user" secondaryKeyTitle="User" linkKey="adminGroup" sequenceNum="614"/>
+    <moqui.server.AuditProjection auditProjectionId="GroupMemberThru" changedEntityName="moqui.security.UserGroupMember"
+            changedFieldName="thruDate" category="access" description="User's group membership ended" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="group" primaryKeyTitle="Group" secondaryKeyKind="user" secondaryKeyTitle="User" linkKey="adminGroup" sequenceNum="615"/>
+    <moqui.server.AuditProjection auditProjectionId="TopicUserOther" changedEntityName="moqui.security.user.NotificationTopicUser"
+            changedFieldName="*" category="operation" description="User's topic subscription"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Topic" secondaryKeyKind="user" secondaryKeyTitle="User" linkKey="adminTopic" sequenceNum="616"/>
+    <!-- an organization membership (a staff relationship's end), an invitation and a lifecycle operation, each by its
+        organization -->
+    <moqui.server.AuditProjection auditProjectionId="OrgMembershipThru" changedEntityName="mantle.party.PartyRelationship"
+            changedFieldName="thruDate" category="identity" description="Organization membership ended" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Relationship" sequenceNum="617"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationStatus" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="statusId" category="identity" description="Invitation state" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="618"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationExpires" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="expiresDate" category="identity" description="Invitation expiry" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="619"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationSent" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="sentDate" category="identity" description="Invitation sent" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="620"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationLinkShown" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="linkShownDate" category="identity" description="Invitation link shown" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="621"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationAccepted" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="acceptedDate" category="identity" description="Invitation accepted" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="622"/>
+    <moqui.server.AuditProjection auditProjectionId="InvitationRevoked" changedEntityName="mantle.party.UserInvitation"
+            changedFieldName="revokedDate" category="identity" description="Invitation revoked" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Invitation" linkKey="adminInvitations" sequenceNum="623"/>
+    <moqui.server.AuditProjection auditProjectionId="LifecycleStatus" changedEntityName="mantle.party.UserLifecycleOperation"
+            changedFieldName="statusId" category="identity" description="Lifecycle operation state" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Operation" linkKey="adminLifecycle" sequenceNum="624"/>
+    <moqui.server.AuditProjection auditProjectionId="LifecycleStepStatus" changedEntityName="mantle.party.UserLifecycleOperationStep"
+            changedFieldName="statusId" category="identity" description="Lifecycle step state" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Operation" secondaryKeyTitle="Step" linkKey="adminLifecycle" sequenceNum="625"/>
+    <!-- an internal organization's own record, and a payment gateway made available to it (impl-admin P11): whether it is
+        enabled and its dates are shown, any other field named -->
+    <moqui.server.AuditProjection auditProjectionId="OrganizationDisabled" changedEntityName="mantle.party.Party"
+            changedFieldName="disabled" category="configuration" description="Organization disabled" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Organization" linkKey="adminOrganization" sequenceNum="626"/>
+    <moqui.server.AuditProjection auditProjectionId="GatewayOrgEnabled" changedEntityName="mantle.account.method.PaymentGatewayOrganization"
+            changedFieldName="isEnabled" category="connection" description="Payment gateway enabled for an organization" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Organization" secondaryKeyTitle="Gateway" linkKey="adminOrganization" sequenceNum="627"/>
+    <moqui.server.AuditProjection auditProjectionId="GatewayOrgThru" changedEntityName="mantle.account.method.PaymentGatewayOrganization"
+            changedFieldName="thruDate" category="connection" description="Payment gateway availability ended" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Organization" secondaryKeyTitle="Gateway" linkKey="adminOrganization" sequenceNum="628"/>
+    <moqui.server.AuditProjection auditProjectionId="GatewayOrgOther" changedEntityName="mantle.account.method.PaymentGatewayOrganization"
+            changedFieldName="*" category="connection" description="Payment gateway of an organization"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyTitle="Organization" secondaryKeyTitle="Gateway" linkKey="adminOrganization" sequenceNum="629"/>
+    <!-- an export and an import are their maker's own doing and carry no organization: the framework registers them as the
+        whole instance's (its data/AdminAuditData.xml), and here they become Mantle's to find, by the organizations the
+        person who made them works for, so one organization's audit reader does not read what another's people exported -->
+    <moqui.server.AuditProjection auditProjectionId="TransferExport" sourceService="mantle.party.IdentityServices.find#IdentityChanges"/>
+    <moqui.server.AuditProjection auditProjectionId="TransferImport" sourceService="mantle.party.IdentityServices.find#IdentityChanges"/>
+
+    <!-- shared devices (mr-boss impl-admin P18; the framework's org.moqui.admin.DeviceServices and its device credential,
+        mr-moqui docs/security/Shared-Devices.md): what happens to a device is evidence on its display account, the device
+        the secondary key, so it is read by the audit reader of an organization the display account shows. Never a
+        registration code or a secret: the services write none. -->
+    <moqui.server.AuditProjection auditProjectionId="AccountDisplay" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="displayAccount" category="identity" description="Display account (shared devices)" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" linkKey="adminUser" sequenceNum="650"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRegistered" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRegistered" category="identity" description="Shared device registered" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="651"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRedeemed" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRedeemed" category="identity" description="Shared device's code redeemed" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="652"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRevoked" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRevoked" category="identity" description="Shared device revoked" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="653"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceRefused" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceRefused" category="identity" description="Shared device refused" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="654"/>
+    <moqui.server.AuditProjection auditProjectionId="AccountDeviceStopped" changedEntityName="moqui.security.UserAccount"
+            changedFieldName="deviceStopped" category="identity" description="Shared device stopped" valueMode="show"
+            sourceService="mantle.party.IdentityServices.find#IdentityChanges"
+            primaryKeyKind="user" primaryKeyTitle="User" secondaryKeyKind="plain" secondaryKeyTitle="Device" linkKey="adminUser" sequenceNum="655"/>
+</entity-facade-xml>

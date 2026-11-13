@@ -19,9 +19,12 @@ along with this software (see the LICENSE.md file). If not, see
     calendar settings write, expanded by mantle.work.EventServices.get#FullCalendarData), or with none the timesheet policy's
     hours of a working day on its working days (TimesheetServices.get#TimesheetPolicy dh and wd); a holiday of the policy's
     organization (a WorkEffort of purpose WepHoliday owned by it, on its allDayStart) takes the whole day, leave (WetTimeOff
-    events the person is on, an all-day one the whole day) its hours. People's working-schedule record, when it exists,
-    replaces the WetAvailable source in get#PartyCapacity and nothing else changes. Days are the session's time zone's; weeks
-    start on weekStart (ISO, 1 Monday).
+    events the person is on, an all-day one the whole day) its hours. People's working schedule, when the person follows one
+    (impl-people P9, F23: their employment assignment's workingScheduleId, mantle.humanres.Schedules.js scheduledDays), replaces
+    the WetAvailable and policy source for the days it plans, and nothing else changes: its intervals are the day's hours by
+    their actual instants (a shift across midnight or a daylight saving change has its true length, on the day it starts in the
+    schedule's zone), and a holiday of its calendar (the assignment's, else the schedule's) takes the day beside the policy
+    organization's. Other days are the session's time zone's; weeks start on weekStart (ISO, 1 Monday).
 
     Allocations (WorkEffortAllocation): hours a week, or a percent of the person's capacity, of a person or of a placeholder (a
     project role and skill with no person yet) on a project, from one day to another. An allocation's hours fall on the
@@ -40,12 +43,22 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="PartyCapacity">
         <description>The capacity of people from fromDate to thruDate (days, inclusive; at most 400 days), each {partyId, source
-            (available: their WetAvailable working hours; policy: the timesheet policy's), organizationPartyId, dayList [{day, isoDay,
-            weekStart, base (the working hours before holidays and leave), holiday (its name or null), leave (hours), capacity}],
-            weekList [{weekStart, base, holidayHours, leaveHours, capacity, workDays}], base, capacity}. With no partyId and no
-            partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
+            (schedule: a People working schedule or a published shift plans some day, impl-people P9 and P14: a shift's hours
+            replace the schedule's that day and no holiday takes it; available: their WetAvailable working hours; policy: the
+            timesheet policy's), organizationPartyId, dayList [{day, isoDay, weekStart, base (the working hours before holidays
+            and leave), holiday (its name or null), leave (hours), training (hours), capacity, workingScheduleId (the schedule that
+            planned the day, or null)}], weekList [{weekStart, base, holidayHours, leaveHours, trainingHours, capacity, workDays}],
+            base, capacity}. A person's time off is taken off, timed leave that overlaps once, at most the day's base; a holiday
+            takes the whole day and leave does not count then. With lessTraining (availability for dispatch and staffing alone:
+            find#StaffingCandidates; impl-people follow-up 3 and its review, the user's call of Nov 12, 2026) People's training
+            sessions are taken off too (Training.js sessionTimesOf: as the trainer, or holding a place enrolled or completed and not
+            marked absent; a cancelled session none), merged with the time off so an overlap counts once (training the hours leave
+            does not already take); without it (timesheets' expected hours, utilization, People's capacity) training is worked
+            time and training is 0. With no partyId and
+            no partyIdList, one entry with partyId null: the standard week of the user's (or organizationPartyId's) policy, as a
             placeholder is planned. policy with organizationPartyId (as get#WeekDays passes them) apply to every party with no
-            working hours of their own. A person whose working hours or leave do not read is logged and planned by the policy.</description>
+            working hours of their own on the days no schedule plans. A person whose schedule, working hours or leave do not read is
+            logged and planned by the policy.</description>
         <in-parameters>
             <parameter name="partyId"/>
             <parameter name="partyIdList" type="List"/>
@@ -54,6 +67,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="weekStart" type="Integer" default="1"/>
             <parameter name="policy" type="Map"/>
             <parameter name="organizationPartyId"/>
+            <parameter name="lessTraining" type="Boolean" default="false"><description>Take People's training sessions off
+                (availability for dispatch and staffing; impl-people follow-up 3 review)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="capacityList" type="List"/>
@@ -133,6 +148,23 @@ capacityList = []
                 if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                 return Array.from(out?.eventList || [])
             }
+            // People's working schedules (impl-people P9) and published shifts (P14): the days each person's schedule or shifts
+            // plan, read once for every party
+            const schedules = ec.resource.script('component://mr-mantle/service/mantle/humanres/Schedules.js')
+            let plannedByParty = {}
+            // People's training sessions of each person over the range (impl-people follow-up 3, F360): {partyId: [[startMs, endMs]]}
+            let trainingByParty = {}
+            // the hours of each day a set of intervals covers, each moment once (overlapping intervals merged first)
+            const spreadOnce = (intervals, into) => {
+                const sorted = intervals.filter(([from, to]) => from != null && to > from).sort((a, b) => a[0] - b[0])
+                let current = null
+                for (const [from, to] of sorted) {
+                    if (current && from <= current[1]) { current[1] = Math.max(current[1], to); continue }
+                    if (current) spread(current[0], current[1], into)
+                    current = [from, to]
+                }
+                if (current) spread(current[0], current[1], into)
+            }
             const entryOf = (person) => {
                 const {policy: thePolicy, organizationPartyId: orgId} = policyOf(person)
                 const workDays = Array.from(thePolicy.workDays || [1, 2, 3, 4, 5]).map(Number)
@@ -140,7 +172,12 @@ capacityList = []
                 let base = days.map((day) => workDays.includes(isoDayOf(day)) ? dayHours : 0)
                 let source = 'policy'
                 const leave = days.map(() => 0)
-                if (person) {
+                // the hours off of leave and training together, each moment once
+                const busy = days.map(() => 0)
+                const leaveIntervals = []
+                const planned = (person && plannedByParty[person]) || null
+                const unplanned = !planned || days.some((day) => !planned[day])
+                if (person && unplanned) {
                     ec.message.pushErrors()
                     try {
                         const cf = ec.entity.conditionFactory
@@ -160,6 +197,12 @@ capacityList = []
                     } catch (err) {
                         ec.logger.error(`Capacity of ${person}: the working hours were not read, the policy's apply: ${err && err.message ? err.message : err}`)
                     } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                }
+                if (planned) {
+                    base = days.map((day, i) => planned[day] ? planned[day].hours : base[i])
+                    source = 'schedule'
+                }
+                if (person) {
                     ec.message.pushErrors()
                     try {
                         for (const event of calendar(person, 'WetTimeOff')) {
@@ -172,38 +215,67 @@ capacityList = []
                             } else {
                                 const startMs = toMillis(event.startMillis)
                                 const stopMs = event.endMillis != null ? toMillis(event.endMillis) : startMs + 3600000
-                                if (startMs != null && stopMs > startMs) spread(startMs, stopMs, leave)
+                                if (startMs != null && stopMs > startMs) leaveIntervals.push([startMs, stopMs])
                             }
                         }
                     } catch (err) {
                         ec.logger.error(`Capacity of ${person}: the leave was not read, none taken off: ${err && err.message ? err.message : err}`)
                     } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                    const timed = days.map(() => 0)
+                    spreadOnce(leaveIntervals, timed)
+                    spreadOnce(leaveIntervals.concat(trainingByParty[person] || []), busy)
+                    for (let i = 0; i < days.length; i++) {
+                        if (leave[i] >= 24) { busy[i] = 24; continue }
+                        leave[i] = timed[i]
+                    }
                 }
                 const holidays = holidaysOf(orgId)
+                // a planned day's holiday of its schedule's calendar (the assignment's, else the schedule's), beside the organization's
+                let calendarHolidays = {}
+                if (planned) {
+                    try {
+                        calendarHolidays = schedules.holidaysOf(Array.from(new Set(Object.values(planned).flatMap((entry) => entry.holidayCategoryIds))), days)
+                    } catch (err) { ec.logger.error(`Capacity of ${person}: the holidays of the schedule's calendar were not read, none marked: ${err}`) }
+                }
                 const dayList = days.map((day, i) => {
-                    const holiday = holidays[day] || null
-                    const off = holiday ? base[i] : Math.min(base[i], round(leave[i]))
-                    return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: holiday ? 0 : off,
-                        capacity: round(Math.max(0, base[i] - off))}
+                    const plannedDay = planned ? planned[day] : null
+                    // a published shift's day (impl-people P14) is worked as rostered: no holiday takes it
+                    const holiday = plannedDay?.shift ? null : holidays[day] || (plannedDay ? plannedDay.holidayCategoryIds.map((id) => calendarHolidays[id]?.[day]).find((name) => name) : null) || null
+                    // leave first, then the training hours it does not already take (impl-people follow-up 3, F360)
+                    const leaveOff = holiday ? 0 : Math.min(base[i], round(leave[i]))
+                    const off = holiday ? base[i] : Math.min(base[i], round(Math.max(leave[i], busy[i])))
+                    return {day: day, isoDay: isoDayOf(day), weekStart: weekOf(day), base: base[i], holiday: holiday, leave: leaveOff,
+                        training: holiday ? 0 : round(off - leaveOff), capacity: round(Math.max(0, base[i] - off)),
+                        workingScheduleId: plannedDay ? plannedDay.workingScheduleId : null}
                 })
                 const weeks = new Map()
                 for (const entry of dayList) {
                     let week = weeks.get(entry.weekStart)
-                    if (!week) { week = {weekStart: entry.weekStart, base: 0, holidayHours: 0, leaveHours: 0, capacity: 0, workDays: 0}; weeks.set(entry.weekStart, week) }
+                    if (!week) { week = {weekStart: entry.weekStart, base: 0, holidayHours: 0, leaveHours: 0, trainingHours: 0, capacity: 0, workDays: 0}; weeks.set(entry.weekStart, week) }
                     week.base += entry.base
                     if (entry.holiday) week.holidayHours += entry.base
                     week.leaveHours += entry.leave
+                    week.trainingHours += entry.training
                     week.capacity += entry.capacity
                     if (entry.capacity > 0) week.workDays += 1
                 }
                 const weekList = Array.from(weeks.values()).map((week) => Object.assign(week, {base: round(week.base), holidayHours: round(week.holidayHours),
-                    leaveHours: round(week.leaveHours), capacity: round(week.capacity)}))
+                    leaveHours: round(week.leaveHours), trainingHours: round(week.trainingHours), capacity: round(week.capacity)}))
                 return {partyId: person || null, source: source, organizationPartyId: orgId, dayList: dayList, weekList: weekList,
                     base: round(dayList.reduce((sum, entry) => sum + entry.base, 0)), capacity: round(dayList.reduce((sum, entry) => sum + entry.capacity, 0))}
             }
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
                 if (!parties.length) { capacityList.push(entryOf(null)); return }
+                try { plannedByParty = schedules.scheduledDays(parties, days) } catch (err) {
+                    ec.logger.error(`Capacity: the working schedules were not read, each person's own hours or the policy's apply: ${err && err.message ? err.message : err}`)
+                }
+                // training is worked time: only availability for dispatch and staffing asks it off (the user's call of Nov 12, 2026)
+                if (lessTraining) try {
+                    trainingByParty = ec.resource.script('component://mr-mantle/service/mantle/humanres/Training.js').sessionTimesOf(parties, starts[0], endMs)
+                } catch (err) {
+                    ec.logger.error(`Capacity: the training sessions were not read, none taken off: ${err && err.message ? err.message : err}`)
+                }
                 for (const person of parties) {
                     try { capacityList.push(entryOf(person)) } catch (err) {
                         ec.logger.error(`Capacity of ${person} not computed: ${err && err.message ? err.message : err}`)
@@ -1095,7 +1167,18 @@ const L = (text) => ec.l10n.localize(text)
             user sees, they are on), costRate and costCurrencyUomId (the person's current vendor rate, RateAmount RaprVendor, only
             withRates for ADMIN and holders of TIME_ENTRY_RATE; an employee's is the employee's pay, null for one without
             PAYROLL_VIEW: mantle.humanres.EmploymentServices.get#PayRateAccess)}. The allocation itself is not counted against its
-            own person.
+            own person. IronStone People (impl-people P18, its SkillsMatrix's FindAvailable; an owner contract with Projects, whose
+            callers pass neither): partyIdList bounds the people to those given (the people of the caller's People scope), and
+            each candidate's skillSelfDeclared says the skill's level is the person's own claim (PartySkill sourceEnumId
+            SksSelfDeclared), which People labels and no requirement takes. The free hours are capacity less People's training
+            sessions (get#PartyCapacity lessTraining; impl-people follow-up 3 review), but in a window, whose caller takes them off. IronStone Maintenance (impl-maintenance P8, its technician
+            assignment; Projects' and People's callers pass none of these): skillList ranks by several skills, each with a least
+            level ({skillTypeEnumId, minimumLevel}): each candidate's skills [{skillTypeEnumId, level, selfDeclared, meets}] (a
+            self-declared level meets nothing), skillsMet, hasSkill (every one met) and skillRating (the mean level held); a window
+            (windowFrom and windowThru, timestamps, instead of the allocation's fields) counts the free hours of the days it covers
+            (each day's capacity, with schedules, holidays and leave, less its share of the person's allocations that week) against
+            windowHours (the window's length when not given): fits when they cover it; with a window every person of partyIdList is
+            a candidate.
         </description>
         <in-parameters>
             <parameter name="workEffortAllocationId"/>
@@ -1107,6 +1190,11 @@ const L = (text) => ec.l10n.localize(text)
             <parameter name="skillTypeEnumId"/>
             <parameter name="limit" type="Integer" default="20"/>
             <parameter name="withRates" type="Boolean" default="false"/>
+            <parameter name="partyIdList" type="List"><description>Only these people (IronStone People's scope, P18)</description></parameter>
+            <parameter name="skillList" type="List"><description>Several skills, each {skillTypeEnumId, minimumLevel} (Maintenance P8)</description></parameter>
+            <parameter name="windowFrom" type="Timestamp"/>
+            <parameter name="windowThru" type="Timestamp"/>
+            <parameter name="windowHours" type="BigDecimal"/>
         </in-parameters>
         <out-parameters>
             <parameter name="candidateList" type="List"/>
@@ -1116,7 +1204,13 @@ const L = (text) => ec.l10n.localize(text)
             const dayOf = (value) => { if (value == null || value === '') return ''; const text = String(value); return /^-?\d+$/.test(text) ? new Date(Number(text)).toISOString().slice(0, 10) : text.slice(0, 10) }
 candidateList = []
             const round = (value) => Math.round(value * 100) / 100
-            if (workEffortAllocationId) {
+            const windowed = windowFrom != null && windowThru != null
+            if (windowed) {
+                if (ec.user.timestampMillis(windowThru) <= ec.user.timestampMillis(windowFrom)) { ec.message.addError(ec.l10n.localize('The window ends before it starts')); return }
+                const localDay = (stamp) => ec.l10n.format(new Date(ec.user.timestampMillis(stamp)), 'yyyy-MM-dd')
+                allocation = {fromDate: localDay(windowFrom), thruDate: localDay(windowThru), hoursPerWeek: null, allocationPercent: null,
+                    roleTypeId: roleTypeId || null, skillTypeEnumId: skillTypeEnumId || null}
+            } else if (workEffortAllocationId) {
                 const access = ec.service.sync().name('mantle.work.ResourceServices.get#AllocationAccess').parameters({workEffortAllocationId: workEffortAllocationId,
                     need: 'view'}).call() || {}
                 if (ec.message.hasError()) return
@@ -1130,6 +1224,10 @@ candidateList = []
             }
             const role = allocation.roleTypeId || null
             const skill = allocation.skillTypeEnumId || null
+            // Maintenance's skills, each with its least level (the single skill otherwise)
+            const skillAsks = (skillList != null ? Array.from(skillList) : []).map((row) => ({skillTypeEnumId: String(row.skillTypeEnumId || ''),
+                    minimumLevel: row.minimumLevel == null || row.minimumLevel === '' ? null : Number(String(row.minimumLevel))}))
+                    .filter((row) => row.skillTypeEnumId)
             const dayNum = (text) => Math.floor(Date.parse(String(text).slice(0, 10) + 'T00:00:00Z') / 86400000)
             const dayText = (num) => new Date(num * 86400000).toISOString().slice(0, 10)
             const isoDayOf = (text) => { const js = new Date(String(text).slice(0, 10) + 'T12:00:00Z').getUTCDay(); return js === 0 ? 7 : js }
@@ -1147,16 +1245,27 @@ candidateList = []
                 const skillRows = {}
                 if (skill) for (const row of ec.entity.find('mantle.humanres.ability.PartySkill').condition('skillTypeEnumId', skill).list()) {
                     pool.add(row.partyId); skillRows[row.partyId] = row }
+                const askedRows = {}
+                if (skillAsks.length) for (const row of ec.entity.find('mantle.humanres.ability.PartySkill')
+                        .condition('skillTypeEnumId', 'in', skillAsks.map((ask) => ask.skillTypeEnumId)).list()) {
+                    pool.add(row.partyId); askedRows[row.partyId + '/' + row.skillTypeEnumId] = row }
                 const roleHolders = new Set()
                 if (role) for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('roleTypeId', role).conditionDate('fromDate', 'thruDate', null)
                         .selectField('partyId').list()) { roleHolders.add(row.partyId); pool.add(row.partyId) }
+                // People's FindAvailable bounds the pool to the people of its scope (impl-people P18)
+                const bounded = partyIdList != null ? new Set(Array.from(partyIdList).map(String)) : null
+                if (bounded) for (const id of Array.from(pool)) if (!bounded.has(id)) pool.delete(id)
+                // Maintenance's window: every person given is a candidate, whether or not they keep time or hold a skill
+                if (bounded && windowed) for (const id of bounded) pool.add(id)
                 let people = pool.size ? Array.from(ec.entity.find('mantle.party.Person').condition('partyId', 'in', Array.from(pool)).selectField('partyId').list()).map((row) => row.partyId) : []
                 if (allocation.partyId) people = people.filter((id) => id !== allocation.partyId || allocation.statusId === 'WealRequested')
                 if (!people.length) return
                 if (people.length > 200) people = people.slice(0, 200)
                 const capacities = {}
+                // availability for staffing takes training sessions off (the user's call of Nov 12, 2026); Maintenance's window takes
+                // them off itself (MaintenanceDispatch.js, Training.js sessionHours: impl-maintenance F360), so not twice
                 for (const entry of Array.from(ec.service.sync().name('mantle.work.ResourceServices.get#PartyCapacity').parameters({partyIdList: people,
-                        fromDate: firstDay, thruDate: lastDay}).call()?.capacityList || [])) capacities[entry.partyId] = entry
+                        fromDate: firstDay, thruDate: lastDay, lessTraining: !windowed}).call()?.capacityList || [])) capacities[entry.partyId] = entry
                 ec.message.clearErrors()
                 const allocRows = Array.from(ec.entity.find('mantle.work.effort.WorkEffortAllocation').condition('partyId', 'in', people)
                         .condition('statusId', 'equals', 'WealAllocated').condition('fromDate', 'less-equals', lastDay).condition('thruDate', 'greater-equals', firstDay).list())
@@ -1175,11 +1284,23 @@ candidateList = []
                     try {
                         const capacity = capacities[person]
                         if (!capacity) continue
-                        const need = weeksOf(allocation, capacity)
                         const taken = {}
                         for (const row of allocRows.filter((one) => one.partyId === person)) for (const [week, hours] of Object.entries(weeksOf(row.getMap(), capacity)))
                             taken[week] = (taken[week] || 0) + hours
                         let freeHours = 0, needHours = 0, shortWeeks = 0, minFree = null
+                        if (windowed) {
+                            // the window's days: each day's capacity less its share (by the day's base hours) of the week's allocations
+                            const weekBase = {}
+                            for (const week of Array.from(capacity.weekList || [])) weekBase[week.weekStart] = Number(week.base) || 0
+                            for (const day of Array.from(capacity.dayList || [])) {
+                                if (day.day < fromDay || day.day > thruDay) continue
+                                const share = weekBase[day.weekStart] > 0 ? (taken[day.weekStart] || 0) * (Number(day.base) || 0) / weekBase[day.weekStart] : 0
+                                freeHours += Math.max(0, (Number(day.capacity) || 0) - share)
+                            }
+                            needHours = windowHours != null ? Number(String(windowHours)) : (ec.user.timestampMillis(windowThru) - ec.user.timestampMillis(windowFrom)) / 3600000
+                            shortWeeks = freeHours + 0.01 < needHours ? 1 : 0
+                        }
+                        const need = windowed ? {} : weeksOf(allocation, capacity)
                         for (const week of Array.from(capacity.weekList || [])) {
                             const needWeek = need[week.weekStart] || 0
                             if (!(needWeek > 0)) continue
@@ -1194,9 +1315,25 @@ candidateList = []
                                 .list()).filter((row) => row.isTemplate !== 'Y' && (all || visible.has(row.workEffortId))).map((row) => row.workEffortName || row.workEffortId))).sort()
                         const skillRow = skillRows[person]
                         const rating = skillRow ? Number(String(skillRow.rating ?? skillRow.skillLevel ?? 0)) : null
-                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating, hasRole: roleHolders.has(person),
+                        const entry = {partyId: person, name: nameOf(person), hasSkill: !!skillRow, skillRating: rating,
+                            skillSelfDeclared: skillRow?.sourceEnumId === 'SksSelfDeclared', hasRole: roleHolders.has(person),
                             fits: shortWeeks === 0 && needHours > 0, shortWeeks: shortWeeks, freeHours: round(freeHours), needHours: round(needHours),
                             minFreeWeek: minFree == null ? null : round(minFree), currentProjects: projects, costRate: null, costCurrencyUomId: null}
+                        if (skillAsks.length) {
+                            // Maintenance's skills: each level held, and met only by a level not self-declared at the least asked
+                            entry.skills = skillAsks.map((ask) => {
+                                const row = askedRows[person + '/' + ask.skillTypeEnumId]
+                                const level = row ? Number(String(row.skillLevel ?? row.rating ?? 0)) : null
+                                const selfDeclared = row?.sourceEnumId === 'SksSelfDeclared'
+                                return {skillTypeEnumId: ask.skillTypeEnumId, level: level, selfDeclared: selfDeclared,
+                                    meets: level != null && level > 0 && !selfDeclared && (ask.minimumLevel == null || level >= ask.minimumLevel)}
+                            })
+                            entry.skillsMet = entry.skills.filter((one) => one.meets).length
+                            entry.hasSkill = entry.skillsMet === skillAsks.length
+                            const held = entry.skills.filter((one) => one.level != null)
+                            entry.skillRating = held.length ? round(held.reduce((sum, one) => sum + one.level, 0) / held.length) : null
+                            entry.skillSelfDeclared = held.some((one) => one.selfDeclared)
+                        }
                         if (showRates && !payHidden.has(person)) {
                             const rate = Array.from(ec.entity.find('mantle.humanres.rate.RateAmount').condition('partyId', person).condition('ratePurposeEnumId', 'RaprVendor')
                                     .condition('workEffortId', 'is-null', null).conditionDate('fromDate', 'thruDate', nowStamp).orderBy('-fromDate').limit(1).list())[0]
@@ -1208,6 +1345,7 @@ candidateList = []
                     }
                 }
                 const scoreOf = (one) => (one.fits ? 1000 : 0) + (one.hasSkill ? 200 + 10 * (one.skillRating || 0) : 0) + (one.hasRole ? 100 : 0)
+                        + 20 * (one.skillsMet || 0)
                 candidateList.sort((a, b) => scoreOf(b) - scoreOf(a) || b.freeHours - a.freeHours || a.name.localeCompare(b.name))
                 candidateList = candidateList.slice(0, Math.max(1, Number(limit) || 20))
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }

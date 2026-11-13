@@ -1,0 +1,516 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's expense claims and employee advances (IronStone People design §9 ExpenseClaims, ExpenseClaimDetail and EmployeeAdvances,
+    §16.2 ExpenseServices, PE-13, PE-24; impl-people P15, F21, F65; Expense.js). A claim stays an employee-from Invoice: it is made by
+    mantle.account.InvoiceServices.create#ProjectExpenseInvoice with expenseClaim (the claimant's own, or made for them under
+    PEOPLE_EXPENSE_MANAGE, under the
+    claimant's current employment), its lines are ItemExpense-family invoice lines with their receipts, and ExpenseClaim keeps the
+    employment, the business state, the settlement route and its reservation. Submitted, the invoice is received and the claim waits
+    for a People approval (PeopleExpenseApproval); business approval leaves the invoice received, and finance's approve#Payable then
+    approves it for payment (only once the business approval is done, and never a claim reserved for payroll). An advance is asked
+    and approved (PeopleAdvanceApproval); its approval makes it a bill to the employee that finance approves for payment and a
+    payment run pays as any other bill, and finance applies it to the employee's claims through a credit on the employee advances
+    account; what is outstanding is read from those payments and credits. PEOPLE_EXPENSE_MANAGE (the user's call, impl-people §4,
+    Nov 12, 2026) reads every claim and advance of the user's employers and acts for an employee; the claimant's own and the
+    approvers' route need no more than their own scope. Receipt values are proposed from the receipt's text by
+    org.moqui.agent.AiTaskServices.run#Extract and reviewed before they are saved; a receipt arrives by mail (the mail rule action
+    createExpenseLine) or chat ("Add to my claim") as a draft line to review. Each service checks the caller's People scope
+    (People.js) and the People permissions itself, then reads and writes with authorization off, and names no application group. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Claims" allow-remote="false">
+        <description>The expense claims the caller reads: their own (PEOPLE_SELF_SERVICE; mine for those alone), their live reports'
+            at the line's employers (PEOPLE_TEAM_VIEW), the employers' of a holder of PEOPLE_EXPENSE_MANAGE; with toDecide, the claims whose step waiting the caller decides now (PEOPLE_REQUEST_APPROVE). Narrowed to a
+            person, an employer, a business state and the days made (fromDate through thruDate). Newest first, paged (an export,
+            pageNoLimit, up to 2000); each with the person, employer, project, purpose, day, currency and total, the business state,
+            the stage (draft, waiting, returned, approved: with finance, finance approved, paid, refused, cancelled), the route and
+            whether the caller decides it. Refuses a caller with none of the four permissions (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="toDecide" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="claims" type="List"/>
+            <parameter name="claimsCount" type="Integer"/>
+            <parameter name="claimsPageIndex" type="Integer"/>
+            <parameter name="claimsPageSize" type="Integer"/>
+            <parameter name="claimsPageMaxIndex" type="Integer"/>
+            <parameter name="claimsPageRangeLow" type="Integer"/>
+            <parameter name="claimsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('findClaims', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Claim" allow-remote="false">
+        <description>An expense claim the caller reads (the claimant, their manager at the employer, a holder of PEOPLE_EXPENSE_MANAGE
+            at the employer, an approver of its step; another, or an invoice that is no claim, is refused as missing, RECORD_UNAVAILABLE):
+            the claim as find#Claims shows it with its department, description, revision and the decider's reason when returned or
+            refused; its lines (type, description, day, quantity, amount, the tax included, merchant, receipt, source and whether it
+            waits for review); its approval (each step with who decides, the decisions); the finance state and settlement (the
+            invoice's state, applied and unpaid, each payment applied to it, an advance or a reimbursement, and the route reserved);
+            the claimant's approved advances still outstanding at the employer; and what the caller may do: canEdit, canSubmit and
+            canCancel (the claimant or a holder of PEOPLE_EXPENSE_MANAGE, a draft or returned claim), canDecide (an approver of the step waiting),
+            canWithdraw (the claimant or who made it, while it waits).</description>
+        <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="claim" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="approval" type="Map"/>
+            <parameter name="payments" type="List"/>
+            <parameter name="advances" type="List"/>
+            <parameter name="access" type="List"/>
+            <parameter name="receiptsMissing" type="Integer"/>
+            <parameter name="linesToReview" type="Integer"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canSubmit" type="Boolean"/>
+            <parameter name="canCancel" type="Boolean"/>
+            <parameter name="canDecide" type="Boolean"/>
+            <parameter name="canWithdraw" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('getClaim', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="Claim" allow-remote="false">
+        <description>A draft (or returned) claim's header changed by the claimant or a holder of PEOPLE_EXPENSE_MANAGE at the employer (PERMISSION_DENIED
+            for another reader; a claim waiting or decided is CLAIM_LOCKED): purpose, description, the day it is dated, a project the
+            claimant works on (PROJECT_UNAVAILABLE; empty clears it) and, while it has no line, the currency (CURRENCY_LOCKED).
+            revision, the claim's revision read, refuses a stale write (REVISION_CHANGED). A claim is made by
+            mantle.account.InvoiceServices.create#ProjectExpenseInvoice with expenseClaim.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="purpose" allow-html="none"/>
+            <parameter name="description" allow-html="none"/>
+            <parameter name="workEffortId"/>
+            <parameter name="invoiceDate" type="Timestamp"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="revision"/>
+        </in-parameters>
+        <out-parameters><parameter name="invoiceId"/></out-parameters>
+        <actions>
+            <set field="invoiceId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('storeClaim', context).invoiceId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ClaimItem" allow-remote="false">
+        <description>A line of a draft (or returned) claim added (no invoiceItemSeqId), changed or removed (remove) by the claimant or
+            a holder of PEOPLE_EXPENSE_MANAGE: the expense type (an ItemExpense-family type, EXPENSE_TYPE_INVALID), the description (DESCRIPTION_REQUIRED),
+            the day (DATE_FUTURE), the quantity (1 by default, QUANTITY_INVALID), the amount (positive and to the currency's precision,
+            AMOUNT_INVALID, CURRENCY_PRECISION), the tax it includes (TAX_INVALID beyond the line), the merchant and a receipt file (a
+            photo, a PDF or a text file of at most 10 MB, RECEIPT_INVALID, RECEIPT_TOO_LARGE), kept as the invoice's receipt content.
+            Saving a line is the claimant's review of it: a line from mail or chat, or with values read from its receipt, no longer
+            waits. Refuses as store#Claim does.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="itemTypeEnumId"/>
+            <parameter name="description" allow-html="none"/>
+            <parameter name="itemDate" type="Timestamp"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="taxAmount" type="BigDecimal"/>
+            <parameter name="merchantName" allow-html="none"/>
+            <parameter name="receiptFile" type="FileItem"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="removed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('storeClaimItem', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="read" noun="Receipt" allow-remote="false" transaction="ignore">
+        <description>Values proposed from a receipt for a line of a claim the caller changes ("Read receipt", design §9): the text
+            given (receiptText, typed or pasted), else the text of the line's receipt file (a PDF or a text file; a photo's text is
+            not read), passed to org.moqui.agent.AiTaskServices.run#Extract, which wraps it as untrusted. Nothing is saved: the
+            proposal (itemDate, amount, currencyUomId, merchantName, taxAmount, description) is shown for the claimant to review and
+            save with store#ClaimItem. available false, with a message, when there is no text or no model answers. Refuses as
+            store#ClaimItem does.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="receiptText" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="available" type="Boolean"/>
+            <parameter name="message"/>
+            <parameter name="proposal" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('readReceipt', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="Claim" allow-remote="false">
+        <description>A draft (or returned) claim sent for business approval by the claimant or a holder of PEOPLE_EXPENSE_MANAGE: it has lines
+            (LINES_REQUIRED), none waiting for review (LINES_TO_REVIEW), each with an amount (AMOUNT_INVALID); its invoice is received
+            (InvoiceReceived) and a People approval of kind PakExpenseClaim is asked (PeopleExpenseApproval to the first step's
+            approvers: the claimant's manager unless a rule says otherwise; never the claimant or who asked; with none it waits).
+            receiptsMissing counts the lines without a receipt (not refused). A claim already waiting answers as it is (repeated).
+            Refuses another reader (PERMISSION_DENIED), a claim decided or cancelled (CLAIM_LOCKED).</description>
+        <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="receiptsMissing" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('submitClaim', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="Claim" allow-remote="false">
+        <description>An expense claim decided, under its lock. approve: the step waiting, through PeopleApprovalServices.record#Decision
+            at the claim's revision (sourceRevision from a notice); the last approval is its business approval, which leaves the invoice
+            received for finance (never InvoiceApproved). return (a reason): back to the claimant to correct and submit again. refuse (a
+            reason): refused, its invoice cancelled. withdraw: the claimant or who made it takes back a claim waiting (a draft again, its
+            approval superseded). cancel: the claimant or HR cancels a draft or returned claim (its invoice cancelled). One who reads
+            nothing of it is answered as for a missing one (RECORD_UNAVAILABLE). A decision retried answers the first (repeated).
+            Refuses: DECISION_INVALID, NOT_YOURS, NOT_PENDING and record#Decision's refusals (NOT_APPROVER, SELF_APPROVAL,
+            ALREADY_DECIDED, SOURCE_CHANGED, REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="decision"><description>approve (the default), return, refuse, withdraw or cancel</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('decideClaim', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="Claim" allow-remote="false">
+        <description>The PeopleExpenseApproval topic's approve service, which approve#NotificationMessage calls as the user deciding
+            the notice: decide#Claim at the claim and revision in the message (a notice of an earlier revision is refused); refuses a
+            notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('approveClaimNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Claim" allow-remote="false">
+        <description>The PeopleExpenseApproval topic's refuse service, with the reason (the topic requires one): as approve#Claim,
+            the claim refused and its invoice cancelled.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('refuseClaimNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ClaimReceipt" allow-remote="false">
+        <description>A receipt of a claim the caller reads (get#Claim's readers; another, or a file of another invoice, is refused as
+            missing): its location and name, for the screen to send.</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="invoiceContentId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="location"/><parameter name="fileName"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('getClaimReceipt', context)"/>
+            <set field="location" from="out.location"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ClaimEvidence" allow-remote="false">
+        <description>The receipts of a claim the caller reads, for its evidence bundle (design §15): each a path in the bundle
+            (receipts/line-NN-...) and its location. The screen adds the claim's printed PDF.</description>
+        <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>
+        <out-parameters><parameter name="invoiceId"/><parameter name="entries" type="List"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('getClaimEvidence', context)"/>
+            <set field="invoiceId" from="out.invoiceId"/>
+            <set field="entries" from="out.entries"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ClaimOptions" allow-remote="false">
+        <description>What the caller's own new claim or advance offers (PEOPLE_SELF_SERVICE; no party parameter): their current
+            employments (the employer and its currency) and the projects they work on, none for a caller without self-service; and
+            the expense types (ItemExpense's family), a closed list for anyone changing a claim.</description>
+        <out-parameters>
+            <parameter name="employments" type="List"/>
+            <parameter name="expenseTypes" type="List"/>
+            <parameter name="projects" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('claimOptions', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ClaimOffer" allow-remote="false">
+        <description>Whether the caller has a current employment of their own to claim under (PEOPLE_SELF_SERVICE and a person; no
+            party parameter): the condition-service of the quick create New claim, which the shell asks on each page load. Answers
+            false for anyone else.</description>
+        <implements service="org.moqui.ui.ShellServices.offer#QuickCreate"/>
+        <actions>
+            <set field="offer" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('offerClaim', context).offer"/>
+        </actions>
+    </service>
+    <service verb="reserve" noun="ClaimSettlement" allow-remote="false">
+        <description>An approved claim taken by its settlement route, or released by it (design §9: one route, the original invoice
+            settled once). EcrPayroll: a payroll editor of the employer (PAYROLL_VIEW and PAYROLL_EDIT; PERMISSION_DENIED, another
+            employer's claim RECORD_UNAVAILABLE) reserves it for a pay run named by reference (impl-people P27), while its invoice is
+            received; EcrPayable: INVOICE_APPROVE in the organization, as finance's approve#Payable reserves it. A claim reserved for
+            the other route is refused (CLAIM_RESERVED), one not business-approved too (CLAIM_NOT_APPROVED); taken again by its own
+            route it answers as it is (repeated). release frees the same route's reservation while the invoice is not approved for
+            payment (CLAIM_SETTLED).</description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="routeEnumId" required="true"/>
+            <parameter name="reference"/>
+            <parameter name="release" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="reservedRouteEnumId"/>
+            <parameter name="reservedReference"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('reserveClaimSettlement', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Advances" allow-remote="false">
+        <description>The employee advances the caller reads (as find#Claims: their own, a manager's reports', the employers' of
+            PEOPLE_EXPENSE_MANAGE, or with toDecide those they decide now), narrowed by a person, an employer and a state; or, with
+            finance and organizationPartyId, the organization's approved advances for finance to follow and apply (a finance reader of
+            the organization: ACCOUNTING_VIEW, ACCOUNTING_ADMIN or PAYABLE_VIEW; ORGANIZATION_DENIED, PERMISSION_DENIED). Newest
+            first, paged; each with the person, employer, purpose, the amount asked, delivered (what delivered or confirmed
+            payments paid of its bill), applied (to claims, by its credits) and outstanding (delivered less applied, never a balance
+            kept), the state and stage (waiting, with finance, approved for payment, paid and outstanding, settled, refused,
+            withdrawn), its bill and the claims it was applied to.</description>
+        <in-parameters>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="mine" type="Boolean"/>
+            <parameter name="toDecide" type="Boolean"/>
+            <parameter name="finance" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="advances" type="List"/>
+            <parameter name="advancesCount" type="Integer"/>
+            <parameter name="advancesPageIndex" type="Integer"/>
+            <parameter name="advancesPageSize" type="Integer"/>
+            <parameter name="advancesPageMaxIndex" type="Integer"/>
+            <parameter name="advancesPageRangeLow" type="Integer"/>
+            <parameter name="advancesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('findAdvances', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="request" noun="Advance" allow-remote="false">
+        <description>An advance asked: by the employee for their own current employment (PEOPLE_SELF_SERVICE; the one named, else
+            their only one, EMPLOYMENT_REQUIRED), or by a holder of PEOPLE_EXPENSE_MANAGE at the employer for an employee's (partyRelationshipId; another
+            reader PERMISSION_DENIED, another employment RECORD_UNAVAILABLE): the purpose (PURPOSE_REQUIRED), the amount (positive,
+            AMOUNT_INVALID) in the employer's currency unless another is named (CURRENCY_REQUIRED), when it is needed and when it
+            should be settled (DATES_INVALID). Sent for a People approval of kind PakAdvance (PeopleAdvanceApproval). A retry with the
+            same operationKey answers the first (repeated).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="purpose" allow-html="none"/>
+            <parameter name="amount" type="BigDecimal"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="requiredDate" type="Date"/>
+            <parameter name="expectedSettlementDate" type="Date"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employeeAdvanceId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('requestAdvance', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="Advance" allow-remote="false">
+        <description>An advance decided, under its lock: approve or refuse (with a reason) the step waiting, through
+            PeopleApprovalServices.record#Decision at the advance's revision; the last approval makes it a payable (approval to advance is
+            not payment): a bill from the employee to the employer of one ItemAdvancePay line, due when the advance is needed,
+            received for finance's approval, which a payment run pays once approved (the user's call, impl-people §4, Nov 12, 2026). withdraw: the person or who asked, while it waits. One who reads nothing of it is answered as
+            for a missing one. A decision retried answers the first. Refuses as decide#Claim does.</description>
+        <in-parameters>
+            <parameter name="employeeAdvanceId" required="true"/>
+            <parameter name="decision"><description>approve (the default), refuse or withdraw</description></parameter>
+            <parameter name="reason" allow-html="none"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employeeAdvanceId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="statusText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('decideAdvance', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="Advance" allow-remote="false">
+        <description>The PeopleAdvanceApproval topic's approve service (approve#NotificationMessage calls it as the user): decide#Advance
+            at the advance and revision in the message; refuses a notice of another record (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('approveAdvanceNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Advance" allow-remote="false">
+        <description>The PeopleAdvanceApproval topic's refuse service, with the reason: as approve#Advance, the advance refused.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusEnumId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('refuseAdvanceNotice', context)"/>
+            <set field="statusEnumId" from="out.statusEnumId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="Advance" allow-remote="false">
+        <description>Finance applies a paid advance to the employee's claim at the same employer (PAYMENT_EDIT in the organization;
+            CLAIM_INVALID for another's): the claim's invoice approved for payment (CLAIM_NOT_FINANCE_APPROVED), in the advance's
+            currency (CURRENCY_MISMATCH), at most what is outstanding of the advance and unpaid of the claim (the amount given,
+            AMOUNT_EXCEEDS beyond it, else the lesser; NOTHING_OUTSTANDING, CLAIM_SETTLED), as a
+            credit the employer issues against the claim on the employee advances account (ItemAdvancePay's incoming account;
+            ADVANCE_ACCOUNT_MISSING), finalized at once and applied to the claim through
+            mantle.account.PaymentServices.apply#InvoiceToInvoice (EmployeeAdvanceApplication links it to the advance). Answers what was applied and what is outstanding after.</description>
+        <in-parameters>
+            <parameter name="employeeAdvanceId" required="true"/>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="amount" type="BigDecimal"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employeeAdvanceId"/>
+            <parameter name="invoiceId"/>
+            <parameter name="creditInvoiceId"/>
+            <parameter name="paymentApplicationId"/>
+            <parameter name="amountApplied" type="BigDecimal"/>
+            <parameter name="outstanding" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('applyAdvance', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+
+    <service verb="create" noun="ClaimLineFromEmail" authenticate="anonymous-all" allow-remote="false">
+        <description>The createExpenseLine action of the mail client's rules (org.moqui.mail.EmailClientServices.run#EmailRules, through
+            the EmailRuleAction enumeration ErActCreateExpenseLine; impl-people F65), run with authorization off, so it checks itself
+            what it does. The claimant is the person whose current work address (EmailWork) sent the message and who is employed now
+            (value names the employer when they have several); the message's files (else its text) become the receipts of one draft
+            line on their open draft claim with that employer, or a new draft, for the claimant to review: never submitted by mail, so
+            a forged sender adds a draft line at most. A message makes one line once (answered again, created false); a sender who is
+            no one's work address, or several people's, or not employed there adds nothing (logged).</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailRuleId"/>
+            <parameter name="ruleOwnerUserId"/>
+            <parameter name="value"><description>The employer, for a sender employed by several</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('claimLineFromEmail', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="create" noun="ClaimLineFromChat" allow-remote="false">
+        <description>"Add to my claim" from a chat message (the create-from of the IronStone chat's message actions, kind claimLine):
+            a message of the caller's own (NOT_YOURS) in a room they read (RECORD_UNAVAILABLE; an end-to-end encrypted room's,
+            ROOM_ENCRYPTED, whose text the server does not have) becomes a draft line, its files the receipts, on their open draft
+            claim for their one current employment (PEOPLE_SELF_SERVICE; NOT_EMPLOYED, EMPLOYMENT_REQUIRED), or a new draft, to
+            review. A message makes one line once (created false).</description>
+        <in-parameters>
+            <parameter name="chatRoomId" required="true"/>
+            <parameter name="eventSeq" type="Integer" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('claimLineFromChat', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+</services>

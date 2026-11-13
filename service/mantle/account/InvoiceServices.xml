@@ -590,8 +590,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toBillingRep">
                 <field-map field-name="partyId" from="toBillingRelList?.[0]?.fromPartyId"/></entity-find-one>
 
+            <!-- People P27 review (AC-23): a payroll-origin invoice or payment (a receivable from a person a pay run made, a payment
+                applied to one) is on a statement for a reader of payroll alone (its payrollOrigin mark, PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <!-- all Invoices -->
             <entity-find entity-name="mantle.account.invoice.Invoice" list="allInvoiceList">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="statusId" operator="in" value="InvoiceFinalized,InvoiceSent,InvoiceAcked"/>
                 <econdition field-name="unpaidTotal" operator="not-equals" from="toDecimal(0)"/>
                 <econdition field-name="toPartyId"/>
@@ -601,6 +605,7 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <!-- all Payments -->
             <entity-find entity-name="mantle.account.payment.Payment" list="allUnappliedPaymentList">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="fromPartyId" from="toPartyId"/>
                 <econdition field-name="toPartyId" from="fromPartyId" ignore-if-empty="true"/>
                 <econdition field-name="unappliedTotal" operator="not-equals" from="toDecimal(0)"/>
@@ -1660,6 +1665,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="ProjectExpenseInvoice">
+        <description>An expense invoice from a worker (fromPartyId) to a project's vendor (toPartyId, else the project's Vendor or
+            VendorBillFrom party), linked to the project (WorkEffortInvoice), or to toPartyId with no project. With expenseClaim
+            (People P15, design-people §9, impl-people F21) it is an employee's expense claim: the claimant (fromPartyId) creates
+            only their own (PEOPLE_SELF_SERVICE), unless a holder of PEOPLE_EXPENSE_MANAGE at the employer acts for them (the user's
+            call, impl-people §4, Nov 12, 2026), who is recorded (PERMISSION_DENIED); the employer is the one of the claimant's current employment
+            (partyRelationshipId, else the one with toPartyId, else their only one: EMPLOYMENT_REQUIRED, NOT_EMPLOYED); a project
+            must be one the claimant works on (PROJECT_UNAVAILABLE); and the claim's record is written (ExpenseClaim: a draft on
+            the accounts payable route, with purpose). A retry with the same operationKey answers the first claim. Without
+            expenseClaim its project behavior is unchanged.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.account.invoice.Invoice" include="nonpk"/>
             <parameter name="workEffortId"/>
@@ -1668,11 +1682,20 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="invoiceTypeEnumId" default-value="InvoiceSales"/>
             <parameter name="invoiceDate" type="Timestamp" default="ec.user.nowTimestamp"/>
             <parameter name="currencyUomId"/>
+            <!-- People P15: an employee's expense claim -->
+            <parameter name="expenseClaim" type="Boolean" default="false"/>
+            <parameter name="partyRelationshipId"><description>The claimant's employment (expenseClaim)</description></parameter>
+            <parameter name="purpose" allow-html="none"/>
+            <parameter name="operationKey"/>
         </in-parameters>
         <out-parameters>
             <parameter name="invoiceId"/>
         </out-parameters>
         <actions>
+            <if condition="expenseClaim">
+                <set field="invoiceId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Expense.js').execute('createClaim', context).invoiceId"/>
+                <return/>
+            </if>
             <if condition="!workEffortId &amp;&amp; !toPartyId">
                 <return error="true" message="Must specify either Project (workEffortId) or To Party (toPartyId)"/></if>
 
@@ -1990,7 +2013,10 @@ along with this software (see the LICENSE.md file). If not, see
                 for RaprVendor use ItemHourlyEarnings for Person Worker and ItemTimeEntry for Organization Worker</description></parameter>
             <parameter name="currencyUomId" default-value="${ec.user.getPreference('CurrencyDefault') || 'USD'}"/>
             <parameter name="ratePurposeEnumId" default-value="RaprClient"><description>If RaprVendor TimeEntry.vendorInvoiceId is
-                populated and time entries with it populated are excluded, otherwise with default of RaprClient TimeEntry.invoiceId is used.</description></parameter>
+                populated and time entries with it populated are excluded, otherwise with default of RaprClient TimeEntry.invoiceId is used.
+                A worker invoice (RaprVendor) is for contractors: time payroll consumed (PAY_SOURCE_CONSUMED) and the time of an
+                employee of the invoice's payer on the entry's date or now (EMPLOYEE_TIME) are refused when named in
+                timeEntryIdList and left out when found.</description></parameter>
             <parameter name="workerPartyId"><description>If specified only include time entries from this Party (matches TimeEntry.partyId)</description></parameter>
             <parameter name="vendorPartyId"><description>Matches TimeEntry.vendorPartyId, a Project Vendor or Employer</description></parameter>
             <parameter name="timeEntryIdList" type="List"><description>If specified only these time entries (and still only those
@@ -2060,6 +2086,39 @@ along with this software (see the LICENSE.md file). If not, see
                     <set field="approvedSheetIds" from="Array.from(approvedSheetList).map((sheet) => sheet.timesheetId)"/>
                 </if>
                 <set field="timeEntryList" from="Array.from(timeEntryList).filter((te) => te.timesheetId &amp;&amp; approvedSheetIds.includes(te.timesheetId))"/>
+            </if>
+            <!-- a worker invoice and payroll never both take a time entry (impl-people P24, F44; owner contract): an entry a pay
+                input consumed (mantle.humanres.PayrollInputServices) is refused when named, and left out when found by the other
+                parameters, as an entry already on a worker invoice is -->
+            <if condition="ratePurposeEnumId == 'RaprVendor' &amp;&amp; Array.from(timeEntryList).length">
+                <service-call name="mantle.humanres.PayrollInputServices.check#SourceUse" out-map="payUse" disable-authz="true"
+                        in-map="{sourceEntityName:'mantle.work.time.TimeEntry', sourceIdList:Array.from(timeEntryList).map((te) => te.timeEntryId)}"/>
+                <if condition="payUse.consumedIdList?.length">
+                    <if condition="timeEntryIdsGiven">
+                        <return error="true" message="PAY_SOURCE_CONSUMED: Payroll pays time entry ${Array.from(payUse.consumedIdList).join(', ')}: a worker invoice cannot take it"/>
+                    </if>
+                    <set field="timeEntryList" from="Array.from(timeEntryList).filter((te) => !Array.from(payUse.consumedIdList).includes(te.timeEntryId))"/>
+                </if>
+            </if>
+            <!-- worker invoices are for contractors (the user's call of Nov 12, 2026; owner contract with People, design-projects §8):
+                the time of a person employed by the invoice's payer (a PrtEmployee relationship to its toPartyId in effect on the
+                entry's date or now, EmploymentServices.get#PayRateAccess) is payroll's: refused when named (EMPLOYEE_TIME), left out
+                when found by the other parameters -->
+            <if condition="ratePurposeEnumId == 'RaprVendor' &amp;&amp; Array.from(timeEntryList).length">
+                <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="workerInvoice" auto-field-map="false">
+                    <field-map field-name="invoiceId"/></entity-find-one>
+                <if condition="workerInvoice?.toPartyId">
+                    <service-call name="mantle.humanres.EmploymentServices.get#PayRateAccess" out-map="employeeTime" disable-authz="true"
+                            in-map="{organizationPartyId:workerInvoice.toPartyId, entryList:Array.from(timeEntryList).map((te) =>
+                                ({key:te.timeEntryId, partyId:te.partyId, date:te.fromDate ?? te.thruDate}))}"/>
+                    <set field="employeeEntryIds" from="Array.from(employeeTime.employeeKeys || []).map((id) => String(id))"/>
+                    <if condition="employeeEntryIds.length">
+                        <if condition="timeEntryIdsGiven">
+                            <return error="true" message="EMPLOYEE_TIME: Time entry ${employeeEntryIds.join(', ')} is an employee's time, which payroll pays: a worker invoice is for contractors"/>
+                        </if>
+                        <set field="timeEntryList" from="Array.from(timeEntryList).filter((te) => !employeeEntryIds.includes(String(te.timeEntryId)))"/>
+                    </if>
+                </if>
             </if>
 
             <if condition="createSingleItem"><then>
@@ -3017,6 +3076,10 @@ along with this software (see the LICENSE.md file). If not, see
 
             Called by SECA rule in AccountingInvoice.secas.xml on tx-commit so runs async from triggering thread.
             May also be called directly with toAddresses specified to send to other email address.
+
+            With no toAddresses or toAddressList and forceByType false (the rule's call), an address that already has a
+            message of this type for the invoice, ready or sent, is skipped: the rule runs again from its ServiceOutbox
+            row when its first run did not commit, and must not send a second time.
         </description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
@@ -3025,8 +3088,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="toAddressList" type="List"><parameter name="toAddress"><text-email/></parameter></parameter>
             <parameter name="alsoPrimaryEmails" type="Boolean" default="false"/>
             <parameter name="setFinalizedInvoiceSent" type="Boolean" default="true"/>
+            <parameter name="forceByType" type="Boolean" default="false"/>
         </in-parameters>
         <actions>
+            <set field="skipSent" from="!forceByType &amp;&amp; !toAddresses &amp;&amp; !toAddressList?.length"/>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
             <service-call name="mantle.account.InvoiceServices.find#InvoiceProductStores" in-map="context" out-map="context"/>
             <if condition="!productStoreIdSet?.length"><return/></if>
@@ -3065,12 +3130,26 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!storeEmail.emailTemplateId"><continue/></if>
 
                     <iterate list="toAddressesList" entry="toAddressesCur">
+                        <if condition="skipSent">
+                            <entity-find-count entity-name="mantle.account.invoice.InvoiceEmailMessageDetail" count-field="sentCount">
+                                <econdition field-name="invoiceId"/><econdition field-name="emailTypeEnumId"/>
+                                <econdition field-name="toAddresses" from="toAddressesCur"/>
+                                <econdition field-name="statusId" operator="in" value="ES_READY,ES_SENT,ES_RECEIVED,ES_VIEWED"/>
+                            </entity-find-count>
+                            <if condition="sentCount">
+                                <message type="warning">Not sending ${emailTypeEnumId} email for invoice ${invoiceId} to ${toAddressesCur}, already sent</message>
+                                <continue/>
+                            </if>
+                        </if>
                         <service-call name="org.moqui.mail.EmailServices.send#EmailTemplate" out-map="sendOut" out-map-add-to-existing="false"
                                 in-map="{emailTemplateId:storeEmail.emailTemplateId, emailTypeEnumId:emailTypeEnumId,
                                     toAddresses:toAddressesCur, bodyParameters:bodyParameters, toUserId:toUserId}"/>
+                        <!-- the link in a transaction of its own, as send#EmailTemplate stores the message, so a run that rolls
+                            back after the send still finds it -->
                         <if condition="sendOut.emailMessageId"><script><![CDATA[
                             ec.service.sync().name("create#mantle.account.invoice.InvoiceEmailMessage")
-                                .parameter("invoiceId", invoiceId).parameter("emailMessageId", sendOut.emailMessageId).disableAuthz().call()
+                                .parameter("invoiceId", invoiceId).parameter("emailMessageId", sendOut.emailMessageId)
+                                .requireNewTransaction(true).disableAuthz().call()
                             if (setFinalizedInvoiceSent && invoice.statusId === 'InvoiceFinalized') {
                                 ec.service.sync().name("update#mantle.account.invoice.Invoice")
                                     .parameter("invoiceId", invoiceId).parameter("statusId", "InvoiceSent").disableAuthz().call()
@@ -3640,6 +3719,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </econditions>
                 <order-by field-name="appliedDate"/><order-by field-name="paymentApplicationId"/>
             </entity-find>
+            <!-- People P27 review (AC-23): a payroll payment applied to this invoice (one paying an expense claim with net pay) and
+                its ledger lines are a reader of payroll's (their payrollOrigin mark, PayrollOrigin.js) -->
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
+            <set field="paymentRows" from="ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
+                .visibleRows(Array.from(paymentRows), {payment:['paymentId', 'toPaymentId'], invoice:['invoiceId', 'toInvoiceId']})"/>
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderSourceList" limit="500" disable-authz="true">
                 <econdition field-name="invoiceId"/></entity-find>
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentRows" limit="500" disable-authz="true">
@@ -3651,6 +3735,7 @@ along with this software (see the LICENSE.md file). If not, see
                         disable-authz="true">
                     <econdition field-name="invoiceId"/>
                     <econdition field-name="organizationPartyId" from="scope.organizationPartyId"/>
+                    <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                     <order-by field-name="transactionDate"/><order-by field-name="acctgTransId"/>
                 </entity-find>
             </if>

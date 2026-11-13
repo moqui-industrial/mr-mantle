@@ -1435,6 +1435,8 @@ const operations = {create, storeItem, removeItem, submit, decide, cancel, compl
     requestSource,
     revisionOf,
     purchaseRequest,
+    // Maintenance's get#PurchaseRequestWork reads a request under this rule (impl-maintenance P10 review)
+    requireRead,
     convertOrderCommitments,
     orderSources,
     execute: (op, parameters) => {

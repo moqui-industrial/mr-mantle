@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P16 (design-people §5; F9, F11): an applicant is a Person with the Applicant role, separate from employee roles
+        and user accounts; an application's stages, the flow mantle.humanres.RecruitingServices.change#ApplicationStage follows
+        (Hired is never a stage change: P17 hires from an accepted offer; Offer needs its offer, P17) -->
+    <mantle.party.RoleType roleTypeId="Applicant" description="Applicant"/>
+    <moqui.basic.StatusItem statusId="EaReceived" statusTypeId="EmploymentApplication" sequenceNum="1" description="Received"/>
+    <moqui.basic.StatusItem statusId="EaScreening" statusTypeId="EmploymentApplication" sequenceNum="2" description="Screening"/>
+    <moqui.basic.StatusItem statusId="EaInterview" statusTypeId="EmploymentApplication" sequenceNum="3" description="Interview"/>
+    <moqui.basic.StatusItem statusId="EaOffer" statusTypeId="EmploymentApplication" sequenceNum="4" description="Offer"/>
+    <moqui.basic.StatusItem statusId="EaHired" statusTypeId="EmploymentApplication" sequenceNum="5" description="Hired"/>
+    <moqui.basic.StatusItem statusId="EaRefused" statusTypeId="EmploymentApplication" sequenceNum="8" description="Refused"/>
+    <moqui.basic.StatusItem statusId="EaWithdrawn" statusTypeId="EmploymentApplication" sequenceNum="9" description="Withdrawn"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaReceived" toStatusId="EaScreening" transitionName="Screen"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaReceived" toStatusId="EaInterview" transitionName="Interview"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaScreening" toStatusId="EaReceived" transitionName="Back to received"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaScreening" toStatusId="EaInterview" transitionName="Interview"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaInterview" toStatusId="EaScreening" transitionName="Back to screening"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaInterview" toStatusId="EaOffer" transitionName="Offer"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaOffer" toStatusId="EaHired" transitionName="Hire"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaReceived" toStatusId="EaRefused" transitionName="Refuse"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaScreening" toStatusId="EaRefused" transitionName="Refuse"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaInterview" toStatusId="EaRefused" transitionName="Refuse"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaOffer" toStatusId="EaRefused" transitionName="Refuse"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaReceived" toStatusId="EaWithdrawn" transitionName="Withdraw"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaScreening" toStatusId="EaWithdrawn" transitionName="Withdraw"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaInterview" toStatusId="EaWithdrawn" transitionName="Withdraw"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="EaOffer" toStatusId="EaWithdrawn" transitionName="Withdraw"/>
+    <moqui.basic.Enumeration enumId="EarbEmail" description="Email" enumTypeId="EmploymentApplicationReferredBy"/>
+    <moqui.basic.Enumeration enumId="EarbCareers" description="Careers page" enumTypeId="EmploymentApplicationReferredBy"/>
+
+    <!-- impl-people P16 (F51, F62): People's purposes of the survey builder's forms, private to the respondents a People service
+        assigns (no publication access kind, so no public or invitation link): built under People › Settings › Forms by the
+        People administrator (PEOPLE_CONFIGURE) for the employers People's scope reads (PeopleServices.get#Scope), and read with
+        the purpose's own People permission. Their answers are read only through the People service of the record they belong
+        to (the scorecard: RecruitingServices.get#Application, P16; the review and the training assessment: P19 and P20; the exit
+        interview: the leaver's checklist task). -->
+    <moqui.basic.Enumeration enumId="DbfpInterviewScorecard" description="Interview scorecard" sequenceNum="21" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="DbfpReview" description="Review" sequenceNum="22" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="DbfpTrainingAssessment" description="Training assessment" sequenceNum="23" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="DbfpExitInterview" description="Exit interview" sequenceNum="24" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="FppInterviewScorecard" description="Interview scorecard" sequenceNum="21" enumTypeId="FormPublicationPurpose"/>
+    <moqui.basic.Enumeration enumId="FppReview" description="Review" sequenceNum="22" enumTypeId="FormPublicationPurpose"/>
+    <moqui.basic.Enumeration enumId="FppTrainingAssessment" description="Training assessment" sequenceNum="23" enumTypeId="FormPublicationPurpose"/>
+    <moqui.basic.Enumeration enumId="FppExitInterview" description="Exit interview" sequenceNum="24" enumTypeId="FormPublicationPurpose"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpInterviewScorecard" publicationPurposeEnumId="FppInterviewScorecard"
+            editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_RECRUIT_VIEW"
+            scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+    <!-- impl-people P20: a review form is also built by a development editor (the review administrator) -->
+    <mantle.party.FormPurpose purposeEnumId="DbfpReview" publicationPurposeEnumId="FppReview"
+            editPermission="PEOPLE_CONFIGURE,PEOPLE_DEVELOP_EDIT" viewPermission="PEOPLE_DEVELOP_VIEW"
+            scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+    <!-- impl-people P19 review: a training assessment is also built by a development editor (the learning administrator) -->
+    <mantle.party.FormPurpose purposeEnumId="DbfpTrainingAssessment" publicationPurposeEnumId="FppTrainingAssessment"
+            editPermission="PEOPLE_CONFIGURE,PEOPLE_DEVELOP_EDIT" viewPermission="PEOPLE_DEVELOP_VIEW"
+            scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpExitInterview" publicationPurposeEnumId="FppExitInterview"
+            editPermission="PEOPLE_CONFIGURE" viewPermission="PEOPLE_HR_VIEW"
+            scopeServiceName="mantle.humanres.PeopleServices.get#Scope" formNoun="form"/>
+
+    <!-- impl-people P16 (PE-24, F65): the mail rule action that makes an application from a message sent to an opening's
+        address (mantle.humanres.RecruitingServices.create#ApplicationFromEmail, run by run#EmailRules with authorization off,
+        which checks itself what the rule's owner may do) -->
+    <moqui.basic.Enumeration enumId="ErActCreateApplication" enumTypeId="EmailRuleAction" enumCode="createApplication" sequenceNum="5"
+            description="Make a job application" optionValue="mantle.humanres.RecruitingServices.create#ApplicationFromEmail"/>
+
+    <!-- impl-people P16 (CX-SYNC, PE-24): My interviews, a projected CalDAV collection (projected-PeopleMyInterviews, read only)
+        on the kind P12 built, answered by RecruitingServices.get#InterviewProjection: the interviews the user is on the panel of,
+        each its time and "Interview · {opening}", never the candidate's other applications or the scorecards -->
+    <mantle.work.calendar.CalendarProjection projectionId="PeopleMyInterviews" title="My interviews"
+            description="The interviews you are on the panel of" sequenceNum="30"
+            ownerServiceName="mantle.humanres.RecruitingServices.get#InterviewProjection"/>
+
+    <!-- impl-people P17 (design-people §5 OfferDetail, §12 ApprovalPolicies; F42): an offer submitted (RecruitingServices
+        change#OfferState submit) sent to the approvers of the step waiting (the employer's HR officers unless a rule says otherwise;
+        never who submitted it or the applicant; with none it waits). approve#NotificationMessage and refuse#NotificationMessage call
+        the topic's approve#Offer and refuse#Offer as the user, which decide it at the offer's revision in the message (change#OfferState
+        over PeopleApprovalServices.record#Decision): the last approval approves the offer for issue, a refusal (its reason required)
+        makes it a draft again. The message holds peopleApprovalId, employmentOfferId, sourceRevision, partyId, personName, the
+        opening's and position's names, subjectText, organizationName, departmentName and stepText: never pay. The app that shows them
+        sets the link (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleOfferApproval" inboxEnumId="NinNotifications"
+            description="Offer of employment to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.RecruitingServices.approve#Offer"
+            refuseServiceName="mantle.humanres.RecruitingServices.refuse#Offer" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P17 review (the user's call of Nov 12, 2026): an issued offer's letter emailed to the applicant
+        (RecruitingServices.send#OfferLetter), the letter attached as it was stored; the service passes subject, fromAddress (the
+        employer's address) and fromName in bodyParameters, and the body, which names the position and the expiry, never pay -->
+    <moqui.basic.email.EmailTemplate emailTemplateId="PEOPLE_OFFER_LETTER" description="Offer of employment to the applicant"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+</entity-facade-xml>

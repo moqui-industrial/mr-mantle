@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed">
+    <!-- The sales access profile of CalcGrid (mr-moqui plans/IronCalc-DB.md, Access and row scope; docs/tools/Database.md,
+        CalcGrid and access profiles): what a person who is not an administrator may put on a spreadsheet's data sheet, as
+        authorization data. The group holds the profile artifact, which CalcGrid enters before it reads, and an artifact
+        org.moqui.calc.entity.[entityName] for each entity and view offered; an offer is CalcGrid's own name and grants
+        nothing on the entity anywhere else. A view is read only with each of its member entities offered too, which is why
+        the plain members (an order's header and items, an invoice's items, a party's organization and person) are listed.
+
+        No grant is here: an application grants the group to its sales groups, AUTHZT_ALWAYS for view, and puts the row
+        scope on that grant as entity filter sets (MANTLE_USER_ORG: the organizations the user works in; MANTLE_ACTIVE_ORG:
+        the one chosen). Under a grant with a filter set CalcGrid refuses an offered entity that no filter of the sets
+        applies to, so the plain members are not read on their own (an order header has no organization; its part has), and
+        a view is read through the filter on its scoped member: orders by OrderPart's vendor and customer, invoices by their
+        from and to party, returns by vendor and customer, payments by from and to party, parties and products by owner,
+        stores by organization. -->
+    <moqui.security.ArtifactGroup artifactGroupId="CALC_PROFILE_SALES" description="Sales: orders, returns, invoices, payments, customers and products"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="org.moqui.calc.profile.sales"/>
+    <!-- orders: the part carries the organizations; the header and the items are members of the views -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderPart"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeader"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderItem"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeaderAndPart"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderHeaderAndPartSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.OrderItemAndPartSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.order.return.ReturnHeader"/>
+    <!-- invoices and the payments applied to them -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.Invoice"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.InvoiceItem"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.invoice.InvoiceSummary"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.account.payment.Payment"/>
+    <!-- customers, products and stores -->
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Party"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Organization"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.Person"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.PartyDetail"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.party.PartyRole"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.Product"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.category.ProductCategory"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="CALC_PROFILE_SALES" artifactTypeEnumId="AT_SERVICE" artifactName="org.moqui.calc.entity.mantle.product.store.ProductStore"/>
+</entity-facade-xml>

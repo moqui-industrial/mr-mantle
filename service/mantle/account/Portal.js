@@ -486,7 +486,7 @@ function submitSupplierBill(p) {
     const checked = checkOrder(p)
     const key = operationId(p)
     // the organization first, as import#Bill locks it, so two submissions of one reference are serialized
-    find("mantle.party.Party", {partyId: checked.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: checked.organizationPartyId}).forNoKeyUpdate(true).one()
     const scope = {organizationPartyId: checked.organizationPartyId, supplierPartyId: checked.partyId}
     const repeat = rows(SUB, {...scope, operationId: key})[0]
     if (repeat) return {submission: submissionView(repeat), alreadyApplied: true}

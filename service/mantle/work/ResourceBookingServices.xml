@@ -14,62 +14,513 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- Resource booking and availability (design-maintenance §12 MT-07 and §13 ResourceBookingServices). Manufacturing P11 builds
     the outage fact of review Y3, record#ResourceUnavailability for an asset's actual outage, which its equipment-fault
-    downtime calls in its own transaction. Maintenance MT-07 adds find#, correct# and end#ResourceUnavailability, planned
-    blocks, facility resources and the booking policy services. -->
+    downtime calls in its own transaction. Maintenance P5 (impl-maintenance F14) gives it Maintenance's entry point and facility
+    resources and adds find#, correct# and end#ResourceUnavailability, in ResourceOutages.js. Maintenance P15 adds planned blocks
+    (RukPlanned: a blackout, and Manufacturing's offline time of a work center, which store#WorkCenterOffline now records here) to
+    record#, correct# and end#, and the booking policy, its approvers and the one availability read (ResourcePolicy.js), which
+    EventServices' booking calls. Maintenance P16 adds the booking decisions (ResourceBookingDecisions.js): find#ResourceBookingRequests,
+    decide#ResourceBooking and decide#ResourceBookings, and the ResourceBooking topic's approve and refuse services. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="record" noun="ResourceUnavailability" allow-remote="false">
-        <description>Record an actual outage of an asset (design-maintenance Downtime RecordDowntime, review Y3), or link the
-            one that is open: with the asset locked, an open actual ResourceUnavailability of the asset (no thruDate) is
-            answered (linked true) and nothing is written, so two faults of one asset are one outage; else a new one of
-            kind RukActual from fromDate (now when empty), open, with the organization of the asset's facility, the
-            description and the source production downtime. Nothing here ends an outage: Maintenance's
-            end#ResourceUnavailability restores the asset (MT-07). Internal: it checks no permission, its caller did
-            (store#ProductionDowntime checks PRODUCTION_OPERATE and the asset's facility); MT-07's Record outage adds its
-            own entry point. Refuses an asset that does not exist or is stock (ASSET_INVALID) and a kind other than
-            RukActual, until MT-07 builds planned blocks (KIND_INVALID).</description>
+        <description>Planned blocks (unavailabilityKindEnumId RukPlanned, impl-maintenance P15): a block of the resource from fromDate
+            (now when empty, a future one allowed) to thruDate (required, END_REQUIRED; at most a year, INTERVAL_INVALID), with its
+            reason (a closure by default, Manufacturing's offline time RurOffline) and, for Maintenance, the work order it is for;
+            Maintenance's entry is a resource administrator (RESOURCE_POLICY_EDIT) or supervisor of the resource's scope, Manufacturing's
+            a scheduler or method engineer (PRODUCTION_SCHEDULE or METHOD_RESOURCES) of a work center of an organization they work for
+            (PERMISSION_DENIED, RECORD_UNAVAILABLE). Bookings it covers (a facility's and those inside it) are kept, never cancelled,
+            and answered (affectedBookingIds) for review. Otherwise:
+            Record an actual outage of a resource, equipment (assetId: an asset that is not stock) or a facility
+            (facilityId), exactly one (design-maintenance Downtime RecordDowntime, review Y3), or link the one that is open: with
+            the resource locked, its open actual outage in force (no thruDate, not superseded) is answered (linked true) and
+            nothing else is written but the work order's link, so two faults of one resource are one outage; else a new one of
+            kind RukActual from fromDate (now when empty), open, or ended at thruDate (a past outage, a supervisor's or resource
+            administrator's), with the reason (ResourceUnavailabilityReason, its planned or unplanned classification kept), the
+            description, and its source: the production downtime or the maintenance work order and step. A work order named links
+            the outage (MaintenanceWorkOrder.resourceUnavailabilityId). Bookings of the resource over it are kept and answered by
+            id (affectedBookingIds). Nothing here ends an outage: end#ResourceUnavailability restores the resource.
+            Two entry points, checked by data: Manufacturing's, sourceProductionDowntimeId an equipment-fault stop of the asset
+            in an organization the user operates (PRODUCTION_OPERATE or PRODUCTION_SUPERVISE), a stop not corrected and with no
+            outage yet, the outage from its start, open and an equipment fault (SOURCE_INVALID otherwise), as
+            ProductionDowntime.js records it; and Maintenance's, MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT on a
+            resource of the user's maintenance scope, or MAINTENANCE_EXECUTE on the work order (or its step) assigned to the
+            user (workEffortId) that targets it, with a reason (REASON_INVALID). Refuses a kind other than RukActual (KIND_INVALID), no resource or two (RESOURCE_REQUIRED),
+            stock or a missing asset (ASSET_INVALID), a kind other than RukActual or RukPlanned (KIND_INVALID), a resource or work outside the scope (RECORD_UNAVAILABLE), another
+            permission (PERMISSION_DENIED), a technician without work (WORK_REQUIRED) or on work not theirs (NOT_ASSIGNED), work
+            that is no work order on the resource (WORK_INVALID), a step of other work (STEP_INVALID), a source that is no
+            equipment fault of the asset (SOURCE_INVALID), and a start or end in the future or an end before the start
+            (INTERVAL_INVALID).</description>
         <in-parameters>
-            <parameter name="assetId" required="true"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
             <parameter name="unavailabilityKindEnumId" default-value="RukActual"/>
+            <parameter name="unavailabilityReasonEnumId"/>
             <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
             <parameter name="description"/>
             <parameter name="sourceProductionDowntimeId"/>
+            <parameter name="workEffortId"><description>The maintenance work order (its root) the outage is recorded
+                from</description></parameter>
+            <parameter name="stepWorkEffortId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="resourceUnavailabilityId"/>
-            <parameter name="linked" type="Boolean"><description>True when an open outage of the asset was
+            <parameter name="linked" type="Boolean"><description>True when an open outage of the resource was
                 answered</description></parameter>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="affectedBookingIds" type="List"/>
+            <parameter name="affectedBookingCount" type="Integer"/>
         </out-parameters>
         <actions>
-            <if condition="unavailabilityKindEnumId != 'RukActual'">
-                <return error="true" message="KIND_INVALID: Only an actual outage is recorded here"/>
-            </if>
-            <entity-find-one entity-name="mantle.product.asset.Asset" value-field="asset" for-update="true"/>
-            <if condition="!asset || !asset.assetTypeEnumId || ['AstTpInventory', 'AstTpSupplies'].includes(asset.assetTypeEnumId)">
-                <return error="true" message="ASSET_INVALID: Equipment ${assetId} is not available"/>
-            </if>
-            <entity-find entity-name="mantle.work.effort.ResourceUnavailability" list="openList" limit="1">
-                <econdition field-name="assetId"/>
-                <econdition field-name="unavailabilityKindEnumId" value="RukActual"/>
-                <econdition field-name="thruDate" operator="is-null"/>
-                <order-by field-name="fromDate"/>
-            </entity-find>
-            <set field="openOutage" from="Array.from(openList)[0] || null"/>
-            <if condition="openOutage">
-                <set field="resourceUnavailabilityId" from="openOutage.resourceUnavailabilityId"/>
-                <set field="linked" from="true"/>
-                <return/>
-            </if>
-            <entity-find-one entity-name="mantle.facility.Facility" value-field="facility">
-                <field-map field-name="facilityId" from="asset.facilityId"/></entity-find-one>
-            <service-call name="create#mantle.work.effort.ResourceUnavailability" out-map="created"
-                    in-map="{unavailabilityKindEnumId:'RukActual', assetId:assetId,
-                        organizationPartyId:facility?.ownerPartyId || asset.ownerPartyId || null,
-                        fromDate:fromDate || ec.user.nowTimestamp, description:description || null,
-                        sourceProductionDowntimeId:sourceProductionDowntimeId || null, createdByUserId:ec.user.userId || null,
-                        createdDate:ec.user.nowTimestamp}"/>
-            <set field="resourceUnavailabilityId" from="created.resourceUnavailabilityId"/>
-            <set field="linked" from="false"/>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('record', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="linked" from="answer.linked"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="affectedBookingIds" from="answer.affectedBookingIds"/>
+            <set field="affectedBookingCount" from="answer.affectedBookingCount"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ResourceUnavailability" allow-remote="false">
+        <description>The actual outages of the user's maintenance scope (a work or resource read: MAINTENANCE_VIEW,
+            _ASSIGNED_VIEW or _RESOURCE_VIEW; PERMISSION_DENIED without), newest first, in force unless includeCorrected, scoped
+            and filtered in the query before paging: one outage, organization, equipment, facility (with those inside it and the
+            equipment there), reason, planned or unplanned (planned Y or N), open or ended (open true or false), source
+            (production or work), a work order (the outages it recorded or linked; it must be readable) and a period (fromDate,
+            thruDate overlapping). Each row carries its resource, interval and elapsed time (open ones to now), reason and
+            classification, production context (the stop's work center, reason and run, and how many stops link it), the work
+            orders recorded with or linked, who recorded and who restored it with the disposition, its corrections, the bookings
+            it affects (a count), the open work orders a restoration leaves open (openWorkList), and canRestore and canCorrect
+            for the user. With resourceUnavailabilityId, history is its correction chain. A holder of every organization with an
+            active one lists that organization's. With unavailabilityKindEnumId RukPlanned (Blackouts, P15) the planned blocks, each
+            with its state (planned, in effect, ended, withdrawn, corrected), its source (a blackout, a work order, production offline),
+            the bookings it covers until it ends (affectedBookingCount, flagged for review) and canCorrect and canEnd for a resource
+            administrator or supervisor.</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="unavailabilityKindEnumId"/>
+            <parameter name="unavailabilityReasonEnumId"/>
+            <parameter name="planned"/>
+            <parameter name="open"/>
+            <parameter name="source"><description>production or work</description></parameter>
+            <parameter name="workEffortId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="includeCorrected"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outageList" type="List"/>
+            <parameter name="outageListCount" type="Integer"/>
+            <parameter name="outageListPageIndex" type="Integer"/>
+            <parameter name="outageListPageSize" type="Integer"/>
+            <parameter name="outageListPageMaxIndex" type="Integer"/>
+            <parameter name="outageListPageRangeLow" type="Integer"/>
+            <parameter name="outageListPageRangeHigh" type="Integer"/>
+            <parameter name="history" type="List"/>
+            <parameter name="canRecord" type="Boolean"/>
+            <parameter name="canRestore" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('find', context)"/>
+            <set field="outageList" from="answer.outageList"/>
+            <set field="outageListCount" from="answer.outageListCount"/>
+            <set field="outageListPageIndex" from="answer.outageListPageIndex"/>
+            <set field="outageListPageSize" from="answer.outageListPageSize"/>
+            <set field="outageListPageMaxIndex" from="answer.outageListPageMaxIndex"/>
+            <set field="outageListPageRangeLow" from="answer.outageListPageRangeLow"/>
+            <set field="outageListPageRangeHigh" from="answer.outageListPageRangeHigh"/>
+            <set field="history" from="answer.history"/>
+            <set field="canRecord" from="answer.canRecord"/>
+            <set field="canRestore" from="answer.canRestore"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="ResourceUnavailability" allow-remote="false">
+        <description>A correction of an outage in force, a maintenance supervisor's or resource administrator's
+            (MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT, PERMISSION_DENIED) in the user's scope, with its reason
+            (REASON_REQUIRED): a new row with the corrected start, the end of an ended outage, the reason and the description,
+            which keeps who recorded and who restored it, and the corrected row kept with its values, superseded by the new one
+            (supersession, design §6); the work orders linked to it are linked to the new row. Refuses an outage outside the scope
+            (RECORD_UNAVAILABLE), one already corrected (OUTAGE_CORRECTED), a changed revision (REVISION_CHANGED), an end on an
+            open outage, which restoration gives (OUTAGE_OPEN), a reason that is no downtime reason (REASON_INVALID) and an
+            interval in the future or ending before it starts (INTERVAL_INVALID). A planned block (P15, replacing the P5 review's
+            KIND_INVALID) is corrected the same way, as a new row in force over the one kept, by either of record#'s entry points for
+            blocks, its end required and a future interval allowed; Manufacturing's withdraw ends the row in force of the block it names.</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="unavailabilityReasonEnumId"/>
+            <parameter name="description"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="correctedUnavailabilityId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="affectedBookingCount" type="Integer"><description>A planned block's: the bookings it covers</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('correct', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="correctedUnavailabilityId" from="answer.correctedUnavailabilityId"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="affectedBookingCount" from="answer.affectedBookingCount || 0"/>
+        </actions>
+    </service>
+    <service verb="end" noun="ResourceUnavailability" allow-remote="false">
+        <description>The restoration of a resource, the only end of an actual outage (design §6 RestoreResource, §7.1): a
+            maintenance supervisor's or resource administrator's (MAINTENANCE_SUPERVISE or MAINTENANCE_RESOURCE_EDIT,
+            PERMISSION_DENIED) in the user's scope, at thruDate (now when empty, not before the start nor in the future), with
+            the disposition, available for use (MdispAvailable) or usable with restrictions (MdispRestricted), and the readiness
+            evidence (endComments). Maintenance work orders linked to the outage that are still open stay open: the answer lists
+            them (openWorkList, as find# does for the dialog), and restoring while any is open needs the reason (openWorkReason,
+            kept on the row; OPEN_WORK names them without one; the user's call of Nov 12). No work order ends an outage: closing
+            the production downtime that recorded it, completing a work order or cancelling one ends nothing, so two work orders
+            on one resource cannot each end the other's. Refuses an outage outside the scope
+            (RECORD_UNAVAILABLE), one corrected (OUTAGE_CORRECTED), one ended
+            (OUTAGE_ENDED), a changed revision (REVISION_CHANGED), no disposition (DISPOSITION_REQUIRED) or another one
+            (DISPOSITION_INVALID) and an end out of its interval (INTERVAL_INVALID). A planned block (P15) is ended now by either of
+            record#'s entry points for blocks (resultCode ENDED), or withdrawn when it has not begun (WITHDRAWN, its end set to its
+            start), with no disposition; the row is kept.</description>
+        <in-parameters>
+            <parameter name="resourceUnavailabilityId" required="true"/>
+            <parameter name="expectedRevision" type="Integer"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="dispositionEnumId"/>
+            <parameter name="endComments"/>
+            <parameter name="openWorkReason"><description>Required while a linked work order is open</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceUnavailabilityId"/>
+            <parameter name="resultCode"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="openWorkList" type="List"><description>The linked work orders still open (workEffortId,
+                workEffortName, statusText, text), which stay open</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceOutages.js').execute('end', context)"/>
+            <set field="resourceUnavailabilityId" from="answer.resourceUnavailabilityId"/>
+            <set field="resultCode" from="answer.resultCode"/>
+            <set field="revision" from="answer.revision"/>
+            <set field="openWorkList" from="answer.openWorkList"/>
+        </actions>
+    </service>
+
+    <!-- ========== Booking policy and availability (impl-maintenance P15; design §7.1; ResourcePolicy.js) ========== -->
+    <service verb="get" noun="ResourceAvailability" allow-remote="false" read-only="true">
+        <description>The one availability read of a resource, equipment (assetId) or a facility (facilityId), from fromDate (now) to
+            thruDate (two weeks later; at most 92 days, INTERVAL_INVALID): its requested and assigned bookings, its planned blocks
+            and actual outages in force (a facility's own and those of the facilities above it), kept apart (kind assigned,
+            requested, planned or actual) with a safe label: Busy for an event the user may not see (no id, no title), a block's
+            reason, "Out of service". excludeWorkEffortId leaves out an event and its series. Any signed-in user; no description,
+            organizer or attendee of a block or a hidden event.</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="excludeWorkEffortId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceName"/>
+            <parameter name="managed" type="Boolean"/>
+            <parameter name="policyText"/>
+            <parameter name="intervalList" type="List"><description>fromDate, thruDate, fromText, thruText, kind, kindText, label,
+                workEffortId, resourceUnavailabilityId, hard</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('availability', context)"/>
+            <set field="resourceName" from="answer.resourceName"/>
+            <set field="managed" from="answer.managed"/>
+            <set field="policyText" from="answer.policyText"/>
+            <set field="intervalList" from="answer.intervalList"/>
+        </actions>
+    </service>
+    <service verb="find" noun="BookableResources" allow-remote="false" read-only="true">
+        <description>The bookable equipment and facilities (bookable Y; no stock, no closed facility) of the user's maintenance scope
+            (design Resources ResourceRows): RESOURCE_POLICY_VIEW or _EDIT or a resource read lists the scope's, a booking approver
+            (RESOURCE_BOOKING_VIEW_ASSIGNED) only the resources they approve now (PERMISSION_DENIED without). Filters: resourceType
+            (asset or facility), text (the name), facilityId (that facility, those inside it and the equipment there) and managed (Y:
+            with a policy in force, N: without). Each row: the resource, its type and location, capacity and features, managed and the
+            policy in words, the longest booking, the approvers, the block in force now or the next within two weeks (blockText), the
+            requests waiting (pendingCount) and canEdit.</description>
+        <in-parameters>
+            <parameter name="resourceType"/>
+            <parameter name="text"/>
+            <parameter name="facilityId"/>
+            <parameter name="managed"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceList" type="List"/>
+            <parameter name="resourceListCount" type="Integer"/>
+            <parameter name="resourceListPageIndex" type="Integer"/>
+            <parameter name="resourceListPageSize" type="Integer"/>
+            <parameter name="resourceListPageMaxIndex" type="Integer"/>
+            <parameter name="resourceListPageRangeLow" type="Integer"/>
+            <parameter name="resourceListPageRangeHigh" type="Integer"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('findBookable', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="ResourceBookingPolicy" allow-remote="false" read-only="true">
+        <description>A resource's booking policy (design ResourcePolicyDetail BookingPolicy): the policy in force (none: the
+            resource is not managed and keeps the approver fallback), its words, the history of policies, the approvers (current and
+            later, with their dates), the setup findings (approval required and no approver; not bookable) and canEdit. Read by a
+            RESOURCE_POLICY_VIEW or _EDIT holder or resource reader of its organization, or one of its booking approvers
+            (RECORD_UNAVAILABLE otherwise).</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceName"/>
+            <parameter name="resourceType"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="managed" type="Boolean"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="policyText"/>
+            <parameter name="historyList" type="List"/>
+            <parameter name="approverList" type="List"/>
+            <parameter name="setupFindings" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('get', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ResourceBookingPolicy" allow-remote="false">
+        <description>A resource's booking policy from fromDate (now when empty, never in the past, DATE_PAST), a RESOURCE_POLICY_EDIT
+            holder's of its organization (PERMISSION_DENIED, RECORD_UNAVAILABLE): bookable, the approval mode (RbamAutomatic or
+            RbamApprovers), the horizon in days, the longest booking in minutes (whole numbers of at least 1, VALUE_INVALID), the
+            time zone and whether a soft conflict may be overridden; or endPolicy, the resource unmanaged from then (POLICY_NONE when
+            it has none). The policy in force and any later one end then (one beginning later is withdrawn); a change names the
+            policy in force's revision (REVISION_CHANGED) and its reason (REASON_REQUIRED). A change applies to new and changed
+            bookings: the ones already made are kept, and impactList names those it no longer allows, for review (as preview#).
+            Approval required with no approver is accepted and refuses every booking until one is named (a setup finding).</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="bookable"/>
+            <parameter name="approvalModeEnumId"/>
+            <parameter name="bookingHorizonDays"/>
+            <parameter name="maximumDurationMinutes"/>
+            <parameter name="timeZone"/>
+            <parameter name="softConflictOverride"/>
+            <parameter name="changeReason"/>
+            <parameter name="endPolicy"/>
+            <parameter name="expectedRevision" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resourceBookingPolicyId"/>
+            <parameter name="revision" type="Integer"/>
+            <parameter name="impactList" type="List"/>
+            <parameter name="impactCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('store', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="preview" noun="ResourceBookingPolicy" allow-remote="false" read-only="true">
+        <description>What store#ResourceBookingPolicy with the same values would mean (design PolicyImpact), a RESOURCE_POLICY_EDIT
+            holder's: each requested or assigned booking of the next 180 days from its date that the new rules no longer allow (not
+            bookable, longer than the maximum, past the horizon, approval required with no approver), with a safe label, its
+            interval, state, finding and consequence (kept, for review), and the setup findings. Nothing is written.</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="bookable"/>
+            <parameter name="approvalModeEnumId"/>
+            <parameter name="bookingHorizonDays"/>
+            <parameter name="maximumDurationMinutes"/>
+            <parameter name="timeZone"/>
+            <parameter name="softConflictOverride"/>
+            <parameter name="endPolicy"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="impactList" type="List"/>
+            <parameter name="impactCount" type="Integer"/>
+            <parameter name="setupFindings" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('preview', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="store" noun="ResourceApprover" allow-remote="false">
+        <description>A booking approver of a resource (design ResourcePolicyDetail BookingApprovers), a RESOURCE_POLICY_EDIT holder's
+            of its organization: the person (PARTY_INVALID otherwise) added as a dated BookingApprover row (FacilityParty, or
+            AssetPartyAssignment for equipment) from fromDate (now), or, with end or thruDate, ended then (APPROVER_NONE when they
+            approve none of it). Ending the last current approver while requests wait needs another (replacementPartyId, added from
+            the end) or the reason they are left unresolved (unresolvedReason; APPROVER_PENDING without). Maintenance's lifecycle
+            participant hands a leaver's approvals over through it.</description>
+        <in-parameters>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="end"/>
+            <parameter name="replacementPartyId"/>
+            <parameter name="unresolvedReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="added" type="Boolean"/>
+            <parameter name="ended" type="Boolean"/>
+            <parameter name="pendingCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourcePolicy.js').execute('storeApprover', context)"/>
+            <set field="added" from="answer.added"/>
+            <set field="ended" from="answer.ended"/>
+            <set field="pendingCount" from="answer.pendingCount"/>
+        </actions>
+    </service>
+    <!-- ========== Booking decisions (impl-maintenance P16; design §7.1, BookingRequests; ResourceBookingDecisions.js) ========== -->
+    <service verb="find" noun="ResourceBookingRequests" allow-remote="false" read-only="true">
+        <description>The bookings waiting for a decision (design BookingRequests BookingRows): of the resources the user approves now
+            (a current BookingApprover, RESOURCE_BOOKING_VIEW_ASSIGNED or _APPROVE), or of the resources of the user's maintenance
+            scope for a policy reader or supervisor (RESOURCE_POLICY_VIEW, _EDIT, MAINTENANCE_SUPERVISE), read only (PERMISSION_DENIED
+            for anyone else). status requested (the default), assigned or denied; not over yet; filters: one resource (facilityId or
+            assetId), the organizer (requesterPartyId), a period (fromDate, thruDate overlapping) and the resource's name (text).
+            Soonest first. Each row: the resource, the event's span now (whenText, recurring), the organizer, its purpose when the
+            user may open the event (else "Not shared with you"), the requester's notes, the policy in words, the bookings it clashes
+            with (an event the user may not see is Busy), how long it waited, canDecide (an approver of it holding
+            RESOURCE_BOOKING_APPROVE) and what a decision names: expectedStatusId, expectedFromDate and expectedThruDate.</description>
+        <in-parameters>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="status"/>
+            <parameter name="requesterPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="text"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestList" type="List"/>
+            <parameter name="requestListCount" type="Integer"/>
+            <parameter name="requestListPageIndex" type="Integer"/>
+            <parameter name="requestListPageSize" type="Integer"/>
+            <parameter name="requestListPageMaxIndex" type="Integer"/>
+            <parameter name="requestListPageRangeLow" type="Integer"/>
+            <parameter name="requestListPageRangeHigh" type="Integer"/>
+            <parameter name="canDecide" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('find', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="ResourceBooking" allow-remote="false">
+        <description>A requested booking approved or denied (design BookingDecision, §7.1 approval; the first path that decides one,
+            F15): by a current BookingApprover of the resource (NOT_APPROVER) holding RESOURCE_BOOKING_APPROVE (PERMISSION_DENIED), with
+            the resource locked (the work centers above a facility first). Refuses a booking no longer requested or a cancelled event
+            (STATE_CHANGED, also when expectedStatusId differs) and a meeting that moved from the span decided on (expectedFromDate,
+            expectedThruDate; SPAN_CHANGED). An approval rechecks the availability through the booking guard: an outage or block
+            (RESOURCE_UNAVAILABLE), the managed resource's rules, and the assigned bookings over the span (CONFLICT; a request waiting
+            holds nothing against this one, so two approvers of overlapping requests cannot both assign: the second is refused); an
+            override with allowConflicts and overrideReason where the policy allows it and the user holds RESOURCE_BOOKING_OVERRIDE. A
+            denial needs its reason (REASON_REQUIRED), kept in the booking's comments ("Denied: ..."). The booking's approval notices
+            leave every inbox, and the organizer is told on ResourceBookingNotice.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="decision" required="true"><description>approve or deny</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="expectedStatusId"/>
+            <parameter name="expectedFromDate"><description>The span decided on (a time stamp or milliseconds)</description></parameter>
+            <parameter name="expectedThruDate"/>
+            <parameter name="allowConflicts"/>
+            <parameter name="overrideReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="resourceName"/>
+            <parameter name="overridden" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('decide', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
+            <set field="overridden" from="!!answer.overridden"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="ResourceBookings" allow-remote="false">
+        <description>Several requested bookings decided alike (design BulkBookingDecision): bookingList, each {workEffortId,
+            facilityId or assetId, expectedStatusId, expectedFromDate, expectedThruDate} or its key text
+            "facility|id|workEffortId|fromMs|thruMs" (comma separated; at most 100; SELECTION_REQUIRED for none), each through
+            decide#ResourceBooking in its own transaction; a failure is named in resultList (reasonCode, message), logged, and the
+            rest go on.</description>
+        <in-parameters>
+            <parameter name="bookingList" type="Object" required="true"/>
+            <parameter name="decision" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="resultList" type="List"/>
+            <parameter name="decidedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('decideMany', context)"/>
+            <script>ec.context.putAll(answer)</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="ResourceBooking" allow-remote="false">
+        <description>The ResourceBooking topic's approve service (Commons' approvals inbox; approve#NotificationMessage calls it as the
+            user deciding): the notice's booking (recordId the event; message facilityId or assetId, the span and state it was sent
+            with) approved through decide#ResourceBooking, which checks the user again; a meeting moved since is refused
+            SPAN_CHANGED.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="resourceName"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="ResourceBooking" allow-remote="false">
+        <description>The ResourceBooking topic's refuse service: the notice's booking denied with the reason (REASON_REQUIRED),
+            through decide#ResourceBooking.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="facilityId"/>
+            <parameter name="assetId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="resourceName"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ResourceBookingDecisions.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="resourceName" from="answer.resourceName"/>
         </actions>
     </service>
 </services>

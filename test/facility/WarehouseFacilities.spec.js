@@ -1,7 +1,8 @@
 // Facility and location setup (mantle.facility.FacilityServices, FacilitySetup.js; impl-warehouse P2): the facility and
 // location saves check FACILITY_EDIT and the organization, facility parents never form a cycle, each location type's asset
 // status is audit-logged, a location closes by its audit-logged thruDate only when nothing is stored or open there (each
-// blocker named), and check#FacilityLocationOpen refuses a closed location. The users are in spec-local groups.
+// blocker named), and check#FacilityLocationOpen refuses a closed location. A facility with no owner of its own is its nearest
+// owning ancestor's (impl-maintenance P2, R8). The users are in spec-local groups.
 const F = "mantle.facility.FacilityServices."
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
@@ -161,6 +162,15 @@ spec({
             facilityName: "Under another",
             ownerPartyId: "WHF_ORG",
             parentFacilityId: "WHF_OTHER_FAC"
+        })
+        // rooms loaded without an owner of their own, one under the fixture warehouse and one under another organization's site
+        // (impl-maintenance P2, the user's call R8: such a facility is its nearest owning ancestor's)
+        call("create#mantle.facility.Facility", {facilityId: "WHF_ROOM", facilityName: "Ownerless room", parentFacilityId: "WHF_FAC"})
+        call("create#mantle.facility.Facility", {facilityId: "WHF_OTHER_SITE", facilityName: "Other site", ownerPartyId: "WHF_OTHER"})
+        call("create#mantle.facility.Facility", {
+            facilityId: "WHF_OTHER_ROOM",
+            facilityName: "Other ownerless room",
+            parentFacilityId: "WHF_OTHER_SITE"
         })
         call("create#mantle.facility.ProductFacilityLocation", {
             productId: "WHF_PRODUCT",
@@ -534,6 +544,29 @@ feature("a blank parent keeps the stored one, an unchanged one is not checked ag
         keptRow.facilityName == "Renamed again"
         cleared.error == ""
         clearedRow.parentFacilityId == null
+    }
+})
+
+feature("a facility with no owner is its nearest owning ancestor's: the editor of that organization changes it, another's is refused", {
+    when() {
+        return as("whf_editor", () => ({
+            renamed: invoke(F + "store#Facility", {facilityId: "WHF_ROOM", facilityName: "Ownerless room, renamed", capacity: 6}),
+            row: one("mantle.facility.Facility", {facilityId: "WHF_ROOM"}),
+            location: invoke(F + "store#FacilityLocation", {facilityId: "WHF_ROOM", locationSeqId: "R1"}),
+            other: invoke(F + "store#Facility", {facilityId: "WHF_OTHER_ROOM", facilityName: "Taken"}),
+            otherLocation: invoke(F + "store#FacilityLocation", {facilityId: "WHF_OTHER_ROOM", locationSeqId: "R1"}),
+            owned: invoke(F + "store#Facility", {facilityId: "WHF_ROOM", ownerPartyId: "WHF_ORG"}),
+            ownedRow: one("mantle.facility.Facility", {facilityId: "WHF_ROOM"})
+        }))
+    },
+    then({renamed, row, location, other, otherLocation, owned, ownedRow}) {
+        renamed.error == ""
+        row.ownerPartyId == null && row.facilityName == "Ownerless room, renamed"
+        location.error == ""
+        other.error.includes("FACILITY_UNAVAILABLE")
+        otherLocation.error.includes("FACILITY_UNAVAILABLE")
+        owned.error == ""
+        ownedRow.ownerPartyId == "WHF_ORG"
     }
 })
 

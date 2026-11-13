@@ -534,6 +534,63 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('retryLifecycleStep', context))</script></actions>
     </service>
+    <!-- People's entry into the lifecycle (Lifecycle.js; impl-people P7, design-admin §4.1 Provisioning from People): the mr-boss
+        tx-commit rule on a People hire or separation calls ironstone.admin.LifecycleServices request#Provisioning or
+        request#AccessEnd, which call these with the app's grant proposal. -->
+    <service verb="request" noun="Provisioning" allow-remote="false">
+        <description>A People hire's provisioning (an applied hire, EmploymentChange employmentChangeId, whose HR officer asked an
+            account for, accessRequested), keyed by the change (operationKey, else people-provision- and its id: a retry answers
+            the first operation, never a second identity or invitation): a UserLifecycleOperation of kind Provisioning for the
+            employer, its steps the organization membership (the employment is it: no second relationship, F49), the account (an
+            existing one, or an invitation of the person's work address, invite#User), the grant proposal (bundleGroupIdList,
+            registered bundles the app supplies: given at the invitation's acceptance or to an existing account) and the person
+            told (the invitation's mail). The steps run now for an identity operator of the organization; for anyone else they
+            wait for one (OPERATOR_REQUIRED), who runs them from LifecycleDetail (retry#LifecycleStep) under Admin's delegation
+            rules. The change records the operation and its IT checklist tasks are linked to it. Refuses a change that is not an
+            applied hire of the caller's (its requester, an HR editor of the employer, an identity operator of it;
+            RECORD_UNAVAILABLE), a hire with no account asked (NOT_REQUESTED) and a bundle not registered (GRANT_INVALID).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="operationId"/>
+            <parameter name="statusId"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('requestProvisioning', context))</script></actions>
+    </service>
+    <service verb="request" noun="AccessEnd" allow-remote="false">
+        <description>A People separation's access end (an applied separation, EmploymentChange employmentChangeId), keyed by the
+            change (operationKey, else people-access-end- and its id; a retry answers the first): an Organization removal
+            operation for the employer from the separation's date, its steps the employer's other relationships of the person
+            ended and, when the person then works for no internal organization, the account signed out (when the date has come)
+            and its memberships ended at the date; a person who still works for another organization keeps the account's access
+            (the memberships step skipped, naming it). The steps run now for an identity operator of the organization, checked as
+            start#Lifecycle checks them (a privileged identity, the administration path); for anyone else they wait for one
+            (OPERATOR_REQUIRED). A person with no account has nothing to end (NO_ACCOUNT, nothing recorded). Refuses a change that
+            is not an applied separation the caller may request for (its requester, the one whose decision applied it, an HR
+            editor of the employer, an identity operator of it; RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="operationId"/>
+            <parameter name="statusId"/>
+            <parameter name="retried" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Lifecycle.js').execute('requestAccessEnd', context))</script></actions>
+    </service>
 
     <!-- Internal organizations (impl-admin P7; design-admin §7 Organizations and OrganizationDetail): the OrgInternal parties in the
         caller's scope (the filtered find on mantle.party.InternalOrganization), their profile, dated parent (PrtOrgRollup) and
@@ -653,5 +710,183 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="revision"/>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Organizations.js').execute('storeOrganizationDefault', context))</script></actions>
+    </service>
+
+    <!-- The import of staff invitations (Invitations.js; mr-boss impl-admin P15, design-admin §4 Invitations' bulk invite,
+        §11.1): the row services of the framework's import target staffInvitations (data/PartyInvitationData.xml), called by
+        org.moqui.admin.DataTransferServices for each row of a staged file, as the importer. -->
+    <service verb="validate" noun="InvitationImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row (emailAddress, partyId, displayName, bundleGroupIds; organizationPartyId only as the
+            batch's own) would be invited into the batch's organization (scopeKey) by invite#User, by the same checks and
+            changing nothing: the organization in the caller's scope, no pending invitation of the address there, an
+            existing identity of another organization only with ADMIN_IDENTITY_GLOBAL, and the bundles as a grant proposal
+            (registered and delegable by the caller; never a privileged group or one granting a sealed permission). The
+            registration's alwaysBundleGroupIds (fixedValues) are added to every row. Needs ADMIN_IDENTITY_MANAGE.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('validateInvitationImportRow', context))</script></actions>
+    </service>
+    <service verb="apply" noun="InvitationImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One invite#User for a validated row, with the batch's options (expireDays, relationshipTypeEnumId,
+            message) and the row's operation key, so a repeat answers the invitation it made. resultRef is the invitation.
+            Needs ADMIN_IDENTITY_MANAGE.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('applyInvitationImportRow', context))</script></actions>
+    </service>
+    <service verb="find" noun="InvitationImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The internal organizations the caller administers (ADMIN_IDENTITY_VIEW or ADMIN_IDENTITY_MANAGE): those
+            an import of invitations may be for and whose imports the caller may read. None without the permission.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/Invitations.js').execute('findInvitationImportScopes', context))</script></actions>
+    </service>
+
+    <!-- ========== Change evidence (IdentityAudit.js; mr-boss impl-admin P17) ========== -->
+
+    <service verb="find" noun="IdentityChanges" allow-remote="false">
+        <implements service="org.moqui.admin.AuditServices.find#OwnedChanges"/>
+        <description>The audit source of the records that belong to an internal organization, for the framework's
+            org.moqui.admin.AuditServices.find#Changes (a registered projection's sourceService): the audit rows of the
+            given projections whose record is of an organization the caller administers, newest first, as ids only
+            (auditIdList) with how many match (changeCount). A user account's, a group membership's and a topic
+            subscription's rows by the organizations the account's party works for now; an organization membership's, an
+            invitation's and a lifecycle operation's by their organization; an organization's own by itself. Which
+            organizations is the organization entity filters of the authorization the call runs under, on the audit-log
+            views (entity/IdentityEntities.xml), as every find of this package: with none named nothing is in scope, but
+            for an instance administrator. A projection of an entity this source does not know is answered nothing. It
+            answers no value of any row. Needs ADMIN_AUDIT_VIEW.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/IdentityAudit.js').execute('findIdentityChanges', context))</script></actions>
+    </service>
+
+    <!-- ========== Shared devices (SharedDevices.js; mr-boss impl-admin P18, design-admin §6 Devices, crosscut CX-DEVICE) ========== -->
+
+    <service verb="create" noun="DisplayAccount" allow-remote="false">
+        <description>A display account for shared devices (the framework's device credential runs a registered browser as
+            it, with no person signed in): a Person party with a member relationship to an internal organization the
+            caller administers (store#OrganizationMembership), so the organization filters show it that organization's
+            rows and no other's; a UserAccount marked displayAccount with no email, no password and nothing that signs it
+            in; and the memberships of the grant proposal (registered bundles, checked and applied by the framework's
+            AccessServices), never a privileged group or a group granting a sealed permission. All or nothing; a refusal
+            is a reason. It shows another organization only through another membership (store#OrganizationMembership).
+            Needs ADMIN_IDENTITY_MANAGE.</description>
+        <in-parameters>
+            <parameter name="displayName" required="true"/>
+            <parameter name="username"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="bundleGroupIdList" type="List" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="userId"/>
+            <parameter name="partyId"/>
+            <parameter name="username"/>
+            <parameter name="addedGroupIds" type="List"/>
+            <parameter name="bundleList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('createDisplayAccount', context))</script></actions>
+    </service>
+    <service verb="find" noun="DisplayAccounts" allow-remote="false">
+        <description>The display accounts in the caller's identity scope (the organization entity filters of the call): name,
+            username, the organizations in scope it shows, its groups, and whether a device may run as it now (usable,
+            unusableReason). Those out of scope are counted (otherCount), never named. Needs ADMIN_ACCESS_VIEW or
+            ADMIN_IDENTITY_VIEW.</description>
+        <out-parameters>
+            <parameter name="displayAccountList" type="List"/>
+            <parameter name="otherCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('findDisplayAccounts', context))</script></actions>
+    </service>
+    <service verb="find" noun="SharedDevices" allow-remote="false">
+        <description>The framework's org.moqui.admin.DeviceServices.find#Devices for the devices whose display account is in
+            the caller's identity scope, each with the organizations in scope it shows and its site's name; the others are
+            counted (otherCount), never named. Needs ADMIN_ACCESS_VIEW.</description>
+        <in-parameters>
+            <parameter name="deviceId"/>
+            <parameter name="routeGroupId"/>
+            <parameter name="facilityId"/>
+            <parameter name="displayUserId"/>
+            <parameter name="parameterValue"/>
+            <parameter name="state"/>
+            <parameter name="text"/>
+            <parameter name="seenSinceDays" type="Integer"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deviceList" type="List"/>
+            <parameter name="deviceCount" type="Integer"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="activeCount" type="Integer"/>
+            <parameter name="otherCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('findSharedDevices', context))</script></actions>
+    </service>
+    <service verb="register" noun="SharedDevice" allow-remote="false">
+        <description>The framework's register#Device for a display account in the caller's identity scope: another
+            organization's display account is refused as not available, one that also shows an organization the caller
+            does not administer needs ADMIN_IDENTITY_GLOBAL, and the site is a facility the caller reads. The registration
+            code is returned once. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceName" required="true"/>
+            <parameter name="routeGroupId" required="true"/>
+            <parameter name="displayUserId" required="true"/>
+            <parameter name="parameterValue"/>
+            <parameter name="facilityId"/>
+            <parameter name="ipAllowed"/>
+            <parameter name="idleTimeoutMinutes" type="Integer"/>
+            <parameter name="lifetimeDays" type="Integer"/>
+            <parameter name="codeMinutes" type="Integer"/>
+            <parameter name="issueCode" type="Boolean" default="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+            <parameter name="registrationCode"/>
+            <parameter name="codeExpireDate" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('registerSharedDevice', context))</script></actions>
+    </service>
+    <service verb="reveal" noun="SharedDeviceCode" allow-remote="false">
+        <description>The framework's issue#DeviceCode for a device whose display account is in the caller's identity scope:
+            the registration code of a device registered without one (issueCode false), made as it is shown, once, to its
+            registrar, within fifteen minutes. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceId" required="true"/>
+            <parameter name="codeMinutes" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+            <parameter name="deviceName"/>
+            <parameter name="registrationCode"/>
+            <parameter name="codeExpireDate" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('revealSharedDeviceCode', context))</script></actions>
+    </service>
+    <service verb="revoke" noun="SharedDevice" allow-remote="false">
+        <description>The framework's revoke#Device for a device whose display account is in the caller's identity scope;
+            another organization's device is refused as not available. Needs ADMIN_ACCESS_MANAGE.</description>
+        <in-parameters>
+            <parameter name="deviceId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reason"/>
+            <parameter name="deviceId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SharedDevices.js').execute('revokeSharedDevice', context))</script></actions>
     </service>
 </services>

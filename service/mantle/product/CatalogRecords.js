@@ -1,6 +1,8 @@
 // Catalog record writers enforce native permissions and owner scope for every caller.
 const P = "mantle.product.",
     policy = () => ec.resource.script("component://mr-mantle/service/mantle/product/CatalogPolicy.js")
+// the associations the catalog row writer keeps: substitutes, and the spare parts of an equipment model
+const substituteAndPartTypes = ["PatEquivalent", "PatReplacement", "PatSparePart"]
 const find = (n, p = {}) => policy().find(n, p),
     one = (n, p) => policy().one(n, p),
     list = (n, p = {}) => policy().rows(n, p),
@@ -165,6 +167,20 @@ const kinds = {
         id: "productMaintenanceId"
     }
 }
+// A maintenance default's work template (impl-maintenance P6, an owner contract with Maintenance): a maintenance procedure the
+// process applicability check admits for the model (not retired, of the model or of any). Empty is no template.
+function maintenanceTemplate(data) {
+    const templateId = String(data.templateWorkEffortId || "").trim()
+    if (!templateId) return
+    const checked = ec.service
+        .sync()
+        .name("mantle.work.ProcessServices.check#ProcessApplicability")
+        .parameters({templateWorkEffortId: templateId, productId: data.productId})
+        .disableAuthz()
+        .call()
+    if (!checked?.applicable)
+        throw new Error("Work template " + templateId + " cannot be used: " + (checked?.message || "not a maintenance procedure"))
+}
 function storeRow(p) {
     const product = record(p.productId, "catalogEdit")
     if (["category", "feature"].includes(p.kind) && !p.operation) {
@@ -236,7 +252,8 @@ function storeRow(p) {
             throw new Error("Distinguishing feature identity is fixed on a used or active variant")
     }
     if (p.kind === "association") {
-        if (!["PatEquivalent", "PatReplacement"].includes(data.productAssocTypeEnumId))
+        // a substitute, or a spare part an equipment model uses in its maintenance (PatSparePart, impl-maintenance P2)
+        if (!substituteAndPartTypes.includes(data.productAssocTypeEnumId))
             throw new Error("Use the dedicated kit, variant, BOM or packaging editor for this association")
         record(data.toProductId)
         if (data.toProductId === p.productId) throw new Error("A product cannot substitute for itself")
@@ -272,6 +289,7 @@ function storeRow(p) {
         if (product.assetTypeEnumId !== "AstTpEquipment") throw new Error("Equipment templates require an equipment product")
         if (p.kind === "maintenance" && toDecimal(data.intervalQuantity || 0).compare(0) <= 0)
             throw new Error("Maintenance interval must be positive")
+        if (p.kind === "maintenance") maintenanceTemplate(data)
         if (
             data.intervalProductMeterId &&
             one(P + "maintenance.ProductMeter", {productMeterId: data.intervalProductMeterId})?.productId !== p.productId
@@ -335,7 +353,8 @@ function prepareRow(p) {
             throw new Error("Distinguishing feature identity is fixed on a used or active variant")
     }
     if (p.kind === "association") {
-        if (!["PatEquivalent", "PatReplacement"].includes(data.productAssocTypeEnumId))
+        // a substitute, or a spare part an equipment model uses in its maintenance (PatSparePart, impl-maintenance P2)
+        if (!substituteAndPartTypes.includes(data.productAssocTypeEnumId))
             throw new Error("Use the dedicated kit, variant, BOM or packaging editor for this association")
         record(data.toProductId)
         if (data.toProductId === p.productId) throw new Error("A product cannot substitute for itself")
@@ -371,6 +390,7 @@ function prepareRow(p) {
         if (product.assetTypeEnumId !== "AstTpEquipment") throw new Error("Equipment templates require an equipment product")
         if (p.kind === "maintenance" && toDecimal(data.intervalQuantity || 0).compare(0) <= 0)
             throw new Error("Maintenance interval must be positive")
+        if (p.kind === "maintenance") maintenanceTemplate(data)
         if (
             data.intervalProductMeterId &&
             one(P + "maintenance.ProductMeter", {productMeterId: data.intervalProductMeterId})?.productId !== p.productId

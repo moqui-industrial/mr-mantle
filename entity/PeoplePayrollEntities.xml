@@ -1,0 +1,809 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's payroll configuration (IronStone People design §8.1, §8.4, PayComponents, PayComponentDetail, PayStructures,
+    PayStructureDetail, PayGroups; PE-08, PE-09, PE-12; impl-people P22): an employer's pay components (PayrollComponent: a stable
+    code a formula names, its kind) with their dated terms (PayrollComponentTerm: an amount or a constrained decimal formula over
+    declared inputs and other components, the explicit currency or unit, the rounding stage, payslip visibility and the account
+    mapping) and the named examples a term is verified with before it is published (PayrollComponentExample); reusable structures
+    (PayrollStructure, in one currency) and their dated components (PayrollStructureComponent); pay groups (PayrollGroup: the
+    employer's currency, frequency, explicit annual divisor, pay-date and proration policy and localization binding) and their pay
+    periods (PayrollGroupPeriod over Mantle's TimePeriod); and the localization registration (PayrollLocalization), seeded with the
+    one synthetic, non-statutory demonstration localization, which can never be live, with the profile fields it declares
+    (PayrollLocalizationField). P23 adds an employment's pay assignments (PayrollAssignment: a structure and a pay group from a
+    date, one primary per employment and date) and its payroll tax profiles (PayrollTaxProfile: the values of a localization's
+    declared fields from a date), written by PayrollSetupServices (PayrollAssignments.js), which checks PAYROLL_VIEW and
+    PAYROLL_EDIT and the employer first. Configuration is written only by
+    mantle.humanres.PayrollSetupServices (PayrollConfiguration.js), which checks PAYROLL_EDIT and PAYROLL_CONFIGURE and the
+    employer first, and publishes a term or a structure's lines only on a People approval of kind PakPayrollConfig (the user's
+    calls of Nov 12, 2026, impl-people §4); the formulas are checked and computed by the framework's org.moqui.impl.ExpressionServices, never by a script. Published
+    terms and lines are ended, never changed or deleted. Nothing here is the legacy payroll (PayrollAdjustment and its rows), which
+    no People service reads (design §8.4). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="PayrollComponent" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's pay component: a stable code (a formula's name for its result, unique in the employer), a name,
+            and its kind, an earning, a deduction, an employer contribution or a statistical value (which enters no total and posts
+            nothing). Its calculation is in its dated terms. Ended (thruDate), never deleted, once it is no longer used.</description>
+        <field name="payrollComponentId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="componentCode" type="text-short"><description>A name a formula may use: a letter or underscore, then letters,
+            digits and underscores</description></field>
+        <field name="componentName" type="text-medium" enable-audit-log="update"/>
+        <field name="componentKindEnumId" type="id"><description>PayrollComponentKind</description></field>
+        <field name="description" type="text-long"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PayrollComponentKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="componentKindEnumId" related="enumId"/></relationship>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="terms">
+            <key-map field-name="payrollComponentId"/></relationship>
+        <index name="PAY_COMP_CODE" unique="true"><index-field name="organizationPartyId"/><index-field name="componentCode"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Component Kind" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckEarning" description="Earning" sequenceNum="1" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckDeduction" description="Deduction" sequenceNum="2" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckContribution" description="Employer contribution" sequenceNum="3"
+                    enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.Enumeration enumId="PckStatistical" description="Statistical" sequenceNum="4" enumTypeId="PayrollComponentKind"/>
+            <moqui.basic.EnumerationType description="Payroll Component Basis" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.Enumeration enumId="PcbAmount" description="Fixed amount" sequenceNum="1" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.Enumeration enumId="PcbFormula" description="Formula" sequenceNum="2" enumTypeId="PayrollComponentBasis"/>
+            <moqui.basic.EnumerationType description="Payroll Rounding" enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdNearest" description="Nearest (half away from zero)" sequenceNum="1"
+                    enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdDown" description="Down" sequenceNum="2" enumTypeId="PayrollRounding"/>
+            <moqui.basic.Enumeration enumId="PrdUp" description="Up" sequenceNum="3" enumTypeId="PayrollRounding"/>
+            <!-- a term or a structure's line: a draft, changed until it is published; a published one is only ended -->
+            <moqui.basic.StatusType description="Payroll Configuration Term" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusItem statusId="PtsDraft" description="Draft" sequenceNum="1" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusItem statusId="PtsPublished" description="Published" sequenceNum="2" statusTypeId="PayrollTerm"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PtsDraft" toStatusId="PtsPublished" transitionName="Publish"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollComponentTerm" package="mantle.humanres.payroll" cache="never">
+        <description>A component's dated calculation, from fromDate until thruDate: a fixed amount or a formula (the framework's
+            decimal expression: named decimal inputs, the codes of other components, comparisons, conditions and an allowlist of
+            functions, nothing else) over its declared inputs (inputNames) and the components it depends on (dependencyCodes, the
+            names it reads that are not inputs); the currency of a money component (required: no implicit currency) or the unit of
+            a statistical one; its rounding stage (places and direction; none keeps the precision); whether a payslip shows it; and
+            its account mapping (the expense account of an earning or contribution, the liability account of a deduction or
+            contribution; a statistical component maps none). A draft is changed until it is published, with examples that verify
+            it; a published term is ended, never changed, and published intervals of one component do not overlap.</description>
+        <field name="payrollComponentTermId" type="id" is-pk="true"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft or published</description></field>
+        <field name="basisEnumId" type="id"><description>PayrollComponentBasis</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"><description>A fixed amount's value</description></field>
+        <field name="formula" type="text-long"/>
+        <field name="inputNames" type="text-medium"><description>The declared inputs, comma separated</description></field>
+        <field name="dependencyCodes" type="text-medium"><description>The codes of the components the formula reads, comma
+            separated; computed when the term is stored</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"><description>A statistical component's unit, when it has one</description></field>
+        <field name="roundingPlaces" type="number-integer"/>
+        <field name="roundingEnumId" type="id"><description>PayrollRounding</description></field>
+        <field name="payslipVisible" type="text-indicator"/>
+        <field name="prorated" type="text-indicator"><description>A fixed amount's proration (impl-people P25 review, the user's
+            call of Nov 12, 2026): Y, a pay run multiplies it by the period fraction in a part period (a mid-period hire or leaver,
+            a split period's segments); N, it is paid whole. Set when the term is stored: yes for an earning, a deduction and an
+            employer contribution unless payroll says otherwise, no for a statistical value; empty for a formula, which reads
+            periodFraction to prorate. Empty on a fixed amount stored before it reads by the same kind default.</description></field>
+        <field name="expenseGlAccountId" type="id"/>
+        <field name="liabilityGlAccountId" type="id"/>
+        <field name="publishedDate" type="date-time"><description>When it was published: its approval's (impl-people P22 review)</description></field>
+        <field name="publishedByUserId" type="id"><description>Who asked to publish it</description></field>
+        <field name="draftedByUserIds" type="text-long"><description>Each user who changed the draft or its examples, comma
+            separated: none of them decides its publishing (impl-people P22 review)</description></field>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="one" title="PayrollComponentBasis" related="moqui.basic.Enumeration" short-alias="basis">
+            <key-map field-name="basisEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="Quantity" related="moqui.basic.Uom" short-alias="quantityUom">
+            <key-map field-name="quantityUomId" related="uomId"/></relationship>
+        <relationship type="one" title="PayrollRounding" related="moqui.basic.Enumeration" short-alias="rounding">
+            <key-map field-name="roundingEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Expense" related="mantle.ledger.account.GlAccount" short-alias="expenseAccount">
+            <key-map field-name="expenseGlAccountId" related="glAccountId"/></relationship>
+        <relationship type="one-nofk" title="Liability" related="mantle.ledger.account.GlAccount" short-alias="liabilityAccount">
+            <key-map field-name="liabilityGlAccountId" related="glAccountId"/></relationship>
+        <index name="PAY_COMP_TERM_COMP"><index-field name="payrollComponentId"/></index>
+    </entity>
+    <entity entity-name="PayrollComponentExample" package="mantle.humanres.payroll" cache="never">
+        <description>A named example of a component's term: the value of each name its formula reads (inputValues, a JSON object
+            of decimal texts) and the amount expected. Preview computes each one; a term is published only when every example
+            gives its expected amount. Configuration values, read and written by payroll configuration alone.</description>
+        <field name="payrollComponentExampleId" type="id" is-pk="true"/>
+        <field name="payrollComponentTermId" type="id"/>
+        <field name="exampleName" type="text-medium"/>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
+        <field name="expectedAmount" type="number-decimal" ai-opt-out="true"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
+        <index name="PAY_COMP_EX_TERM"><index-field name="payrollComponentTermId"/></index>
+    </entity>
+
+    <entity entity-name="PayrollStructure" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's reusable pay calculation: a name, one currency (every money component of it is in it), a pay
+            basis, and its components (PayrollStructureComponent). A draft until it is first published, from fromDate; published
+            lines are only ended; ended (thruDate) when no longer used. A copy is a new structure with draft lines and no
+            assignments. Publishing reassigns no employee and rewrites no payslip.</description>
+        <field name="payrollStructureId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="structureName" type="text-medium" enable-audit-log="update"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="payBasisEnumId" type="id" enable-audit-log="update"><description>PayrollPayBasis</description></field>
+        <field name="description" type="text-long"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft until first published</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="copiedFromStructureId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="publishedDate" type="date-time"><description>When its draft lines were last published: their approval's</description></field>
+        <field name="publishedByUserId" type="id"><description>Who last asked to publish its draft lines</description></field>
+        <field name="draftedByUserIds" type="text-long"><description>Each user who changed the structure or its lines since it was
+            last published, comma separated: none of them decides its publishing (impl-people P22 review)</description></field>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" title="PayrollPayBasis" related="moqui.basic.Enumeration" short-alias="payBasis">
+            <key-map field-name="payBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollStructureComponent" short-alias="lines">
+            <key-map field-name="payrollStructureId"/></relationship>
+        <index name="PAY_STRUCT_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Pay Basis" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbSalaried" description="Salaried" sequenceNum="1" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbHourly" description="Hourly" sequenceNum="2" enumTypeId="PayrollPayBasis"/>
+            <moqui.basic.Enumeration enumId="PpbMixed" description="Salaried and hourly" sequenceNum="3" enumTypeId="PayrollPayBasis"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollStructureComponent" package="mantle.humanres.payroll" cache="never">
+        <description>A component of a structure from fromDate (the structure's publishing date when empty) until thruDate: its
+            payslip order (sequenceNum, independent of the calculation order its dependencies decide) and the structure's values
+            of the component's declared inputs (parameterValues, a JSON object of decimal texts, such as a contribution's rate). A
+            draft until the structure is published; a published line is only ended.</description>
+        <field name="payrollStructureComponentId" type="id" is-pk="true"/>
+        <field name="payrollStructureId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="update"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="parameterValues" type="text-long"/>
+        <field name="eligibilityEnumId" type="id"><description>PayrollLineEligibility: every assignment of the structure (empty
+            or PleAll), or only an assignment that elects the component (PleElected, such as a voluntary pension); impl-people
+            P23</description></field>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollStructure" short-alias="structure"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_STRUCT_LINE"><index-field name="payrollStructureId"/></index>
+        <index name="PAY_STRUCT_LINE_COMP"><index-field name="payrollComponentId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Line Eligibility" enumTypeId="PayrollLineEligibility"/>
+            <moqui.basic.Enumeration enumId="PleAll" description="Every assignment" sequenceNum="1" enumTypeId="PayrollLineEligibility"/>
+            <moqui.basic.Enumeration enumId="PleElected" description="Only when the assignment elects it" sequenceNum="2"
+                    enumTypeId="PayrollLineEligibility"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PayrollGroup" package="mantle.humanres.payroll" cache="never">
+        <description>An employer's pay group: its currency (a run is one employer and currency), its pay frequency (a Payroll time
+            period type) and the first day of its first period, its explicit periods a year (the annual divisor a salary formula
+            reads; never assumed), the pay date's place (days after a period's last day), how a part period is prorated (calendar
+            days, working days or hours) and where hours come from, the time zone of its workweek, and the localization it is bound
+            to. liveEnabled is N in this build: no localization covers a group (the demonstration one never can) and the
+            payroll-origin projection is not built, so a group is preview only (design §8). Its policy fields are audited.</description>
+        <field name="payrollGroupId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="groupName" type="text-medium" enable-audit-log="update"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="timePeriodTypeId" type="id" enable-audit-log="update"/>
+        <field name="firstPeriodFromDate" type="date"/>
+        <field name="periodsPerYear" type="number-decimal" enable-audit-log="update"/>
+        <field name="payDateOffsetDays" type="number-integer" enable-audit-log="update"/>
+        <field name="prorationEnumId" type="id" enable-audit-log="update"><description>PayrollProration</description></field>
+        <field name="timeBasisEnumId" type="id" enable-audit-log="update"><description>PayrollTimeBasis</description></field>
+        <field name="workweekTimeZone" type="text-short" enable-audit-log="update"/>
+        <field name="payrollLocalizationId" type="id" enable-audit-log="update"/>
+        <field name="liveEnabled" type="text-indicator"/>
+        <field name="description" type="text-long"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currency">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one" related="mantle.party.time.TimePeriodType" short-alias="frequency"/>
+        <relationship type="one" title="PayrollProration" related="moqui.basic.Enumeration" short-alias="proration">
+            <key-map field-name="prorationEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="PayrollTimeBasis" related="moqui.basic.Enumeration" short-alias="timeBasis">
+            <key-map field-name="timeBasisEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <index name="PAY_GROUP_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Proration" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprCalendarDays" description="Calendar days" sequenceNum="1" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprWorkingDays" description="Working days" sequenceNum="2" enumTypeId="PayrollProration"/>
+            <moqui.basic.Enumeration enumId="PprHours" description="Hours" sequenceNum="3" enumTypeId="PayrollProration"/>
+            <moqui.basic.EnumerationType description="Payroll Time Basis" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbTimesheets" description="Approved timesheets" sequenceNum="1" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbAttendance" description="Attendance" sequenceNum="2" enumTypeId="PayrollTimeBasis"/>
+            <moqui.basic.Enumeration enumId="PtbSchedule" description="Working schedule (no time recorded)" sequenceNum="3"
+                    enumTypeId="PayrollTimeBasis"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollGroupPeriod" package="mantle.humanres.payroll" cache="never">
+        <description>A pay period of a group: Mantle's TimePeriod of the employer and the group's frequency (shared by the
+            employer's groups of that frequency and start) with the group's pay date. Prepared once, idempotently; a period is
+            never closed merely to mark a run finished.</description>
+        <field name="payrollGroupId" type="id" is-pk="true"/>
+        <field name="timePeriodId" type="id" is-pk="true"/>
+        <field name="payDate" type="date"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one" related="mantle.party.time.TimePeriod" short-alias="period"/>
+    </entity>
+
+    <entity entity-name="PayrollLocalization" package="mantle.humanres.payroll" use="configuration" cache="never">
+        <description>A payroll localization's registration (design §8.4, PE-12): its jurisdictions, the effective coverage of its
+            rule set and its release, the setup it requires, its outputs, and its calculation service, which implements
+            mantle.humanres.PayrollLocalizationServices.calculate#Localization (side-effect free: declared pay facts and bases in,
+            itemized employee and employer amounts, explanations and findings out). Trusted deployed code registered as seed data,
+            never named in a payroll form. A demonstration localization (isDemonstration Y) previews examples and is never live;
+            this build ships that one alone (impl-people §4, Nov 11, 2026).</description>
+        <field name="payrollLocalizationId" type="id" is-pk="true"/>
+        <field name="localizationName" type="text-medium"/>
+        <field name="jurisdictionText" type="text-medium"/>
+        <field name="calculationServiceName" type="text-medium"/>
+        <field name="coverageFromDate" type="date-time"/>
+        <field name="coverageThruDate" type="date-time"/>
+        <field name="releaseVersion" type="text-short"/>
+        <field name="isDemonstration" type="text-indicator"/>
+        <field name="requiredSetup" type="text-long"/>
+        <field name="supportedOutputs" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <seed-data>
+            <mantle.humanres.payroll.PayrollLocalization payrollLocalizationId="PlzDemonstration"
+                    localizationName="Demonstration (synthetic, not statutory)" jurisdictionText="None: a synthetic example"
+                    calculationServiceName="mantle.humanres.PayrollLocalizationServices.calculate#Demonstration"
+                    coverageFromDate="2000-01-01 00:00:00" releaseVersion="1" isDemonstration="Y"
+                    requiredSetup="None" supportedOutputs="Preview explanations only"
+                    description="A flat demonstration levy on earnings (2% from the employee, 1% from the employer) to show where a localization's amounts enter gross to net. It is no country's law, previews only, and can never make a pay group live."/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollLocalizationField" package="mantle.humanres.payroll" use="configuration" cache="never">
+        <description>A field a localization declares for an employment's payroll tax profile (design §8.1 PayrollTaxProfile, §8
+            PayAssignments' TaxAndBenefits; impl-people P23): its name, its label, its kind (an indicator, a choice of listed values,
+            a decimal or a short text), the values a choice offers ("value = label" pairs, one a line), and whether it is required
+            before the localization can calculate for the employment. A profile holds values of these fields alone: the fields of
+            the localizations installed, never a country's columns in the neutral core. Seed data beside its localization.</description>
+        <field name="payrollLocalizationId" type="id" is-pk="true"/>
+        <field name="fieldName" type="text-short" is-pk="true"><description>A name a localization's calculation reads: a letter or
+            underscore, then letters, digits and underscores</description></field>
+        <field name="fieldLabel" type="text-medium"/>
+        <field name="fieldKindEnumId" type="id"><description>PayrollProfileFieldKind</description></field>
+        <field name="optionValues" type="text-long"><description>A choice's values, "value = label", one a line</description></field>
+        <field name="isRequired" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="description" type="text-medium"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <relationship type="one" title="PayrollProfileFieldKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="fieldKindEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Profile Field Kind" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfIndicator" description="Yes or no" sequenceNum="1" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfChoice" description="A choice of listed values" sequenceNum="2"
+                    enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfDecimal" description="A decimal" sequenceNum="3" enumTypeId="PayrollProfileFieldKind"/>
+            <moqui.basic.Enumeration enumId="PpfText" description="A short text" sequenceNum="4" enumTypeId="PayrollProfileFieldKind"/>
+            <!-- the demonstration localization's profile: synthetic, like its levy; no country's election -->
+            <mantle.humanres.payroll.PayrollLocalizationField payrollLocalizationId="PlzDemonstration" fieldName="levyRegion"
+                    fieldLabel="Demonstration levy region" fieldKindEnumId="PpfChoice" isRequired="Y" sequenceNum="1"
+                    optionValues="NORTH = North (synthetic)&#10;SOUTH = South (synthetic)"
+                    description="A synthetic region, to show a required election; it changes no amount"/>
+            <mantle.humanres.payroll.PayrollLocalizationField payrollLocalizationId="PlzDemonstration" fieldName="levyExempt"
+                    fieldLabel="Exempt from the demonstration levy" fieldKindEnumId="PpfIndicator" isRequired="N" sequenceNum="2"
+                    description="A synthetic exemption, to show an optional election; it changes no amount"/>
+        </seed-data>
+    </entity>
+
+    <entity entity-name="PayrollAssignment" package="mantle.humanres.payroll" cache="never">
+        <description>An employment's dated pay terms (design §8.1 PayrollAssignment, §8 PayAssignments; PE-08; impl-people P23): the
+            structure it is calculated with and the pay group it is paid in (both its employer's, in one currency), from fromDate
+            until thruDate, the values of its structure's declared inputs that are the employment's own (inputValues, a JSON object
+            of decimal texts), and the components of elective lines it takes (electedComponentIds). EmploymentSalary stays the
+            salary and RateAmount the hourly rate: an assignment refers to them and keeps no salary of its own, and assigning a
+            structure changes no salary. One primary assignment (isPrimary Y) applies per employment and date across every group;
+            another earning source is a component or an input, or a secondary assignment of another structure. Ended (thruDate,
+            audited with its reason), never deleted.</description>
+        <field name="payrollAssignmentId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollStructureId" type="id"/>
+        <field name="payrollGroupId" type="id"/>
+        <field name="isPrimary" type="text-indicator"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
+            change; "update" would skip it), with its reason (P23 review)</description></field>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
+        <field name="electedComponentIds" type="text-medium"><description>The components of elective lines (PleElected) the
+            assignment takes, comma separated</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="operationKey" type="text-short"><description>The assigner's key: a retry with it answers the first</description></field>
+        <field name="assignedByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollStructure" short-alias="structure"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <index name="PAY_ASGN_EMPL"><index-field name="partyRelationshipId"/></index>
+        <index name="PAY_ASGN_ORG"><index-field name="organizationPartyId"/></index>
+        <index name="PAY_ASGN_STRUCT"><index-field name="payrollStructureId"/></index>
+        <index name="PAY_ASGN_GROUP"><index-field name="payrollGroupId"/></index>
+    </entity>
+    <entity entity-name="PayrollTaxProfile" package="mantle.humanres.payroll" cache="never">
+        <description>An employment's payroll tax profile for a localization from fromDate until thruDate (design §8.1
+            PayrollTaxProfile, §8 PayAssignments' TaxAndBenefits; PE-12; impl-people P23): the values of the fields the localization
+            declares (profileValues, a JSON object; PayrollLocalizationField), so the neutral core holds no country's columns. A
+            change starts a new profile and ends the one in effect (thruDate audited with its reason); never deleted. Employment's and
+            Employee's historical US tax fields are neither read nor written (impl-people F33). Bank details are not here: they are
+            the person's payment methods, changed through Accounting's payment-method services.</description>
+        <field name="payrollTaxProfileId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="payrollLocalizationId" type="id"/>
+        <field name="profileValues" type="text-long"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
+            change; "update" would skip it), with its reason (P23 review)</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
+        <index name="PAY_TAXPROF_EMPL"><index-field name="partyRelationshipId"/></index>
+    </entity>
+    <!-- impl-people P24 (design-people §6 HoursForPay, §8.1 PayrollInput and PayrollInputSource, §8 PayAdjustments; PE-09, PE-07,
+        PE-05): an employment's approved pay inputs for a pay group's period (PayrollInput: worked hours of a day from the group's time
+        basis, paid or unpaid leave of a day, a time entry's pieces, an expense claim reserved for payroll, or a reasoned adjustment
+        a payroll approver approved) and the source records each consumed (PayrollInputSource). Written only by
+        mantle.humanres.PayrollInputServices (PayInputs.js), which checks PAYROLL_VIEW and PAYROLL_EDIT and the employer first. Each
+        entitlement is paid once (activeEntitlementKey, unique: a day's worked time whichever stream it came from, a leave day, an
+        entry's pieces, a claim) and each source consumed once (activeSourceKey, unique), so preparing again makes nothing twice and a
+        worker invoice and payroll never both take a time entry. A voided or refused input releases both keys; a finalized one is
+        never changed (a correction is a new input linked to it). Nothing here is the legacy PayrollAdjustment, which no People
+        service reads (design §8.4). -->
+    <entity entity-name="PayrollInput" package="mantle.humanres.payroll" cache="never">
+        <description>An approved (or, for an adjustment, proposed) pay input of an employment for a pay group's period: its kind
+            (PayrollInputType), the day or date it is for (inputDate), the formula input it supplies (inputName: workedHours,
+            paidLeaveHours, unpaidLeaveHours, pieces, reimbursement) or the component an adjustment is to (payrollComponentId), a
+            quantity with its unit or an amount with its currency (never assumed), the source's own rate where it has one
+            (rateAmount: a time entry's worker rate, evidence for the calculation), its state (PayrollInput status: proposed,
+            approved, refused, voided, finalized) and the entitlement it pays (entitlementKey; activeEntitlementKey while it is
+            neither voided nor refused, unique). An adjustment carries its reason and evidence, the inputs of one recurrence share
+            seriesInputId, and a correction of a finalized input links it (correctionOfInputId). Created, approved and voided by
+            PayrollInputServices; finalized by the pay run's finalization, after which it is never changed.</description>
+        <field name="payrollInputId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"><description>The group's pay period it is for</description></field>
+        <field name="inputTypeEnumId" type="id"><description>PayrollInputType</description></field>
+        <field name="inputName" type="text-short"><description>The formula input it supplies, for an input of time, pieces or a
+            reimbursement</description></field>
+        <field name="payrollComponentId" type="id"><description>The component an adjustment is to</description></field>
+        <field name="inputDate" type="date"><description>The day it is for (an adjustment's date)</description></field>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="rateAmount" type="number-decimal" ai-opt-out="true"><description>The source's own rate (a time entry's worker rate), kept as
+            evidence</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollInput: PinProposed, PinApproved, PinRefused,
+            PinVoided, PinFinalized</description></field>
+        <field name="entitlementKey" type="text-medium"/>
+        <field name="activeEntitlementKey" type="text-medium"><description>The entitlementKey while the input is neither voided
+            nor refused; unique, so an entitlement is paid once</description></field>
+        <field name="isAdjustment" type="text-indicator"><description>Y: made by store#Adjustment (approved by a payroll approver),
+            not prepared from a source</description></field>
+        <field name="reason" type="text-long"><description>An adjustment's reason, a payroll working note</description></field>
+        <field name="evidence" type="text-medium"><description>An adjustment's evidence: what it rests on</description></field>
+        <field name="seriesInputId" type="id"><description>The first input of a recurring adjustment, which every input of the
+            recurrence names</description></field>
+        <field name="correctionOfInputId" type="id"><description>The finalized input a correction changes</description></field>
+        <field name="voidReason" type="text-medium"/>
+        <field name="voidedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"><description>The preparation or adjustment's key: a retry answers the first</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="changedByUserIds" type="text-medium"><description>Each user who made or changed an adjustment, comma separated:
+            none of them decides it</description></field>
+        <field name="payrollRunId" type="id"><description>The pay run whose calculation took the input (impl-people P25): another run
+            does not take it while that run is live, and a change of it invalidates that run's approval</description></field>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" title="PayrollInputType" related="moqui.basic.Enumeration" short-alias="inputType">
+            <key-map field-name="inputTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollInputSource" short-alias="sources">
+            <key-map field-name="payrollInputId"/></relationship>
+        <index name="PAY_INPUT_EMPL"><index-field name="partyRelationshipId"/><index-field name="inputDate"/></index>
+        <index name="PAY_INPUT_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
+        <index name="PAY_INPUT_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAY_INPUT_SERIES"><index-field name="seriesInputId"/></index>
+        <index name="PAY_INPUT_RUN"><index-field name="payrollRunId"/></index>
+        <index name="PAY_INPUT_ENTITLE" unique="true"><index-field name="activeEntitlementKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Input Type" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitWorked" enumCode="workedHours" description="Worked hours" sequenceNum="1"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitPaidLeave" enumCode="paidLeaveHours" description="Paid leave" sequenceNum="2"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitUnpaidLeave" enumCode="unpaidLeaveHours" description="Unpaid leave" sequenceNum="3"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitPieces" enumCode="pieces" description="Pieces" sequenceNum="4"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitReimbursement" enumCode="reimbursement" description="Expense reimbursement"
+                    sequenceNum="5" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitAdjustment" description="Adjustment" sequenceNum="6" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitAdvanceRecovery" description="Advance recovery" sequenceNum="7"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.StatusType description="Payroll Input" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinProposed" description="Waiting for approval" sequenceNum="1" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinApproved" description="Approved" sequenceNum="2" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinRefused" description="Refused" sequenceNum="3" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinVoided" description="Voided" sequenceNum="4" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinFinalized" description="Finalized" sequenceNum="5" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinVoided" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinApproved" toStatusId="PinVoided" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinApproved" toStatusId="PinFinalized" transitionName="Finalize"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollInputSource" package="mantle.humanres.payroll" cache="never">
+        <description>A source record a pay input consumed (design §8.1 PayrollInputSource): a time entry (its hours or its pieces),
+            an attendance day, a day of a leave request, an expense claim, or the advance an adjustment recovers; its part
+            (quantity or amount), the source's fingerprint when it was prepared (sourceRevision: its hours, rates, minutes or state,
+            so a change since is seen) and its key (sourceKey; activeSourceKey while its input is neither voided nor refused,
+            unique, so a source is consumed once). Mantle's time writers read it: a worker invoice refuses a time entry a pay input
+            consumed, and a change of a consumed entry or the reopening of its week voids an input not finalized and is refused for
+            a finalized one.</description>
+        <field name="payrollInputSourceId" type="id" is-pk="true"/>
+        <field name="payrollInputId" type="id"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="id"/>
+        <field name="sourcePart" type="text-short"><description>The part of the source: hours or pieces of a time entry, the day of
+            a leave request</description></field>
+        <field name="sourceKey" type="text-medium"/>
+        <field name="activeSourceKey" type="text-medium"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="sourceRevision" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollInput" short-alias="input"/>
+        <index name="PAY_INSRC_INPUT"><index-field name="payrollInputId"/></index>
+        <index name="PAY_INSRC_SOURCE"><index-field name="sourceEntityName"/><index-field name="sourceId"/></index>
+        <index name="PAY_INSRC_ACTIVE" unique="true"><index-field name="activeSourceKey"/></index>
+    </entity>
+    <!-- impl-people P25 (design-people §8.1 PayrollRun and PayrollRunEmployment, §8.2 steps 1 to 5, PayRuns, PayRunDetail; PE-10): a
+        pay group's run for one of its prepared periods (PayrollRun: one employer and currency, its pay date and kind), its population
+        employment by employment (PayrollRunEmployment: selected, calculated, in error or excluded with a reason, each its own unit of
+        work with its outcome, totals and the fingerprint of the sources and rules it was calculated from) and each unit's draft
+        results (PayrollRunResult: a component's line or a localization's item, with its explanation). Written only by
+        mantle.humanres.PayrollRunServices (PayrollRuns.js), which checks PAYROLL_VIEW and PAYROLL_EDIT (PAYROLL_APPROVE to decide)
+        and the employer first. Calculation and approval create no invoice or payment (design §2, §8.3); a run's results are drafts
+        until P27's finalization, and the approval (a People approval of kind PakPayrollRun) is bound to the exact population,
+        amounts and source revisions. -->
+    <entity entity-name="PayrollRun" package="mantle.humanres.payroll" cache="never">
+        <description>A pay run of a pay group for one of its prepared periods: the employer and currency (the group's), the pay date,
+            its kind (regular, off-cycle, correction), the source cutoff, its state (draft, calculating, review, approved, and
+            P27's finalizing and finalized; cancelled), who prepared it (selected or calculated: none of them approves it) and the
+            approval it took (approvedRevision: the population, amounts and sources approved). A group's period has one live
+            regular run (activeRunKey, unique), so its inputs are not paid twice.</description>
+        <field name="payrollRunId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="payDate" type="date" enable-audit-log="update"/>
+        <field name="runKindEnumId" type="id"><description>PayrollRunKind</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollRun</description></field>
+        <field name="cutoffDate" type="date-time"/>
+        <field name="activeRunKey" type="text-medium"><description>group:period:kind of a live regular run; unique</description></field>
+        <field name="description" type="text-medium"/>
+        <field name="preparedByUserIds" type="text-long"><description>Each user who selected the population or calculated, comma
+            separated: none of them approves the run</description></field>
+        <field name="approvedRevision" type="text-medium"><description>The revision the approval was made at</description></field>
+        <field name="approvedDate" type="date-time"/>
+        <field name="returnedReason" type="text-long"><description>Why the approver returned it, when they did</description></field>
+        <field name="cancelReason" type="text-long"><description>Why a payroll editor cancelled it (cancel#Run, a run not approved;
+            impl-people P25 review): its inputs released and its activeRunKey freed</description></field>
+        <field name="calculatedDate" type="date-time"/>
+        <field name="correctsPayslipId" type="id"><description>A correction run's original slip (impl-people P26,
+            create#Correction): the run recalculates that slip's employment and pays the change</description></field>
+        <field name="correctionReason" type="text-long"><description>Why the slip is corrected (the changed source or rule)</description></field>
+        <field name="operationKey" type="text-medium"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
+        <relationship type="one" title="PayrollRunKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="runKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_RUN_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
+        <index name="PAY_RUN_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAY_RUN_ACTIVE" unique="true"><index-field name="activeRunKey"/></index>
+        <index name="PAY_RUN_CORRECTS"><index-field name="correctsPayslipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Run Kind" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkRegular" description="Regular" sequenceNum="1" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkOffCycle" description="Off-cycle" sequenceNum="2" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.Enumeration enumId="PrkCorrection" description="Correction" sequenceNum="3" enumTypeId="PayrollRunKind"/>
+            <moqui.basic.StatusType description="Payroll Run" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnDraft" description="Draft" sequenceNum="1" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnCalculating" description="Calculating" sequenceNum="2" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnReview" description="Review" sequenceNum="3" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnApproved" description="Approved" sequenceNum="4" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnFinalizing" description="Finalizing" sequenceNum="5" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnFinalized" description="Finalized" sequenceNum="6" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusItem statusId="PrnCancelled" description="Cancelled" sequenceNum="7" statusTypeId="PayrollRun"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnReview" transitionName="Review"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnReview" transitionName="Review"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnReview" transitionName="Return"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnCalculating" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnDraft" transitionName="Select"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnFinalizing" transitionName="Finalize"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnFinalizing" toStatusId="PrnFinalized" transitionName="Finalized"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnCancelled" transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollRunEmployment" package="mantle.humanres.payroll" cache="never">
+        <description>An employment of a run's population, its own unit of work: pending (selected, not calculated yet or changed
+            since), calculated, in error (its reason code and message persisted, the other units going on) or excluded (with the
+            reason, its totals kept out but the exclusion shown in the approval); the primary pay assignment and structure it was
+            calculated with, its totals (gross, deductions, employer contributions, the localization's employee and employer
+            amounts, net, employer cost), how its period was split (salary, rate or assignment changes), the fingerprint of the
+            sources and rules its results were calculated from (sourceRevision: a change since makes the results stale and the
+            approval invalid), and the attempts made. One a run and employment.</description>
+        <field name="payrollRunEmploymentId" type="id" is-pk="true"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollRunUnit</description></field>
+        <field name="exclusionReason" type="text-medium"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="message" type="text-long"/>
+        <field name="payrollAssignmentId" type="id"/>
+        <field name="payrollStructureId" type="id"/>
+        <field name="grossAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="deductionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="contributionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployeeAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployerAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="netAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="employerCostAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="segmentCount" type="number-integer"/>
+        <field name="splitText" type="text-long" ai-opt-out="true"><description>How the period was split and prorated</description></field>
+        <field name="sourceRevision" type="text-medium"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="calculatedDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRun" short-alias="run"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <index name="PAY_RUN_EMPL_RUN" unique="true"><index-field name="payrollRunId"/><index-field name="partyRelationshipId"/></index>
+        <index name="PAY_RUN_EMPL_REL"><index-field name="partyRelationshipId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Payroll Run Unit" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruPending" description="Pending" sequenceNum="1" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruCalculated" description="Calculated" sequenceNum="2" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruError" description="Error" sequenceNum="3" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruExcluded" description="Excluded" sequenceNum="4" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusItem statusId="PruFinalized" description="Finalized" sequenceNum="5" statusTypeId="PayrollRunUnit"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruPending" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruError" toStatusId="PruExcluded" transitionName="Exclude"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruPending" transitionName="Reset"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruCalculated" transitionName="Calculate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruExcluded" toStatusId="PruError" transitionName="Fail"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PruCalculated" toStatusId="PruFinalized" transitionName="Finalize"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollRunResult" package="mantle.humanres.payroll" cache="never">
+        <description>A draft result line of a run's employment: a component's amount for the period (its segments summed or taken
+            once, its adjustments added, rounded to the currency; a statistical value in its unit, entering no total) or a
+            localization's item (employee or employer), with its explanation (each segment's formula and values, the rounding).
+            Replaced when the employment is calculated again; P26's payslips and P27's finalization make the lasting facts.</description>
+        <field name="payrollRunResultId" type="id" is-pk="true"/>
+        <field name="payrollRunEmploymentId" type="id"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="componentCode" type="text-short"/>
+        <field name="resultName" type="text-medium"/>
+        <field name="componentKindEnumId" type="id"/>
+        <field name="localizationParty" type="text-short"><description>employee or employer, for a localization's item</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="inTotals" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="explanation" type="text-long" ai-opt-out="true"/>
+        <field name="previousAmount" type="number-decimal" ai-opt-out="true"><description>A correction run's line: what the original
+            slip and the corrections before it paid (impl-people P26); its amount is the change</description></field>
+        <field name="payrollComponentTermId" type="id"><description>The component term the line was calculated by (impl-people P26: a
+            payslip line names its rule); none for a localization's item or an adjustment of a component outside the structure</description></field>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRunEmployment" short-alias="unit"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <index name="PAY_RUN_RES_UNIT"><index-field name="payrollRunEmploymentId"/></index>
+        <index name="PAY_RUN_RES_RUN"><index-field name="payrollRunId"/></index>
+    </entity>
+    <!-- impl-people P26 (design-people §8.1 Payslip and PayslipItem, §8.2 corrections, Payslips, PayslipDetail, §15 the payslip; PE-10,
+        PE-17): pay results with identities of their own (Payslip: a run's employment, never keyed by employment and pay date, so a
+        regular, an off-cycle and a correction slip of one day are three; PayslipItem: its lines, each explained from its rule and
+        sources), made from a run's calculated employments when the run is approved. In preview mode (every pay group of this build)
+        they are preview slips, payroll's alone, never issued and never an obligation (§5 Q3); a final slip is P27's finalization's,
+        issued once (issue#Payslip: its statement stored and the person told, PayslipIssued, with no amount). A correction is a new
+        slip linked to the one it corrects (correctsPayslipId), its lines the change; the original stays as it was. Year-to-date
+        accumulators are derived on read from final and issued slips (PayrollResults.js), never stored. Written only by
+        mantle.humanres.PayrollRunServices and PayrollResultServices (PayrollRuns.js, PayrollResults.js), which check PAYROLL_VIEW
+        (PAYROLL_EDIT to issue or correct) and the employer; the person reads their own issued slips alone. Amounts and explanations are
+        opted out of AI. -->
+    <entity entity-name="Payslip" package="mantle.humanres.payroll" cache="never">
+        <description>A pay result of one employment of an approved pay run, with its own identity: the employer, the employment and
+            person, the group, period, pay date, currency and the run's kind; its totals (gross, deductions, employer contributions,
+            the localization's employee and employer amounts, net, employer cost) and how its period was split; the fingerprint of
+            the sources it came from (sourceRevision). Its state: a preview (preview mode: payroll's alone, never issued), withdrawn
+            (its run's approval was taken back before it was approved again), final (P27's finalization) or issued (its statement
+            rendered once and stored, the person told). A correction names the slip it corrects (correctsPayslipId, the original:
+            its lines and totals are the change, and the original stays). One slip a run's employment.</description>
+        <field name="payslipId" type="id" is-pk="true"/>
+        <field name="payrollRunId" type="id"/>
+        <field name="payrollRunEmploymentId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="partyRelationshipId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"/>
+        <field name="payDate" type="date"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="runKindEnumId" type="id"><description>PayrollRunKind: regular, off-cycle or correction</description></field>
+        <field name="correctsPayslipId" type="id"><description>The original slip a correction corrects</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>Payslip</description></field>
+        <field name="isPreview" type="text-indicator"><description>Y for a preview slip (preview mode): never issued as pay</description></field>
+        <field name="grossAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="deductionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="contributionAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployeeAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="localEmployerAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="netAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="employerCostAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="splitText" type="text-long" ai-opt-out="true"/>
+        <field name="sourceRevision" type="text-medium"><description>The fingerprint of the sources and rules the slip came from (the
+            run employment's when its run was approved)</description></field>
+        <field name="approvedDate" type="date-time"><description>When its run was approved for these results</description></field>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="contentLocation" type="text-medium"><description>The issued statement, rendered once and stored (its PDF, or its
+            html-print page where the server has no PDF engine)</description></field>
+        <field name="contentType" type="text-short"/>
+        <field name="fileName" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRun" short-alias="run"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollRunEmployment" short-alias="unit"/>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Corrects" related="mantle.humanres.payroll.Payslip" short-alias="corrects">
+            <key-map field-name="correctsPayslipId" related="payslipId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayslipItem" short-alias="items">
+            <key-map field-name="payslipId"/></relationship>
+        <index name="PAYSLIP_UNIT" unique="true"><index-field name="payrollRunEmploymentId"/></index>
+        <index name="PAYSLIP_RUN"><index-field name="payrollRunId"/></index>
+        <index name="PAYSLIP_EMPL"><index-field name="partyRelationshipId"/><index-field name="payDate"/></index>
+        <index name="PAYSLIP_PARTY"><index-field name="partyId"/><index-field name="statusId"/></index>
+        <index name="PAYSLIP_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAYSLIP_CORRECTS"><index-field name="correctsPayslipId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Payslip" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssPreview" description="Preview" sequenceNum="1" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssWithdrawn" description="Withdrawn" sequenceNum="2" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssFinal" description="Final" sequenceNum="3" statusTypeId="Payslip"/>
+            <moqui.basic.StatusItem statusId="PssIssued" description="Issued" sequenceNum="4" statusTypeId="Payslip"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssPreview" toStatusId="PssWithdrawn" transitionName="Withdraw"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssWithdrawn" toStatusId="PssPreview" transitionName="Approve again"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PssFinal" toStatusId="PssIssued" transitionName="Issue"/>
+            <!-- a payslip's notes and messages are told to their named users alone (People follow-up 1's rule) -->
+            <mantle.party.communication.ConfidentialRecordType recordEntityName="mantle.humanres.payroll.Payslip" ownerText="IronStone People: a payslip"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayslipItem" package="mantle.humanres.payroll" cache="never">
+        <description>A line of a payslip: a component's amount (an earning, a deduction, an employer contribution; a statistical value
+            in its unit, in no total) or a localization's item (employee or employer), the term it was calculated by
+            (payrollComponentTermId, the dated rule) and its explanation (each part's formula and values, the adjustments, the
+            rounding). On a correction slip the amount is the change and previousAmount what the original and the corrections before
+            it paid. payslipVisible N (the term's setting) keeps a line from the person's own view, never from the totals.</description>
+        <field name="payslipItemId" type="id" is-pk="true"/>
+        <field name="payslipId" type="id"/>
+        <field name="payrollComponentId" type="id"/>
+        <field name="payrollComponentTermId" type="id"/>
+        <field name="componentCode" type="text-short"/>
+        <field name="itemName" type="text-medium"/>
+        <field name="componentKindEnumId" type="id"/>
+        <field name="localizationParty" type="text-short"><description>employee or employer, for a localization's item</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"/>
+        <field name="previousAmount" type="number-decimal" ai-opt-out="true"><description>On a correction slip: the line as paid
+            before</description></field>
+        <field name="currencyUomId" type="id"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="inTotals" type="text-indicator"/>
+        <field name="payslipVisible" type="text-indicator"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="explanation" type="text-long" ai-opt-out="true"/>
+        <relationship type="one" related="mantle.humanres.payroll.Payslip" short-alias="payslip"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
+        <index name="PAYSLIP_ITEM_SLIP"><index-field name="payslipId"/></index>
+    </entity>
+    <entity entity-name="PayslipContent" package="mantle.humanres.payroll" cache="never">
+        <description>A file of a payslip (IronStone People PE-01, the payslip content host): evidence payroll keeps with a result (a
+            signed statement, a calculation sheet). The payslip is People's content host, so the file is never on the person's
+            broadly visible Party record; get#RecordLinkInfo and RecordFiles admit it only to a payroll reader of the slip's
+            employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person reads their issued slip, never these
+            files); no Records-drive folder maps it. Written through PayrollResultServices.create#PayslipContent (a payroll editor's).</description>
+        <field name="payslipContentId" type="id" is-pk="true"/>
+        <field name="payslipId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.humanres.payroll.Payslip"/>
+        <relationship type="one" title="PayslipContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <index name="PAYSLIP_CNT_SLIP"><index-field name="payslipId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payslip Content Type" enumTypeId="PayslipContentType"/>
+            <moqui.basic.Enumeration description="Evidence" enumId="PsctEvidence" enumTypeId="PayslipContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Other" enumId="PsctOther" enumTypeId="PayslipContentType" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+</entities>

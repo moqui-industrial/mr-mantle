@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's approval rules, routes and decisions (IronStone People design §12 ApprovalPolicies, §13 Approvals, PE-15;
+    impl-people P5; Approvals.js): an employer's dated rules by kind of approval (find#Policies, store#Policy), the route of a
+    request explained (resolve#Approvers: employee override, then the department's rule, then the employer's, then the manager,
+    with the step's alternate and the HR fallback; never the requester; unresolved waits), the shared record#Decision the domain
+    decision services call (PositionServices.decide#PositionApproval now), and People's lifecycle participant on the framework's
+    owned-resource contract (find#OwnedApprovals, transfer#ApprovalOwner). Each checks the People permissions and scope itself
+    and reads and writes with authorization off after that; none names an application group. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="find" noun="Policies" allow-remote="false">
+        <description>The approval rule rows of the employers in the caller's scope (or the one asked for, refused outside it,
+            ORGANIZATION_DENIED) and of a kind, in effect on asOfDate (now) or every row with includeEnded: each with its
+            employer, kind, scope (employee, department or whole employer), step, role, approver and alternate names, dates,
+            state (current, future, ended), revision and canEdit (PEOPLE_CONFIGURE). Paged. Read by the People administrator
+            and an HR reader (PEOPLE_CONFIGURE or PEOPLE_HR_VIEW; PERMISSION_DENIED otherwise).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="approvalKindEnumId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="policies" type="List"/>
+            <parameter name="policiesCount" type="Integer"/>
+            <parameter name="policiesPageIndex" type="Integer"/>
+            <parameter name="policiesPageSize" type="Integer"/>
+            <parameter name="policiesPageMaxIndex" type="Integer"/>
+            <parameter name="policiesPageRangeLow" type="Integer"/>
+            <parameter name="policiesPageRangeHigh" type="Integer"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('findPolicies', context)"/>
+            <set field="policies" from="found.policies"/>
+            <set field="policiesCount" from="found.policiesCount"/>
+            <set field="policiesPageIndex" from="found.policiesPageIndex"/>
+            <set field="policiesPageSize" from="found.policiesPageSize"/>
+            <set field="policiesPageMaxIndex" from="found.policiesPageMaxIndex"/>
+            <set field="policiesPageRangeLow" from="found.policiesPageRangeLow"/>
+            <set field="policiesPageRangeHigh" from="found.policiesPageRangeHigh"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Policy" allow-remote="false">
+        <description>A new approval rule row of an employer and kind from fromDate (now when empty): a step (sequenceNum, 1 when
+            empty) decided by a role (ParDepartmentHead, ParManager, ParPerson with approverPartyId, ParHr with an optional
+            designated officer), for the whole employer, a department of it or one employee (an override), with an optional
+            alternate; or the employer's HR fallback for the kind (ParHrFallback with the person). With peopleApprovalPolicyId,
+            a row's new terms (the row in effect ends on the change's date, fromDate or now, never before now, and the next
+            starts; a row not yet in effect changes in place) or its end (thruDate alone, never before now), each audited with
+            changeReason. The waiting requests of
+            the employer and kind are routed again (a request that waited for an approver is sent to the one it has now).
+            Refuses a caller without PEOPLE_CONFIGURE (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED) or one outside the
+            scope (ORGANIZATION_DENIED), a kind not built (KIND_INVALID), a role that is not one (ROLE_INVALID), a named role with
+            no person (APPROVER_REQUIRED), a step outside 1 to 20 (STEP_INVALID), a department that is not one
+            (NOT_A_DEPARTMENT) or not the employer's (DEPARTMENT_OUTSIDE), an employee the employer does not employ or an
+            approver or alternate who does not work for it (NOT_EMPLOYED), an employee's rule naming them to decide
+            (SELF_APPROVAL), a step another row of the same scope holds then (STEP_EXISTS), dates out of order (DATES_INVALID),
+            a row outside the scope (RECORD_UNAVAILABLE) or ended (RULE_ENDED) and a revision other than the one read
+            (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="peopleApprovalPolicyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="approvalKindEnumId"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="employeePartyId"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="approverRoleEnumId"/>
+            <parameter name="approverPartyId"/>
+            <parameter name="alternatePartyId"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="changeReason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalPolicyId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('storePolicy', context)"/>
+            <set field="peopleApprovalPolicyId" from="stored.peopleApprovalPolicyId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="Approvers" allow-remote="false">
+        <description>The route of an example request, explained (design §12 ResolvePreview): for an employer and kind, the
+            department (or a position, which gives both), the person it is about (subjectPartyId) and the requester, the basis
+            of its rules (employee, department, type or the default manager route) and each step with its role, who decides it
+            now and how (the role, the alternate, the HR fallback, or no one: the request would wait), never the requester or
+            the person it is about. Read by the People administrator and an HR reader (PERMISSION_DENIED otherwise); refuses an
+            employer outside the scope (ORGANIZATION_DENIED), a position outside it (RECORD_UNAVAILABLE), a department not the
+            employer's (NOT_A_DEPARTMENT, DEPARTMENT_OUTSIDE) and a person the employer does not employ (NOT_EMPLOYED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="approvalKindEnumId" default-value="PakPosition"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="subjectPartyId"/>
+            <parameter name="requesterPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="basis"><description>employee, department, type or default</description></parameter>
+            <parameter name="basisText"/>
+            <parameter name="steps" type="List"><description>sequenceNum, stepText, approverRoleEnumId, roleText, approverPartyIds,
+                approverNames, via (route, alternate, fallback, or null), unresolved, explanation</description></parameter>
+            <parameter name="unresolved" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="route" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('resolveApprovers', context)"/>
+            <set field="basis" from="route.basis"/>
+            <set field="basisText" from="route.basisText"/>
+            <set field="steps" from="route.steps"/>
+            <set field="unresolved" from="route.unresolved"/>
+        </actions>
+    </service>
+    <service verb="record" noun="Decision" allow-remote="false">
+        <description>The shared decision of a People approval the domain decision services call (decide#PositionApproval): the
+            step waiting of the request (peopleApprovalId, else the latest of the kind's source) approved, or refused with a
+            reason, as a PeopleApprovalDecision (actor, step, rule row, role, revision, time, reason). Rechecks the decider's
+            authority (an approver of the step waiting by the employer's rules now, never the requester or the person it is
+            about, nor one who decided another step, nor one who no longer works for the employer) and the source's revision,
+            with the request locked and read again. The last step's approval approves the request,
+            a refusal refuses it, and either reads the notices; an approval of an earlier step sends the next step's. A decision
+            the caller already made of the request answers the first (repeated). Refuses a caller without
+            PEOPLE_REQUEST_APPROVE, which every step needs, HR-routed ones too (PERMISSION_DENIED), no request (RECORD_UNAVAILABLE), another decision than
+            the caller's first (ALREADY_DECIDED), a request no longer waiting (NOT_PENDING), a notice of an earlier revision
+            (REVISION_CHANGED), a source changed since the request (SOURCE_CHANGED), a refusal without a reason
+            (REASON_REQUIRED), the requester or the person it is about (SELF_APPROVAL) and anyone else not an approver of the
+            step waiting (NOT_APPROVER). P22 review: a payroll configuration's step (PakPayrollConfig) is decided by its approvers
+            holding PAYROLL_APPROVE or PEOPLE_REQUEST_APPROVE, with PAYROLL_VIEW, never one who drafted it.</description>
+        <in-parameters>
+            <parameter name="approvalKindEnumId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceEntityName"><description>A kind's other source (P22 review: a pay structure of PakPayrollConfig,
+                whose own is a pay component's term); its own when empty</description></parameter>
+            <parameter name="sourceId"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="peopleApprovalDecisionId"/>
+            <parameter name="decisionEnumId"/>
+            <parameter name="statusId"/>
+            <parameter name="complete" type="Boolean"/>
+            <parameter name="sourceId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('recordDecision', context)"/>
+            <set field="peopleApprovalId" from="decided.peopleApprovalId"/>
+            <set field="peopleApprovalDecisionId" from="decided.peopleApprovalDecisionId"/>
+            <set field="decisionEnumId" from="decided.decisionEnumId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="complete" from="decided.complete"/>
+            <set field="sourceId" from="decided.sourceId"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+
+    <!-- People's lifecycle participant (design-admin §14; impl-people P5, §4): the waiting decisions and the rules that name a
+        user, on the framework's owned-resource contract -->
+    <service verb="find" noun="OwnedApprovals" allow-remote="false">
+        <description>What userId owns of People's approvals, for an offboarding preview: the requests waiting for their decision
+            (resourceId approval:id, not transferable: a request follows its route and goes to the next approver once the rule
+            or reporting line naming them changes) and the approval rule rows not ended (in effect or starting later) naming
+            them as approver, alternate or HR fallback (resourceId policy:id, transferable), and the draft and open openings they are
+            the recruiting owner of (resourceId opening:id, transferable; impl-people P16), and the open confidential cases they
+            handle (resourceId case:id, named "Confidential case" alone, not transferable: when they leave, each goes back to the
+            employer's case intake handlers; impl-people P21, the user's call of Nov 12, 2026), each {resourceId, resourceName,
+            resourceKind, transferable, note}; names only. The caller's own, or another user's with PEOPLE_APPROVAL_OWNER_CHANGE.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <actions>
+            <set field="resourceList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('findOwnedApprovals', context).resourceList"/>
+        </actions>
+    </service>
+    <service verb="transfer" noun="ApprovalOwner" allow-remote="false">
+        <description>An approval rule row naming fromUserId's person (as approver or alternate) handed to toUserId's: the row in
+            effect ends now and its copy names the new person (a row not yet in effect changes in place), with the reason in
+            the audit log; the waiting requests of its employer and kind are routed again. With PEOPLE_APPROVAL_OWNER_CHANGE, or
+            by fromUserId holding PEOPLE_CONFIGURE in the rule's employer (PERMISSION_DENIED otherwise: an approver alone does
+            not choose who decides in their place). Refuses a resource that is not such a row (RECORD_UNAVAILABLE), a waiting request or a confidential case (NOT_TRANSFERABLE), a new owner with no enabled account and person
+            (OWNER_INVALID), one who does not work for the employer (NOT_EMPLOYED) and the rule's own employee
+            (SELF_APPROVAL). An opening (opening:id, impl-people P16) gets the new recruiting owner, audit-logged with the reason:
+            with PEOPLE_APPROVAL_OWNER_CHANGE or as a recruiter who changes the employer's openings; the new owner works for the
+            employer (NOT_EMPLOYED) with an enabled account (OWNER_INVALID).</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <in-parameters><parameter name="approvalResourceId" required="true"/></in-parameters>
+        <actions>
+            <set field="transferred" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('transferApprovalOwner', context).transferred"/>
+        </actions>
+    </service>
+</services>

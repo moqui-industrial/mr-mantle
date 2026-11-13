@@ -1,0 +1,642 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A reusable WorkEffort process (IronStone Maintenance design §4.1 and §4.2, MT-03; WorkProcesses.js): the first, minimal part
+    built by impl-people P7 for People's lifecycle checklists (store#ProcessStep, instantiate#WorkProcess and the managed-work
+    rule's check#ManagedWork); impl-maintenance P6 extended these services and added Maintenance's procedures
+    (MaintenanceProcedures.js, the checked path of the WppMaintenanceProcedure policy: the organization's scope, publication,
+    approval, effectivity and applicability, the requirements copied after the clone, instructions resolved not copied) and leaves
+    People's path as it is. clone#WorkEffort and clone#Project are not changed by it (clone#WorkEffort refuses managed work,
+    impl-maintenance F110). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="store" noun="ProcessStep" allow-remote="false">
+        <description>A step of a template tree (rootWorkEffortId, a WorkEffort with isTemplate Y and a process policy in effect):
+            new (workEffortName; under parentWorkEffortId, a node of the same tree, else the root) or changed (workEffortId), with
+            its step policy from now (isRequired, roleTypeId, dueOffsetDays; a change ends the policy in effect and starts the
+            next), and the steps of the same tree it waits for (dependsOnIds; a cycle or another tree's step is refused,
+            DEPENDENCY_INVALID). With end, the step's policy ends now: the step is left out of new executions. Needs the
+            permission of the policy using the process (PERMISSION_DENIED; PROCESS_UNAVAILABLE for a template with no policy in
+            effect). A maintenance procedure (impl-maintenance P6) takes its checked path: WORK_PROCESS_EDIT in its organization,
+            not retired (PROCESS_RETIRED), an approved one back to Draft, and the step's response policy (responseKindEnumId,
+            measurementTypeId, measurementUomId, minimumValue, maximumValue, evidenceRequired, commentRequired, waiverAllowed;
+            VALUE_INVALID).</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="parentWorkEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="purposeEnumId"><description>A new step's purpose; the root's when empty</description></parameter>
+            <parameter name="description"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="estimatedWorkTime"/>
+            <parameter name="isRequired"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="dueOffsetDays"/>
+            <parameter name="dependsOnIds" type="List"/>
+            <parameter name="end" type="Boolean" default="false"/>
+            <parameter name="responseKindEnumId"/>
+            <parameter name="measurementTypeId"/>
+            <parameter name="measurementUomId"/>
+            <parameter name="minimumValue"/>
+            <parameter name="maximumValue"/>
+            <parameter name="evidenceRequired"/>
+            <parameter name="commentRequired"/>
+            <parameter name="waiverAllowed"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('storeProcessStep', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="instantiate" noun="WorkProcess" allow-remote="false">
+        <description>A template (templateWorkEffortId: isTemplate Y, its process policy in effect) made into fresh work by the
+            two-pass copy of design-maintenance §4.2: the root and each step whose policy is in effect (an ended step left out
+            with its sub-steps) copied with their definition fields only (the template flag, status, resolution, actual dates,
+            effort and recurrence reset; due dates from each step's offset after startDate, now when empty), the WeatDependsOn
+            edges inside the tree remapped, one WeatBasedOn association from each new node to its template node, the step and
+            process policies copied, and each step assigned (Assignee) to the party roleParties names for its role (a role named
+            for no one stays a requirement). rootFields override the root's workEffortName, description and ownerPartyId. One tree
+            in the caller's transaction; a retry with operationKey answers the first root (repeated). Needs the permission of
+            the policy using the process. A maintenance procedure takes its checked path (impl-maintenance P6, design §4.2 step 1):
+            MAINTENANCE_PLAN or _SUPERVISE in its organization; approved (PROCESS_NOT_APPROVED, PROCESS_RETIRED), effective now
+            (PROCESS_NOT_EFFECTIVE) and applicable to assetId or facilityId (PROCESS_NOT_APPLICABLE); then the copy, and each
+            template node's requirements copied to its new node (F58).</description>
+        <in-parameters>
+            <parameter name="templateWorkEffortId" required="true"/>
+            <parameter name="operationKey"/>
+            <parameter name="startDate" type="Timestamp"/>
+            <parameter name="roleParties" type="Map"/>
+            <parameter name="rootFields" type="Map"/>
+            <parameter name="assetId"><description>A procedure's target, for its applicability</description></parameter>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="idMap" type="Map"><description>Each template node's id to its new node's</description></parameter>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('instantiateWorkProcess', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="idMap" from="out.idMap"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="check" noun="ManagedWork" allow-remote="false">
+        <description>The managed-work rule (impl-people §4, impl-maintenance §4, in the same words): the generic task and
+            work-effort services refuse a root that has a MaintenanceWorkOrder row and its steps, and work whose process policy
+            guards execution (MANAGED_WORK): its own policy, its root's or its parent's. People's checklist tasks stay ordinary
+            tasks (People's policy does not guard). A data check, for any caller; reads nothing else.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortIdList" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="managed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="managed" from="!!ec.resource.script('component://mr-mantle/service/mantle/work/WorkProcesses.js').execute('checkManagedWork', context).managed"/>
+        </actions>
+    </service>
+    <!-- ===== Maintenance procedures (impl-maintenance P6; design-maintenance §4.1, §4.2, Procedures, ProcedureDetail, §12),
+        MaintenanceProcedures.js. Each checks the work process or maintenance permission and the procedure's organization in the
+        caller's maintenance scope (MaintenanceAccess.js); a missing procedure and one outside the scope are refused alike
+        (RECORD_UNAVAILABLE). ===== -->
+    <service verb="find" noun="WorkProcesses" allow-remote="false">
+        <description>The maintenance procedures of the caller's scope (WORK_PROCESS_VIEW): text (id or name), organization, state
+            (draft, approved, retired; every state when empty), maintenance type, equipment model, effectiveDate (in effect then).
+            With usable (also for MAINTENANCE_PLAN or _SUPERVISE): approved, in effect now and applicable to assetId or facilityId,
+            the procedures new work may use. Never an execution. Each row: name, organization, state, approval, effective dates,
+            applicability, step and required step counts.</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"><description>draft, approved or retired</description></parameter>
+            <parameter name="maintenanceTypeEnumId"/>
+            <parameter name="applicableProductId"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="usable" type="Boolean" default="false"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="procedureList" type="List"/>
+            <parameter name="procedureListCount" type="Integer"/>
+            <parameter name="procedureListPageIndex" type="Integer"/>
+            <parameter name="procedureListPageSize" type="Integer"/>
+            <parameter name="procedureListPageMaxIndex" type="Integer"/>
+            <parameter name="procedureListPageRangeLow" type="Integer"/>
+            <parameter name="procedureListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('findProcesses', context)"/>
+            <set field="procedureList" from="answer.procedureList"/>
+            <set field="procedureListCount" from="answer.procedureListCount"/>
+            <set field="procedureListPageIndex" from="answer.procedureListPageIndex"/>
+            <set field="procedureListPageSize" from="answer.procedureListPageSize"/>
+            <set field="procedureListPageMaxIndex" from="answer.procedureListPageMaxIndex"/>
+            <set field="procedureListPageRangeLow" from="answer.procedureListPageRangeLow"/>
+            <set field="procedureListPageRangeHigh" from="answer.procedureListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="WorkProcess" allow-remote="false">
+        <description>A maintenance procedure as its reader sees it (WORK_PROCESS_VIEW in its organization; a technician assigned to
+            work made of it reads it read only): the header (name, organization, state, estimate, applicability, effective dates,
+            approval and last author), the steps in order with their depth, group flag, response policy, dependencies, requirements
+            and instruction summary, the requirements, the current instructions (an author's draft, else the published one), the
+            approval history (WorkEffortApproval), the findings that block publication, and what the caller may do (edit, request
+            approval, approve or why not, retire, use for new work).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="procedure" type="Map"/>
+            <parameter name="stepList" type="List"/>
+            <parameter name="requirementList" type="List"/>
+            <parameter name="instructionList" type="List"/>
+            <parameter name="approvalList" type="List"/>
+            <parameter name="findingList" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canRequest" type="Boolean"/>
+            <parameter name="canApprove" type="Boolean"/>
+            <parameter name="approveWhyNot"/>
+            <parameter name="canRetire" type="Boolean"/>
+            <parameter name="canUse" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('getProcess', context)"/>
+            <set field="procedure" from="answer.procedure"/>
+            <set field="stepList" from="answer.stepList"/>
+            <set field="requirementList" from="answer.requirementList"/>
+            <set field="instructionList" from="answer.instructionList"/>
+            <set field="approvalList" from="answer.approvalList"/>
+            <set field="findingList" from="answer.findingList"/>
+            <set field="approveWhyNot" from="answer.approveWhyNot"/>
+            <set field="canEdit" from="!!answer.canEdit"/>
+            <set field="canRequest" from="!!answer.canRequest"/>
+            <set field="canApprove" from="!!answer.canApprove"/>
+            <set field="canRetire" from="!!answer.canRetire"/>
+            <set field="canUse" from="!!answer.canUse"/>
+        </actions>
+    </service>
+    <service verb="store" noun="WorkProcess" allow-remote="false">
+        <description>A new maintenance procedure, a draft of organizationPartyId (WORK_PROCESS_EDIT in it; the caller's one
+            organization when empty): a template root (WetTask, WepMaintenance, the WorkEffortProcedure flow) with its process
+            policy (WppMaintenanceProcedure, guarding execution) and applicability; cloned from sourceWorkEffortId (a procedure the
+            caller reads) with new ids, its steps, dependencies, requirements and instruction texts as drafts and no approval. Or a
+            change of one (workEffortId): its name, description, estimated hours and applicability; an approved one goes back to
+            Draft (PROCESS_RETIRED for a retired one).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="estimatedWorkTime"/>
+            <parameter name="maintenanceTypeEnumId"/>
+            <parameter name="applicableProductId"/>
+            <parameter name="applicableAssetClassEnumId"/>
+            <parameter name="applicableFacilityTypeEnumId"/>
+            <parameter name="sourceWorkEffortId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('storeProcess', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="move" noun="ProcessStep" allow-remote="false">
+        <description>A step of a procedure one place up or down among its siblings (WORK_PROCESS_EDIT; the keyboard and terminal
+            reorder). moved false at either end.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="direction" required="true"><description>up or down</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/><parameter name="moved" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('moveStep', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="moved" from="!!answer.moved"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProcessDependency" allow-remote="false">
+        <description>The steps of the same procedure a step waits for (WeatDependsOn; dependsOnIds replaces them): a step of
+            another procedure or a loop is refused (DEPENDENCY_INVALID). WORK_PROCESS_EDIT.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="dependsOnIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('storeDependency', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProcessRequirements" allow-remote="false">
+        <description>One planned requirement of a procedure's step (or its root), new, changed or removed (remove):
+            kind product (a part, WorkEffortProduct of type consume, dated: a change ends the row and starts the next; productId,
+            estimatedQuantity), asset (equipment needed, WorkEffortAssetNeeded; assetProductId, estimatedQuantity,
+            estimatedDuration) or skill (WorkEffortSkillStandard; skillTypeEnumId, estimatedNumPeople, estimatedDuration, People's
+            minimumSkillLevel (a skill level's number, VALUE_INVALID) and qualificationTypeEnumId (the QualificationType that must
+            prove it, VALUE_INVALID), which assignment checks; impl-maintenance P8, F75). WORK_PROCESS_EDIT.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="kind" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="assetProductId"/>
+            <parameter name="skillTypeEnumId"/>
+            <parameter name="estimatedQuantity"/>
+            <parameter name="estimatedNumPeople"/>
+            <parameter name="estimatedDuration"/>
+            <parameter name="minimumSkillLevel"/>
+            <parameter name="qualificationTypeEnumId"/>
+            <parameter name="remove" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('storeRequirements', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ProcessInstruction" allow-remote="false">
+        <description>A procedure step's (or its root's) draft instruction text (WorkEffortContent WectProcedureDraft; a new draft
+            ends the one before); with end, no instruction from the next approval. The next approval publishes it as a
+            WectInstruction row (impl-maintenance F68). WORK_PROCESS_EDIT.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="contentText" allow-html="safe"/>
+            <parameter name="description"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortContentId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('storeInstruction', context)"/>
+            <set field="workEffortContentId" from="answer.workEffortContentId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ProcessInstructions" allow-remote="false">
+        <description>The instruction of a procedure node in effect now (a reader of the procedure), or of an execution's node (a
+            work order's root or step the caller reads as Maintenance does): its template node's instruction in effect when the
+            execution was made, through its WeatBasedOn link; nothing is copied, so a later approval does not change it.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters><parameter name="instructionList" type="List"/></out-parameters>
+        <actions>
+            <set field="instructionList" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('findInstructions', context).instructionList"/>
+        </actions>
+    </service>
+    <service verb="request" noun="WorkProcessApproval" allow-remote="false">
+        <description>A draft procedure put for approval (WORK_PROCESS_EDIT or _APPROVE in its organization): its definition is
+            checked first (PUBLICATION_INVALID naming each finding: a group with a response, a reading with no measurement or unit,
+            a unit of another kind, bounds the wrong way round, a dependency outside the procedure or in a loop, no step); a
+            WorkEffortApproval row is requested (impl-maintenance F44) and the organization's approvers (WORK_PROCESS_APPROVE, not
+            the last author unless self-approval is allowed) are told on WorkProcessApproval. A request waiting is answered
+            (repeated).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortApprovalId"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('requestApproval', context)"/>
+            <set field="workEffortApprovalId" from="answer.workEffortApprovalId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+            <set field="notifiedCount" from="answer.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="WorkProcess" allow-remote="false">
+        <description>The approval of a draft waiting for it (WORK_PROCESS_APPROVE in its organization), from ProcedureDetail or as
+            the WorkProcessApproval topic's approve service (recordId; the framework's approve#NotificationMessage calls it as the
+            user deciding): not by the last author unless the organization's MaintenancePolicy allows self-approval
+            (SELF_APPROVAL); APPROVAL_NOT_REQUESTED when none waits, PUBLICATION_INVALID with findings. The decision on its
+            WorkEffortApproval row, the procedure Approved from effectiveDate (now or later; DATE_PAST), each changed draft
+            instruction published as a WectInstruction row (F68), the definition stored as a PDF (WectPublishedProcedure) and the
+            notices read.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="effectiveDate" type="Timestamp"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="statusId"/>
+            <parameter name="workEffortApprovalId"/>
+            <parameter name="publishedCount" type="Integer"/>
+            <parameter name="publishedContentId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('approveProcess', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="workEffortApprovalId" from="answer.workEffortApprovalId"/>
+            <set field="publishedCount" from="answer.publishedCount"/>
+            <set field="publishedContentId" from="answer.publishedContentId"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="WorkProcess" allow-remote="false">
+        <description>The refusal of a draft waiting for approval, with the reason (WORK_PROCESS_APPROVE in its organization; the
+            WorkProcessApproval topic's refuse service): the request refused, the procedure still a draft.</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/><parameter name="statusId"/><parameter name="workEffortApprovalId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('refuseProcess', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="workEffortApprovalId" from="answer.workEffortApprovalId"/>
+        </actions>
+    </service>
+    <service verb="retire" noun="WorkProcess" allow-remote="false">
+        <description>A procedure retired (WORK_PROCESS_APPROVE in its organization): no new work is made of it from now; a request
+            waiting is cancelled; its executions and history stay, and it stays searchable.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="comments"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('retireProcess', context)"/>
+            <set field="workEffortId" from="answer.workEffortId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="ProcessExecutions" allow-remote="false">
+        <description>The work made of a procedure that the caller's maintenance scope covers (WORK_PROCESS_VIEW): each work
+            order's id, name, target, when it was made, state and outcome, newest first; openable for a reader of work.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="executionList" type="List"/>
+            <parameter name="executionListCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('findExecutions', context)"/>
+            <set field="executionList" from="answer.executionList"/>
+            <set field="executionListCount" from="answer.executionListCount"/>
+        </actions>
+    </service>
+    <service verb="check" noun="ProcessApplicability" allow-remote="false">
+        <description>Whether a procedure may be named for an equipment model (productId: Product360's maintenance default, an owner
+            contract with Products), equipment (assetId) or a facility (facilityId): a maintenance procedure, not retired, whose
+            applicability admits it. A data check (reasonCode PROCESS_UNAVAILABLE, PROCESS_RETIRED, PROCESS_NOT_APPLICABLE); the
+            caller checks its own permission.</description>
+        <in-parameters>
+            <parameter name="templateWorkEffortId" required="true"/>
+            <parameter name="productId"/>
+            <parameter name="assetId"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applicable" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceProcedures.js').execute('checkApplicability', context)"/>
+            <set field="applicable" from="!!answer.applicable"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="message" from="answer.message"/>
+        </actions>
+    </service>
+    <!-- ===== Executing a process's steps (impl-maintenance P7; design-maintenance §4.3, §3 ProcedureSteps, StepResponse and
+        ExecutionAmendment, §12), ProcessChecks.js. A step's status moves only through these, the root's close or cancel; each checks
+        the work order's scope (MaintenanceAccess.js requireWork) and the caller's maintenance permission. ===== -->
+    <service verb="get" noun="ProcessExecution" allow-remote="false">
+        <description>A work order's checklist for a reader of it (MAINTENANCE_VIEW in its organization, or its assigned technician):
+            each step in order with its depth, group flag, state, policy (required, response kind, reading and bounds, evidence,
+            comment, waiver), blockers (the dependencies not done), assignees, instruction, current check (outcome, reading,
+            findings, notes, evidence), failures and waiver, and what the caller may do (start, respond, skip, waive, correct); the
+            checks newest first, the waivers and the amendments; the next actionable step, the required steps open (the gate of
+            the work order's Complete) and the stored completed checklist. workEffortId is the root or one of its steps.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="execution" type="Map"/>
+            <parameter name="stepList" type="List"/>
+            <parameter name="checkList" type="List"/>
+            <parameter name="waiverList" type="List"/>
+            <parameter name="amendmentList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('getExecution', context)"/>
+            <set field="execution" from="answer.execution"/>
+            <set field="stepList" from="answer.stepList"/>
+            <set field="checkList" from="answer.checkList"/>
+            <set field="waiverList" from="answer.waiverList"/>
+            <set field="amendmentList" from="answer.amendmentList"/>
+        </actions>
+    </service>
+    <service verb="record" noun="ProcessStep" allow-remote="false">
+        <description>A step of a work order in progress (STATUS_INVALID otherwise), by its assigned technician (MAINTENANCE_EXECUTE,
+            assigned to the step or its root; NOT_ASSIGNED) or a supervisor; a leaf (GROUP_NO_RESPONSE), its dependencies and its
+            groups' done (DEPENDENCY_OPEN). action start: the step in progress. action skip: an optional step (SKIP_NOT_ALLOWED)
+            cancelled with the reason (comments; REASON_REQUIRED). action respond (design §4.3): outcome (pass or fail) for a pass
+            or fail step (OUTCOME_REQUIRED), measurementValue (VALUE_REQUIRED) and measurementUomId for a reading, observedDate (now
+            when empty; DATE_FUTURE), comments, evidence (evidenceContentIds, files of the work order; contentFile, files uploaded
+            with it, stored on the root named for the step; voiceFile, a voice note), supersededCheckId and correctionReason for
+            a correction of a check (REASON_REQUIRED), operationKey (a retry answers the first check; changed input
+            OPERATION_KEY_CONFLICT). The policy, bounds, organization and actor are the execution's and the caller's, never given.
+            A missing file or comment, a wrong unit, an out-of-range reading or a failure is saved as an unresolved check (its
+            findings) and leaves the step open; an accepted check completes it. A reading is a Measurement of the step; a counter
+            reading also goes through MaintenanceResourceServices.record#MaintenanceMeter with the Measurement linked. A step's
+            response is never a group's: groups follow their steps.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="action"><description>start, respond (the default) or skip</description></parameter>
+            <parameter name="outcome"><description>pass or fail</description></parameter>
+            <parameter name="measurementValue"/>
+            <parameter name="measurementUomId"/>
+            <parameter name="observedDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="evidenceContentIds" type="List"/>
+            <parameter name="contentFile" type="Object"/>
+            <parameter name="voiceFile" type="Object"/>
+            <parameter name="supersededCheckId"/>
+            <parameter name="correctionReason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortCheckId"/>
+            <parameter name="statusId"/>
+            <parameter name="accepted" type="Boolean"/>
+            <parameter name="findingList" type="List"/>
+            <parameter name="measurementId"/>
+            <parameter name="voiceContentId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('recordStep', context)"/>
+            <set field="workEffortCheckId" from="answer.workEffortCheckId"/>
+            <set field="statusId" from="answer.statusId"/>
+            <set field="accepted" from="!!answer.accepted"/>
+            <set field="findingList" from="answer.findingList || []"/>
+            <set field="measurementId" from="answer.measurementId"/>
+            <set field="voiceContentId" from="answer.voiceContentId"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="transcribe" noun="CheckVoiceNote" allow-remote="false">
+        <description>The voice note of a check (its recorder or a supervisor) as text, through SpeechServices.transcribe#Audio,
+            added to the check's transcript, only when the work order's organization turns transcription on (MaintenancePolicy
+            voiceNoteTranscription, off by default; otherwise reasonCode TRANSCRIPTION_OFF and nothing is sent). A transcription
+            that does not work is an answer (reasonCode); the audio stays the evidence either way. Called in a transaction of its
+            own after record#ProcessStep.</description>
+        <in-parameters><parameter name="workEffortCheckId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="transcribed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="transcript"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('transcribeVoiceNote', context)"/>
+            <set field="transcribed" from="!!answer.transcribed"/>
+            <set field="reasonCode" from="answer.reasonCode"/>
+            <set field="transcript" from="answer.transcript"/>
+        </actions>
+    </service>
+    <service verb="waive" noun="ProcessStep" allow-remote="false">
+        <description>A supervisor's waiver of a step (MAINTENANCE_SUPERVISE in its organization; a technician is refused,
+            PERMISSION_DENIED) while the work is in progress or held: a leaf not done (STEP_DONE) whose execution policy allows it
+            (WAIVER_NOT_ALLOWED), with the reason (REASON_REQUIRED). The step is complete; the failed check it answers
+            (workEffortCheckId, else the step's latest unresolved one) stays.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="workEffortCheckId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortWaiverId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('waiveStep', context)"/>
+            <set field="workEffortWaiverId" from="answer.workEffortWaiverId"/>
+            <set field="statusId" from="answer.statusId"/>
+        </actions>
+    </service>
+    <service verb="amend" noun="ProcessExecution" allow-remote="false">
+        <description>A supervisor's change of an open work order's execution (MAINTENANCE_SUPERVISE; completed, closed or cancelled
+            work is corrected, not amended, WORK_CLOSED). Each change of changeList has an action (the user's call of Nov 12, P7
+            review): add (workEffortName, parentWorkEffortId the root or a group, GROUP_REQUIRED otherwise, sequenceNum, description,
+            estimatedWorkTime, the policy fields, dependsOnIds: a new step not started; a complete group it joins reopens, named
+            among the invalidations); remove (workEffortId: a step, or a group with its steps, not yet started and with no check,
+            STEP_STARTED otherwise; it is cancelled and named in the amendment, and what waited for it no longer does); or change (the
+            default): it names steps of it and their new step policy fields
+            (isRequired, responseKindEnumId, measurementTypeId, measurementUomId, minimumValue, maximumValue, evidenceRequired,
+            commentRequired, waiverAllowed) or dependencies (dependsOnIds, steps of the same tree, no loop: DEPENDENCY_INVALID).
+            With preview, the changes, the acceptances they invalidate (a complete step whose requirement changed, or that now waits
+            for work not done) and the findings (complete steps waiting for a reopened one), and nothing written. Else, with the
+            reason (REASON_REQUIRED): the step policies from now, the dependencies, the amendment record, and each invalidated step
+            back in progress with its accepted checks invalidated and its waiver ended (both kept). operationKey: a retry answers
+            the first.</description>
+        <in-parameters>
+            <parameter name="rootWorkEffortId"/>
+            <parameter name="workEffortId"/>
+            <parameter name="changeList" type="List"/>
+            <parameter name="reason"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="executionAmendmentId"/>
+            <parameter name="changeList" type="List"/>
+            <parameter name="invalidatedList" type="List"/>
+            <parameter name="findingList" type="List"/>
+            <parameter name="addedList" type="List"/>
+            <parameter name="removedList" type="List"/>
+            <parameter name="addedIds" type="List"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('amendExecution', context)"/>
+            <set field="addedList" from="answer.addedList || []"/>
+            <set field="removedList" from="answer.removedList || []"/>
+            <set field="addedIds" from="answer.addedIds || []"/>
+            <set field="executionAmendmentId" from="answer.executionAmendmentId"/>
+            <set field="changeList" from="answer.changeList"/>
+            <set field="invalidatedList" from="answer.invalidatedList"/>
+            <set field="findingList" from="answer.findingList"/>
+            <set field="repeated" from="!!answer.repeated"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ProcessChecklist" allow-remote="false">
+        <description>A work order's completed checklist and exception record as a PDF (a reader of it; design §12): the one stored at
+            close (contentLocation), else made now (pdfBytes). No cost.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="pdfBytes" type="Object"/>
+            <parameter name="contentLocation"/>
+            <parameter name="fileName"/>
+            <parameter name="stored" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('getChecklist', context)"/>
+            <set field="pdfBytes" from="answer.pdfBytes"/>
+            <set field="contentLocation" from="answer.contentLocation"/>
+            <set field="fileName" from="answer.fileName"/>
+            <set field="stored" from="!!answer.stored"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EvidencePolicy" allow-remote="false">
+        <description>The evidence policy of a work effort's files (RecordFiles' get#ContentType, impl-maintenance F69): for managed
+            work, whether files may be added or changed (not on closed or cancelled work; a procedure's are its authors') and the
+            files a check names as evidence or the stored checklist, which are never removed, replaced or given a new version;
+            ordinary work answers managed false. A data check; the caller checks who reads the record.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="managed" type="Boolean"/>
+            <parameter name="canChange" type="Boolean"/>
+            <parameter name="protectedContentIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('evidencePolicy', context)"/>
+            <set field="managed" from="!!answer.managed"/>
+            <set field="canChange" from="!!answer.canChange"/>
+            <set field="protectedContentIds" from="answer.protectedContentIds || []"/>
+        </actions>
+    </service>
+    <service verb="check" noun="EvidenceChange" allow-remote="false">
+        <description>A work effort's file a check names as evidence is not changed (EVIDENCE_PROTECTED): update#WorkEffortContent
+            calls it. A data check.</description>
+        <in-parameters><parameter name="workEffortContentId"/></in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('checkEvidenceChange', context)</script>
+        </actions>
+    </service>
+</services>

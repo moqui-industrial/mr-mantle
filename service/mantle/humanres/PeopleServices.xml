@@ -1,0 +1,1491 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's guarded entry over the HR records (IronStone People design §1.1, §16.2 PeopleServices; People.js): the caller's
+    scope, which every People service checks first and then reads and writes with authorization off, Home's counts and the setup
+    readiness Admin's registry reads. Each checks the People permissions itself (data/MantleSetupData.xml seeds them, each granted
+    to ADMIN) and names no application group. P2 adds the employee record over Employees.js: the directory, Employee360's
+    regions, the employment history, the personal information correction and the employment content host. P5 adds People's HR
+    vocabularies over Lookups.js (find#Lookups, store#Lookup). P6 adds the hire and the employment change over Employment.js
+    (preview#Hire, hire#Employee, preview#EmploymentChange, apply#EmploymentChange, decide#EmploymentChange and the
+    PeopleEmploymentChangeApproval topic's approve and refuse services, find#EmploymentChanges): the dated assignment of an
+    employment and its projections (department membership, position occupancy, reporting line). P7 adds the withdrawal of a change
+    set for a later date (withdraw#EmploymentChange; a separation and an early return supersede what they overtake), the lifecycle
+    checklists over mantle.work.ProcessServices (find#, store#Checklist, store#ChecklistStep, start#Checklists after commit,
+    get#ChecklistTask; Checklists.js), the equipment held and its return (get#AssignedEquipment, get#EquipmentCustody,
+    return#Equipment, complete#ReturnTasks on a holding's end), the access request's failure note and the employees import's row
+    services (PeopleImport.js). P8 adds self-service and the manager's team: get#SelfService (the caller's own party alone),
+    find#MyRequests, get#Team, find#DueWork (decisions waiting on the caller, HR's due work, the caller's own People tasks), an
+    employee's emergency contacts (store#EmergencyContact; read with the personal information) and the PeopleTaskAssigned notice
+    (notify#PeopleTaskAssigned). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="Scope" allow-remote="false">
+        <description>The caller's People scope: capabilities from the People and payroll permissions (an edit permission alone
+            reads nothing), the employers a staff reader sees (their own internal organizations, only the active one when it is
+            theirs; every one, or the active one, for a holder of PEOPLE_ALL_ORGANIZATIONS, which reads nothing by itself) and
+            the units under them, their own party and current employments, and a manager's live reports. With
+            organizationPartyId, narrows the employers, the units and a staff admission to it and refuses one outside the scope
+            (ORGANIZATION_DENIED). With partyId, says how the scope admits that person (self, team or staff) and which of their
+            employments it shows (staff: an employment by an employer in scope, in effect on asOfDate for a directory
+            reader, any for an HR reader), and refuses a person it does not admit as it refuses a missing one
+            (RECORD_UNAVAILABLE); a supplied party never widens self scope.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyId"/>
+            <parameter name="asOfDate" type="Timestamp"><description>The date a directory reader's employments are in effect
+                on; now when empty</description></parameter>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller asking whether the person is
+                admitted (a link shown only then): a person missing or outside the scope answers partyAccess empty instead of
+                RECORD_UNAVAILABLE, alike either way</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="capabilities" type="Map"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyIds" type="List"/>
+            <parameter name="activeOrganizationPartyId"/>
+            <parameter name="allOrganizations" type="Boolean"/>
+            <parameter name="unitPartyIds" type="List"/>
+            <parameter name="employments" type="List"><description>The caller's own current employments: partyRelationshipId,
+                partyId, organizationPartyId, fromDate, thruDate</description></parameter>
+            <parameter name="reportPartyIds" type="List"/>
+            <parameter name="partyAccess" type="List"><description>self, team and staff, as each admits the party asked
+                for</description></parameter>
+            <parameter name="partyEmployments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('scope', context)"/>
+            <set field="capabilities" from="found.capabilities"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="organizationPartyIds" from="found.organizationPartyIds"/>
+            <set field="activeOrganizationPartyId" from="found.activeOrganizationPartyId"/>
+            <set field="allOrganizations" from="found.allOrganizations"/>
+            <set field="unitPartyIds" from="found.unitPartyIds"/>
+            <set field="employments" from="found.employments"/>
+            <set field="reportPartyIds" from="found.reportPartyIds"/>
+            <set field="partyAccess" from="found.partyAccess"/>
+            <set field="partyEmployments" from="found.partyEmployments"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Home" allow-remote="false">
+        <description>People Home's summary for a staff reader, over the employers in scope or the one asked for (refused outside
+            the scope, ORGANIZATION_DENIED), as of asOfDate (now when empty): headcount (distinct people) and employments for a
+            staff reader, the joins and exits of the last 30 days for an HR reader, the vacant seats in effect for a position reader
+            (HR, recruiting, payroll, the administrator; P8) and the People decisions waiting on the caller (PEOPLE_REQUEST_APPROVE;
+            P8), each count of a later phase absent (one that cannot be counted is logged and left out); and the
+            due work an HR reader clears (employees with no manager, by name, the first 20 of dueWorkCount). Pay is never
+            counted. Refuses a caller who reads no employer (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyIds" type="List"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="counts" type="Map"><description>headcount, employments, joins, exits, vacancies and decisions, each
+                present only for a caller who may read it</description></parameter>
+            <parameter name="hasEmployees" type="Boolean"/>
+            <parameter name="dueWork" type="List"><description>dueKind, dueText, partyId, personName, organizationPartyId,
+                organizationName</description></parameter>
+            <parameter name="dueWorkCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('home', context)"/>
+            <set field="organizationPartyIds" from="found.organizationPartyIds"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="counts" from="found.counts"/>
+            <set field="hasEmployees" from="found.hasEmployees"/>
+            <set field="dueWork" from="found.dueWork"/>
+            <set field="dueWorkCount" from="found.dueWorkCount"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Readiness" allow-remote="false">
+        <description>People's setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider)
+            with no adapter: called with providerKey and an organizationPartyId (or none, for every employer in the caller's
+            scope), returns checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the
+            employer as subject and scope, and fixRoute (the key of People's settings), with the organization's id and name. The
+            checks of what is built, for an organization with current employees (one with none answers no check): a department
+            set up, every employee with a manager, payroll set up (a pay group, every employee on a pay assignment), and (P29)
+            a position, an HR fallback among the approval rules, an onboarding checklist, a working schedule, a leave policy
+            and someone to take confidential cases, each with the key of the place that sets it up. Refuses a caller without PEOPLE_CONFIGURE
+            (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="providerKey"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/People.js"/>
+            <set field="found" from="ec.resource.script(module).execute('readiness', context)"/>
+            <set field="checks" from="found.checks"/>
+        </actions>
+    </service>
+    <!-- ===== P2: the employee record (design §4 Employees and Employee360, §13, §15; Employees.js) ===== -->
+    <service verb="find" noun="Employees" allow-remote="false">
+        <description>The employee directory (design §4 Employees, §15): one row per employment the caller's scope reaches as of
+            asOfDate (now when empty; a date alone is the end of that day): an employment by an employer a staff reader sees, a
+            live report's and, with PEOPLE_SELF_SERVICE, the caller's own. Each row is the public work identity (name, preferred
+            name, employer, job title, manager employed by that employer, work email (EmailWork, never EmailPrimary), phone and
+            location, the state); an HR reader (PEOPLE_HR_VIEW) gets the id and dates of an employment by an employer in their
+            scope too, and with includeEnded the ended employments. Never a private contact, identification
+            or pay. Searched by term (name, preferred name or id) in the query ignoring case; filtered by employer (refused outside
+            the scope, ORGANIZATION_DENIED) and manager; paged, or with pageNoLimit (an export) every row up to 2000. Refuses a
+            caller the scope reaches no one for (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="term"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employees" type="List"><description>partyId, personName, preferredName, organizationPartyId,
+                organizationName, jobTitle, managerPartyId, managerName, workEmail, workPhone, workLocation, state, stateText;
+                for an HR reader partyRelationshipId, fromDate, thruDate, fromDateText, thruDateText, terminationReason</description></parameter>
+            <parameter name="hrColumns" type="Boolean"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="employeesCount" type="Integer"/>
+            <parameter name="employeesPageIndex" type="Integer"/>
+            <parameter name="employeesPageSize" type="Integer"/>
+            <parameter name="employeesPageMaxIndex" type="Integer"/>
+            <parameter name="employeesPageRangeLow" type="Integer"/>
+            <parameter name="employeesPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('findEmployees', context)"/>
+            <set field="employees" from="found.employees"/>
+            <set field="hrColumns" from="found.hrColumns"/>
+            <set field="asOfDate" from="found.asOfDate"/>
+            <set field="employeesCount" from="found.employeesCount"/>
+            <set field="employeesPageIndex" from="found.employeesPageIndex"/>
+            <set field="employeesPageSize" from="found.employeesPageSize"/>
+            <set field="employeesPageMaxIndex" from="found.employeesPageMaxIndex"/>
+            <set field="employeesPageRangeLow" from="found.employeesPageRangeLow"/>
+            <set field="employeesPageRangeHigh" from="found.employeesPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Employee360" allow-remote="false">
+        <description>A person's record as the caller may read it (design §4 Employee360): the regions their access admits, each
+            one they may not read absent from the answer. Overview (any reader the scope admits): the public work identity and
+            the employments the scope shows of the person (an HR reader's with their dates). EmploymentHistory and PersonalInfo
+            (the person, and an HR reader of an employer of theirs): personalInfo holds the private contacts, birth date, gender
+            and the revision store#PersonalInfo checks, the emergency contacts (P8, each with its own revision), and for HR the identifications other than tax ones, values masked.
+            FilesAndActivity (an HR reader of the employer of the employment opened): hostEmploymentId, the employment content
+            host. Compensation (P23; a payroll reader, PAYROLL_VIEW, of the opened employment's employer): the region alone, its
+            content read through PayrollSetupServices.get#Compensation; absent for anyone else, HR included. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
+            one, then the newest. A person outside the scope is refused as a missing one (RECORD_UNAVAILABLE). Never pay, review,
+            case or leave data. A manager shown is one of a shown employment's employer (or employed by none); HR's dates and
+            employment ids are of the employments by an employer in their scope (and a payroll reader's ids, P23).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller that shows the record only when
+                it is readable (a card, a link): a person or employment missing or outside the scope answers access and regions
+                empty instead of RECORD_UNAVAILABLE, alike either way</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="access" type="List"><description>self, team and staff, as get#Scope admits the person</description></parameter>
+            <parameter name="regions" type="List"><description>overview, and employmentHistory, personalInfo,
+                filesAndActivity and compensation (P23) as admitted</description></parameter>
+            <parameter name="overview" type="Map"/>
+            <parameter name="personalInfo" type="Map"/>
+            <parameter name="partyRelationshipId"><description>The employment opened, for the person and HR; null for a directory
+                or team reader</description></parameter>
+            <parameter name="hostEmploymentId"/>
+            <parameter name="capabilities" type="Map"><description>editPersonal, editHr, selfFields (the fields the caller may
+                change), files, changeEmployment (an HR editor of the opened employment's employer, P6), changePay (a payroll editor
+                of it, P23)</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('employee360', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="access" from="found.access"/>
+            <set field="regions" from="found.regions"/>
+            <set field="overview" from="found.overview"/>
+            <set field="personalInfo" from="found.personalInfo || null"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="hostEmploymentId" from="found.hostEmploymentId"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="EmploymentHistory" allow-remote="false">
+        <description>A person's employments, newest first, with employer, job title, dates, state and termination reason
+            (design §4 EmploymentHistory), and their dated assignments (P6: dates, state, department, position, manager, work
+            location and the change that started each): an HR reader's of the employers in their scope, any dates; the person's
+            own, all of them. Refuses anyone else (PERMISSION_DENIED) and a person outside the scope
+            (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="history" type="List"/>
+            <parameter name="assignments" type="List"><description>employmentAssignmentId, partyRelationshipId, organizationName,
+                fromDateText, thruDateText, stateText, departmentName, positionName, managerName, facilityName, changeText,
+                reason</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('employmentHistory', context)"/>
+            <set field="history" from="found.history"/>
+            <set field="assignments" from="found.assignments"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PersonalInfo" allow-remote="false">
+        <description>Correct a person's private data (design §4 PersonalInfo). The person themselves (PEOPLE_SELF_SERVICE) may
+            change their preferred name and home and mobile phones; an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer
+            of theirs these and the legal names, birth date, gender and home address. A field left out is unchanged, an empty
+            one is cleared (a legal name cannot be, NAME_REQUIRED). Tax and bank fields are not taken here: they are reviewed
+            payroll setup. Refuses a person outside the scope (RECORD_UNAVAILABLE), a caller who may change nothing of the person
+            (PERMISSION_DENIED), a field the caller may not change (FIELD_NOT_PERMITTED) and an expectedRevision other than the
+            current one (REVISION_CHANGED, naming it). Contacts change by date: the one in effect ends and a new one
+            starts.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="expectedRevision" required="true"><description>personalInfo.revision of get#Employee360</description></parameter>
+            <parameter name="preferredName"/>
+            <parameter name="homePhone"/>
+            <parameter name="mobilePhone"/>
+            <parameter name="firstName"/>
+            <parameter name="middleName"/>
+            <parameter name="lastName"/>
+            <parameter name="suffix"/>
+            <parameter name="birthDate"/>
+            <parameter name="gender"/>
+            <parameter name="address1"/>
+            <parameter name="address2"/>
+            <parameter name="city"/>
+            <parameter name="postalCode"/>
+            <parameter name="stateProvinceGeoId"/>
+            <parameter name="countryGeoId"/>
+        </in-parameters>
+        <out-parameters><parameter name="revision"/></out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="revision" from="ec.resource.script(module).execute('storePersonalInfo', context).revision"/>
+        </actions>
+    </service>
+
+    <service verb="check" noun="EmploymentAccess" allow-remote="false">
+        <description>Whether the caller reads an employment's files and activity, the employment content host (PE-01): an HR
+            reader (PEOPLE_HR_VIEW) of its employer in their scope; canEdit with PEOPLE_HR_EDIT. Never refuses: a relationship that
+            is not an employment, or not the caller's to read, answers recordVisible false, and so does a call with no user.
+            get#RecordLinkInfo and RecordFiles read it.</description>
+        <in-parameters><parameter name="partyRelationshipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
+            <set field="found" from="ec.resource.script(module).execute('employmentAccess', context)"/>
+            <set field="recordVisible" from="found.recordVisible"/>
+            <set field="canEdit" from="found.canEdit"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+        </actions>
+    </service>
+
+    <service verb="create" noun="EmploymentContent">
+        <description>A file of an employment (EmploymentContent, the record files of get#RecordLinkInfo): the row, and the
+            uploaded file saved through save#EmploymentContentFile. Needs an HR editor of the employer (check#EmploymentAccess:
+            RECORD_UNAVAILABLE outside the scope, PERMISSION_DENIED without PEOPLE_HR_EDIT).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.humanres.employment.EmploymentContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="employmentContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.humanres.employment.EmploymentContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.humanres.PeopleServices.save#EmploymentContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="EmploymentContentFile" allow-remote="false">
+        <description>Internal to create#EmploymentContent, which checks the caller: the file of an EmploymentContent row of that
+            employment.</description>
+        <in-parameters>
+            <parameter name="employmentContentId" required="true"/>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.humanres.employment.EmploymentContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.partyRelationshipId != partyRelationshipId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${employmentContentId} is not of employment ${partyRelationshipId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/employment/${partyRelationshipId}/content_${employmentContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.humanres.employment.EmploymentContent" disable-authz="true"
+                    in-map="{employmentContentId:employmentContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+
+    <!-- P5: People's HR vocabularies (design §12 Lookups, PE-03; Lookups.js) -->
+    <service verb="find" noun="Lookups" allow-remote="false">
+        <description>People's HR vocabularies, a whitelist of Enumeration families (termination reasons and types, skill types and
+            levels, leave types, P18's qualification types; later phases add theirs), each with its value count; with enumTypeId, its values in order, current unless
+            includeEnded, each with how many records hold it (useCount), whether it has ended and whether the caller may change
+            it. Read by the People administrator and an HR reader (PEOPLE_CONFIGURE or PEOPLE_HR_VIEW; PERMISSION_DENIED
+            otherwise); refuses another family (FAMILY_INVALID).</description>
+        <in-parameters>
+            <parameter name="enumTypeId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="families" type="List"><description>enumTypeId, title, valueCount</description></parameter>
+            <parameter name="values" type="List"><description>enumId, enumTypeId, description, enumCode, sequenceNum, useCount,
+                ended, stateText, canEdit, revision</description></parameter>
+            <parameter name="enumTypeId"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Lookups.js').execute('findLookups', context)"/>
+            <set field="families" from="found.families"/>
+            <set field="values" from="found.values"/>
+            <set field="enumTypeId" from="found.enumTypeId"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Lookup" allow-remote="false">
+        <description>A new value of one of People's HR vocabularies (its name, code and order), a value's new name, code or order,
+            or its end (end true, from now): an ended value stays for the records that hold it and is offered for no new one;
+            nothing is deleted. Refuses a caller without PEOPLE_CONFIGURE (PERMISSION_DENIED), a family not People's
+            (FAMILY_INVALID), a value of another family (RECORD_UNAVAILABLE), no name (DESCRIPTION_REQUIRED), a name a current
+            value of the family has (DUPLICATE_VALUE), an order that is not a whole number from 0 to 9999 (SEQUENCE_INVALID), an
+            ended value (VALUE_ENDED) and a revision other than the one read (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="enumTypeId" required="true"/>
+            <parameter name="enumId"/>
+            <parameter name="description"/>
+            <parameter name="enumCode"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="enumId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Lookups.js').execute('storeLookup', context)"/>
+            <set field="enumId" from="stored.enumId"/>
+            <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <!-- ===== P6: the hire and the employment change (design §4 HireEmployee and EmploymentChange, PE-02; Employment.js) ===== -->
+    <service verb="define" noun="HireTerms" type="interface">
+        <description>The terms of a hire: the person (an existing one by partyId, else a new one's names, with term searching for
+            who may be them), the employer and dates, the first assignment's department, position, manager and work location, and
+            the new person's work contacts.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyId"/>
+            <parameter name="term"><description>A name searched for the person (two characters at least)</description></parameter>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="preferredName"/>
+            <parameter name="workEmail"/>
+            <parameter name="workPhone"/>
+            <parameter name="confirmNewPerson" type="Boolean"><description>A new person although someone matches</description></parameter>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="employmentOfferId"><description>P17: the accepted offer the hire is made from: its employer and applicant
+                (the person by the offer, whoever else People knows), consumed once by the hire</description></parameter>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="Hire" allow-remote="false">
+        <description>A hire checked before it is made (design §4 HireEmployee's Identity and EmploymentTerms): the people who may be
+            the person (People's own search with the entity filters off and public identity only, by the name searched, the names
+            given or the work email, each with their relationships with the employer and none with another employer: a person
+            employed by a second employer is found, not made again, F59), the chosen person's relationships of any type with the
+            employer (an employment, an orphan PrtEmployee relationship, a contractor's, a contact's), the plan (new, an orphan
+            completed, or a rehire beside the ended employment), the terms with their names and the findings: errors that refuse
+            the hire (as hire#Employee does) and warnings and notes. Refuses a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT
+            (PERMISSION_DENIED), no employer (ORGANIZATION_REQUIRED), one outside the scope (ORGANIZATION_DENIED) and a person
+            not found (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="person" type="Map"><description>partyId (none for a new one), personName, preferredName, isNew</description></parameter>
+            <parameter name="matches" type="List"><description>partyId, personName, preferredName, matchedBy, employedNow,
+                relationshipText</description></parameter>
+            <parameter name="relationships" type="List"/>
+            <parameter name="plan"><description>new, complete or rehire</description></parameter>
+            <parameter name="planText"/>
+            <parameter name="terms" type="Map"><description>departmentPartyId, emplPositionId, managerPartyId, facilityId and their
+                names, fromDateText, thruDateText</description></parameter>
+            <parameter name="findings" type="List"><description>code, severity (error, warning, info), message</description></parameter>
+            <parameter name="canHire" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('previewHire', context)"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="organizationName" from="found.organizationName"/>
+            <set field="person" from="found.person"/>
+            <set field="matches" from="found.matches"/>
+            <set field="relationships" from="found.relationships"/>
+            <set field="plan" from="found.plan"/>
+            <set field="planText" from="found.planText"/>
+            <set field="terms" from="found.terms"/>
+            <set field="findings" from="found.findings"/>
+            <set field="canHire" from="found.canHire"/>
+        </actions>
+    </service>
+    <service verb="hire" noun="Employee" allow-remote="false">
+        <description>A hire in one transaction (design §4, PE-02): the person (chosen, or a new Person whose Party owner is left as
+            it is), the Employee role, exactly one employment (a new one through EmploymentServices.create#Employment, or an
+            orphan PrtEmployee relationship of the employer completed with its Employment row, never a second relationship; a
+            rehire beside the ended one), the first assignment from the start (department, position, manager, work location) with
+            its department membership, position occupancy and reporting line, and the hire's change row. A retry with the same
+            operationKey answers the first hire. Never calls create#PersonEmployee (F5). Refuses as preview#Hire's errors say: no
+            person (PERSON_REQUIRED), a new person someone already matches unless confirmNewPerson (PERSON_MATCHES), an
+            employment of the employer overlapping (EMPLOYMENT_OVERLAP), dates out of order (DATES_INVALID), a department not of
+            the employer (NOT_A_DEPARTMENT, DEPARTMENT_OUTSIDE), a position not of the employer (RECORD_UNAVAILABLE), not in effect
+            (POSITION_NOT_IN_EFFECT), inactive (POSITION_INACTIVE), of another department (POSITION_DEPARTMENT) or held then
+            (POSITION_OCCUPIED), a manager not employed by the employer (MANAGER_NOT_EMPLOYED), a work location not the
+            employer's (FACILITY_OUTSIDE). P17: a hire from an accepted offer (employmentOfferId; the offer locked) is of its employer
+            and applicant, takes its working schedule from the first day and consumes it, exactly once: the offer is Hired and its
+            application Hired; refused: an offer hired from already (OFFER_USED: a second hire from it), not accepted
+            (OFFER_NOT_ACCEPTED), of another person or employer (OFFER_PERSON, OFFER_EMPLOYER), of an application refused or
+            withdrawn since (OFFER_APPLICATION_CLOSED), not of the editor's employers
+            (RECORD_UNAVAILABLE). The offer's pay, approved with it, is recorded as the employment's first salary from its first day
+            (P23 review, the user's call of Nov 12, 2026; the answer names no amount); no account is asked but by requestAccount.</description>
+        <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
+        <in-parameters>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+            <parameter name="requestAccount" type="Boolean" default="false"><description>HR asks for the person's account (P7):
+                recorded on the hire's change, the provisioning an app requests after commit (IronStone: the mr-boss tx-commit
+                rule, ironstone.admin.LifecycleServices.request#Provisioning); nobody gets a login merely to be paid</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="employmentChangeId"/>
+            <parameter name="employmentAssignmentId"/>
+            <parameter name="plan"/>
+            <parameter name="accessRequested" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="hired" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('hireEmployee', context)"/>
+            <set field="partyId" from="hired.partyId"/>
+            <set field="partyRelationshipId" from="hired.partyRelationshipId"/>
+            <set field="employmentChangeId" from="hired.employmentChangeId"/>
+            <set field="employmentAssignmentId" from="hired.employmentAssignmentId"/>
+            <set field="plan" from="hired.plan"/>
+            <set field="accessRequested" from="!!hired.accessRequested"/>
+            <set field="repeated" from="!!hired.repeated"/>
+        </actions>
+    </service>
+
+    <service verb="define" noun="EmploymentChangeTerms" type="interface">
+        <description>An employment change: the employment, what changes (changeKind: transfer, manager, leave, return,
+            separation, or pay, P23), from when, the new terms (a term not passed is kept, an empty one cleared), a leave's return
+            date, a separation's termination reason and type (People's lookups), a pay change's salary (amount, currency, pay
+            frequency and an optional pay grade), and why.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="changeKind"/>
+            <parameter name="effectiveDate"/>
+            <parameter name="departmentPartyId"/>
+            <parameter name="emplPositionId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="facilityId"/>
+            <parameter name="returnDate"/>
+            <parameter name="terminationReasonEnumId"/>
+            <parameter name="terminationTypeEnumId"/>
+            <parameter name="salaryAmount"/>
+            <parameter name="salaryCurrencyUomId"/>
+            <parameter name="salaryPeriodTypeId"/>
+            <parameter name="payGradeId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+    </service>
+    <service verb="preview" noun="EmploymentChange" allow-remote="false">
+        <description>An employment change checked before it is asked for (design §4 EmploymentChange's Change and ImpactAndConfirm):
+            the employment's terms now (department, position, manager, work location, state) and its revision, the new terms with
+            their names, the impact (the seat vacated and the seat taken, the department and reporting line moved; for a
+            separation the employment's end, the reports left with no manager, the units left with no lead, another employer's
+            employment continuing and the approvals routed again), whether it waits for approval (a transfer and a separation)
+            and who would decide it, and the findings: errors that refuse it (as apply#EmploymentChange does) and notes. Refuses
+            a caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED) and an employment outside the scope
+            (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.humanres.PeopleServices.define#EmploymentChangeTerms"/>
+        <out-parameters>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="employmentFromDateText"/>
+            <parameter name="employmentThruDateText"/>
+            <parameter name="revision"/>
+            <parameter name="current" type="Map"/>
+            <parameter name="changeKindEnumId"/>
+            <parameter name="changeText"/>
+            <parameter name="effectiveDateText"/>
+            <parameter name="terms" type="Map"/>
+            <parameter name="impact" type="List"><description>kind, impactText</description></parameter>
+            <parameter name="findings" type="List"/>
+            <parameter name="needsApproval" type="Boolean"/>
+            <parameter name="route" type="List"><description>stepText, explanation, unresolved</description></parameter>
+            <parameter name="canApply" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('previewEmploymentChange', context)"/>
+            <set field="partyRelationshipId" from="found.partyRelationshipId"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="personName" from="found.personName"/>
+            <set field="organizationPartyId" from="found.organizationPartyId"/>
+            <set field="organizationName" from="found.organizationName"/>
+            <set field="employmentFromDateText" from="found.employmentFromDateText"/>
+            <set field="employmentThruDateText" from="found.employmentThruDateText"/>
+            <set field="revision" from="found.revision"/>
+            <set field="current" from="found.current"/>
+            <set field="changeKindEnumId" from="found.changeKindEnumId"/>
+            <set field="changeText" from="found.changeText"/>
+            <set field="effectiveDateText" from="found.effectiveDateText"/>
+            <set field="terms" from="found.terms"/>
+            <set field="impact" from="found.impact"/>
+            <set field="findings" from="found.findings"/>
+            <set field="needsApproval" from="found.needsApproval"/>
+            <set field="route" from="found.route"/>
+            <set field="canApply" from="found.canApply"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="EmploymentChange" allow-remote="false">
+        <description>An employment change from its effective date (design §4 EmploymentChange), at the employment's revision read
+            (expectedRevision): a manager change, a leave of absence (to an optional return date) and a return are applied now; a
+            transfer and a separation wait for approval (a PeopleApproval of kind PakEmploymentChange, routed by the employer's
+            rules, the person's manager by default, never the requester or the person; sent on the PeopleEmploymentChangeApproval
+            topic; with no one who may decide it waits) and are applied by the last approval (decide#EmploymentChange). Applied: the
+            assignment in effect ends on the date and the next starts, the department membership, position occupancy and reporting
+            line follow; a separation ends the employment (thruDate audited with the reason, the termination reason and type), its
+            assignment and projections, the person's lead and team memberships at the employer and the lines they manage there
+            (each report's assignment continues with no manager), leaves another employer's employment alone and routes the
+            employer's waiting People decisions again (a leaver decides nothing). A new change supersedes one of the employment
+            still waiting. A retry with the same operationKey answers the first. P23: a pay change (changeKind pay) is a payroll
+            editor's (PAYROLL_VIEW and PAYROLL_EDIT, not HR's) at the salary revision get#Compensation answers (payRevision): a new
+            salary from the date (salaryAmount, salaryCurrencyUomId, salaryPeriodTypeId, an optional payGradeId; CURRENCY_REQUIRED,
+            CURRENCY_INVALID, AMOUNT_INVALID, CURRENCY_PRECISION, FREQUENCY_REQUIRED, FREQUENCY_INVALID, GRADE_INVALID,
+            SALARY_EXISTS, SALARY_SCHEDULED, a note outside the grade's band) that waits for approval, the first salary too (P23
+            review, the user's calls of Nov 12, 2026): a request of its own kind, PakPayChange, decided by the employer's payroll
+            approvers (PAYROLL_APPROVE with PAYROLL_VIEW) unless a rule of the kind routes it, never by who asked; applied, the
+            salary in effect ends on the date and the new one starts.
+            It supersedes only a pay change waiting, and only a separation supersedes it. Refuses a caller without PEOPLE_HR_VIEW
+            and PEOPLE_HR_EDIT (PERMISSION_DENIED; for a pay change, PAYROLL_VIEW and PAYROLL_EDIT), an employment outside the scope (RECORD_UNAVAILABLE), a revision other than the one
+            read (REVISION_CHANGED), no kind (KIND_INVALID), a date outside the employment (DATE_OUTSIDE) or before a change set
+            for it or later (ASSIGNMENT_SCHEDULED), terms that change nothing (NOTHING_CHANGES), no reason for one that waits for
+            approval (REASON_REQUIRED), a leave while on leave (ALREADY_ON_LEAVE), a return while working (NOT_ON_LEAVE), a
+            termination reason or type not of the list or ended (VALUE_INVALID, VALUE_ENDED) and the terms' refusals of
+            hire#Employee (SELF_REPORTING and REPORTING_CYCLE too).</description>
+        <implements service="mantle.humanres.PeopleServices.define#EmploymentChangeTerms"/>
+        <in-parameters>
+            <parameter name="expectedRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="employmentAssignmentId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="waitingText"/>
+            <parameter name="unresolved" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="changed" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('applyEmploymentChange', context)"/>
+            <set field="employmentChangeId" from="changed.employmentChangeId"/>
+            <set field="partyRelationshipId" from="changed.partyRelationshipId"/>
+            <set field="statusId" from="changed.statusId"/>
+            <set field="statusText" from="changed.statusText"/>
+            <set field="applied" from="!!changed.applied"/>
+            <set field="employmentAssignmentId" from="changed.employmentAssignmentId"/>
+            <set field="peopleApprovalId" from="changed.peopleApprovalId"/>
+            <set field="waitingText" from="changed.waitingText"/>
+            <set field="unresolved" from="!!changed.unresolved"/>
+            <set field="repeated" from="!!changed.repeated"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="EmploymentChange" allow-remote="false">
+        <description>The decision service of an employment change (design §12's PeopleEmploymentChangeApproval): the step waiting
+            of the change's request (peopleApprovalId, else the change's latest) approved, or refused with a reason, through
+            PeopleApprovalServices.record#Decision, which rechecks that the caller is an approver of that step (never the
+            requester or the person) and that neither the change nor the employment has changed since the request
+            (SOURCE_CHANGED; sourceRevision, the notice's, when given). The last step's approval applies the change, checked again
+            as apply#EmploymentChange checks it; a refusal refuses it. A decision the caller already made answers the first
+            (repeated) and applies nothing again. Refuses as record#Decision does, and as apply#EmploymentChange's checks do
+            when the change no longer fits the employment.</description>
+        <in-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="peopleApprovalDecisionId"/>
+            <parameter name="statusId"/>
+            <parameter name="employmentChangeId"/>
+            <parameter name="changeStatusId"/>
+            <parameter name="applied" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('decideEmploymentChange', context)"/>
+            <set field="peopleApprovalId" from="decided.peopleApprovalId"/>
+            <set field="peopleApprovalDecisionId" from="decided.peopleApprovalDecisionId"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="employmentChangeId" from="decided.employmentChangeId"/>
+            <set field="changeStatusId" from="decided.changeStatusId"/>
+            <set field="applied" from="!!decided.applied"/>
+            <set field="repeated" from="!!decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="EmploymentChange" allow-remote="false">
+        <description>The PeopleEmploymentChangeApproval topic's approve service, which the framework's approve#NotificationMessage
+            calls as the user deciding the notice: decide#EmploymentChange at the request and revision in the message (a notice of
+            an earlier revision is refused, REVISION_CHANGED or SOURCE_CHANGED); refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="applied" type="Boolean"/><parameter name="repeated" type="Boolean"/>
+            <parameter name="employmentChangeId"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="employmentChangeId" from="decided.employmentChangeId"/>
+            <set field="applied" from="decided.applied"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="EmploymentChange" allow-remote="false">
+        <description>The PeopleEmploymentChangeApproval topic's refuse service, with the reason (the topic requires one): as
+            approve#EmploymentChange, the request and the change refused and the employment left as it is.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="decided" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="decided.statusId"/>
+            <set field="repeated" from="decided.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="EmploymentChanges" allow-remote="false">
+        <description>A person's employment changes the caller may see (Employee360's changes waiting): an HR reader's of the
+            employers in their scope (those waiting, and with includeDone those applied, refused or superseded), and a waiting one
+            whose step waiting the caller decides (a manager sees their report's transfer to approve it); each with its kind,
+            dates, new terms as names, reason and, while it waits or once refused, its approval (state, who asked, the steps, the
+            decisions, canDecide). Never pay. Others get none.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="includeDone" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="changes" type="List"/></out-parameters>
+        <actions>
+            <set field="changes" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('findEmploymentChanges', context).changes"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's own unfinished hire or change (EmploymentDraft; the wizards' draft record, style-guide §3.10): by
+            employmentDraftId, else their newest of the kind (draftKind hire, or change of partyRelationshipId and changeKind). An
+            HR editor's (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT, PERMISSION_DENIED otherwise); another user's draft, or a change of an
+            employment outside the caller's scope, is missing (RECORD_UNAVAILABLE). None found answers no draft.</description>
+        <in-parameters>
+            <parameter name="draftKind" required="true"><description>hire or change</description></parameter>
+            <parameter name="employmentDraftId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="changeKind"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentDraftId"/>
+            <parameter name="draft" type="Map"><description>The wizard's values so far (the kind's preview parameters)</description></parameter>
+            <parameter name="operationKey"><description>The key the hire or change is made with</description></parameter>
+            <parameter name="fromDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('getEmploymentDraft', context)"/>
+            <set field="employmentDraftId" from="found.employmentDraftId"/>
+            <set field="draft" from="found.draft"/>
+            <set field="operationKey" from="found.operationKey"/>
+            <set field="fromDateText" from="found.fromDateText"/>
+        </actions>
+    </service>
+    <service verb="store" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's unfinished hire or change kept (EmploymentDraft): their own draft of the kind (and, for a change,
+            the employment and kind) changed, else a new one from now with its operation key (made once). Only the kind's preview
+            parameters are kept. Refuses as get#EmploymentDraft, a kind not hire or change (KIND_INVALID), an employer outside the
+            caller's scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="draftKind" required="true"/>
+            <parameter name="employmentDraftId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="changeKind"/>
+            <parameter name="draft" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentDraftId"/>
+            <parameter name="draft" type="Map"/>
+            <parameter name="operationKey"/>
+            <parameter name="fromDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('storeEmploymentDraft', context)"/>
+            <set field="employmentDraftId" from="found.employmentDraftId"/>
+            <set field="draft" from="found.draft"/>
+            <set field="operationKey" from="found.operationKey"/>
+            <set field="fromDateText" from="found.fromDateText"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="EmploymentDraft" allow-remote="false">
+        <description>The caller's own draft discarded, once its hire or change is made or when given up; another user's is left as it
+            is (deleted false). An HR editor's (PERMISSION_DENIED otherwise).</description>
+        <in-parameters><parameter name="employmentDraftId" required="true"/></in-parameters>
+        <out-parameters><parameter name="deleted" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="deleted" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('deleteEmploymentDraft', context).deleted"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="DueAssignments" authenticate="anonymous-all" allow-remote="false" transaction-timeout="1800">
+        <description>The apply_EmploymentDueAssignments job (daily): Employment.emplPositionId holds the seat in effect, so each
+            employment whose primary assignment in effect now names another seat (a change dated later, now come) gets it, each in
+            its own transaction, a failing one logged by its employment and the rest going on. A rerun changes nothing; an
+            employment with no assignment in effect is left as it is. P7 (F134): each employer with a separation, transfer,
+            manager change or reorganization applied for a date now come and not yet routed from it (EmploymentChange
+            reroutedDate) routes its waiting People decisions again, each employer in its own transaction, so a leaver's
+            decisions move on the date.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipIds" type="List"><description>Only these employments</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="applied" type="Integer"/>
+            <parameter name="rerouted" type="Integer"><description>Employers whose waiting People decisions were routed again</description></parameter>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="failedList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('applyDueAssignments', context)"/>
+            <set field="applied" from="out.applied"/>
+            <set field="rerouted" from="out.rerouted"/>
+            <set field="failed" from="out.failed"/>
+            <set field="failedList" from="out.failedList"/>
+        </actions>
+    </service>
+    <!-- ===== P7: a scheduled change withdrawn (F131); checklists, equipment return and the employees import (design §4, §12
+        ChecklistTemplates and EmployeeImport, §13 WorkItemDetail and EquipmentDetail, Employee360's AssignedEquipment, PE-02,
+        PE-19; Employment.js, Checklists.js, PeopleImport.js) ===== -->
+    <service verb="withdraw" noun="EmploymentChange" allow-remote="false">
+        <description>An applied change of an employment in the caller's scope whose date is still to come (a transfer, a manager
+            change, a leave of absence, a return, a reorganization) withdrawn with a reason (F131): its assignments set for that
+            date never take effect (ended on their own start), the assignment before continues, and the department membership,
+            seat and reporting line it would have moved stay as they were; the change is Withdrawn (when, by whom, why). A leave
+            of absence already begun loses only its return date. The employment's waiting changes are superseded. Refuses a
+            caller without PEOPLE_HR_VIEW and PEOPLE_HR_EDIT (PERMISSION_DENIED), a change outside the scope (RECORD_UNAVAILABLE),
+            a hire, a separation or a change not applied (NOT_WITHDRAWABLE), one in effect (CHANGE_IN_EFFECT), one a later change
+            follows (LATER_CHANGE_SCHEDULED), no reason (REASON_REQUIRED), a revision other than the one read (REVISION_CHANGED)
+            and a seat another holds by then (POSITION_OCCUPIED). A separation dated before scheduled changes withdraws them
+            itself, and a return the leave's scheduled return.</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="statusId"/>
+            <parameter name="statusText"/>
+            <parameter name="whole" type="Boolean"><description>false when only a begun leave's return was withdrawn</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('withdrawEmploymentChange', context)"/>
+            <set field="employmentChangeId" from="out.employmentChangeId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="statusText" from="out.statusText"/>
+            <set field="whole" from="!!out.whole"/>
+        </actions>
+    </service>
+
+    <service verb="note" noun="AccessRequestFailure" allow-remote="false">
+        <description>Why an app's provisioning or access end request for an applied hire or separation failed, kept on its change
+            (EmploymentChange accessRequestFailure, with the date) and logged by employment: the hire or change stands, and the
+            request is made again by its key (a success clears it). For the change's requester, an HR editor of its employer or the
+            one whose decision applied it; anyone else, and another change, is refused alike (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="failure"/>
+        </in-parameters>
+        <out-parameters><parameter name="noted" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="noted" from="!!ec.resource.script('component://mr-mantle/service/mantle/humanres/Employment.js').execute('noteAccessRequestFailure', context).noted"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Checklists" allow-remote="false">
+        <description>The lifecycle checklist templates of the employers in the caller's scope (organizationPartyId narrows, refused
+            outside the scope, ORGANIZATION_DENIED; lifecycleKindEnumId: onboarding, transfer or offboarding; ended ones with
+            includeEnded): name, employer, kind, dates and state, and their steps (name, required, who does it, due offset,
+            source link, visibility, protected flag, named person; ended steps marked when asked). An HR reader's
+            (PEOPLE_HR_VIEW, PERMISSION_DENIED otherwise); canEdit for an HR editor.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="lifecycleKindEnumId"/>
+            <parameter name="includeEnded" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checklists" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('findChecklists', context)"/>
+            <set field="checklists" from="out.checklists"/>
+            <set field="canEdit" from="!!out.canEdit"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Checklist" allow-remote="false">
+        <description>A lifecycle checklist template (design §12 ChecklistTemplates): new (an employer in the caller's scope, its
+            lifecycle kind and name: an isTemplate root WorkEffort with purpose WepPrOrgMgmt, People's process policy, which
+            guards nothing, and its ChecklistTemplate row), changed (name and description, at the revision read when given) or
+            ended (end: from now, never deleted; the checklists it started stay). An HR editor's (PEOPLE_HR_VIEW and
+            PEOPLE_HR_EDIT, PERMISSION_DENIED otherwise); refuses an employer outside the scope (ORGANIZATION_DENIED), a template
+            outside it (RECORD_UNAVAILABLE), no name (NAME_REQUIRED), a kind not onboarding, transfer or offboarding (KIND_INVALID)
+            and a stale revision (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="lifecycleKindEnumId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="end" type="Boolean" default="false"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('storeChecklist', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ChecklistStep" allow-remote="false">
+        <description>A step of a checklist template in the caller's scope, over mantle.work.ProcessServices.store#ProcessStep: new
+            (workEffortName) or changed (workEffortId), with who does it (roleTypeId: Employee, Manager, HumanResourcesManager, or
+            any other role for the named person, assigneePartyId, employed by the template's employer now), its due offset in days
+            from the change's date (dueOffsetDays), whether it is required, and People's facts: what it links to
+            (sourceLinkEnumId: IT access, equipment return, exit interview), who sees it (visibilityEnumId) and whether it is
+            protected (isProtected: left out of a phone's Tasks); or ended (end). An HR editor's. Refuses as store#Checklist, a
+            step of another template (RECORD_UNAVAILABLE), a value not of its list (VALUE_INVALID), a role with no named person
+            (ASSIGNEE_REQUIRED) or one not employed by the employer (ASSIGNEE_OUTSIDE).</description>
+        <in-parameters>
+            <parameter name="templateWorkEffortId" required="true"/>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="isRequired"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="assigneePartyId"/>
+            <parameter name="dueOffsetDays"/>
+            <parameter name="sourceLinkEnumId"/>
+            <parameter name="visibilityEnumId"/>
+            <parameter name="isProtected"/>
+            <parameter name="end" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('storeChecklistStep', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="ended" from="!!out.ended"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Checklists" allow-remote="false">
+        <description>The checklists of an applied hire, transfer or separation (employmentChangeId), run by Mantle's tx-commit rules
+            on hire#Employee, apply#, decide# and approve#EmploymentChange (PeopleChecklists.secas.xml): each template of the
+            employer and kind in use now in its own transaction (start#Checklist), and for a separation its equipment return
+            (start#EquipmentReturn); a failure is logged by employment and template, the rest go on and the change stands. The
+            change's own record decides (a manager whose approval applied a transfer starts its checklist); a change not applied
+            starts nothing; a retry answers what was made.</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="started" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startChecklists', context)"/>
+            <set field="started" from="out.started"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Checklist" allow-remote="false">
+        <description>One template's checklist for an applied change (start#Checklists', in its own transaction): the template
+            (of the change's employer and kind) instantiated by instantiate#WorkProcess under the key of the change and template
+            (a retry answers it), its root named for the person, from the change's date (the due offsets), each task assigned by
+            its step's role (the employee, their manager, the HR officer who asked for the change, else the step's named person),
+            People's step facts copied (offboarding tasks protected), the IT access task linked to the change's access request,
+            and the EmploymentChecklist recorded. Refuses a change not applied or a template of another employer
+            (RECORD_UNAVAILABLE) or kind (KIND_INVALID).</description>
+        <in-parameters>
+            <parameter name="employmentChangeId" required="true"/>
+            <parameter name="templateWorkEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startChecklist', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <service verb="start" noun="EquipmentReturn" allow-remote="false">
+        <description>An applied separation's equipment return (start#Checklists', in its own transaction): one task per
+            AssetPartyAssignment the person holds on its date, under a root of People's policy, protected, due on the date and
+            assigned to the HR officer who asked for the separation, each naming its assignment by a WorkEffortAssetAssign of the
+            asset and a WorkEffortParty of the holder in the assignment's role (F60). An assignment with an open return task is
+            left (a retry makes none again).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="taskCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('startEquipmentReturn', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="taskCount" from="out.taskCount"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="ReturnTasks" allow-remote="false">
+        <description>Mantle's rule on the end of an AssetPartyAssignment (PeopleChecklist.eecas.xml; F45, F52): the open equipment
+            return tasks of the asset, holder and role completed through mantle.work.TaskServices.set#TaskStatus, whoever ends the
+            holding (People's return#Equipment, Warehouse's or Maintenance's custody change). Never refuses: a failure is logged
+            and the custody change stands.</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="completed" type="Integer"/></out-parameters>
+        <actions>
+            <set field="completed" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('completeReturnTasks', context).completed"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ChecklistTask" allow-remote="false">
+        <description>People's context of a checklist or equipment return task (WorkItemDetail's People mount, design §13): for one of
+            its current parties, an HR reader of the employment's employer, or the employee when the step is visible to them, the
+            person, employer, checklist and kind by name, what it links to (the equipment; the Admin outcome of the IT access
+            request, as its state and its steps' states), whether it is protected and the checklist's other tasks; the employee's
+            partyId only for HR. Anyone else, and a task of no checklist, is refused alike (RECORD_UNAVAILABLE). Never pay or a
+            case's text.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="statusText"/>
+            <parameter name="dueText"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="organizationName"/>
+            <parameter name="checklistName"/>
+            <parameter name="kindText"/>
+            <parameter name="sourceLinkEnumId"/>
+            <parameter name="sourceLinkText"/>
+            <parameter name="isProtected" type="Boolean"/>
+            <parameter name="canReadEmployee" type="Boolean"/>
+            <parameter name="equipment" type="Map"/>
+            <parameter name="access" type="Map"/>
+            <parameter name="siblings" type="List"/>
+            <parameter name="exitInterview" type="Map"><description>A step linking an exit interview (impl-people P16 review): the
+                form (the employer's only published exit interview form, or the one answered), whether it was recorded, whether
+                the caller records it (one of the task's people) and the answers for the task's people and HR readers</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getChecklistTask', context)"/>
+            <script>ec.context.putAll(out)</script>
+        </actions>
+    </service>
+    <service verb="submit" noun="ExitInterview" allow-remote="false">
+        <description>The exit interview a checklist step links (ClsExitInterview, impl-people P16 review): one of the task's current
+            people (a protected task: an assignee who is not the leaver) records the leaver's answers once (ALREADY_ANSWERED) on the
+            employer's published form of the exit interview purpose (FORM_REQUIRED for none or several), checked against it
+            (FORM_VALUES_INVALID); kept as a FormInvitation naming the leaver and the task, with no link. Anyone else, and a task of
+            no such step, is refused alike (RECORD_UNAVAILABLE). Read back through get#ChecklistTask alone.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="values" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="formResponseId"/></out-parameters>
+        <actions>
+            <set field="formResponseId" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('submitExitInterview', context).formResponseId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AssignedEquipment" allow-remote="false">
+        <description>Employee360's AssignedEquipment: the equipment a person holds now (current AssetPartyAssignment rows: asset,
+            product, serial, role, from date, the open return task), for the person themselves (PEOPLE_SELF_SERVICE) or an HR
+            reader of an employer of theirs; refused alike when missing or outside (RECORD_UNAVAILABLE). No cost. canReturn for
+            an HR editor. With checkOnly (P23 review), a person the caller may not read answers equipmentList null instead of
+            RECORD_UNAVAILABLE, alike either way.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="checkOnly" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="equipmentList" type="List"/>
+            <parameter name="canReturn" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getAssignedEquipment', context)"/>
+            <set field="equipmentList" from="out.equipmentList"/>
+            <set field="canReturn" from="!!out.canReturn"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EquipmentCustody" allow-remote="false">
+        <description>People's EquipmentDetail (design §13): an asset a person the caller reads as HR holds or held (or the caller
+            themselves): its identity (product, serial, status, location; never cost) and its custody history with each open
+            return task and whether the caller may end a holding (an HR editor of the holder's employer). Refused alike when
+            missing or outside (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="assetId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="asset" type="Map"/>
+            <parameter name="custodyList" type="List"/>
+            <parameter name="canReturn" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('getEquipmentCustody', context)"/>
+            <set field="asset" from="out.asset"/>
+            <set field="custodyList" from="out.custodyList"/>
+            <set field="canReturn" from="!!out.canReturn"/>
+        </actions>
+    </service>
+    <service verb="return" noun="Equipment" allow-remote="false">
+        <description>A holding ended by the equipment's return (EquipmentDetail's End assignment): the current AssetPartyAssignment
+            of the asset, holder and role replaced by one of the receiving custodian (newPartyId: a person employed now by one of
+            the caller's employers, not the holder) through mantle.product.AssetServices.replace#AssetPartyAssignment, which ends
+            every other holder of the role (F52); Mantle's rule on the end completes the return task. An HR editor of the holder's
+            employer (PERMISSION_DENIED; RECORD_UNAVAILABLE for a holding outside the scope); refuses no or a wrong custodian
+            (CUSTODIAN_INVALID).</description>
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId" required="true"/>
+            <parameter name="newPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="completed" type="Boolean"><description>No open return task of the holding is left</description></parameter></out-parameters>
+        <actions>
+            <set field="completed" from="!!ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js').execute('returnEquipment', context).completed"/>
+        </actions>
+    </service>
+
+    <!-- The employees import target (data/PeopleLifecycleSetupData.xml; design §12 EmployeeImport, Admin §11, F16): the row services
+        of the framework's org.moqui.admin.DataTransferServices, called for each row of a staged file as the importer -->
+    <service verb="validate" noun="EmployeeImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row would hire one employee into the batch's employer (scopeKey) by preview#Hire's own checks,
+            changing nothing: the person (an existing one by partyId, admitted as the hire wizard admits one, or a new one by first
+            and last name and work email, a person matching refused unless the row confirms a new one), the start and optional end,
+            and the first assignment (department, position, manager, work location by id). An HR editor's who also holds
+            PEOPLE_IMPORT; refuses an employer outside the scope. A first salary (salaryAmount, salaryCurrencyUomId,
+            salaryPeriodTypeId, salaryFromDate; the user's call of Nov 12, 2026): for an importer who also holds PAYROLL_EDIT and
+            PAYROLL_VIEW its terms are checked as a pay change's, an error of the row; for anyone else its columns alone are
+            refused (a warning, PERMISSION_DENIED), as is a salary the employment has already (PAY_CHANGE_REQUIRED).</description>
+        <out-parameters><parameter name="salaryReasonCode"><description>Why the row's salary is refused or invalid, else empty</description></parameter></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('validateRow', context))</script></actions>
+    </service>
+    <service verb="apply" noun="EmployeeImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One hire#Employee for a validated row, with the row's operation key, so a repeat answers the hire it made
+            (resultRef: the employment). No account is requested (provisioning follows a hire only when HR asks for it). An HR
+            editor's who also holds PEOPLE_IMPORT. The row's first salary is written at once for an importer who also holds
+            PAYROLL_EDIT and PAYROLL_VIEW (the import's exception to a first salary's approval: logged, its audit reason "Employee
+            import"); for anyone else, or for an employment with a salary already (PAY_CHANGE_REQUIRED), the hire is made and the
+            salary named as not imported in the result.</description>
+        <out-parameters>
+            <parameter name="salaryWritten" type="Boolean"/>
+            <parameter name="salaryReasonCode"><description>Why the row's salary was not written, else empty</description></parameter>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('applyRow', context))</script></actions>
+    </service>
+    <service verb="find" noun="EmployeeImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The employers an import of employees may be for and whose imports the caller may read: those in the caller's
+            People scope, for an HR reader (PEOPLE_HR_VIEW). None otherwise.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('findScopes', context))</script></actions>
+    </service>
+
+    <!-- ===== P8: self-service, the manager's team, due work and emergency contacts (design §3 Home, MyTeam, SelfService; §4
+        PersonalInfo) ===== -->
+    <service verb="get" noun="SelfService" allow-remote="false">
+        <description>The caller's own self-service summary (design §3 SelfService MySummary), with PEOPLE_SELF_SERVICE: their own
+            party alone (the service takes no party: a supplied one is dropped and changes nothing), their current and coming
+            employments (employer, job title, department, manager, work location, dates and state), their emergency contacts, and
+            how many of their own People requests wait (find#MyRequests) and People tasks are theirs to do (find#DueWork's myTask,
+            a protected task about them left out). Never pay. Refuses a caller without PEOPLE_SELF_SERVICE or a party
+            (PERMISSION_DENIED), or with checkOnly answers available false. P10: the caller's own weeks to submit (the
+            missing-week card; mantle.work.TimesheetServices.find#WeeksToSubmit, the rule of Projects' Today). The cards of later
+            phases (balances, the clock, payslips) join here.</description>
+        <in-parameters>
+            <parameter name="checkOnly" type="Boolean" default="false"><description>For a caller that shows a card only when the
+                user has self-service (Commons Home): answers available false instead of refusing</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="available" type="Boolean"/>
+            <parameter name="partyId"/>
+            <parameter name="personName"/>
+            <parameter name="preferredName"/>
+            <parameter name="employments" type="List"><description>partyRelationshipId, organizationPartyId, organizationName,
+                jobTitle, departmentName, managerName, workLocation, state, stateText, fromDateText, thruDateText, onLeave</description></parameter>
+            <parameter name="emergencyContacts" type="List"><description>contactPartyId, firstName, lastName, name,
+                relationshipName, phone, fromDateText, revision</description></parameter>
+            <parameter name="openRequestCount" type="Integer"/>
+            <parameter name="openTaskCount" type="Integer"/>
+            <parameter name="weeksToSubmit" type="List"><description>P10: the caller's own weeks to submit
+                (mantle.work.TimesheetServices.find#WeeksToSubmit): timesheetId, weekStart, weekText, hours, returned, overdue</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('selfService', context)"/>
+            <set field="available" from="!!found.available"/>
+            <set field="partyId" from="found.partyId || null"/>
+            <set field="personName" from="found.personName || null"/>
+            <set field="preferredName" from="found.preferredName || null"/>
+            <set field="employments" from="found.employments || []"/>
+            <set field="emergencyContacts" from="found.emergencyContacts || []"/>
+            <set field="openRequestCount" from="found.openRequestCount || 0"/>
+            <set field="openTaskCount" from="found.openTaskCount || 0"/>
+            <set field="weeksToSubmit" from="found.weeksToSubmit || []"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="MyRequests" allow-remote="false">
+        <description>The People requests the caller made (design §3 SelfService MyRequests), newest first, or with openOnly those
+            waiting: kind, what it is about (no pay), the dates, the state, who decides the step waiting (or that no one may yet)
+            and a refusal's reason. The caller's own only: the service takes no user or party. Later phases' requests (leave,
+            expense claims) join with their kinds. Paged. Refuses a call with no user (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="openOnly" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requests" type="List"><description>peopleApprovalId, approvalKindEnumId, kindText, summary,
+                sourceEntityName, sourceId, subjectPartyId, requestedDateText, effectiveDateText, statusId, statusText,
+                nextApproverText, returnReason</description></parameter>
+            <parameter name="requestsCount" type="Integer"/>
+            <parameter name="requestsPageIndex" type="Integer"/>
+            <parameter name="requestsPageSize" type="Integer"/>
+            <parameter name="requestsPageMaxIndex" type="Integer"/>
+            <parameter name="requestsPageRangeLow" type="Integer"/>
+            <parameter name="requestsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Approvals.js').execute('findMyRequests', context)"/>
+            <set field="requests" from="found.requests"/>
+            <set field="requestsCount" from="found.requestsCount"/>
+            <set field="requestsPageIndex" from="found.requestsPageIndex"/>
+            <set field="requestsPageSize" from="found.requestsPageSize"/>
+            <set field="requestsPageMaxIndex" from="found.requestsPageMaxIndex"/>
+            <set field="requestsPageRangeLow" from="found.requestsPageRangeLow"/>
+            <set field="requestsPageRangeHigh" from="found.requestsPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="get" noun="Team" allow-remote="false">
+        <description>The caller's current reports (design §3 MyTeam Team), with PEOPLE_TEAM_VIEW: the people of their live
+            reporting lines, one row per employment at an employer the line is at (never a report's employment at another
+            employer), as the public work identity with the department, work location and whether they work or are on a leave of
+            absence now, and the working schedule they follow now (P9); no employment id, private contact or pay. The caller's own
+            lines only: the service takes no manager or party. Refuses a caller without PEOPLE_TEAM_VIEW (PERMISSION_DENIED). Who is
+            out and missing time join with P12 and P10.</description>
+        <out-parameters>
+            <parameter name="team" type="List"><description>partyId, personName, preferredName, organizationPartyId,
+                organizationName, jobTitle, departmentName, workLocation, workEmail, workPhone, state, stateText, availability,
+                availabilityText, scheduleName</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="team" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('team', context).team"/>
+        </actions>
+    </service>
+
+    <service verb="find" noun="DueWork" allow-remote="false">
+        <description>The due work the caller clears (design §3 Home DueWork, MyTeam Decisions, SelfService), of the kinds asked
+            (every kind they may read when none is): decision, the People decisions waiting on them now (PEOPLE_REQUEST_APPROVE: a
+            request whose step waiting they may decide); noManager, an HR reader's employees with no manager at an employer in
+            scope; checklistTask, the open lifecycle tasks (checklist steps, equipment returns) of those employers, an HR reader's;
+            myTask, the caller's own open People tasks. A protected task about the caller (their own offboarding) is never in it,
+            as HR or as its assignee, unless its step is the employee's to see. Overdue first, then by due date. Paged. Refuses an
+            unknown kind (KIND_INVALID), a caller who may read none of the kinds asked (PERMISSION_DENIED) and an employer outside
+            the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="kinds"><description>decision, noManager, checklistTask, myTask: a comma list</description></parameter>
+            <parameter name="organizationPartyId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="dueWork" type="List"><description>dueKind, dueText, title, partyId, personName, organizationPartyId,
+                organizationName, whenText, overdue, assigneeText, workEffortId (a task's), peopleApprovalId, approvalKindEnumId and
+                sourceId (a decision's)</description></parameter>
+            <parameter name="kinds" type="List"><description>The kinds read</description></parameter>
+            <parameter name="dueWorkCount" type="Integer"/>
+            <parameter name="dueWorkPageIndex" type="Integer"/>
+            <parameter name="dueWorkPageSize" type="Integer"/>
+            <parameter name="dueWorkPageMaxIndex" type="Integer"/>
+            <parameter name="dueWorkPageRangeLow" type="Integer"/>
+            <parameter name="dueWorkPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/People.js').execute('dueWork', context)"/>
+            <set field="dueWork" from="found.dueWork"/>
+            <set field="kinds" from="found.kinds"/>
+            <set field="dueWorkCount" from="found.dueWorkCount"/>
+            <set field="dueWorkPageIndex" from="found.dueWorkPageIndex"/>
+            <set field="dueWorkPageSize" from="found.dueWorkPageSize"/>
+            <set field="dueWorkPageMaxIndex" from="found.dueWorkPageMaxIndex"/>
+            <set field="dueWorkPageRangeLow" from="found.dueWorkPageRangeLow"/>
+            <set field="dueWorkPageRangeHigh" from="found.dueWorkPageRangeHigh"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="EmergencyContact" allow-remote="false">
+        <description>Add, change or end one of a person's emergency contacts (design §4 PersonalInfo; the user's call on F80): a
+            Person party of its own with its names and phone, linked from the person by a dated PrtEmergencyContact relationship
+            (relationshipName: spouse, parent, ...), held as private contact data (Party.privateOwnerUserId _PEOPLE_PRIVATE_, so
+            no directory, contact book, palette, contact list or search shows it to anyone). The person themselves
+            (PEOPLE_SELF_SERVICE) or an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) of an employer of theirs, as
+            store#PersonalInfo. Without contactPartyId a contact is added; with it, changed at the revision read, or ended with end
+            (never deleted). Refuses a person outside the scope and a contact not theirs (RECORD_UNAVAILABLE), a caller who may
+            change nothing of the person (PERMISSION_DENIED), a stale revision (REVISION_CHANGED), no name (NAME_REQUIRED), no phone
+            (PHONE_REQUIRED) and a sixth contact (CONTACT_LIMIT).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"><description>The employee</description></parameter>
+            <parameter name="contactPartyId"><description>A current emergency contact of theirs, to change or end</description></parameter>
+            <parameter name="expectedRevision"><description>The contact's revision read (get#Employee360's or get#SelfService's)</description></parameter>
+            <parameter name="firstName"/>
+            <parameter name="lastName"/>
+            <parameter name="relationshipName"/>
+            <parameter name="phone"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactPartyId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Employees.js').execute('storeEmergencyContact', context)"/>
+            <set field="contactPartyId" from="stored.contactPartyId"/>
+            <set field="ended" from="!!stored.ended"/>
+        </actions>
+    </service>
+
+    <service verb="notify" noun="PeopleTaskAssigned" allow-remote="false">
+        <description>Tells the users of a party newly assigned to a task of People's lifecycle work (a checklist step, an equipment
+            return; mantle.work.TaskServices.notify#TaskAssigned hands such a task here) on the topic PeopleTaskAssigned, whose
+            title names who assigned it and when it is due and nothing of the person or the change: workEffortId, assignedByName,
+            dueDateText, and the task as the record. Not the user who assigned it; to the assignee's users alone (directOnly: a
+            subscription to every message of the topic receives none). A failure is logged, not the assignment's.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="partyId" required="true"/>
+        </in-parameters>
+        <actions><script><![CDATA[
+            try {
+                const task = ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', workEffortId).disableAuthz().one()
+                if (task == null) return
+                const userIds = Array.from(ec.entity.find('moqui.security.UserAccount').condition('partyId', partyId).selectField('userId')
+                        .disableAuthz().list()).map((account) => account.userId).filter((userId) => userId !== ec.user.userId)
+                if (!userIds.length) return
+                const me = ec.user.userAccount?.partyId ? ec.entity.find('mantle.party.Person').condition('partyId', ec.user.userAccount.partyId)
+                        .disableAuthz().one() : null
+                const assignedByName = (me ? [me.firstName, me.lastName].filter((part) => part).join(' ') : '') || ec.user.username || 'People'
+                const due = task.estimatedCompletionDate
+                const dueDateText = due ? ec.l10n.format(new Date(Number(String(due)) || Date.parse(String(due))), 'MMM d') : 'when you can'
+                // to the assignee alone (directOnly): a People task may be a protected checklist step or a confidential case's
+                // (People follow-up 1)
+                ec.makeNotificationMessage().topic('PeopleTaskAssigned').userIds(userIds)
+                        .message({workEffortId: workEffortId, assignedByName: assignedByName, dueDateText: dueDateText})
+                        .record('mantle.work.effort.WorkEffort', workEffortId).directOnly().send()
+            } catch (err) {
+                ec.logger.error(`People task ${workEffortId} assigned to ${partyId}: notification not sent: ${err && err.message ? err.message : err}`)
+            }
+        ]]></script></actions>
+    </service>
+
+    <!-- impl-people P17 (design-people §15 "Employment/offer and lifecycle letters"; Letters.js): the lifecycle letter of an applied
+        employment change, on the template of the offer letter, stored when issued -->
+    <service verb="get" noun="EmploymentLetter" allow-remote="false">
+        <description>The letter of an employment change for an HR reader of its employer (PEOPLE_HR_VIEW; RECORD_UNAVAILABLE
+            outside, as a missing one; a letter holding pay terms with PAYROLL_VIEW too): once issued the stored letter (letter: its location, file name and type, who issued it and
+            when; never rendered again), before the preview (letterHtml, People's letter template marked as a draft) and whether
+            the caller issues it (canIssue). A change applied and not withdrawn has one when it is a hire, a transfer, a manager
+            change, a leave of absence, a return or a separation (offered, else problem says why).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentChangeId"/>
+            <parameter name="partyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="issued" type="Boolean"/>
+            <parameter name="letter" type="Map"/>
+            <parameter name="offered" type="Boolean"/>
+            <parameter name="problem"/>
+            <parameter name="title"/>
+            <parameter name="letterHtml"/>
+            <parameter name="canIssue" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getEmploymentLetter', context)"/>
+            <script>for (const key of ['employmentChangeId', 'partyId', 'partyRelationshipId', 'letter', 'problem', 'title', 'letterHtml']) context[key] = out[key]</script>
+            <set field="issued" from="!!out.issued"/>
+            <set field="offered" from="!!out.offered"/>
+            <set field="canIssue" from="!!out.canIssue"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="EmploymentLetter" allow-remote="false">
+        <description>An HR editor of the employer (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; PERMISSION_DENIED, RECORD_UNAVAILABLE outside)
+            issues the letter of an applied change (CHANGE_NOT_APPLIED for one waiting, refused, superseded or withdrawn;
+            LETTER_NOT_OFFERED for a working schedule or a reorganization): rendered once from People's letter template (the person,
+            the employer, the change's date and terms; never the change's reason) and stored as its PDF, or its html-print page where
+            the server has no PDF engine, with who issued it and when. One letter per change, the change locked: an issue retried
+            answers the first (repeated).</description>
+        <in-parameters><parameter name="employmentChangeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="employmentLetterId"/>
+            <parameter name="location"/>
+            <parameter name="fileName"/>
+            <parameter name="contentType"/>
+            <parameter name="issuedDateText"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('issueEmploymentLetter', context)"/>
+            <script>for (const key of ['employmentLetterId', 'location', 'fileName', 'contentType', 'issuedDateText']) context[key] = out[key]</script>
+            <set field="repeated" from="!!out.repeated"/>
+        </actions>
+    </service>
+    <!-- impl-people P17 review (the user's call of Nov 12, 2026): an employee's own issued lifecycle letters, in their self-service -->
+    <service verb="find" noun="MyLetters" allow-remote="false">
+        <description>The issued lifecycle letters addressed to the caller (a hire's confirmation, a transfer, a manager change, a
+            leave of absence, a return, a separation), newest first, with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): the caller's own
+            party alone (no party is taken). Each its title, employer, issue date and file name.</description>
+        <out-parameters><parameter name="letters" type="List"/></out-parameters>
+        <actions>
+            <set field="letters" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('findMyLetters', context).letters"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyLetter" allow-remote="false">
+        <description>One of the caller's own issued lifecycle letters as it was stored, whole (pay included: the letter is theirs),
+            with PEOPLE_SELF_SERVICE (PERMISSION_DENIED): its location, file name and type. Another person's letter, an offer's or a
+            missing one is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="employmentLetterId" required="true"/></in-parameters>
+        <out-parameters><parameter name="letter" type="Map"/></out-parameters>
+        <actions>
+            <set field="letter" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getMyLetter', context).letter"/>
+        </actions>
+    </service>
+    <!-- ===== P29: the employer preferences (design §12 Settings PeoplePreferences; PeopleSettings.js) ===== -->
+    <service verb="get" noun="Settings" allow-remote="false">
+        <description>The People preferences of the employers of the caller's scope (or the one asked) that they may change: the
+            clocking default (the PartySetting PeopleClocking, Y or N; an employment's own setting comes first, Attendance.js
+            isClockingOn), and, for the People administrator, the confidential case intake handlers (PeopleCaseIntake) with their
+            names and whether each may take a case now (never a case), and with one employer asked the people who could. Each
+            employer with its settings revision. Refuses a caller who is neither the People administrator (PEOPLE_CONFIGURE) nor
+            an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) (PERMISSION_DENIED) and an employer outside their scope
+            (ORGANIZATION_DENIED).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters><parameter name="employers" type="List"/></out-parameters>
+        <actions>
+            <set field="employers" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleSettings.js').execute('getSettings', context).employers"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Settings" allow-remote="false">
+        <description>Changes an employer's People preferences, each given one when it changed, audit-logged with the reason as a
+            change of the employer's settings: the clocking default (clocking Y or N; CLOCKING_INVALID otherwise), by the People
+            administrator or an HR editor of the employer; the confidential case intake handlers (intakeHandlerIds, a list or comma
+            separated party ids; empty names nobody, so a filing there is refused NO_CASE_HANDLER), by the People administrator of
+            the employer alone, each one an enabled account holding PEOPLE_CASE_HANDLE working for the employer
+            (HANDLER_NOT_ELIGIBLE). Refuses a caller without the right for a setting given (PERMISSION_DENIED), an employer outside
+            their scope (ORGANIZATION_DENIED), nothing to change (NOTHING_TO_CHANGE) and a stale expectedRevision
+            (REVISION_STALE: required with the intake handlers, which replace the whole list; checked when given with the
+            clocking default). Answers the employer's settings as get#Settings does and the settings changed.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="clocking"/>
+            <parameter name="intakeHandlerIds" type="Object"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="settings" type="Map"/>
+            <parameter name="changed" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="settings" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleSettings.js').execute('storeSettings', context)"/>
+            <set field="changed" from="settings.changed"/>
+        </actions>
+    </service>
+</services>

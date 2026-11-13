@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P15 (design-people §9 ExpenseClaimDetail and EmployeeAdvances, §12 ApprovalPolicies; F42): an expense claim
+        submitted (ExpenseServices.submit#Claim) and an employee advance asked (request#Advance), each sent to the approvers of the
+        step waiting (the person's manager unless a rule says otherwise; never the claimant or who asked). approve#NotificationMessage
+        and refuse#NotificationMessage call the topic's approve and refuse services as the user, which decide it at the revision in
+        the message (decide#Claim and decide#Advance over PeopleApprovalServices.record#Decision): a claim's last approval is its
+        business approval (the invoice stays received, for finance), an advance's makes it payable by finance; a refusal needs a
+        reason. The messages hold peopleApprovalId, the claim's invoiceId or the advance's employeeAdvanceId, sourceRevision,
+        partyId, personName, subjectText, organizationName, departmentName and stepText: never an amount, a line or a purpose. The
+        app that shows them sets the links (IronStone People: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleExpenseApproval" inboxEnumId="NinNotifications"
+            description="Expense claim to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.ExpenseServices.approve#Claim"
+            refuseServiceName="mantle.humanres.ExpenseServices.refuse#Claim" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+    <moqui.security.user.NotificationTopic topic="PeopleAdvanceApproval" inboxEnumId="NinNotifications"
+            description="Employee advance to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.ExpenseServices.approve#Advance"
+            refuseServiceName="mantle.humanres.ExpenseServices.refuse#Advance" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+
+    <!-- impl-people P15 (design-people §1.4 Mail intake, PE-24; F65): the mail rule action createExpenseLine, run by
+        org.moqui.mail.EmailClientServices.run#EmailRules (the service in optionValue for the action in enumCode, with authorization
+        off). The service finds its own target: the claimant is the person whose current employment's work address (EmailWork) sent
+        the message; the message's files become receipts of one draft line on the claimant's open draft claim with that employer
+        (or a new draft), to review before it is submitted; never submitted by mail, so a forged sender adds a draft line at most.
+        A message makes one line once. -->
+    <moqui.basic.Enumeration enumId="ErActCreateExpenseLine" enumTypeId="EmailRuleAction" enumCode="createExpenseLine" sequenceNum="5"
+            description="Add an expense line to the sender's claim" optionValue="mantle.humanres.ExpenseServices.create#ClaimLineFromEmail"/>
+</entity-facade-xml>

@@ -1,4 +1,4 @@
-/* The PASS authority's operations after the transport's own checks (mr-moqui plans/Edge-Node.md §5.5): one function
+/* The PASS authority's operations after the transport's own checks (mr-moqui plans/archive/Edge-Node.md §5.5): one function
    for the REST servlet (PassApi.js) and the host's PassAuthority gRPC service (PassAuthorityServices.handle#Call).
    Restricted public API: no generic service or entity dispatch. CC0 plus patent grant. */
 const routes = ec.resource.script('component://mr-mantle/script/PassRoutes.js')

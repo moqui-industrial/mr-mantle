@@ -73,7 +73,7 @@ function assetScope(assetId, need, lock = false) {
     }
     if (!fixedTypes().includes(initial.assetTypeEnumId)) denied("ASSET_NOT_FIXED", "Only a fixed asset has a book")
     if (!lock) return {s, asset: initial, org: s.organizationPartyId}
-    find("mantle.party.Party", {partyId: s.organizationPartyId}).forUpdate(true).one()
+    find("mantle.party.Party", {partyId: s.organizationPartyId}).forNoKeyUpdate(true).one()
     return {s, asset: find(ASSET, {assetId}).forUpdate(true).one(), org: s.organizationPartyId}
 }
 // The fiscal periods of the organization, and those it rolls up to, that hold the day and are closed.

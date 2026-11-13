@@ -6,8 +6,15 @@ const find = (entity, conditions = {}) => ec.entity.find(entity).condition(condi
 const one = (entity, conditions) => find(entity, conditions).one()
 const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
 const map = row => (row?.getMap ? row.getMap() : Object.assign({}, row || {}))
+// a Date's own millis: its text has none, so Date.parse of it would move it to the start of its second
 const ms = value =>
-    value == null || value === "" ? null : /^-?\d+$/.test(String(value)) ? Number(value) : Date.parse(String(value))
+    value == null || value === ""
+        ? null
+        : value instanceof Date
+          ? value.getTime()
+          : /^-?\d+$/.test(String(value))
+            ? Number(value)
+            : Date.parse(String(value))
 const active = (row, date = ec.user.nowTimestamp) =>
     (ms(row.fromDate) ?? -Infinity) <= ms(date) && (ms(row.thruDate) ?? Infinity) > ms(date)
 const pick = (row, fields) => Object.fromEntries(fields.filter(key => row[key] !== undefined).map(key => [key, row[key]]))

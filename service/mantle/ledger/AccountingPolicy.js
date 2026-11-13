@@ -4,6 +4,7 @@
 const domain = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, map, call, probe, ms, active, pick, hash, dateText, calendarDateText, display, denied, check} = lib
+const payrollOrigin = () => ec.resource.script("component://mr-mantle/service/mantle/account/PayrollOrigin.js")
 // A posting's book day: its accounting day, else the day of its transaction date in the user's zone, the rule of a
 // document's and an application's book day.
 function postingDay(transaction) {
@@ -285,6 +286,18 @@ function query(p) {
             )
         )
     } else q = q.condition(kind[2], "in", ids.length ? ids : ["_DENIED_"])
+    // People P27 (AC-23, the payroll-origin projection): payroll-origin invoices, payments and ledger lines are a holder of
+    // PAYROLL_VIEW's; for anyone else a list leaves them out and a record read (a locked one too) finds none, by the payrollOrigin
+    // mark of the Invoice, Payment or AcctgTrans each kind reads
+    const origin = payrollOrigin()
+    const originCondition = ["invoices", "bills"].includes(p.kind)
+        ? origin.invoiceCondition()
+        : p.kind === "payments"
+          ? origin.paymentCondition()
+          : ["journals", "entries"].includes(p.kind)
+            ? origin.transactionCondition()
+            : null
+    if (originCondition) q = q.condition(originCondition)
     if (p.recordId) q = q.condition(kind[1], p.recordId)
     if (p.acctgTransId && p.kind === "entries") q = q.condition("acctgTransId", p.acctgTransId)
     if (p.parentGlAccountId && p.kind === "accounts") q = q.condition("parentGlAccountId", p.parentGlAccountId)

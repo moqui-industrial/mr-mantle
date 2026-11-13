@@ -209,7 +209,7 @@
         </actions>
     </service>
     <service verb="get" noun="ProductPaidAccess" allow-remote="false">
-        <description>Product360's Paid access (PaidAccess): the product's ProductSubscriptionResource rows, newest first, with each resource's handler services read only and whether the row is in effect, and (canEdit: COMMERCE_SUBSCRIPTION_MANAGE for a product of the user's stores) the resources a row may name, those with installed handlers only. PRODUCT_CATALOG_VIEW (Products shows the rows read only) or COMMERCE_VIEW.</description>
+        <description>Product360's Paid access (PaidAccess): the product's ProductSubscriptionResource rows, newest first, with each resource's handler services read only and whether the row is in effect, and (canEdit: COMMERCE_SUBSCRIPTION_MANAGE for a product of the user's stores) the resources a row may name, those with installed handlers only. Read needs PRODUCT_CATALOG_VIEW over an owned or shared product, or COMMERCE_VIEW over a product in the user's store assortment.</description>
         <in-parameters><parameter name="productId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="productId"/>

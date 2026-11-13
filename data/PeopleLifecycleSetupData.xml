@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's employee lifecycle (IronStone People design §4, §12 EmployeeImport; impl-people P7): the import target `employees`, a
+    target of the framework's org.moqui.admin.DataTransferServices with no batch of its own (the framework keeps a TransferBatch),
+    on the pattern of the staff invitations target (PartyInvitationData.xml). Its fields are the hire's: the person (an existing one
+    by id, else a new one by name and work email), the start and optional end, and the first assignment by id; the employer is the
+    batch's own. Each row is validated by preview#Hire's checks and applied by hire#Employee as the importer, in a transaction of
+    its own, under the row's operation key. A file with a column named like a password, a group, a permission, a user id, a wage,
+    pay, tax or a bank account is refused whole: an import never sets a password, grants a group or writes pay or tax history.
+    The one exception is a first salary (the user's call of Nov 12, 2026): the columns salaryAmount, salaryCurrencyUomId,
+    salaryPeriodTypeId and salaryFromDate, written at once for an importer who also holds PAYROLL_EDIT and PAYROLL_VIEW and
+    refused alone for anyone else (PeopleImport.js). The salary columns name PAYROLL_VIEW (the user's call of Nov 12, 2026, impl-people
+    P25 review): a staged row's salary values are shown only to a holder, masked for the batch's other readers (an HR importer, an
+    HR reader, Admin's Imports), and cleared from the staged row once it is applied (the framework's restricted columns). It asks
+    PEOPLE_IMPORT and
+    PEOPLE_HR_EDIT to import and PEOPLE_HR_VIEW to view, and no ADMIN_* permission (impl-people §4: a target's permissions are all
+    required, so ADMIN_TRANSFER_RUN beside them would shut HR out of EmployeeImport); Admin's Imports lists a run for a data
+    operator who also holds PEOPLE_HR_VIEW. Its owner place is People's EmployeeImport (the app maps ownerRoute). -->
+<entity-facade-xml type="seed">
+    <moqui.server.TransferTarget targetId="employees" direction="import" targetMode="rows" title="Employees"
+            description="Employees hired into an employer, each with the first assignment"
+            effectsNote="Each row hires one person into the employer, as Hire employee does: a new person or one People knows, one employment, its first assignment. No account is made. A first salary is set only for an importer who may change pay; for anyone else its columns are left out."
+            ownerApp="People" targetVersion="1" fieldLabel="Employee field" scopeLabel="Employer"
+            columnsJson="[{&quot;name&quot;:&quot;firstName&quot;,&quot;label&quot;:&quot;First name&quot;},{&quot;name&quot;:&quot;lastName&quot;,&quot;label&quot;:&quot;Last name&quot;},{&quot;name&quot;:&quot;preferredName&quot;,&quot;label&quot;:&quot;Preferred name&quot;},{&quot;name&quot;:&quot;workEmail&quot;,&quot;label&quot;:&quot;Work email&quot;},{&quot;name&quot;:&quot;workPhone&quot;,&quot;label&quot;:&quot;Work phone&quot;},{&quot;name&quot;:&quot;partyId&quot;,&quot;label&quot;:&quot;Existing person ID&quot;},{&quot;name&quot;:&quot;fromDate&quot;,&quot;label&quot;:&quot;Start&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;thruDate&quot;,&quot;label&quot;:&quot;End&quot;},{&quot;name&quot;:&quot;departmentPartyId&quot;,&quot;label&quot;:&quot;Department ID&quot;},{&quot;name&quot;:&quot;emplPositionId&quot;,&quot;label&quot;:&quot;Position ID&quot;},{&quot;name&quot;:&quot;managerPartyId&quot;,&quot;label&quot;:&quot;Manager ID&quot;},{&quot;name&quot;:&quot;facilityId&quot;,&quot;label&quot;:&quot;Work location ID&quot;},{&quot;name&quot;:&quot;confirmNewPerson&quot;,&quot;label&quot;:&quot;New person although someone matches&quot;},{&quot;name&quot;:&quot;organizationPartyId&quot;,&quot;label&quot;:&quot;Employer ID&quot;},{&quot;name&quot;:&quot;reason&quot;,&quot;label&quot;:&quot;Note&quot;},{&quot;name&quot;:&quot;salaryAmount&quot;,&quot;label&quot;:&quot;Salary&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryCurrencyUomId&quot;,&quot;label&quot;:&quot;Salary currency&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryPeriodTypeId&quot;,&quot;label&quot;:&quot;Salary frequency&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;salaryFromDate&quot;,&quot;label&quot;:&quot;Salary from&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;}]"
+            keyFields="partyId,workEmail"
+            refusedColumns="password,group,permission,authz,privilege,userid,wage,pay,tax,bank,iban"
+            validateRowService="mantle.humanres.PeopleServices.validate#EmployeeImportRow"
+            applyRowService="mantle.humanres.PeopleServices.apply#EmployeeImportRow"
+            scopeService="mantle.humanres.PeopleServices.find#EmployeeImportScopes"
+            maxBytes="262144" maxRows="500" retentionDays="30"
+            importPermission="PEOPLE_IMPORT,PEOPLE_HR_EDIT" viewPermission="PEOPLE_HR_VIEW"
+            ownerRoute="peopleEmployeeImport" sequenceNum="40"/>
+    <!-- The row and scope services run as the importer wherever the framework calls them (the wizard under People, Admin's Imports,
+        an apply carried on after the request): every user may call them, as Mantle's identity services (PartyAccessData.xml), and each
+        checks PEOPLE_IMPORT with the hire's own permissions and employer scope itself, as preview#Hire and hire#Employee do again. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantlePeopleImportServices" description="People's employees import row services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantlePeopleImportServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.humanres\.PeopleServices\.(validate#EmployeeImportRow|apply#EmployeeImportRow|find#EmployeeImportScopes)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantlePeopleImportServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantlePeopleImportServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+
+    <!-- impl-people P8: a People lifecycle task assigned (a checklist step, an equipment return), told on a topic of its own rather
+        than the generic WorkItemAssigned, whose title names the task and its root ("Offboarding: <person>", "Return … from
+        <person>"): this title names nothing of the person or the change, only who assigned it and when it is due, so a lock screen
+        shows nothing private. Sent by its owning service, mantle.humanres.PeopleServices.notify#PeopleTaskAssigned, which
+        mantle.work.TaskServices.notify#TaskAssigned hands People's work to. The message holds workEffortId, assignedByName and
+        dueDateText, and the task as its record; the app that shows it sets the link (IronStone: BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="PeopleTaskAssigned" inboxEnumId="NinNotifications"
+            description="People task assigned to you" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION" titleTemplate="${assignedByName} assigned you a People task, due ${dueDateText}"/>
+
+    <!-- impl-people P8 (the user's call on F80, Nov 11): an employee's emergency contact is a Person party of its own, linked from
+        the employee by a dated relationship of this type (from the employee to the contact; the kind of relation, such as spouse or
+        parent, in relationshipName), with the contact's own phone. It is private contact data (People design §1.1): read and
+        changed only through mantle.humanres.PeopleServices (the person and HR of their employer), never in a directory, a contact
+        book, the palette, a contact list or search. Every such reader hides a personal contact (Party.privateOwnerUserId) from
+        everyone but its owner, so the contact party is held by the account _PEOPLE_PRIVATE_ (disabled, no password, no group: no one
+        signs in as it, no user is its owner, and no reader shows it). The account is made with the first contact
+        (Employees.js privateHolderId), not seeded here: a fresh install offers its first administrator only while no account but the
+        framework's own exists (org.moqui.impl.UserServices.create#InitialAdminAccount, the Login screen). -->
+    <moqui.basic.Enumeration enumId="PrtEmergencyContact" description="Emergency Contact" enumTypeId="PartyRelationshipType"/>
+</entity-facade-xml>
