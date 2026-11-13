@@ -30,11 +30,21 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- impl-people P30 review (the user's call of Nov 12, 2026): a burst of refused proofs at a clocking kiosk (KioskIdentity.js: ten
         within ten minutes) told to the HR editors of the device's organizations, at most once an hour per device, to them alone.
-        The message holds deviceId, deviceName, refusalCount and windowMinutes: never a badge, a number, a PIN or a person. -->
+        The message holds deviceId, deviceName, refusalCount and windowMinutes: never a badge, a number, a PIN or a person. Its
+        record is the device (moqui.security.DeviceCredential), which the app's record link resolves for each recipient: in BOSS,
+        Admin's Security › Devices for one who may open it there (follow-up 4), no link for the others. -->
     <moqui.security.user.NotificationTopic topic="PeopleKioskRefusals" inboxEnumId="NinNotifications"
             description="Refused attempts at a clocking kiosk" typeString="warning" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
             titleTemplate="${refusalCount} refused attempts at the clocking kiosk ${deviceName} in ${windowMinutes} minutes"/>
+    <!-- People follow-up 4 (the user's call of Nov 12, 2026): a clocking badge stopped after twenty wrong PINs within a day
+        (KioskIdentity.js) told to the HR editors of its employer, to them alone, once, when it stops. The message holds partyId,
+        partyRelationshipId, personName, organizationName and wrongCount, and its record is the employment (an HR reader opens its
+        Employee360, where the PIN is reset or a new badge issued): never the badge's number or a PIN. -->
+    <moqui.security.user.NotificationTopic topic="PeopleKioskBadgeDisabled" inboxEnumId="NinNotifications"
+            description="A clocking badge stopped after wrong PINs" typeString="warning" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="${personName}'s clocking badge is stopped after ${wrongCount} wrong PINs in a day: reset its PIN or issue a new badge"/>
     <!-- P30 review (the user's call of Nov 12, 2026): refused kiosk attempts are kept 90 days; the daily prune deletes older ones a
         batch at a time, a failing row logged and left for the next run -->
     <moqui.service.job.ServiceJob jobName="prune_KioskAttempts"

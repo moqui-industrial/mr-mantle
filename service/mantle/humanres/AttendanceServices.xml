@@ -402,8 +402,11 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A worker clocks in or out now (the server's time) at a registered clocking device: only in the device's own request,
             whose display account is the user and holds PEOPLE_KIOSK_PUNCH (DEVICE_REQUIRED, PERMISSION_DENIED). The worker is the one
             the badge's number (badgeText, typed or scanned) and the PIN prove: an unknown number (BADGE_UNKNOWN), a revoked badge
-            (BADGE_REVOKED), a locked one (PIN_LIMITED), one whose worker has not set their PIN in self-service yet (PIN_NOT_SET) and
-            a wrong PIN (PIN_WRONG; the fifth in a row locks the badge for fifteen minutes) are refused and counted at the device;
+            (BADGE_REVOKED), one stopped by a day's wrong PINs (BADGE_DISABLED), a locked one (PIN_LIMITED), one whose worker has
+            not set their PIN in self-service yet (PIN_NOT_SET) and a wrong PIN (PIN_WRONG; the fifth in a row locks the badge for
+            fifteen minutes, each lockout after twice as long until a right PIN; the twentieth within a day, here or in
+            self-service, stops it until HR resets its PIN or issues a new one, and tells the employer's HR editors,
+            PeopleKioskBadgeDisabled, naming the person, never the number or a PIN) are refused and counted at the device;
             after many refusals at the device lately its next proof is checked only once a growing pause after the last refusal has
             passed (KIOSK_WAIT, at most a few seconds, nothing looked up or counted), and a burst tells the HR editors of its
             organizations at most hourly (PeopleKioskRefusals); the employment must be current (EMPLOYMENT_ENDED) and with an organization of the display account's (ORGANIZATION_DENIED),
@@ -511,9 +514,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="reset" noun="KioskPin" allow-remote="false">
         <description>A badge's PIN reset by an HR editor of the employer (anyone else is refused as missing, RECORD_UNAVAILABLE) for a
-            worker who forgot it, with a new one-time PIN of 4 to 8 digits (PIN_INVALID) or none: the worker's PIN, its wrong count
-            and its lock are cleared, so the badge works at no kiosk until the worker sets their PIN again in self-service. A revoked
-            badge is not reset (BADGE_REVOKED).</description>
+            worker who forgot it, with a new one-time PIN of 4 to 8 digits (PIN_INVALID) or none: the worker's PIN, its wrong count,
+            its lockouts and its lock are cleared and a badge stopped by a day's wrong PINs starts again (those before the reset no
+            longer count toward the day's limit), so the badge works at no kiosk until the worker sets their PIN again in
+            self-service. A revoked badge is not reset (BADGE_REVOKED).</description>
         <in-parameters>
             <parameter name="kioskBadgeId" required="true"/>
             <parameter name="oneTimePin"/>
@@ -539,8 +543,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The caller sets or changes the PIN of their own badge in use (anyone else's, or a revoked one, is refused as
             missing, RECORD_UNAVAILABLE): the new PIN of 4 to 8 digits (PIN_INVALID), not the one-time PIN HR gave (PIN_REUSED), so
             HR never learns it; the PIN they have now (their own, else the one-time PIN when HR gave one) is asked, a wrong one
-            counted on the badge as at a kiosk (PIN_WRONG; the fifth in a row locks it for fifteen minutes, PIN_LIMITED). Kept only
-            as its argon2 hash; the badge works at a kiosk from then on.</description>
+            counted on the badge as at a kiosk (PIN_WRONG; the fifth in a row locks it, PIN_LIMITED, each lockout twice as long; the
+            twentieth within a day stops it until HR resets its PIN, BADGE_DISABLED, and tells HR). Kept only as its argon2 hash; the
+            badge works at a kiosk from then on.</description>
         <in-parameters>
             <parameter name="kioskBadgeId" required="true"/>
             <parameter name="currentPin"/>
@@ -568,11 +573,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="KioskBadge" allow-remote="false">
         <description>An employment's clocking badge as an HR reader of the employer reads it (PEOPLE_HR_VIEW; anyone else is refused as
-            missing, RECORD_UNAVAILABLE), never its number or PIN: the latest badge with its state (issued and not printed, active,
-            locked after wrong PINs, waiting for the worker's PIN, revoked), when it was issued, printed, its PIN set and last used,
-            and whether the reader prints it now; whether the reader issues a badge (an HR editor, a current employment), revokes this
-            one and resets its PIN.</description>
-        <in-parameters><parameter name="partyRelationshipId" required="true"/></in-parameters>
+            missing, RECORD_UNAVAILABLE), never its number or PIN: the latest badge, or the one asked by kioskBadgeId (BadgePrint's
+            page), with its state (issued and not printed, active, locked after wrong PINs, stopped after a day's wrong PINs, waiting
+            for the worker's PIN, revoked), when it was issued, printed, its PIN set and last used, and whether the reader prints it
+            now; whether the reader issues a badge (an HR editor, a current employment), revokes this one and resets its
+            PIN.</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId"><description>The employment, for its latest badge</description></parameter>
+            <parameter name="kioskBadgeId"><description>Instead: the badge itself</description></parameter>
+        </in-parameters>
         <out-parameters>
             <parameter name="badge" type="Map"/>
             <parameter name="canIssue" type="Boolean"/>

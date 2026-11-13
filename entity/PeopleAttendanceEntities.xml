@@ -27,7 +27,8 @@ along with this software (see the LICENSE.md file). If not, see
     P30, the clocking kiosk's identity (design §6 ClockingKiosk, §15 the badge; PE-05): a worker proves who they are at a registered
     shared device by a badge (KioskBadge: a revocable opaque number of an employment, printed once as a barcode, kept only as its
     hash) and a PIN the worker sets themselves in self-service (kept only as its argon2 hash; HR never learns it); a wrong PIN is
-    counted on the badge, which it locks for a while, and every refusal at a device is a KioskAttempt, which slows the device's next
+    counted on the badge, which it locks for a while, each lockout twice as long, and twenty in a day stop it until HR resets its
+    PIN (follow-up 4); every refusal at a device is a KioskAttempt, which slows the device's next
     proofs and, in a burst, tells the employer's HR (KioskDeviceNotice, at most hourly); attempts are kept 90 days. Written only by
     KioskIdentity.js and Attendance.js's kiosk punch. -->
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
@@ -223,7 +224,9 @@ along with this software (see the LICENSE.md file). If not, see
             employment's badge before it, with a one-time PIN or none (oneTimePinHash: it only lets the worker set their first PIN,
             and never works at a kiosk); HR resets a forgotten PIN the same way. The number is made when its issuer prints it, once,
             within fifteen minutes of the issue. A wrong PIN counts on the badge (failedCount), and enough of them lock it for a
-            while (lockedUntilDate); a right one clears the count. Revoked, it is refused at every kiosk; it is never
+            while (lockedUntilDate), each lockout twice as long as the one before (lockCount) until a right PIN; twenty wrong
+            PINs within a day (since HR last reset the PIN, pinResetDate) stop it (disabledDate) until HR resets its PIN or
+            issues a new badge. A right PIN clears the count and the lockouts. Revoked, it is refused at every kiosk; it is never
             deleted.</description>
         <field name="kioskBadgeId" type="id" is-pk="true"/>
         <field name="partyRelationshipId" type="id"><description>The employment</description></field>
@@ -242,14 +245,22 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="revokeReason" type="text-medium"/>
         <field name="failedCount" type="number-integer"><description>Wrong PINs since the last right one</description></field>
         <field name="lockedUntilDate" type="date-time"/>
+        <!-- follow-up 4 (the user's call of Nov 12, 2026): the badge lock grows, and a day's wrong PINs stop the badge -->
+        <field name="lockCount" type="number-integer"><description>Lockouts since the last right PIN: the next lasts 15 minutes
+            doubled this many times</description></field>
+        <field name="disabledDate" type="date-time"><description>When twenty wrong PINs within a day stopped the badge: it works
+            nowhere until HR resets its PIN or issues a new badge</description></field>
+        <field name="pinResetDate" type="date-time"><description>When HR last reset the PIN: wrong PINs before it no longer count
+            toward the day's limit</description></field>
         <field name="lastUsedDate" type="date-time"/>
         <field name="lastDeviceId" type="id"/>
         <index name="KIOSK_BADGE_TOKEN" unique="true"><index-field name="tokenHash"/></index>
         <index name="KIOSK_BADGE_EMPL"><index-field name="partyRelationshipId"/><index-field name="issuedDate"/></index>
     </entity>
     <entity entity-name="KioskAttempt" package="mantle.humanres.attendance" cache="never">
-        <description>A refused proof at a clocking kiosk: the device, when, why (reasonCode: BADGE_UNKNOWN, BADGE_REVOKED, PIN_WRONG,
-            PIN_LIMITED, PIN_NOT_SET, ...) and the badge when one was read. Kept in a transaction of its own, so the refusal is counted
+        <description>A refused proof at a clocking kiosk: the device, when, why (reasonCode: BADGE_UNKNOWN, BADGE_REVOKED,
+            BADGE_DISABLED, PIN_WRONG, PIN_LIMITED, PIN_NOT_SET, ...) and the badge when one was read; a wrong PIN typed in
+            self-service is one too, with no device, so a badge's wrong PINs of a day are counted wherever they were typed. Kept in a transaction of its own, so the refusal is counted
             although the punch is not recorded; a device with many refusals in a short time checks its next proofs only after a
             growing pause, and a burst of them tells the employer's HR. Pruned after 90 days (KioskIdentity's prune#KioskAttempts
             job).</description>
@@ -260,6 +271,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="reasonCode" type="text-short"/>
         <index name="KIOSK_ATTEMPT_DEVICE"><index-field name="deviceId"/><index-field name="attemptDate"/></index>
         <index name="KIOSK_ATTEMPT_DATE"><index-field name="attemptDate"/></index>
+        <index name="KIOSK_ATTEMPT_BADGE"><index-field name="kioskBadgeId"/><index-field name="attemptDate"/></index>
     </entity>
     <entity entity-name="KioskDeviceNotice" package="mantle.humanres.attendance" cache="never">
         <description>When a clocking device's burst of refused proofs was last told to its employer's HR, so it is told at most once

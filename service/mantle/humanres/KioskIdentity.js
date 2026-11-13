@@ -18,8 +18,11 @@
 //   holds PEOPLE_KIOSK_PUNCH; the device is not pausing (KIOSK_WAIT: after many refusals at it lately each next proof waits a
 //   growing pause, at most a few seconds, after the last refusal, and is not checked or counted sooner; nobody is ever shut out for
 //   longer); the badge's number is known (BADGE_UNKNOWN), and then, under the badge's row lock so attempts at once are counted one
-//   by one: not revoked (BADGE_REVOKED), not locked (PIN_LIMITED), its PIN set by the worker (PIN_NOT_SET), the PIN right
-//   (PIN_WRONG: counted on the badge, and the fifth in a row locks it for fifteen minutes); the employment is current
+//   by one: not revoked (BADGE_REVOKED), not stopped (BADGE_DISABLED), not locked (PIN_LIMITED), its PIN set by the worker
+//   (PIN_NOT_SET), the PIN right (PIN_WRONG: counted on the badge, and the fifth in a row locks it, for fifteen minutes the first
+//   time and twice as long each time after until a right PIN; the twentieth within a day, at kiosks and in self-service alike,
+//   stops the badge until HR resets its PIN or issues a new one, and tells the employer's HR editors, to them alone, naming the
+//   person and never the number or a PIN: PeopleKioskBadgeDisabled; the user's call of Nov 12, 2026); the employment is current
 //   (EMPLOYMENT_ENDED) and with an organization of the display account's (ORGANIZATION_DENIED). Every refusal of a proof is a
 //   KioskAttempt of the device, written in a transaction of its own, so it counts although nothing else is kept; a burst of them
 //   at a device tells the HR editors of its organizations, at most hourly, naming the device and the count, no badge or person
@@ -43,9 +46,12 @@ const minuteMs = 60 * 1000
 const dayMs = 24 * 60 * minuteMs
 // a badge is printed by its issuer within this long of its issue
 const printMs = 15 * minuteMs
-// wrong PINs in a row that lock a badge, and for how long
+// wrong PINs in a row that lock a badge, and for how long the first time: each lockout after lasts twice as long, until a right
+// PIN (the doubling stops at 2^maxDoublings, about thirty years, so the date stays one); wrong PINs within a day that stop it
 const maxWrongPins = 5
 const lockMs = 15 * minuteMs
+const maxDoublings = 20
+const maxWrongPerDay = 20
 // a device's refusals within the window: from paceFrom of them each next proof waits a pause after the last refusal, a second
 // doubling with each refusal and at most paceCapMs; at noticeAt of them the device's HR is told, at most once each noticeEveryMs
 const deviceWindowMs = 10 * minuteMs
@@ -98,6 +104,16 @@ const printable = (badge, at) =>
     !badge.revokedDate && !badge.tokenHash && badge.issuedByUserId === ec.user.userId && at - ms(badge.issuedDate) <= printMs
 function badgeState(badge, at) {
     if (badge.revokedDate) return {state: "revoked", stateText: "Revoked " + dateTimeText(badge.revokedDate)}
+    if (badge.disabledDate)
+        return {
+            state: "disabled",
+            stateText:
+                "Stopped after " +
+                maxWrongPerDay +
+                " wrong PINs on " +
+                dateTimeText(badge.disabledDate) +
+                ": reset its PIN or issue a new badge"
+        }
     if (!badge.tokenHash)
         return at - ms(badge.issuedDate) <= printMs
             ? {state: "issued", stateText: "Issued, not printed yet"}
@@ -203,7 +219,8 @@ function revokeBadge(p) {
     return {revoked: true, repeated: false}
 }
 // reset#KioskPin: an HR editor of the employer resets a badge's PIN the worker forgot, with a new one-time PIN or none: the
-// worker's PIN is cleared, with its wrong count and lock, so the badge works at no kiosk until the worker sets theirs again.
+// worker's PIN is cleared, with its wrong count, lockouts and lock, and a badge stopped by a day's wrong PINs starts again (the
+// wrong PINs before the reset no longer count toward the day's limit), so the badge works at no kiosk until the worker sets theirs.
 function resetPin(p) {
     const badge = hrBadge(p.kioskBadgeId, true)
     if (badge.revokedDate) denied("BADGE_REVOKED", "This badge was revoked")
@@ -213,16 +230,21 @@ function resetPin(p) {
         pinSetDate: null,
         oneTimePinHash: oneTimePinHash(p.oneTimePin),
         failedCount: 0,
-        lockedUntilDate: null
+        lockCount: 0,
+        lockedUntilDate: null,
+        disabledDate: null,
+        pinResetDate: ec.user.nowTimestamp
     })
     return {reset: true}
 }
 // get#KioskBadge: an employment's badge as an HR reader of the employer reads it (never its number or PIN): the one in use (else the
-// last revoked) with its state, whether the reader prints it now, and whether they issue and revoke badges.
+// last revoked), or the badge asked by its id, with its state, whether the reader prints it now, and whether they issue and revoke
+// badges.
 function getBadge(p) {
-    const {employment, canEdit} = hrEmployment(p.partyRelationshipId, false)
+    const asked = text(p.kioskBadgeId) ? hrBadge(p.kioskBadgeId, false) : null
+    const {employment, canEdit} = hrEmployment(asked ? asked.partyRelationshipId : p.partyRelationshipId, false)
     const at = nowMs()
-    const latest = first(find(BADGE, {partyRelationshipId: employment.partyRelationshipId}).orderBy("-issuedDate"))
+    const latest = asked || first(find(BADGE, {partyRelationshipId: employment.partyRelationshipId}).orderBy("-issuedDate"))
     return {
         badge: latest ? badgeLine(latest, at) : null,
         canIssue: canEdit && currentAt(employment, at),
@@ -256,40 +278,117 @@ function myBadges() {
     const names = people.organizationNames(Array.from(new Set(own.map(row => row.organizationPartyId))))
     return {
         badges: own.map(badge =>
-            Object.assign(badgeLine(badge, at), {
-                organizationPartyId: badge.organizationPartyId,
-                organizationName: names[badge.organizationPartyId] || badge.organizationPartyId,
-                pinSet: !!badge.pinSetDate,
-                currentPinAsked: !!(badge.pinHash || badge.oneTimePinHash),
-                canPrint: false
-            })
+            Object.assign(
+                badgeLine(badge, at),
+                badge.disabledDate && !badge.revokedDate
+                    ? {stateText: "Stopped after too many wrong PINs: ask HR to reset its PIN"}
+                    : {},
+                {
+                    organizationPartyId: badge.organizationPartyId,
+                    organizationName: names[badge.organizationPartyId] || badge.organizationPartyId,
+                    pinSet: !!badge.pinSetDate,
+                    currentPinAsked: !!(badge.pinHash || badge.oneTimePinHash),
+                    canPrint: false
+                }
+            )
         )
     }
 }
-// A wrong PIN counted on the badge row (locked for update by the caller): the fifth in a row locks it for fifteen minutes. Answers
-// whether it locked.
-function countWrongPin(row, at) {
+const durationText = millis => {
+    const minutes = Math.round(millis / minuteMs)
+    if (minutes < 60) return minutes + " minutes"
+    const hours = Math.round(minutes / 60)
+    if (hours < 48) return hours + (hours === 1 ? " hour" : " hours")
+    return Math.round(hours / 24) + " days"
+}
+// A wrong PIN of a badge, under its row lock (taken by the caller, in its transaction): kept as an attempt (of the device, or of
+// self-service with none) and counted on the badge. The twentieth within a day (since HR last reset the PIN) stops the badge;
+// else the fifth in a row locks it, for fifteen minutes the first time and twice as long each lockout after, until a right PIN.
+// Answers {lockedMs, disabled}: how long it locked (0 for no lock), and whether it stopped.
+function countWrongPin(row, at, deviceId) {
+    recordAttempt(deviceId, "PIN_WRONG", row.kioskBadgeId)
+    const from = Math.max(at - dayMs, ms(row.pinResetDate) ?? -Infinity)
+    const today = find(ATTEMPT)
+        .condition("kioskBadgeId", row.kioskBadgeId)
+        .condition("reasonCode", "PIN_WRONG")
+        .condition("attemptDate", "greater-equals", stamp(from))
+        .count()
+    if (today >= maxWrongPerDay) {
+        call("update#" + BADGE, {kioskBadgeId: row.kioskBadgeId, failedCount: 0, disabledDate: ec.user.nowTimestamp})
+        return {lockedMs: 0, disabled: true}
+    }
     const count = (Number(row.failedCount) || 0) + 1
-    const locked = count >= maxWrongPins
+    if (count < maxWrongPins) {
+        call("update#" + BADGE, {kioskBadgeId: row.kioskBadgeId, failedCount: count})
+        return {lockedMs: 0, disabled: false}
+    }
+    const lockCount = Number(row.lockCount) || 0
+    const lockedMs = lockMs * 2 ** Math.min(lockCount, maxDoublings)
     call("update#" + BADGE, {
         kioskBadgeId: row.kioskBadgeId,
-        failedCount: locked ? 0 : count,
-        lockedUntilDate: locked ? stamp(at + lockMs) : row.lockedUntilDate
+        failedCount: 0,
+        lockCount: lockCount + 1,
+        lockedUntilDate: stamp(at + lockedMs)
     })
-    return locked
+    return {lockedMs, disabled: false}
+}
+// What a wrong PIN answers: the PIN refused, and the lock or the stop it caused.
+const wrongPinText = (counted, wrongText) =>
+    counted.disabled
+        ? wrongText + ": too many wrong PINs today, this badge is stopped until HR resets its PIN"
+        : counted.lockedMs
+          ? wrongText + ": this badge is locked for " + durationText(counted.lockedMs)
+          : wrongText
+// A badge stopped by a day's wrong PINs, told to the HR editors of its employer, to them alone: the person and the employment
+// (Employee360, where its PIN is reset), never its number or a PIN. Sent after the stop is committed, in a transaction of its own
+// (the refusal rolls the caller's back); a failure is logged and the stop stands.
+function noticeDisabled(badge) {
+    try {
+        const at = nowMs()
+        const userIds = hrEditorUsers([badge.organizationPartyId], at)
+        if (!userIds.length) {
+            ec.logger.warn("Clocking badge " + badge.kioskBadgeId + " was stopped after wrong PINs: no HR editor to tell")
+            return
+        }
+        ec.transaction.runRequireNew(null, "Telling HR of a stopped clocking badge", () => sendDisabled(badge, userIds))
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.error("The stopped badge notice of clocking badge " + badge.kioskBadgeId + " was not sent: " + error.message)
+    }
+}
+function sendDisabled(badge, userIds) {
+    ec.makeNotificationMessage()
+        .topic("PeopleKioskBadgeDisabled")
+        .message({
+            partyId: badge.partyId,
+            partyRelationshipId: badge.partyRelationshipId,
+            personName: people.personNames([badge.partyId])[badge.partyId] || badge.partyId,
+            organizationName:
+                people.organizationNames([badge.organizationPartyId])[badge.organizationPartyId] || badge.organizationPartyId,
+            wrongCount: maxWrongPerDay
+        })
+        .record("mantle.humanres.employment.Employment", badge.partyRelationshipId)
+        .userIds(userIds)
+        .directOnly()
+        .send()
+    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
 }
 // set#MyKioskPin: the caller sets or changes the PIN of their own badge (else RECORD_UNAVAILABLE): the new PIN of 4 to 8 digits
 // (PIN_INVALID), not the one-time PIN HR gave (PIN_REUSED); the PIN they have now (their own, else the one-time PIN, when HR gave
-// one) is asked, a wrong one counted on the badge as at a kiosk (PIN_WRONG, PIN_LIMITED). The badge works at a kiosk from then on.
+// one) is asked, a wrong one counted on the badge as at a kiosk (PIN_WRONG, PIN_LIMITED, BADGE_DISABLED: a badge stopped by a day's
+// wrong PINs waits for HR's reset here too). The badge works at a kiosk from then on.
 function setMyPin(p) {
     const at = nowMs()
     const own = ownBadges(at).find(row => row.kioskBadgeId === text(p.kioskBadgeId))
     if (!own) denied("RECORD_UNAVAILABLE", "Badge " + text(p.kioskBadgeId) + " is not available")
     if (!validPin(p.newPin)) denied("PIN_INVALID", "The PIN is 4 to 8 digits")
     let refusal = null
+    let stopped = null
     ec.transaction.runRequireNew(null, "Setting a kiosk PIN", () => {
         const row = find(BADGE, {kioskBadgeId: own.kioskBadgeId}).forUpdate(true).one()
         if (row.revokedDate) return (refusal = ["RECORD_UNAVAILABLE", "Badge " + own.kioskBadgeId + " is not available"])
+        if (row.disabledDate)
+            return (refusal = ["BADGE_DISABLED", "Too many wrong PINs: this badge is stopped until HR resets its PIN"])
         if (ms(row.lockedUntilDate) > at)
             return (refusal = [
                 "PIN_LIMITED",
@@ -297,14 +396,11 @@ function setMyPin(p) {
             ])
         const asked = row.pinHash || row.oneTimePinHash
         if (asked && !(validPin(p.currentPin) && ec.user.passwordsMatch(text(p.currentPin), asked, null, null, false))) {
-            const locked = countWrongPin(row, at)
+            const counted = countWrongPin(row, at, null)
+            if (counted.disabled) stopped = row
             return (refusal = [
                 "PIN_WRONG",
-                locked
-                    ? "The current PIN is not right: this badge is locked for 15 minutes"
-                    : row.pinHash
-                      ? "The current PIN is not right"
-                      : "The one-time PIN HR gave you is not right"
+                wrongPinText(counted, row.pinHash ? "The current PIN is not right" : "The one-time PIN HR gave you is not right")
             ])
         }
         if (row.oneTimePinHash && ec.user.passwordsMatch(text(p.newPin), row.oneTimePinHash, null, null, false))
@@ -315,9 +411,11 @@ function setMyPin(p) {
             pinSetDate: ec.user.nowTimestamp,
             oneTimePinHash: null,
             failedCount: 0,
+            lockCount: 0,
             lockedUntilDate: null
         })
     })
+    if (stopped) noticeDisabled(stopped)
     if (refusal) denied(refusal[0], refusal[1])
     return {pinSet: true}
 }
@@ -337,9 +435,10 @@ function deviceEmployers() {
     const partyId = ec.user.userAccount?.partyId
     return partyId ? Array.from(call("mantle.party.PartyServices.get#PartyInternalOrgIds", {partyId}).userOrgIds || []) : []
 }
-const recordAttempt = (device, reasonCode, kioskBadgeId) =>
+// a refused attempt at the device (by its id), or with none a wrong PIN in self-service
+const recordAttempt = (deviceId, reasonCode, kioskBadgeId) =>
     call("create#" + ATTEMPT, {
-        deviceId: device.deviceId,
+        deviceId: deviceId || null,
         kioskBadgeId: kioskBadgeId || null,
         attemptDate: ec.user.nowTimestamp,
         reasonCode
@@ -446,13 +545,15 @@ function noticeBurst(device, at) {
 // A refusal of a proof, counted at the device in a transaction of its own (with the badge's count, when the update is given), a
 // burst told to HR.
 function refuse(device, reasonCode, message, kioskBadgeId) {
-    ec.transaction.runRequireNew(null, "Recording a refused kiosk attempt", () => recordAttempt(device, reasonCode, kioskBadgeId))
+    ec.transaction.runRequireNew(null, "Recording a refused kiosk attempt", () =>
+        recordAttempt(device.deviceId, reasonCode, kioskBadgeId)
+    )
     noticeBurst(device, nowMs())
     denied(reasonCode, message)
 }
 // The badge a worker proves themselves by at the device: its number and PIN, checked in order, every refusal counted. The badge's
-// state and PIN are read and its count written under its row lock, in a transaction of its own, so proofs at once are checked one
-// after the other and none slips past the lock.
+// state and PIN are read and its count, lockouts and stop written under its row lock, in a transaction of its own, so proofs at
+// once are checked one after the other and none slips past the lock or the day's limit.
 function identify(device, badgeText, pin) {
     const at = nowMs()
     pace(device, at)
@@ -460,34 +561,39 @@ function identify(device, badgeText, pin) {
     const found = /^\d{12,32}$/.test(digits) ? first(find(BADGE, {tokenHash: tokenHash(digits)})) : null
     if (!found) refuse(device, "BADGE_UNKNOWN", "This badge is not recognized")
     let refusal = null
+    let stopped = false
     let badge = found
     ec.transaction.runRequireNew(null, "Checking a kiosk badge and PIN", () => {
         badge = find(BADGE, {kioskBadgeId: found.kioskBadgeId}).forUpdate(true).one()
         const refused = (reasonCode, message) => {
-            recordAttempt(device, reasonCode, badge.kioskBadgeId)
+            recordAttempt(device.deviceId, reasonCode, badge.kioskBadgeId)
             refusal = [reasonCode, message]
         }
         if (badge.revokedDate) return refused("BADGE_REVOKED", "This badge is no longer valid: ask HR for a new one")
+        if (badge.disabledDate)
+            return refused("BADGE_DISABLED", "Too many wrong PINs: this badge is stopped until HR resets its PIN")
         if (ms(badge.lockedUntilDate) > at)
             return refused("PIN_LIMITED", "Too many wrong PINs: this badge works again at " + timeText(ms(badge.lockedUntilDate)))
         if (!badge.pinSetDate || !badge.pinHash)
             return refused("PIN_NOT_SET", "Set your PIN in self-service first: this badge works once you have")
         if (!validPin(pin) || !ec.user.passwordsMatch(text(pin), badge.pinHash, null, null, false)) {
-            const locked = countWrongPin(badge, at)
-            return refused(
-                "PIN_WRONG",
-                locked ? "The PIN is not right: this badge is locked for 15 minutes" : "The PIN is not right"
-            )
+            // the attempt is kept by the count
+            const counted = countWrongPin(badge, at, device.deviceId)
+            stopped = counted.disabled
+            refusal = ["PIN_WRONG", wrongPinText(counted, "The PIN is not right")]
+            return
         }
-        // a right PIN clears the count, whatever then becomes of the punch
+        // a right PIN clears the count and the lockouts, whatever then becomes of the punch
         call("update#" + BADGE, {
             kioskBadgeId: badge.kioskBadgeId,
             failedCount: 0,
+            lockCount: 0,
             lastUsedDate: ec.user.nowTimestamp,
             lastDeviceId: device.deviceId
         })
     })
     if (refusal) {
+        if (stopped) noticeDisabled(badge)
         noticeBurst(device, nowMs())
         denied(refusal[0], refusal[1])
     }
