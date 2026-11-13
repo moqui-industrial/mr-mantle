@@ -139,7 +139,11 @@ along with this software (see the LICENSE.md file). If not, see
                 </parameter>
                 <parameter name="customerDetail" type="Map"><auto-parameters entity-name="mantle.party.PartyDetail"/></parameter>
                 <parameter name="customerEmail"/>
+                <parameter name="customerTaxAuthorityInfo"><description>Customer Tax Authority Info.</description></parameter>
+                <parameter name="customerSocialSecurityNumber"><description>Customer Social Security Number.</description></parameter>
                 <parameter name="vendorDetail" type="Map"><auto-parameters entity-name="mantle.party.PartyDetail"/></parameter>
+                <parameter name="vendorTaxAuthorityInfo"><description>Vendor Tax Authority Info.</description></parameter>
+                <parameter name="vendorSocialSecurityNumber"><description>Vendor Social Security Number.</description></parameter>
                 <parameter name="isCustomerInternalOrg" type="Boolean"/>
                 <parameter name="isVendorInternalOrg" type="Boolean"/>
                 <parameter name="orderPartPartyList" type="List"><parameter name="orderPartParty">
@@ -391,6 +395,7 @@ along with this software (see the LICENSE.md file). If not, see
             for (const orderPart of orderPartList) {
                 const partStatusItem = orderPart.status
                 const partSettlementTerm = orderPart.settlementTerm
+                const partTradeTermEnum = orderPart.tradeTermEnum
 
                 const partOrderItemList = orderItemList.filter((it) => it.orderPartSeqId === orderPart.orderPartSeqId)
                 const partNoParentOrderItemList = partOrderItemList.filter((it) => it.parentItemSeqId == null)
@@ -414,6 +419,11 @@ along with this software (see the LICENSE.md file). If not, see
                 const customerBillToDetail = orderPartPartyList.find((it) => it.roleTypeId === 'CustomerBillTo') ?? null
                 const shipToPartyId = customerShipToDetail?.partyId || orderPart.customerPartyId
                 const billToPartyId = customerBillToDetail?.partyId || orderPart.customerPartyId
+
+                const customerTaxAuthorityInfo = orderPart.customerPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.customerPartyId).conditionDate("", "", ec.user.nowTimestamp).list()?.[0] ?? null) : null
+                const customerSocialSecurityNumber = orderPart.customerPartyId ? (ec.entity.find("mantle.party.PartyIdentification").condition({partyId:orderPart.customerPartyId, partyIdTypeEnumId:"PtidSsn"}).one() ?? null) : null
+                const vendorTaxAuthorityInfo = orderPart.vendorPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.vendorPartyId).conditionDate("", "", ec.user.nowTimestamp).list()?.[0] ?? null) : null
+                const vendorSocialSecurityNumber = orderPart.vendorPartyId ? (ec.entity.find("mantle.party.PartyIdentification").condition({partyId:orderPart.vendorPartyId, partyIdTypeEnumId:"PtidSsn"}).one() ?? null) : null
 
                 let customerEmail = null
                 if (orderPart.customerPartyId) {
@@ -511,7 +521,9 @@ along with this software (see the LICENSE.md file). If not, see
                         .parameters({orderId:orderPart.orderId, orderPartSeqId:orderPart.orderPartSeqId}).call()
 
                 orderPartInfoList.push({orderPart:orderPart, partEditable:editableStatusIds.includes(orderPart.statusId),
-                        partStatusItem:partStatusItem, partSettlementTerm:partSettlementTerm,
+                        partStatusItem:partStatusItem, partSettlementTerm:partSettlementTerm, partTradeTermEnum:partTradeTermEnum,
+                        customerTaxAuthorityInfo:customerTaxAuthorityInfo, customerSocialSecurityNumber:customerSocialSecurityNumber,
+                        vendorTaxAuthorityInfo:vendorTaxAuthorityInfo, vendorSocialSecurityNumber:vendorSocialSecurityNumber,
                         partOrderItemList:partOrderItemList, partNoParentOrderItemList:partNoParentOrderItemList,
                         partNoParentOrderItemCount:partNoParentOrderItemCount,
                         hasShippableItems:hasShippableItems, singleLot:singleLot, newerInventory:newerInventory,

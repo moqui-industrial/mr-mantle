@@ -180,6 +180,8 @@ function create(p) {
         currencyUomId,
         facilityId,
         orderName: text(p.orderName),
+        settlementTermId: text(p.settlementTermId) || profile?.settlementTermId || null,
+        tradeTermEnumId: text(p.tradeTermEnumId) || profile?.tradeTermEnumId || null,
         statusId: "OrderOpen"
     })
     return {

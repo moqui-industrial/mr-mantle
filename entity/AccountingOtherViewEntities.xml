@@ -26,6 +26,26 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="BDGT"/>
         <alias-all entity-alias="TMPD"/>
     </view-entity>
+    <view-entity entity-name="BudgetAndItem" package="mantle.other.budget">
+        <member-entity entity-alias="BDGT" entity-name="mantle.other.budget.Budget"/>
+        <member-entity entity-alias="BIT" entity-name="mantle.other.budget.BudgetItem" join-from-alias="BDGT">
+            <key-map field-name="budgetId"/></member-entity>
+        <alias-all entity-alias="BDGT"/>
+        <alias-all entity-alias="BIT"/>
+    </view-entity>
+    <view-entity entity-name="BudgetAndItemDetail" package="mantle.other.budget">
+        <member-entity entity-alias="BDGT" entity-name="mantle.other.budget.Budget"/>
+        <member-entity entity-alias="BIT" entity-name="mantle.other.budget.BudgetItem" join-from-alias="BDGT">
+            <key-map field-name="budgetId"/></member-entity>
+        <member-entity entity-alias="BIDET" entity-name="mantle.other.budget.BudgetItemDetail" join-from-alias="BIT" join-optional="true">
+            <key-map field-name="budgetId"/><key-map field-name="budgetItemSeqId"/></member-entity>
+        <alias-all entity-alias="BDGT"/>
+        <alias-all entity-alias="BIT"><exclude field="amount"/><exclude field="productId"/><exclude field="quantity"/></alias-all>
+        <alias-all entity-alias="BIDET"/>
+        <alias name="itemAmount" entity-alias="BIT" field="amount"/>
+        <alias name="itemProductId" entity-alias="BIT" field="productId"/>
+        <alias name="itemQuantity" entity-alias="BIT" field="quantity"/>
+    </view-entity>
     <view-entity entity-name="BudgetItemAndDetail" package="mantle.other.budget">
         <member-entity entity-alias="BIT" entity-name="mantle.other.budget.BudgetItem"/>
         <member-entity entity-alias="BIDET" entity-name="mantle.other.budget.BudgetItemDetail" join-from-alias="BIT">
@@ -35,6 +55,52 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="itemAmount" entity-alias="BIT" field="amount"/>
         <alias name="itemProductId" entity-alias="BIT" field="productId"/>
         <alias name="itemQuantity" entity-alias="BIT" field="quantity"/>
+    </view-entity>
+    <view-entity entity-name="BudgetAndParty" package="mantle.other.budget">
+        <member-entity entity-alias="BGT" entity-name="mantle.other.budget.Budget"/>
+        <member-entity entity-alias="BGTP" entity-name="mantle.other.budget.BudgetParty" join-from-alias="BGT" join-optional="true">
+            <key-map field-name="budgetId"/></member-entity>
+        <alias-all entity-alias="BGT"/>
+        <alias-all entity-alias="BGTP"/>
+    </view-entity>
+    <view-entity entity-name="BudgetPartyAndPerson" package="mantle.other.budget">
+        <member-entity entity-alias="BGTP" entity-name="mantle.other.budget.BudgetParty"/>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="BGTP">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="BGTP"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="BudgetAndPartyDetail" package="mantle.other.budget">
+        <member-entity entity-alias="BGT" entity-name="mantle.other.budget.Budget"/>
+        <member-entity entity-alias="BGTP" entity-name="mantle.other.budget.BudgetParty" join-from-alias="BGT">
+            <key-map field-name="budgetId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="BGTP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="BGTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="BGTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="BGTP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="BGTP"/>
+        <alias-all entity-alias="BGT"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PTY"><exclude field="comments"/></alias-all>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+        <alias name="username" entity-alias="USRACT"/>
+    </view-entity>
+    <view-entity entity-name="BudgetItemAndRevisionImpact" package="mantle.other.budget">
+        <member-entity entity-alias="BIT" entity-name="mantle.other.budget.BudgetItem"/>
+        <member-entity entity-alias="BREVIMP" entity-name="mantle.other.budget.BudgetRevisionImpact" join-from-alias="BIT" join-optional="true">
+            <key-map field-name="budgetId"/><key-map field-name="budgetItemSeqId"/></member-entity>
+        <member-entity entity-alias="BREV" entity-name="mantle.other.budget.BudgetRevision" join-from-alias="BREVIMP" join-optional="true">
+            <key-map field-name="budgetId"/><key-map field-name="revisionSeqId"/></member-entity>
+
+        <alias-all entity-alias="BIT"/>
+        <alias-all entity-alias="BREV"><exclude field="budgetId"/></alias-all>
+        <alias name="revisedAmount" entity-alias="BREVIMP"/>
+        <alias name="addDeleteFlag" entity-alias="BREVIMP"/>
+        <alias name="revisionReason" entity-alias="BREVIMP"/>
     </view-entity>
 
     <!-- ========================================================= -->

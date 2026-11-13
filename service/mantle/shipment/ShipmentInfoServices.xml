@@ -36,10 +36,14 @@ along with this software (see the LICENSE.md file). If not, see
                 ShipmentRouteSegment.origin* fields then the warehouse Facility
                 (using mantle.facility.ContactServices.get#FacilityDefaultShipOrigin) or if no warehouse or contact info
                 found then from the mantle.party.ContactServices.get#PartyContactInfo service for the fromPartyId.</description></parameter>
+            <parameter name="fromPartyTaxAuthorityInfo"><description>From Party Tax Authority Info.</description></parameter>
+            <parameter name="fromPartySocialSecurityNumber"><description>From Party Social Security Number.</description></parameter>
             <parameter name="toPartyId"/>
             <parameter name="toPartyDetail" type="Map"/>
             <parameter name="toContactInfo" type="Map"><description>The to ship info, first by ShipmentRouteSegment.dest*,
                 then from the mantle.party.ContactServices.get#PartyContactInfo service for Shipment.toPartyId.</description></parameter>
+            <parameter name="toPartyTaxAuthorityInfo"><description>To Party Tax Authority Info.</description></parameter>
+            <parameter name="toPartySocialSecurityNumber"><description>To Party Social Security Number.</description></parameter>
             <parameter name="productStore" type="Map"/>
 
             <parameter name="shipmentItemDetailList" type="List"><parameter name="shipmentItemDetail" type="Map"/></parameter>
@@ -282,11 +286,15 @@ along with this software (see the LICENSE.md file). If not, see
                 ShipmentRouteSegment.origin* fields then the warehouse Facility
                 (using mantle.facility.ContactServices.get#FacilityDefaultShipOrigin) or if no warehouse or contact info
                 found then from the mantle.party.ContactServices.get#PartyContactInfo service for the fromPartyId.</description></parameter>
+            <parameter name="fromPartyTaxAuthorityInfo"><description>From Party Tax Authority Info.</description></parameter>
+            <parameter name="fromPartySocialSecurityNumber"><description>From Party Social Security Number.</description></parameter>
             <parameter name="logoImageLocation"/>
             <parameter name="toPartyId"/>
             <parameter name="toPartyDetail" type="Map"/>
             <parameter name="toContactInfo" type="Map"><description>The to ship info, first by ShipmentRouteSegment.dest*,
                 then from the mantle.party.ContactServices.get#PartyContactInfo service for Shipment.toPartyId.</description></parameter>
+            <parameter name="toPartyTaxAuthorityInfo"><description>To Party Tax Authority Info.</description></parameter>
+            <parameter name="toPartySocialSecurityNumber"><description>To Party Social Security Number.</description></parameter>
         </out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
@@ -325,6 +333,12 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="fromPartyDetail">
                 <field-map field-name="partyId" from="fromPartyId"/></entity-find-one>
 
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="fromPartyTaxAuthorityInfoList">
+                <date-filter/><econdition field-name="partyId" from="fromPartyId"/></entity-find>
+            <set field="fromPartyTaxAuthorityInfo" from="fromPartyTaxAuthorityInfoList?.[0]"/>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromPartySocialSecurityNumber">
+                <field-map field-name="partyId" from="fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
+
             <if condition="firstRouteSegment?.originPostalContactMechId">
                 <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="fromContactInfo"
                         in-map="{partyId:fromPartyId, postalContactMechId:firstRouteSegment.originPostalContactMechId,
@@ -352,6 +366,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="toPartyId" from="shipment.toPartyId"/>
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toPartyDetail">
                 <field-map field-name="partyId" from="toPartyId"/></entity-find-one>
+
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="toPartyTaxAuthorityInfoList">
+                <date-filter/><econdition field-name="partyId" from="toPartyId"/></entity-find>
+            <set field="toPartyTaxAuthorityInfo" from="toPartyTaxAuthorityInfoList?.[0]"/>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toPartySocialSecurityNumber">
+                <field-map field-name="partyId" from="toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
 
             <if condition="lastRouteSegment?.destPostalContactMechId">
                 <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="toContactInfo"
@@ -775,10 +795,14 @@ along with this software (see the LICENSE.md file). If not, see
                 ShipmentRouteSegment.origin* fields then the warehouse Facility
                 (using mantle.facility.ContactServices.get#FacilityDefaultShipOrigin) or if no warehouse or contact info
                 found then from the mantle.party.ContactServices.get#PartyContactInfo service for the fromPartyId.</description></parameter>
+            <parameter name="fromPartyTaxAuthorityInfo"><description>From Party Tax Authority Info.</description></parameter>
+            <parameter name="fromPartySocialSecurityNumber"><description>From Party Social Security Number.</description></parameter>
             <parameter name="logoImageLocation"/>
             <parameter name="toPartyDetail" type="Map"/>
             <parameter name="toContactInfo" type="Map"><description>The to ship info, first by ShipmentRouteSegment.dest*,
                 then from the mantle.party.ContactServices.get#PartyContactInfo service for Shipment.toPartyId.</description></parameter>
+            <parameter name="toPartyTaxAuthorityInfo"><description>To Party Tax Authority Info.</description></parameter>
+            <parameter name="toPartySocialSecurityNumber"><description>To Party Social Security Number.</description></parameter>
             <parameter name="toBillingContactInfo" type="Map"><description>If there is an order associated with this shipment the
                 billing address for the order using OrderInfoServices.get#OrderPartBillingAddress</description></parameter>
 

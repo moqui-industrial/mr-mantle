@@ -326,6 +326,26 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Shipment Documents" enumId="PtpShipmentDocuments" enumTypeId="PrinterPurpose"/>
         </seed-data>
     </entity>
+    <entity entity-name="FacilityDevice" package="mantle.facility">
+        <field name="facilityId" type="id" is-pk="true"/>
+        <field name="deviceId" type="id" is-pk="true"/>
+        <field name="purposeEnumId" type="id">
+            <description>The purpose of the device in this facility.</description></field>
+        <relationship type="one" related="mantle.facility.Facility"/>
+        <relationship type="one" related="moqui.device.Device" short-alias="device"/>
+        <relationship type="one" title="FacilityDevicePurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <seed-data>
+            <!-- Facility Device Purpose --> 
+            <moqui.basic.EnumerationType description="Facility Device Purpose" enumTypeId="FacilityDevicePurpose"/>
+            <moqui.basic.Enumeration description="Networking" enumId="FdpNetworking" enumTypeId="FacilityDevicePurpose"/>
+            <moqui.basic.Enumeration description="Automation" enumId="FdpAutomation" enumTypeId="FacilityDevicePurpose"/>
+            <moqui.basic.Enumeration description="Monitoring" enumId="FdpMonitoring" enumTypeId="FacilityDevicePurpose"/>
+            <moqui.basic.Enumeration description="Protection" enumId="FdpProtection" enumTypeId="FacilityDevicePurpose"/>
+            <moqui.basic.Enumeration description="Safety" enumId="FdpSafety" enumTypeId="FacilityDevicePurpose"/>
+	    <moqui.basic.Enumeration description="ICT" enumId="FdpICT" enumTypeId="FacilityDevicePurpose"/>
+        </seed-data>
+    </entity>
     <entity entity-name="ProductFacility" package="mantle.facility" cache="never">
         <field name="productId" type="id" is-pk="true"/>
         <field name="facilityId" type="id" is-pk="true"/>

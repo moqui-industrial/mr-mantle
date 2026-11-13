@@ -911,4 +911,75 @@ along with this software (see the LICENSE.md file). If not, see
                           in-map="{organizationPartyId:partyId}"/>
         </actions>
     </service>
+
+    <service verb="set" noun="InvoiceReferenceNumber">
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="referenceNumber"/>
+        </out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="invoice"/>
+            <if condition="!invoice"><return error="true" message="Invoice not found with ID ${invoiceId}"/></if>
+            <if condition="invoice.referenceNumber">
+                <set field="referenceNumber" from="invoice.referenceNumber"/>
+                <return/>
+            </if>
+
+            <!-- Only for outgoing invoices where fromPartyId is an Internal Organization -->
+            <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromOrgInternal">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/>
+                <field-map field-name="roleTypeId" value="OrgInternal"/>
+            </entity-find-one>
+            <if condition="!fromOrgInternal"><return/></if>
+
+            <!-- Only for sales/billing invoice types (Sales, Return, Credit Memo) -->
+            <if condition="!(['InvoiceSales', 'InvoiceReturn', 'InvoiceCreditMemo'].includes(invoice.invoiceTypeEnumId))"><return/></if>
+
+            <!-- Verify that the active TaxAuthority for fromPartyId requires sequential numbering -->
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="taxAuthorityPartyList">
+                <date-filter/><econdition field-name="partyId" from="invoice.fromPartyId"/><order-by field-name="-fromDate"/>
+            </entity-find>
+            <set field="taxAuthority" from="taxAuthorityPartyList?.[0]?.taxAuthority"/>
+            <if condition="!(taxAuthority?.sequentialInvoiceNumbering == 'Y' || taxAuthority?.taxAuthorityRateTypeEnumId == 'TartVatTax')">
+                <return/>
+            </if>
+
+            <set field="referenceNumber" value="${ec.entity.sequencedIdPrimary('InvoiceReferenceNumber', null, 1)}"/>
+            <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, referenceNumber:referenceNumber}"/>
+        </actions>
+    </service>
+
+    <service verb="set" noun="ShipmentReferenceNumber">
+        <in-parameters>
+            <parameter name="shipmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="referenceNumber"/>
+        </out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.shipment.Shipment" value-field="shipment"/>
+            <if condition="!shipment"><return error="true" message="Shipment not found with ID ${shipmentId}"/></if>
+            <if condition="shipment.referenceNumber">
+                <set field="referenceNumber" from="shipment.referenceNumber"/>
+                <return/>
+            </if>
+
+            <!-- Only for outgoing shipments where fromPartyId is an Internal Organization -->
+            <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromOrgInternal">
+                <field-map field-name="partyId" from="shipment.fromPartyId"/>
+                <field-map field-name="roleTypeId" value="OrgInternal"/>
+            </entity-find-one>
+            <if condition="!fromOrgInternal"><return/></if>
+
+            <!-- Verify shipment is outgoing (sales, transfer, etc.) -->
+            <set field="shipmentTypeEnum" from="shipment.shipmentTypeEnum"/>
+            <set field="isOutgoing" from="['ShpTpOutgoing', 'ShpTpSales', 'ShpTpTransfer'].includes(shipment.shipmentTypeEnumId) || shipmentTypeEnum?.parentEnumId == 'ShpTpOutgoing'"/>
+            <if condition="!isOutgoing"><return/></if>
+
+            <set field="referenceNumber" value="${ec.entity.sequencedIdPrimary('ShipmentReferenceNumber', null, 1)}"/>
+            <service-call name="update#mantle.shipment.Shipment" in-map="{shipmentId:shipmentId, referenceNumber:referenceNumber}"/>
+        </actions>
+    </service>
 </services>

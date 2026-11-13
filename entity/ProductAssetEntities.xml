@@ -203,7 +203,13 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Service Body" enumId="AsClsServiceBody" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Tractor" enumId="AsClsTractor" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Passenger Vehicle" enumId="AsClsPassengerVeh" enumTypeId="AssetClass"/>
+            <!-- A pump or other mechanism that reduces volume and increases pressure of gases in order to condense the gases to drive pneumatically powered pieces of equipment -->
             <moqui.basic.Enumeration description="Compressor" enumId="AsClsCompressor" enumTypeId="AssetClass"/>
+            <!-- An apparatus that raises, drives, exhausts, or compresses fluids or gases by means of a piston, plunger, or set of rotating vanes -->
+            <moqui.basic.Enumeration description="Pump" enumId="AsClsPump" enumTypeId="AssetClass"/>
+            <!-- A mechanism that produces a current of air -->
+            <moqui.basic.Enumeration description="Fan" enumId="AsClsFan" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Heater" enumId="AsClsHeater" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Trencher" enumId="AsClsTrencher" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Puller" enumId="AsClsPuller" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Tanker" enumId="AsClsTanker" enumTypeId="AssetClass"/>
@@ -215,6 +221,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Container" enumId="AsClsContainer" parentEnumId="AsClsCargoVehicle" enumTypeId="AssetClass"/>
 
             <moqui.basic.Enumeration description="Computer Hardware" enumId="AsClsComputerHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Server" enumId="AsClsServer" parentEnumId="AsClsComputerHard" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Desktop" enumId="AsClsDesktop" parentEnumId="AsClsComputerHard" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Laptop" enumId="AsClsLaptop" parentEnumId="AsClsComputerHard" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Tablet" enumId="AsClsTablet" parentEnumId="AsClsComputerHard" enumTypeId="AssetClass"/>
@@ -225,6 +232,295 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="System Software" enumId="AsClsSoftSystem" parentEnumId="AsClsComputerSoft" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Application Software" enumId="AsClsSoftApp" parentEnumId="AsClsComputerSoft" enumTypeId="AssetClass"/>
             <moqui.basic.Enumeration description="Utility Software" enumId="AsClsSoftUtility" parentEnumId="AsClsComputerSoft" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Networking Hardware" enumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Switch" enumId="AsClsSwitch" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Router" enumId="AsClsRouter" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Firewall" enumId="AsClsFirewall" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Network Bridge" enumId="AsClsNetworkBridge" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Modem" enumId="AsClsModem" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Access Point" enumId="AsClsAccessPoint" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Gateway" enumId="AsClsGateway" parentEnumId="AsClsNetworkingHard" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Automation Controller" enumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="IoT Gateway" enumId="AsClsIoTGateway" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Motion Controller" enumId="AsClsMotionController" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Embedded Controller" enumId="AsClsEmbeddedController" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="PLC" enumId="AsClsPLC" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="PAC" enumId="AsClsPAC" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Soft PLC" enumId="AsClsSoftPLC" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Robot Controller" enumId="AsClsRobotController" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="CNC" enumId="AsClsCNC" parentEnumId="AsClsAutomationController" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Industrial Robot" enumId="AsClsIndustrialRobot" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Collaborative Robot" enumId="AsClsCobot" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Remote IO" enumId="AsClsRemoteIO" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="HMI" enumId="AsClsHMI" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Rugged Tablet" enumId="AsClsRuggedTablet" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Drive" enumId="AsClsDrive" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Servo Drive" enumId="AsClsServoDrive" parentEnumId="AsClsDrive" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Softstarter" enumId="AsClsSoftstarter" parentEnumId="AsClsDrive" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Power Converter" enumId="AsClsPowerConverter" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Solar Inverter" enumId="AsClsSolarInverter" parentEnumId="AsClsPowerConverter" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Wind Turbine Converter" enumId="AsClsWindTurbineConverter" parentEnumId="AsClsPowerConverter" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Hydrokinetic Converter" enumId="AsClsHydrokineticConverter" parentEnumId="AsClsPowerConverter" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Energy Storage Converter" enumId="AsClsEnergyStorageConverter" parentEnumId="AsClsPowerConverter" enumTypeId="AssetClass"/>
+            
+            <!-- A mechanism that converts electrical, pneumatic, or hydraulic energy into mechanical energy -->
+            <moqui.basic.Enumeration description="Motor" enumId="AsClsMotor" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Electric Machine" enumId="AsClsElectricMachine" enumTypeId="AssetClass"/>
+            <!-- A mechanism that transforms electric energy from a source to a secondary circuit -->
+            <moqui.basic.Enumeration description="Transformer" enumId="AsClsTransformer" parentEnumId="AsClsElectricMachine" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electric Motor" enumId="AsClsElectricMotor" parentEnumId="AsClsElectricMachine" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Stepper Motor" enumId="AsClsStepperMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="DC Brushed Motor" enumId="AsClsDCBrushedMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="DC Brushless Motor" enumId="AsClsDCBrushlessMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="AC Brushless Motor" enumId="AsClsACBrushlessMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Synchronous Motor" enumId="AsClsSyncMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Induction Motor" enumId="AsClsInductionMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Direct Drive" enumId="AsClsDirectDrive" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Linear Motor" enumId="AsClsLinearMotor" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Synchronous Reluctance Motor - SyncRM" enumId="AsClsSyncRM" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Switched Reluctance Motor - SRM" enumId="AsClsSRM" parentEnumId="AsClsElectricMotor" enumTypeId="AssetClass"/>
+
+            <!-- A mechanism that moves or controls a mechanical part of a piece of equipment.
+                 It takes energy usually provided by air, electric current, or liquid and converts the energy into some kind of motion -->
+            <moqui.basic.Enumeration description="Actuator" enumId="AsClsActuator" enumTypeId="AssetClass"/>
+            <!-- A mechanism that halts or controls the flow of a liquid, gas, or other material through a passage, pipe, inlet, or outlet -->
+            <moqui.basic.Enumeration description="Valve Actuator" enumId="AsClsValveActuator" parentEnumId="AsClsActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Zone Valve Actuator" enumId="AsClsZoneValveActuator" parentEnumId="AsClsValveActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Ball Valve and Actuator" enumId="AsClsBallValveActuator" parentEnumId="AsClsValveActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Globe Valve and Actuator" enumId="AsClsGlobeValveActuator" parentEnumId="AsClsValveActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Pressure Independent Valve and Actuator" enumId="AsClsPressureIndependentValveActuator" parentEnumId="AsClsValveActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Butterfly Valve and Actuator" enumId="AsClsButterflyValveActuator" parentEnumId="AsClsValveActuator" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Damper Actuator" enumId="AsClsDamper Actuator" parentEnumId="AsClsActuator" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Safety Device" enumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety PLC" enumId="AsClsSafetyPLC" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Relay" enumId="AsClsSafetyRelay" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Contactor" enumId="AsClsSafetyContactor" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Lock" enumId="AsClsSafetyLock" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Switch" enumId="AsClsSafetySwitch" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Sensor" enumId="AsClsSafetySensor" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Optical Safety Device" enumId="AsClsOpticalSafetyDevice" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Emergency Stop" enumId="AsClsEmergencyStop" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Pressure Sensitive Device" enumId="AsClsPressureSensitiveDevice" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Control Device" enumId="AsClsSafetyControlDevice" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Pilot Device" enumId="AsClsSafetyPilotDevice" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Safety Lighting" enumId="AsClsSafetyLighting" parentEnumId="AsClsSafetyDevice" enumTypeId="AssetClass"/>
+
+            <moqui.basic.Enumeration description="Electrical Component" enumId="AsClsElectricalComponent" enumTypeId="AssetClass"/>
+            <!-- A string like piece or filament of relatively rigid or flexible material provided in a variety of diameters -->
+            <moqui.basic.Enumeration description="Wire" enumId="AsClsWire" parentEnumId="AsClsElectricalComponent" enumTypeId="AssetClass"/>
+            <!-- System that manages a chemical mixture used in a manufacturing process being performed at that piece of equipment.
+                 For example, this could describe the dielectric system for an EDM process or the chemical bath used in a plating process -->
+            <moqui.basic.Enumeration description="Dielectric" enumId="AsClsDielectric" parentEnumId="AsClsElectricalComponent" enumTypeId="AssetClass"/>
+            <!-- A unit that provides power to electric mechanisms -->
+            <moqui.basic.Enumeration description="Power Supply" enumId="AsClsPowerSupply" parentEnumId="AsClsElectricalComponent" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electrical Protection and Control" enumId="AsClsProtectionAndControl" parentEnumId="AsClsElectricalComponent" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Relay" enumId="AsClsRelay" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Contactor" enumId="AsClsContactor" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <!-- A mechanism that turns on or off an electric current or makes or breaks a circuit -->
+            <moqui.basic.Enumeration description="Switch" enumId="AsClsSwitch" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Switch Disconnector" enumId="AsClsSwitchDisconnector" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Switch Fuse" enumId="AsClsSwitchFuse" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Circuit Breaker" enumId="AsClsCircuitBreaker" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Pilot Device" enumId="AsClsPilotDevice" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Residual Current Device" enumId="AsClsRCD" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Surge Protective Device" enumId="AsClsSDP" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Arc Fault Detection Device" enumId="AsClsAFDD" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Fuse Holder" enumId="AsClsFuseHolder" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Fuse Disconnector" enumId="AsClsFuseDisconnector" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Overload Relay" enumId="AsClsOverloadRelay" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Motor Starter" enumId="AsClsMotorStarter" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Enclosure" enumId="AsClsEnclosure" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Energy Meter" enumId="AsClsEnergyMeter" parentEnumId="AsClsProtectionAndControl" enumTypeId="AssetClass"/>
+
+            <!-- Component that responds to a physical stimulus and transmits a resulting impulse or value from a sensing unit -->
+            <moqui.basic.Enumeration description="Sensor" enumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Temperature Sensor" enumId="AsClsTempSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Humidity Sensor" enumId="AsClsHumiditySensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Temperature and Humidity Sensor" enumId="AsClsTempHumiditySensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Limit Switch Sensor" enumId="AsClsLimitSwitchSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Magnetic Switch Sensor" enumId="AsClsMagneticSwitchSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Inductive Switch Sensor" enumId="AsClsInductiveSwitchSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Capacitive Switch Sensor" enumId="AsClsCapacitiveSwitchSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Photocell Sensor" enumId="AsClsPhotocellSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Ultrasonic Sensor" enumId="AsClsUltrasonicSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Ultrasonic Sensor" enumId="AsClsUltrasonicSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Ultrasonic Sensor" enumId="AsClsUltrasonicSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Geophone Sensor" enumId="AsClsGeophoneSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Hydrophone Sensor" enumId="AsClsHydrophoneSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Seismometer Sensor" enumId="AsClsSeismometerSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Sound Locator Sensor" enumId="AsClsSoundLocatorSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Microphone" enumId="AsClsMicrophoneSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Breathalyzer" enumId="AsClsBreathalyzerSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Carbon Dioxide Sensor" enumId="AsClsC2O2Sensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Carbon Monoxide Detector" enumId="AsClsC2OSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Catalytic Bead Sensor" enumId="AsClsCatalyticBeadSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Chemical Field-Effect Transistor" enumId="AsClsChemicalTransistorSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Chemiresistor" enumId="AsClsChemiresistorSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electrochemical Gas Sensor" enumId="AsClsGasSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electronic Nose" enumId="AsClsElectronicNoseSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electronic Tongue" enumId="AsClsElectronicTongueSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Electrolyte–Insulator–Semiconductor Sensor" enumId="AsClsEISSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Energy-Dispersive X-Ray Spectroscopy" enumId="AsClsXRaySensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Near-Infrared Spectroscopy" enumId="AsClsNIRSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Fluorescent Chloride Sensor" enumId="AsClsChlorideSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Holographic Sensor" enumId="AsClsHolographicSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Hydrocarbon Dew Point Analyzer" enumId="AsClsHydrocarbonSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Hydrogen Sensor" enumId="AsClsHydrogenSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Hydrogen Sulfide Sensor" enumId="AsClsHydrogenSulfideSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Infrared Point Sensor" enumId="AsClsInfraredPointSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Ion-Selective Electrode" enumId="AsClsIonSelectiveElectrodeSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="Nondispersive Infrared Sensor" enumId="AsClsNonDispersiveInfraredSensor" parentEnumId="AsClsSensor" enumTypeId="AssetClass"/>
+
+            <!-- other asset classes -->
+            <!-- System that circulates air or regulates airflow without altering temperature or humidity -->
+            <moqui.basic.Enumeration description="Air Handler" enumId="AsClsAirHandler" enumTypeId="AssetClass"/>
+            <!-- A motion system that provides linear or rotational motion for a piece of equipment -->
+            <moqui.basic.Enumeration description="Axis" enumId="AsClsAxis" enumTypeId="AssetClass"/>
+            <!-- Linear Axis that provides prismatic motion along a fixed axis -->
+            <moqui.basic.Enumeration description="Linear Axis" enumId="AsClsLinearAxis" parentEnumId="AsClsAxis" enumTypeId="AssetClass"/>
+            <!-- Rotatory Axis that provides rotation about a fixed axis -->
+            <moqui.basic.Enumeration description="Rotatory Axis" enumId="AsClsRotatoryAxis" parentEnumId="AsClsAxis" enumTypeId="AssetClass"/>
+            <moqui.basic.Enumeration description="System" enumId="DetSystem" enumTypeId="AssetClass"/>
+            <!-- An electronic component or circuit that amplifies power, electric current, or voltage -->
+            <moqui.basic.Enumeration description="Amplifier" enumId="AsClsAmplifier" enumTypeId="AssetClass"/>
+            <!-- Tooling delivery composed of a tool delivery mechanism that moves tools between a tool magazine and a spindle a turret -->
+            <moqui.basic.Enumeration description="Automatic Tool Changer" enumId="AsClsAutomaticToolChanger" enumTypeId="AssetClass"/>
+            <!-- A mechanical structure that transforms rotary motion into linear motion -->
+            <moqui.basic.Enumeration description="Ballscrew" enumId="AsClsBallscrew" enumTypeId="AssetClass"/>
+            <!-- Loader that delivers bar stock to a piece of equipment -->
+            <moqui.basic.Enumeration description="Bar Feeder" enumId="AsClsBarFeeder" enumTypeId="AssetClass"/>
+            <!-- An endless flexible band that transmits motion for a piece of equipment or conveys materials and objects -->
+            <moqui.basic.Enumeration description="Belt" enumId="AsClsBelt" enumTypeId="AssetClass"/>
+            <!-- A mechanism that slows down or stops a moving object by the absorption or transfer of the energy of momentum, usually by means of friction, electrical force, or magnetic force -->
+            <moqui.basic.Enumeration description="Brake" enumId="AsClsBrake" enumTypeId="AssetClass"/>
+            <!-- An interconnected series of objects that band together and transmit motion for a piece of equipment or to convey materials and objects -->
+            <moqui.basic.Enumeration description="Chain" enumId="AsClsChain" enumTypeId="AssetClass"/>
+            <!-- A mechanism that breaks material into smaller pieces -->
+            <moqui.basic.Enumeration description="Chopper" enumId="AsClsChopper" enumTypeId="AssetClass"/>
+            <!-- A mechanism that holds a part, stock material, or any other item in place -->
+            <moqui.basic.Enumeration description="Chuck" enumId="AsClsChuck" enumTypeId="AssetClass"/>
+            <!-- An inclined channel that conveys material -->
+            <moqui.basic.Enumeration description="Chute" enumId="AsClsChute" enumTypeId="AssetClass"/>
+            <!-- A mechanism that strengthens, supports, or fastens objects in place -->
+            <moqui.basic.Enumeration description="Clamp" enumId="AsClsClamp" enumTypeId="AssetClass"/>
+            <!-- System that provides distribution and management of fluids that remove heat from a piece of equipment -->
+            <moqui.basic.Enumeration description="Coolant" enumId="AsClsCoolant" enumTypeId="AssetClass"/>
+            <!-- System that extracts controlled amounts of heat to achieve a target temperature at a specified cooling rate.
+                 Note: As an example, Energy Extraction Method can be via cooling water pipes running through the chamber -->
+            <moqui.basic.Enumeration description="Cooling System" enumId="AsClsCoolingSystem" enumTypeId="AssetClass"/>
+            <!-- A heat exchange system that uses a fluid to transfer heat to the atmosphere -->
+            <moqui.basic.Enumeration description="Cooling Tower" enumId="AsClsCoolingTower" enumTypeId="AssetClass"/>
+            <!-- Auxiliary that manages the addition of material or state change of material being performed in an additive manufacturing process.
+                 For example, this could describe the portion of a piece of equipment that manages a material extrusion process or a vat polymerization process -->
+            <moqui.basic.Enumeration description="Deposition" enumId="AsClsDeposition" enumTypeId="AssetClass"/>
+            <!-- A mechanical mechanism or closure that covers a physical access portal into a piece of equipment allowing or restricting access to other parts of the equipment -->
+            <moqui.basic.Enumeration description="Door" enumId="AsClsDoor" enumTypeId="AssetClass"/>
+            <!-- A mechanism that allows material to flow for the purpose of drainage from, for example, a vessel or tank -->
+            <moqui.basic.Enumeration description="Drain" enumId="AsClsDrain" enumTypeId="AssetClass"/>
+            <!-- Electric system composed of the main power supply for the piece of equipment that provides distribution of that power throughout the equipment.
+                 The electric system will provide all the data with regard to electric current, voltage, frequency, etc. that applies to the piece of equipment as a functional unit -->
+            <moqui.basic.Enumeration description="Electric System" enumId="AsClsElectricSystem" enumTypeId="AssetClass"/>
+            <!-- System composed of a structure that is used to contain or isolate a piece of equipment or area.
+                 Enclosure may provide information regarding access to the internal components of a piece of equipment or the conditions within the enclosure -->
+            <moqui.basic.Enumeration description="Enclosure" enumId="AsClsEnclosure" enumTypeId="AssetClass"/>
+            <!-- Device that measures position -->
+            <moqui.basic.Enumeration description="Encoder" enumId="AsClsEncoder" enumTypeId="AssetClass"/>
+            <!-- System composed of functions that form the last link segment of a piece of equipment -->
+            <moqui.basic.Enumeration description="End Effector" enumId="AsClsEndEffector" enumTypeId="AssetClass"/>
+            <!-- System that provides movement and distribution of pressurized liquid throughout the piece of equipment -->
+            <moqui.basic.Enumeration description="Hydraulic System" enumId="AsClsHydraulicSystem" enumTypeId="AssetClass"/>
+            <!-- A mechanism that measures rotary position -->
+            <moqui.basic.Enumeration description="Encoder" enumId="AsClsEncoder" enumTypeId="AssetClass"/>
+            <!-- A mechanism that emits a type of radiation -->
+            <moqui.basic.Enumeration description="Exposure Unit" enumId="AsClsExposureUnit" enumTypeId="AssetClass"/>
+            <!-- A mechanism that dispenses liquid or powered materials -->
+            <moqui.basic.Enumeration description="Extrusion Unit" enumId="AsClsExtrusionUnit" enumTypeId="AssetClass"/>
+            <!-- A substance or structure that allows liquids or gases to pass through to remove suspended impurities or to recover solids -->
+            <!-- System that manages the delivery of materials within a piece of equipment -->
+            <moqui.basic.Enumeration description="Feeder" enumId="AsClsFeeder" enumTypeId="AssetClass"/>
+            <!-- Component through which liquids or gases are passed to remove suspended impurities or to recover solids -->
+            <moqui.basic.Enumeration description="Filter" enumId="AsClsFilter" enumTypeId="AssetClass"/>
+            <!-- An electromechanical actuator that produces deflection of a beam of light or energy in response to electric current through its coil in a magnetic field -->
+            <moqui.basic.Enumeration description="Galvanomotor" enumId="AsClsGalvanomotor" enumTypeId="AssetClass"/>
+            <!-- Tooling delivery composed of a tool mounting mechanism that holds any number of tools.
+                 Tools are located in a station. Tools are positioned for use in the manufacturing process by linearly positioning the gang tool bar -->
+	        <moqui.basic.Enumeration description="Gang Tool Bar" enumId="AsClsGangToolBar" enumTypeId="AssetClass"/>
+            <!-- A mechanism that holds a part, stock material, or any other item in place -->
+            <moqui.basic.Enumeration description="Gripper" enumId="AsClsGripper" enumTypeId="AssetClass"/>
+            <!-- System that delivers controlled amounts of heat to achieve a target temperature at a specified heating rate.
+                 Note: As an example, energy delivery method can be either through electric heaters or gas burners -->
+            <moqui.basic.Enumeration description="Heating System" enumId="AsClsHeatingSystem" enumTypeId="AssetClass"/>
+            <!-- System that provides movement and distribution of pressurized liquid throughout the piece of equipment -->
+            <moqui.basic.Enumeration description="Hydraulic System" enumId="AsClsHydraulicSystem" enumTypeId="AssetClass"/>
+            <!-- A chamber or bin that stores materials temporarily, typically being filled through the top and dispensed through the bottom -->
+            <moqui.basic.Enumeration description="Hopper" enumId="AsClsHopper" enumTypeId="AssetClass"/>
+            <!-- Structure that provides a connection between components -->
+            <moqui.basic.Enumeration description="Link" enumId="AsClsLink" enumTypeId="AssetClass"/>
+            <!-- Component that physically prohibits a device or component from opening or operating -->
+            <moqui.basic.Enumeration description="Lock" enumId="AsClsLock" enumTypeId="AssetClass"/>
+            <!-- Auxiliary that provides movement and distribution of materials, parts, tooling, and other items to or from a piece of equipment -->
+            <moqui.basic.Enumeration description="Loader" enumId="AsClsLoader" enumTypeId="AssetClass"/>
+            <!-- System that provides distribution and management of fluids used to lubricate portions of the piece of equipment -->
+            <moqui.basic.Enumeration description="Lubrification System" enumId="AsClsLubrificationSystem" enumTypeId="AssetClass"/>
+            <!-- A viscous liquid -->
+            <moqui.basic.Enumeration description="Oil" enumId="AsClsOil" enumTypeId="AssetClass"/>
+            <!-- System that uses compressed gasses to actuate components or do work within the piece of equipment.
+                 Note: Actuation is usually performed using a cylinder -->
+            <moqui.basic.Enumeration description="Pneumatic System" enumId="AsClsPneumaticSystem" enumTypeId="AssetClass"/>
+            <!-- A tool storage location associated with a tool magazine or automatic tool changer -->
+            <moqui.basic.Enumeration description="Pot" enumId="AsClsPot" enumTypeId="AssetClass"/>
+            <!-- System composed of a power source associated with a piece of equipment that supplies energy to the manufacturing process separate from the electric system.
+	             For example, this could be the power source for an EDM machining process, an electroplating line, or a welding system -->
+	        <moqui.basic.Enumeration description="Process Power" enumId="AsClsProcessPower" enumTypeId="AssetClass"/>
+            <!-- System that provides functions used to detect or prevent harm or damage to equipment or personnel -->
+            <moqui.basic.Enumeration description="Protective System" enumId="AsClsProtectiveSystem" enumTypeId="AssetClass"/>
+            <!-- A mechanism or wheel that turns in a frame or block and serves to change the direction of or to transmit force -->
+            <moqui.basic.Enumeration description="Pulley" enumId="AsClsPulley" enumTypeId="AssetClass"/>
+            <!-- A rotary storage unit for material -->
+            <moqui.basic.Enumeration description="Reel" enumId="AsClsReel" enumTypeId="AssetClass"/>
+            <!-- A mechanism that flattens or spreads materials -->
+            <moqui.basic.Enumeration description="Spreader" enumId="AsClsSpreader" enumTypeId="AssetClass"/>
+            <!-- Component that provides a signal or measured value -->
+            <moqui.basic.Enumeration description="Sensor" enumId="AsClsSensor" enumTypeId="AssetClass"/>
+            <!-- One or more cells that converts chemical energy to electricity and serves as a source of power -->
+            <moqui.basic.Enumeration description="Storage Battery" enumId="AsClsStarageBattery" enumTypeId="AssetClass"/>
+            <!-- Component composed of part(s) comprising the rigid bodies of the piece of equipment -->
+            <moqui.basic.Enumeration description="Structure" enumId="AsClsStructure" enumTypeId="AssetClass"/>
+            <!-- A surface that holds an object or material -->
+            <moqui.basic.Enumeration description="Table" enumId="AsClsTable" enumTypeId="AssetClass"/>
+            <!-- A receptacle or container that holds material -->
+            <moqui.basic.Enumeration description="Tank" enumId="AsClsTank" enumTypeId="AssetClass"/>
+            <!-- A mechanism that provides or applies a stretch or strain to another mechanism -->
+            <moqui.basic.Enumeration description="Tensioner" enumId="AsClsTensioner" enumTypeId="AssetClass"/>
+            <!-- Auxiliary that manages, positions, stores, and delivers tooling within a piece of equipment -->
+            <moqui.basic.Enumeration description="Tooling Delivery" enumId="AsClsToolingDelivery" enumTypeId="AssetClass"/>
+            <!-- Tooling delivery composed of a tool storage mechanism that holds any number of tools -->
+            <moqui.basic.Enumeration description="Tool Magazine" enumId="AsClsToolMagazine" enumTypeId="AssetClass"/>
+            <!-- Tooling delivery composed of a linear or matrixed tool storage mechanism that holds any number of tools -->
+            <moqui.basic.Enumeration description="Tool Rack" enumId="AsClsToolRack" enumTypeId="AssetClass"/>
+            <!-- A mechanism that physically moves a tool from one location to another -->
+            <moqui.basic.Enumeration description="Transfer Arm" enumId="AsClsTransferArm" enumTypeId="AssetClass"/>
+            <!-- Tooling delivery composed of a tool mounting mechanism that holds any number of tools.
+                 Tools are positioned for use in the manufacturing process by rotating the turret -->
+            <moqui.basic.Enumeration description="Turret" enumId="AsClsTurret" enumTypeId="AssetClass"/>
+            <!-- Vacuum system that evacuates gases and liquids from an enclosed and sealed space to a controlled negative pressure
+                 or a molecular density below the prevailing atmospheric level -->
+            <moqui.basic.Enumeration description="Vacuum System" enumId="AsClsVacuumSystem" enumTypeId="AssetClass"/>
+            <!-- A container for liquid or powdered materials -->
+            <moqui.basic.Enumeration description="VAT" enumId="AsClsVAT" enumTypeId="AssetClass"/>
+            <!-- Auxiliary that removes manufacturing byproducts from a piece of equipment -->
+            <moqui.basic.Enumeration description="Waste Disposal" enumId="AsClsWasteDisposal" enumTypeId="AssetClass"/>
+            <!-- Liquid composed of H2O -->
+            <moqui.basic.Enumeration description="Water" enumId="AsClsWater" enumTypeId="AssetClass"/>
+            <!-- An object or material on which a form of work is performed -->
+            <moqui.basic.Enumeration description="Workpiece" enumId="AsClsWorkpiece" enumTypeId="AssetClass"/>
 
             <!-- Asset Status -->
             <moqui.basic.StatusType description="Asset" statusTypeId="Asset"/>
@@ -793,6 +1089,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Air Filter Replace" enumId="MntTpAirFilterRepl" parentEnumId="MntTpHvac" enumTypeId="MaintenanceType"/>
             <moqui.basic.Enumeration description="Refrigerant Check/Recharge" enumId="MntTpRefrChkChrg" parentEnumId="MntTpHvac" enumTypeId="MaintenanceType"/>
             <moqui.basic.Enumeration description="Cleaning" enumId="MntTpCleaning" enumTypeId="MaintenanceType"/>
+            <!-- Calibration could be the initial maintenance upon which the validity of the sensor unit's calibration data is verified, or it could be the next scheduled calibration job -->
+            <moqui.basic.Enumeration description="Sensor Calibration" enumId="MntTpSensorCalibration" enumTypeId="MaintenanceType"/>
         </seed-data>
     </entity>
     <entity entity-name="AssetMaintenanceContent" package="mantle.product.maintenance" cache="never">
@@ -986,6 +1284,15 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========================================================= -->
 
     <extend-entity entity-name="NetworkPrinter" package="moqui.basic.print">
+        <field name="assetId" type="id"/>
+        <relationship type="one" related="mantle.product.asset.Asset"/>
+    </extend-entity>
+
+    <!-- ========================================================= -->
+    <!-- moqui.device -->
+    <!-- ========================================================= -->
+
+    <extend-entity entity-name="Device" package="moqui.device">
         <field name="assetId" type="id"/>
         <relationship type="one" related="mantle.product.asset.Asset"/>
     </extend-entity>

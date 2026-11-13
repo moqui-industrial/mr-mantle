@@ -130,6 +130,13 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="FACP"/>
         <alias-all entity-alias="NPTR"/>
     </view-entity>
+    <view-entity entity-name="FacilityDeviceDetail" package="mantle.facility">
+        <member-entity entity-alias="FD" entity-name="mantle.facility.FacilityDevice"/>
+        <member-entity entity-alias="DEV" entity-name="moqui.device.Device" join-from-alias="FD">
+            <key-map field-name="deviceId"/></member-entity>
+        <alias-all entity-alias="FD"/>
+        <alias-all entity-alias="DEV"><exclude field="deviceId"/><exclude field="purposeEnumId"/></alias-all>
+    </view-entity>
     <view-entity entity-name="FacilityLocationDetail" package="mantle.facility">
         <member-entity entity-alias="FAC" entity-name="mantle.facility.Facility"/>
         <member-entity entity-alias="FLOC" entity-name="mantle.facility.FacilityLocation" join-from-alias="FAC">

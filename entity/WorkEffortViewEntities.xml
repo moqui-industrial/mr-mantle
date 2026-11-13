@@ -515,6 +515,53 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- mantle.work.estimate -->
     <!-- ========================================================= -->
 
+    <view-entity entity-name="ProductionEstimateAndParty" package="mantle.work.estimate">
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate"/>
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty" join-from-alias="PE" join-optional="true">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <alias-all entity-alias="PE"/>
+        <alias-all entity-alias="PEP"/>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimatePartyAndPerson" package="mantle.work.estimate">
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty"/>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PEP">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="PEP"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimateAndPartyDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate"/>
+        <member-entity entity-alias="PEP" entity-name="mantle.work.estimate.ProductionEstimateParty" join-from-alias="PE">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <member-entity entity-alias="PTY" entity-name="mantle.party.Party" join-from-alias="PEP">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="ORG" entity-name="mantle.party.Organization" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="PER" entity-name="mantle.party.Person" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <member-entity entity-alias="USRACT" entity-name="moqui.security.UserAccount" join-from-alias="PEP" join-optional="true">
+            <key-map field-name="partyId"/></member-entity>
+        <alias-all entity-alias="PE"/>
+        <alias-all entity-alias="PEP"><exclude field="productionEstimateId"/></alias-all>
+        <alias-all entity-alias="PTY"/>
+        <alias-all entity-alias="PER"><exclude field="partyId"/></alias-all>
+        <alias-all entity-alias="ORG"><exclude field="partyId"/></alias-all>
+        <alias name="username" entity-alias="USRACT"/>
+    </view-entity>
+    <view-entity entity-name="ProductionEstimateWorkEffDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PEWE" entity-name="mantle.work.estimate.ProductionEstimateWorkEff"/>
+        <member-entity entity-alias="WEF" entity-name="mantle.work.effort.WorkEffort" join-from-alias="PEWE">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="PEWE"/>
+        <alias-all entity-alias="WEF"><exclude field="workEffortId"/></alias-all>
+    </view-entity>
+    <view-entity entity-name="WorkEffortProductionEstimateDetail" package="mantle.work.estimate">
+        <member-entity entity-alias="PEWE" entity-name="mantle.work.estimate.ProductionEstimateWorkEff"/>
+        <member-entity entity-alias="PE" entity-name="mantle.work.estimate.ProductionEstimate" join-from-alias="PEWE">
+            <key-map field-name="productionEstimateId"/></member-entity>
+        <alias-all entity-alias="PEWE"/>
+        <alias-all entity-alias="PE"><exclude field="productionEstimateId"/></alias-all>
+    </view-entity>
     <view-entity entity-name="ProductionEstimateSummary" package="mantle.work.estimate">
         <member-entity entity-alias="PEST" entity-name="mantle.work.estimate.ProductionEstimate"/>
         <alias-all entity-alias="PEST"><exclude field="quantity"/></alias-all>

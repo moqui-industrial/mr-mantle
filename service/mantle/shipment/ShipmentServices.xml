@@ -669,7 +669,8 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="createRouteSegment">
                 <service-call name="create#mantle.shipment.ShipmentRouteSegment" out-map="context"
                         in-map="{shipmentId:shipmentId, carrierPartyId:orderPart.carrierPartyId,
-                            shipmentMethodEnumId:orderPart.shipmentMethodEnumId, shippingGatewayConfigId:shippingGatewayConfigId,
+                            shipmentMethodEnumId:orderPart.shipmentMethodEnumId, tradeTermEnumId:orderPart.tradeTermEnumId,
+                            shippingGatewayConfigId:shippingGatewayConfigId,
                             destPostalContactMechId:orderPart.postalContactMechId, destTelecomContactMechId:orderPart.telecomContactMechId,
                             originFacilityId:originFacilityId, destinationFacilityId:destinationFacilityId}"/>
             </if>

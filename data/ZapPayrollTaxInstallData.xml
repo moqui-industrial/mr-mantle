@@ -461,11 +461,13 @@ along with this software (see the LICENSE.md file). If not, see
     </mantle.humanres.employment.PayrollAdjustment>
     -->
 
-    <!-- ========== Italy ========== -->
+    <!-- ========== Italy State ========== -->
+    <!-- see https://www.agenziaentrate.gov.it/ -->
     <mantle.party.Party partyId="ItaRa" partyTypeEnumId="PtyOrganization">
         <mantle.party.Organization organizationName="Italian Revenue Agency"/>
         <mantle.party.PartyRole roleTypeId="OrgTaxAuthority"/>
     </mantle.party.Party>
     <mantle.other.tax.TaxAuthority taxAuthorityId="ItaRa" description="Italian Revenue Agency" taxAuthGeoId="ITA"
-            taxAuthPartyId="ItaRa" taxAuthorityTypeEnumId="TatFederal" taxAuthorityRateTypeEnumId="TartVatTax"/>
+            taxAuthPartyId="ItaRa" taxAuthorityTypeEnumId="TatFederal" taxAuthorityRateTypeEnumId="TartVatTax"
+            sequentialInvoiceNumbering="Y"/>
 </entity-facade-xml>

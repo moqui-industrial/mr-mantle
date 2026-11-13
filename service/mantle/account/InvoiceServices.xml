@@ -329,13 +329,17 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="invoice" type="Map"/>
             <parameter name="currentStatus" type="Map"/>
             <parameter name="invoiceTotal" type="BigDecimal"/>
+            <parameter name="invoiceTaxSummaryList" type="List"><parameter name="invoiceTaxSummary" type="Map"/></parameter>
             <parameter name="appliedPaymentsTotal" type="BigDecimal"/>
             <parameter name="unpaidTotal" type="BigDecimal"/>
             <parameter name="noAdjustmentTotal" type="BigDecimal"/>
             <parameter name="adjustmentTotal" type="BigDecimal"/>
             <parameter name="settlementTerm" type="Map"/>
+            <parameter name="orderItemBillingList" type="List"><parameter name="orderItemBilling" type="Map"/></parameter>
             <parameter name="orderIdSet" type="Set"><parameter name="orderId"/></parameter>
             <parameter name="paymentApplicationList" type="List"><parameter name="paymentApplication" type="Map"/></parameter>
+            <parameter name="shipmentItemSourceList" type="List"><parameter name="shipmentItemSource" type="Map"/></parameter>
+            <parameter name="shipmentIdSet" type="Set"><parameter name="shipmentId"/></parameter>
 
             <parameter name="invoiceItemList" type="List"><parameter name="invoiceItem" type="Map"/></parameter>
             <parameter name="topItemList" type="List"><parameter name="invoiceItem" type="Map"/></parameter>
@@ -348,10 +352,21 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fromContactInfo" type="Map"><description>From the mantle.party.ContactServices.get#PartyContactInfo service.</description></parameter>
             <parameter name="logoImageLocation"/>
             <parameter name="fromPartyMessage"/>
+            <parameter name="fromPartyTaxAuthorityInfo"><description>From Party Tax Authority Info.</description></parameter>
+            <parameter name="fromPartySocialSecurityNumber"><description>From Party Social Security Number.</description></parameter>
+            <parameter name="fromPartyREA"><description>From Party Economic and Administrative Index.</description></parameter>
+            <parameter name="fromPartyEORI"><description>From Party Economic Operator Registration and Identification Number.</description></parameter>
+            <parameter name="fromPartyExchSysCode"><description>From Party E-Invoice Exchange System Code.</description></parameter>
             <parameter name="toPartyMessage"/>
             <parameter name="toParty" type="Map"/>
             <parameter name="toContactInfo" type="Map"><description>From the mantle.party.ContactServices.get#PartyContactInfo service.</description></parameter>
             <parameter name="toBillingRep" type="Map"/>
+            <parameter name="toPartyTaxAuthorityInfo"><description>To Party Tax Authority Info.</description></parameter>
+            <parameter name="toPartySocialSecurityNumber"><description>To Party Social Security Number.</description></parameter>
+            <parameter name="toPartyREA"><description>To Party Economic and Administrative Index.</description></parameter>
+            <parameter name="toPartyEORI"><description>To Party Economic Operator Registration and Identification Number.</description></parameter>
+            <parameter name="toPartyEORINumber"><description>To Party Economic Operator Registration and Identification Number (alias).</description></parameter>
+            <parameter name="toPartyExchSysCode"><description>To Party E-Invoice Exchange System Code.</description></parameter>
 
             <parameter name="finalizedStatusHistoryList" type="List"><parameter name="entityAuditLog" type="Map"/></parameter>
 
@@ -365,9 +380,17 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.InvoiceServices.get#InvoiceTotal" in-map="{invoiceId:invoiceId}" out-map="context"/>
             <entity-find-related-one value-field="invoice" relationship-name="mantle.account.invoice.SettlementTerm" to-value-field="settlementTerm"/>
 
+            <entity-find entity-name="mantle.account.invoice.InvoiceTaxSummary" list="invoiceTaxSummaryList">
+                <econdition field-name="invoiceId" from="invoiceId"/></entity-find>
+
             <entity-find entity-name="mantle.order.OrderItemBilling" list="orderItemBillingList">
                 <econdition field-name="invoiceId"/><order-by field-name="invoiceItemSeqId"/></entity-find>
             <set field="orderIdSet" from="Array.from(new Set(Array.from(orderItemBillingList).map((it) => it.orderId))).sort()"/>
+
+            <!-- get associated shipment items -->
+            <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentItemSourceList">
+                <econdition field-name="invoiceId"/></entity-find>
+            <set field="shipmentIdSet" from="Array.from(new Set(Array.from(shipmentItemSourceList).map((it) => it.shipmentId))).sort()"/>
 
             <entity-find entity-name="mantle.account.payment.PaymentApplication" list="paymentApplicationList">
                 <econditions combine="or">
@@ -445,6 +468,18 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="toPartyMessage" from="messageToOut.contentText"/>
             <log level="warn" message="toPartyMessage: ${toPartyMessage}"/>
 
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="fromPartyTaxAuthorityInfoList">
+                <date-filter/><econdition field-name="partyId" from="invoice.fromPartyId"/></entity-find>
+            <set field="fromPartyTaxAuthorityInfo" from="fromPartyTaxAuthorityInfoList?.[0]"/>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromPartySocialSecurityNumber">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromPartyREA">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidREA"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromPartyEORI">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromPartyExchSysCode">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
+
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toParty">
                 <field-map field-name="partyId" from="invoice.toPartyId"/></entity-find-one>
             <service-call name="mantle.party.ContactServices.get#PartyContactInfo" out-map="toContactInfo"
@@ -456,6 +491,19 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- don't limit to this, useful for contact and other rel types (like Sales Contact of a Sales Account): <econdition field-name="relationshipTypeEnumId" value="PrtRepresentative"/> -->
                 <econdition field-name="fromRoleTypeId" value="ClientBilling"/>
             </entity-find>
+
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="toPartyTaxAuthorityInfoList">
+                <date-filter/><econdition field-name="partyId" from="invoice.toPartyId"/></entity-find>
+            <set field="toPartyTaxAuthorityInfo" from="toPartyTaxAuthorityInfoList?.[0]"/>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toPartySocialSecurityNumber">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toPartyREA">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidREA"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toPartyEORI">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
+            <set field="toPartyEORINumber" from="toPartyEORI"/>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toPartyExchSysCode">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
             <entity-find-one entity-name="mantle.party.PartyDetail" value-field="toBillingRep">
                 <field-map field-name="partyId" from="toBillingRelList?.[0]?.fromPartyId"/></entity-find-one>
 
@@ -3558,6 +3606,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="auditRows" type="List"/>
             <parameter name="sendTo"/>
             <parameter name="creditRows" type="List"/>
+            <parameter name="terms" type="List"/>
+            <parameter name="taxSummary" type="List"/>
+            <parameter name="fromFiscal" type="Map"/>
+            <parameter name="toFiscal" type="Map"/>
+            <parameter name="settlementTerm" type="Map"/>
         </out-parameters>
         <actions>
             <set field="workflow" value="component://mr-mantle/service/mantle/account/InvoiceWorkflow.js"/>
@@ -3644,6 +3697,59 @@ along with this software (see the LICENSE.md file). If not, see
                 .execute('invoiceCommitments', invoiceId)"/>
             <set field="budgetAvailable" from="true"/>
             <set field="budgetUnavailableReason" from="null"/>
+
+            <!-- Terms (mantle.account.invoice.InvoiceTerm) -->
+            <entity-find entity-name="mantle.account.invoice.InvoiceTerm" list="rawTermList" limit="100" disable-authz="true">
+                <econdition field-name="invoiceId"/>
+                <order-by field-name="invoiceItemSeqId,invoiceTermId"/>
+            </entity-find>
+            <entity-find entity-name="moqui.basic.Enumeration" list="termTypeList" cache="true" disable-authz="true">
+                <econdition field-name="enumTypeId" value="TermType"/></entity-find>
+            <set field="termTypeNames" from="Object.fromEntries(Array.from(termTypeList).map((t) => [t.enumId, t.description]))"/>
+            <entity-find entity-name="mantle.account.invoice.SettlementTerm" list="allSettlementTerms" cache="true" disable-authz="true"/>
+            <set field="settlementTermNames" from="Object.fromEntries(Array.from(allSettlementTerms).map((s) => [s.settlementTermId, s.description]))"/>
+            <set field="terms" from="Array.from(rawTermList).map((term) => Object.assign(term.getMap(), {
+                termTypeDescription: termTypeNames[term.termTypeEnumId] || term.termTypeEnumId,
+                settlementTermDescription: settlementTermNames[term.settlementTermId] || term.settlementTermId
+            }))"/>
+
+            <!-- Tax Summary (mantle.account.invoice.InvoiceTaxSummary) -->
+            <entity-find entity-name="mantle.account.invoice.InvoiceTaxSummary" list="taxSummary" limit="100" disable-authz="true">
+                <econdition field-name="invoiceId"/>
+                <order-by field-name="taxCode"/>
+            </entity-find>
+
+            <!-- Settlement Term of Invoice -->
+            <entity-find-one entity-name="mantle.account.invoice.SettlementTerm" value-field="settlementTermVal">
+                <field-map field-name="settlementTermId" from="invoice.settlementTermId"/></entity-find-one>
+            <set field="settlementTerm" from="settlementTermVal?.getMap()"/>
+
+            <!-- Fiscal details for fromPartyId and toPartyId -->
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="fromTaxAuthList">
+                <date-filter/><econdition field-name="partyId" from="invoice.fromPartyId"/></entity-find>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromSsnVal">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromReaVal">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidREA"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromEoriVal">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="fromExchVal">
+                <field-map field-name="partyId" from="invoice.fromPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
+            <set field="fromFiscal" from="{taxIdNumber: fromTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: fromSsnVal?.idValue,
+                reaNumber: fromReaVal?.idValue, eoriNumber: fromEoriVal?.idValue, exchSysCode: fromExchVal?.idValue}"/>
+
+            <entity-find entity-name="mantle.other.tax.TaxAuthorityParty" list="toTaxAuthList">
+                <date-filter/><econdition field-name="partyId" from="invoice.toPartyId"/></entity-find>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toSsnVal">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidSsn"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toReaVal">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidREA"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toEoriVal">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidEORI"/></entity-find-one>
+            <entity-find-one entity-name="mantle.party.PartyIdentification" value-field="toExchVal">
+                <field-map field-name="partyId" from="invoice.toPartyId"/><field-map field-name="partyIdTypeEnumId" value="PtidExchSysCode"/></entity-find-one>
+            <set field="toFiscal" from="{taxIdNumber: toTaxAuthList?.[0]?.taxIdNumber, socialSecurityNumber: toSsnVal?.idValue,
+                reaNumber: toReaVal?.idValue, eoriNumber: toEoriVal?.idValue, exchSysCode: toExchVal?.idValue}"/>
         </actions>
     </service>
     <service verb="reverse" noun="DraftInvoice" allow-remote="false">

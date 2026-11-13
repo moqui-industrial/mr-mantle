@@ -523,6 +523,13 @@ along with this software (see the LICENSE.md file). If not, see
         </master>
     </entity>
 
+    <extend-entity entity-name="WorkEffort" package="mantle.work.effort" short-alias="workEfforts" cache="never" sequence-bank-size="10">
+        <field name="deviceProcessId" type="id">
+                <description>The device process, usually a program, machine production cycle, a recipe or batch execution, is modeled by a rule set.</description></field>
+        <relationship type="one" related="moqui.device.DeviceRuleSet" short-alias="deviceProcess">
+            <key-map field-name="deviceProcessId" related="deviceRuleSetId"/></relationship>
+    </extend-entity>
+
     <entity entity-name="WorkEffortAssetAssign" package="mantle.work.effort" cache="never">
         <field name="workEffortId" type="id" is-pk="true"/>
         <field name="assetId" type="id" is-pk="true"/>
@@ -1309,6 +1316,37 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="assetId" type="id" is-pk="true"/>
         <relationship type="one" related="mantle.work.estimate.ProductionEstimate"/>
         <relationship type="one" related="mantle.product.asset.Asset"/>
+    </entity>
+    <entity entity-name="ProductionEstimateParty" package="mantle.work.estimate" cache="never">
+        <field name="productionEstimateId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="roleTypeId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="receiveNotifications" type="text-indicator"/>
+        <relationship type="one" related="mantle.work.estimate.ProductionEstimate" short-alias="estimate"/>
+        <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" related="mantle.party.RoleType" short-alias="role"/>
+        <relationship type="one-nofk" related="mantle.party.Person" short-alias="person"/>
+        <relationship type="one-nofk" related="mantle.party.Organization" short-alias="organization"/>
+        <seed-data>
+            <moqui.basic.Enumeration description="ProductionEstimate" enumId="RgpProductionEstimate" enumTypeId="RoleGroup"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpProductionEstimate" roleTypeId="Assignee"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpProductionEstimate" roleTypeId="Manager"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpProductionEstimate" roleTypeId="Reporter"/>
+            <mantle.party.RoleGroupMember roleGroupEnumId="RgpProductionEstimate" roleTypeId="Analyst"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="ProductionEstimateBudgetAllocation" package="mantle.work.estimate" cache="never">
+        <field name="productionEstimateId" type="id" is-pk="true"/>
+        <field name="budgetId" type="id" is-pk="true"/>
+        <field name="budgetItemSeqId" type="id" is-pk="true"/>
+        <field name="amount" type="currency-amount"/>
+        <relationship type="one" related="mantle.other.budget.BudgetItem">
+            <key-map field-name="budgetId"/>
+            <key-map field-name="budgetItemSeqId"/>
+        </relationship>
+        <relationship type="one" related="mantle.work.estimate.ProductionEstimate"/>
     </entity>
 
     <!-- ========================================================= -->

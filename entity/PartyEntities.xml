@@ -1860,10 +1860,8 @@ along with this software (see the LICENSE.md file). If not, see
                     description="Website URL - Snapchat"/>
             <ContactMechPurpose contactMechPurposeId="WebUrlTikTok" contactMechTypeEnumId="CmtWebAddress"
                     description="Website URL - TikTok"/>
-            <ContactMechPurpose contactMechPurposeId="WebUrlTwitter" contactMechTypeEnumId="CmtWebAddress"
-                    description="Website URL - Twitter"/>                  
-                  
-
+            <ContactMechPurpose contactMechPurposeId="WebUrlX" contactMechTypeEnumId="CmtWebAddress"
+                    description="Website URL - X"/>
 
             <!-- General 'Other' purpose, mainly needed because PartyContactMech.contactMechPurposeId is a PK field, needs a non-null value -->
             <ContactMechPurpose contactMechPurposeId="Other" contactMechTypeEnumId="" description="Other"/>

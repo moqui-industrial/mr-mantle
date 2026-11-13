@@ -195,6 +195,39 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="invoiceDate" entity-alias="INV"/>
         <alias name="productStoreId" entity-alias="INV"/>
     </view-entity>
+
+    <view-entity entity-name="InvoiceTaxSummary" package="mantle.account.invoice">
+        <member-entity entity-alias="INV" entity-name="mantle.account.invoice.Invoice"/>
+        <member-entity entity-alias="IITM" entity-name="mantle.account.invoice.InvoiceItem" join-from-alias="INV">
+            <key-map field-name="invoiceId"/></member-entity>
+        <member-entity entity-alias="PROD" entity-name="mantle.product.Product" join-from-alias="IITM" join-optional="true">
+            <key-map field-name="productId"/></member-entity>
+        <entity-condition>
+            <econdition entity-alias="IITM" field-name="itemTypeEnumId" operator="not-in" value="ItemSalesTax,ItemVatTax,ItemVatTaxTotal"/>
+        </entity-condition>
+
+        <alias name="invoiceId" entity-alias="INV"/>
+        <alias name="invoiceTypeEnumId" entity-alias="INV"/>
+        <alias name="fromPartyId" entity-alias="INV"/>
+        <alias name="toPartyId" entity-alias="INV"/>
+        <alias name="statusId" entity-alias="INV"/>
+        <alias name="invoiceDate" entity-alias="INV"/>
+        <alias name="dueDate" entity-alias="INV"/>
+        <alias name="settlementTermId" entity-alias="INV"/>
+        <alias name="paidDate" entity-alias="INV"/>
+        <alias name="referenceNumber" entity-alias="INV"/>
+        <alias name="currencyUomId" entity-alias="INV"/>
+        <alias name="timePeriodId" entity-alias="INV"/>
+        <alias name="externalId" entity-alias="INV"/>
+        <alias name="originId" entity-alias="INV"/>
+        <alias name="invoiceTotal" entity-alias="INV"/>
+        <alias entity-alias="PROD" name="taxCode"/>
+        <alias name="itemsTotal" function="sum"><complex-alias operator="*">
+            <complex-alias-field entity-alias="IITM" field="quantity"/>
+            <complex-alias-field entity-alias="IITM" field="amount"/>
+        </complex-alias></alias>
+    </view-entity>
+
     <view-entity entity-name="InvoiceProductSalesSummary" package="mantle.account.invoice">
         <description>Like InvoiceItemSalesSummary but Product based instead of InvoiceItem based</description>
         <member-entity entity-alias="PROD" entity-name="mantle.product.Product"/>

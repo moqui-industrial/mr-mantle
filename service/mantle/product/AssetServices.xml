@@ -3895,4 +3895,54 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
         </actions>
     </service>
+
+    <!-- ========== AssetContent Services ========== -->
+    <service verb="get" noun="AssetContentLocation">
+        <in-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="contentTypeEnumIdList" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contentLocation"/>
+            <parameter name="assetContent"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.product.AssetRecordServices.get#AssetContentLocation" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+    <service verb="create" noun="AssetContent">
+        <in-parameters>
+            <auto-parameters entity-name="mantle.product.asset.AssetContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="assetId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="assetContentId"/></out-parameters>
+        <actions>
+            <service-call name="mantle.product.AssetRecordServices.create#AssetContent" in-map="context" out-map="context"/>
+        </actions>
+    </service>
+    <service verb="update" noun="AssetContent">
+        <in-parameters>
+            <parameter name="assetContentId" required="true"/>
+            <auto-parameters entity-name="mantle.product.asset.AssetContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <actions>
+            <service-call name="mantle.product.AssetRecordServices.update#AssetContent" in-map="context"/>
+        </actions>
+    </service>
+    <service verb="save" noun="AssetContentFile">
+        <in-parameters>
+            <parameter name="assetContentId" required="true"/>
+            <parameter name="assetId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+            <parameter name="saveContentLocation" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <service-call name="mantle.product.AssetRecordServices.save#AssetContentFile" in-map="context" out-map="context"/>
+        </actions>
+    </service>
 </services>

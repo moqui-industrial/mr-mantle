@@ -124,6 +124,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="produceEstimatedQuantity" type="BigDecimal"/>
 
             <parameter name="originFacilityId"/>
+            <parameter name="requirementId"/>
         </in-parameters>
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
@@ -152,6 +153,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="originFacilityId">
                 <service-call name="create#mantle.work.effort.WorkEffortFacility"
                         in-map="{workEffortId:workEffortId, facilityId:originFacilityId, typeEnumId:'WeftOrigin'}"/>
+            </if>
+            <if condition="requirementId">
+                <service-call name="create#mantle.request.requirement.WorkRequirementFulfillment"
+                        in-map="{requirementId:requirementId, workEffortId:workEffortId, fulfillmentTypeEnumId:'WrfProduces'}"/>
             </if>
         </actions>
     </service>
@@ -816,7 +821,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     
     <service verb="get" noun="ProductBomDetail">
-        <description>Given a Product to Produce in a Production Run find the BOM associated products (PatMfgBom) and if
+        <description>Given a Product to Produce in a Production Run find the BOM associated products (PatMfgBom as default) and if
             an associated product is a variant of another include the virtual for it too (ie allow either the virtual or
             variant to be consumed in the run). If a Product to Produce is a variant of a virtual Product and it has no
             BOM associated products, allow the product it is a variant of to take place of the BOM associations as a
@@ -824,6 +829,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="productId" required="true"/>
             <parameter name="produceQuantity" default="1.0" type="BigDecimal"/>
+            <parameter name="productAssocTypeEnumId" default="'PatMfgBom'"/>
         </in-parameters>
         <out-parameters>
             <parameter name="bomDetailList" type="List"><parameter name="bomDetailMap" type="Map">
@@ -835,7 +841,7 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- BOM assoc is from Product to Produce and to its various Products to Consume -->
             <entity-find entity-name="mantle.product.ProductAssoc" list="bomAssocList" cache="true">
                 <econdition field-name="productId"/>
-                <econdition field-name="productAssocTypeEnumId" value="PatMfgBom"/>
+                <econdition field-name="productAssocTypeEnumId"/>
                 <order-by field-name="sequenceNum,toProductId"/>
             </entity-find>
             <set field="bomDetailList" from="[]"/>

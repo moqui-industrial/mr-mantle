@@ -316,6 +316,14 @@ along with this software (see the LICENSE.md file). If not, see
         <alias-all entity-alias="AGTRM"/>
     </view-entity>
 
+    <view-entity entity-name="AgreementAssocAndTo" package="mantle.party.agreement">
+        <member-entity entity-alias="AASS" entity-name="mantle.party.agreement.AgreementAssoc"/>
+        <member-entity entity-alias="AGMT" entity-name="mantle.party.agreement.Agreement" join-from-alias="AASS">
+            <key-map field-name="toAgreementId" related="agreementId"/></member-entity>
+        <alias-all entity-alias="AASS"/>
+        <alias-all entity-alias="AGMT"><exclude field="agreementId"/></alias-all>
+    </view-entity>
+
     <!-- ========================================================= -->
     <!-- mantle.party.communication -->
     <!-- ========================================================= -->

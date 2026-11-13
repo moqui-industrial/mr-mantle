@@ -49,6 +49,13 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.sales.opportunity.SalesOpportunityStage">
             <key-map field-name="opportunityStageId"/></relationship>
         <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales Opportunity Type" enumTypeId="OpportunityType"/>
+            <moqui.basic.Enumeration enumId="SoCrossSell" description="Cross-Sell" enumTypeId="OpportunityType"/>
+            <moqui.basic.Enumeration enumId="SoUpSell" description="Up-Sell" enumTypeId="OpportunityType"/>
+            <moqui.basic.Enumeration enumId="SoMigration" description="Migration" enumTypeId="OpportunityType"/>
+            <moqui.basic.Enumeration enumId="SoNetNewBusiness" description="Net New Business" enumTypeId="OpportunityType"/>
+        </seed-data>
     </entity>
     <entity entity-name="SalesOpportunityParty" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>
@@ -66,6 +73,18 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-medium"/>
         <field name="defaultProbability" type="number-decimal"/>
         <field name="sequenceNum" type="number-integer"/>
+        <seed-data>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosProspecting" description="Prospecting" defaultProbability="10" sequenceNum="10"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosQualification" description="Qualification" defaultProbability="10" sequenceNum="20"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosAnalysis" description="Analysis" defaultProbability="20" sequenceNum="30"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosValueProposition" description="Value Proposition" defaultProbability="50" sequenceNum="40"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosIdDecisionMakers" description="Identify Decision Makers" defaultProbability="60" sequenceNum="50"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosPerceptionAnalysis" description="Perception Analysis" defaultProbability="70" sequenceNum="60"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosProposalPriceQuote" description="Proposal/Price Quote" defaultProbability="75" sequenceNum="70"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosNegotiationReview" description="Negotiation/Review" defaultProbability="90" sequenceNum="80"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosClosedWon" description="Closed Won" defaultProbability="100" sequenceNum="90"/>
+            <mantle.sales.opportunity.SalesOpportunityStage opportunityStageId="SosClosedLost" description="Closed Lost" defaultProbability="0" sequenceNum="100"/>
+        </seed-data>
     </entity>
     <entity entity-name="SalesOpportunityWorkEffort" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>
