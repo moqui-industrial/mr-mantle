@@ -244,33 +244,74 @@ feature("a contact's relationship is ended and the person kept; another organiza
             toPartyId: accountId,
             relationshipTypeEnumId: "PrtContact"
         })
-        const listed = as(users.rep, () => ids(call(workspace + "find#AccountContacts", {accountPartyId: accountId}).contactList))
-        const otherRep = as(users.repB, () =>
-            refusal(accounts + "delete#Contact", {partyRelationshipId: relationship.partyRelationshipId})
-        )
-        const ended = as(users.rep, () =>
-            refusal(accounts + "delete#Contact", {partyRelationshipId: relationship.partyRelationshipId})
-        )
+        const contactRows = as(users.rep, () => call(workspace + "find#AccountContacts", {accountPartyId: accountId}).contactList)
+        const listed = ids(contactRows)
+        // P4 (F99): the relationship's revision as the list read it; a stale one is refused
+        const expectedRevision = Array.from(contactRows).find(row => row.partyId === contactId).revision
+        const end = {partyRelationshipId: relationship.partyRelationshipId, expectedRevision}
+        const otherRep = as(users.repB, () => refusal(accounts + "delete#Contact", end))
+        const stale = as(users.rep, () => refusal(accounts + "delete#Contact", Object.assign({}, end, {expectedRevision: "1"})))
+        const ended = as(users.rep, () => refusal(accounts + "delete#Contact", end))
         const after = as(users.rep, () => ids(call(workspace + "find#AccountContacts", {accountPartyId: accountId}).contactList))
         return {
             contactId,
             owner: one("mantle.party.Party", {partyId: contactId}).ownerPartyId,
             listed,
             otherRep,
+            stale,
             ended,
             after,
             thruDate: one("mantle.party.PartyRelationship", {partyRelationshipId: relationship.partyRelationshipId}).thruDate,
             person: one("mantle.party.Party", {partyId: contactId})
         }
     },
-    then({contactId, owner, listed, otherRep, ended, after, thruDate, person}) {
+    then({contactId, owner, listed, otherRep, stale, ended, after, thruDate, person}) {
         owner == orgA
         listed.includes(contactId)
         otherRep.includes("RECORD_UNAVAILABLE")
+        stale.includes("REVISION_CHANGED")
         ended == ""
         !after.includes(contactId)
         thruDate != null
         person != null && person.disabled != "Y"
+    }
+})
+
+feature("set#AccountManager names the management's revision: a stale one refused, the read one changes the manager", {
+    when() {
+        const accountId = system(() => account(prefix + "_ACC_MANAGED", "Managed account", orgA))
+        // a representative takes the account with no manager ("0"), then the manager hands it back to the manager with the revision
+        // get#CustomerSales read
+        const taken = as(users.rep, () =>
+            refusal(accounts + "set#AccountManager", {
+                accountPartyId: accountId,
+                managerPartyId: users.rep,
+                expectedRevision: "0"
+            })
+        )
+        const read = as(users.manager, () => call(workspace + "get#CustomerSales", {customerPartyId: accountId}).customerDetail)
+        const change = {accountPartyId: accountId, managerPartyId: users.manager}
+        const stale = as(users.manager, () =>
+            refusal(accounts + "set#AccountManager", Object.assign({}, change, {expectedRevision: "0"}))
+        )
+        const changed = as(users.manager, () =>
+            refusal(accounts + "set#AccountManager", Object.assign({}, change, {expectedRevision: read.managerRevision}))
+        )
+        const current = Array.from(
+            ec.entity
+                .find("mantle.party.PartyRelationship")
+                .condition({toPartyId: accountId, relationshipTypeEnumId: "PrtAccountManager", thruDate: null})
+                .disableAuthz()
+                .list()
+        ).map(row => row.fromPartyId)
+        return {taken, revision: read.managerRevision, stale, changed, current}
+    },
+    then({taken, revision, stale, changed, current}) {
+        taken == ""
+        revision != "0"
+        stale.includes("REVISION_CHANGED")
+        changed == ""
+        current.length == 1 && current[0] == users.manager
     }
 })
 

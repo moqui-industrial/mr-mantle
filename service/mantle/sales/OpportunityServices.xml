@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     verbs and reads (SalesSettings.js): pipelines and their stages, sales teams and their dated members, the lead sources and their
     organization bindings, the lost reasons, and the options an organization offers. Each checks the SALES_* permission and the
     organization itself (mantle/sales/SalesAccess.js), whoever calls it; refusals carry reason codes. Later phases add the lead and
-    opportunity lifecycle (P4), the lead intake (P5) and the import (P6). -->
+    opportunity lifecycle (P4, below: SalesOpportunities.js), the lead intake (P5) and the import (P6). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== P2: the pipeline setup (design §9 Stages, Teams, LeadSources, TypesAndReasons) ===== -->
     <service verb="store" noun="Pipeline" allow-remote="false">
@@ -148,8 +148,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="LostReason" allow-remote="false">
         <description>A new lost reason (a SalesLostReason value: a name no current reason has, DUPLICATE_VALUE; an order from 0 to
             9999, last when empty), or a reason's name, order or end (end, or thruDate now or later), naming its revision. An ended
-            reason stays on the records that hold it and is offered for no new one; never deleted. The reasons are the instance's.
-            Needs SALES_CONFIGURE.</description>
+            reason stays on the records that hold it and is offered for no new one; never deleted. The reasons are the instance's,
+            so a change needs every organization's scope (SALES_ALL_ORGANIZATIONS or a system administrator; ORGANIZATION_DENIED
+            for a configurer of fewer: the user's call, impl-sales §4 Nov 13, built in P4). Needs SALES_CONFIGURE.</description>
         <in-parameters>
             <parameter name="enumId"/>
             <parameter name="description"/>
@@ -218,6 +219,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canConfigure" type="Boolean"/>
             <parameter name="canManageTeams" type="Boolean"/>
             <parameter name="canEditShared" type="Boolean"/>
+            <parameter name="canEditReasons" type="Boolean"><description>P4: whether the caller may change the instance's lost
+                reasons (every organization's scope)</description></parameter>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('salesSetup', context)"/>
@@ -234,6 +237,421 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canConfigure" from="answer.canConfigure"/>
             <set field="canManageTeams" from="answer.canManageTeams"/>
             <set field="canEditShared" from="answer.canEditShared"/>
+            <set field="canEditReasons" from="answer.canEditReasons"/>
+        </actions>
+    </service>
+    <!-- ===== P4: leads and opportunities (design §3 Opportunities, Leads, OpportunityDetail; SalesOpportunities.js) ===== -->
+    <service verb="define" noun="OpportunityFields" type="interface">
+        <description>The facts of a lead or opportunity that create#Opportunity and update#Opportunity take.</description>
+        <in-parameters>
+            <parameter name="opportunityName"/>
+            <parameter name="description"/>
+            <parameter name="nextStep"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="estimatedAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="estimatedProbability"/>
+            <parameter name="probabilityModeEnumId"><description>SpmStage (the stage's default, the default) or SpmManual</description></parameter>
+            <parameter name="estimatedCloseDate" type="Timestamp" format="yyyy-MM-dd"/>
+            <parameter name="recurringAmount"/>
+            <parameter name="recurringPlanEnumId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="marketingCampaignId"/>
+        </in-parameters>
+    </service>
+    <service verb="find" noun="Opportunities" allow-remote="false" read-only="true">
+        <description>The one scoped query of the board, list and calendar, Home and the palette (design §3, §12.1): the leads and
+            opportunities of the caller's sales scope (an organization of it; the deals assigned to the caller or a team of theirs,
+            or the organization's every deal for SALES_TEAM_VIEW), filtered by type, organization, owner (mine Y: the caller) or
+            team, pipeline and stage, outcome (SalesOppOpen: not Won or Lost; closed; a status), close period, account, source and
+            campaign, and text (name or id, ignoring case), paged in the query. Each row's names, stage, owner, team, source, next
+            activity, stage age and revision (selectionKey: id@revision, for a batch); the totals of the whole filtered result by
+            currency; the board's stage columns (the pipeline asked, when shared or of the scope, else the default organization's default pipeline,
+            empty stages too). Needs a
+            Sales read (PERMISSION_DENIED); an organization outside the scope is refused (ORGANIZATION_DENIED). An account the
+            caller may not see is named nowhere.</description>
+        <in-parameters>
+            <parameter name="typeEnumId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="statusId"><description>SalesOppOpen, SalesOppWon, SalesOppLost or closed; empty for every one</description></parameter>
+            <parameter name="closeFrom" type="Timestamp" format="yyyy-MM-dd"/>
+            <parameter name="closeThru" type="Timestamp" format="yyyy-MM-dd"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="text"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="opportunityList" type="List"/>
+            <parameter name="opportunityListCount" type="Integer"/>
+            <parameter name="opportunityListPageIndex" type="Integer"/>
+            <parameter name="opportunityListPageSize" type="Integer"/>
+            <parameter name="opportunityListPageMaxIndex" type="Integer"/>
+            <parameter name="opportunityListPageRangeLow" type="Integer"/>
+            <parameter name="opportunityListPageRangeHigh" type="Integer"/>
+            <parameter name="totals" type="List"><description>{currencyUomId, amount, amountText, count} over the whole result</description></parameter>
+            <parameter name="boardPipelineId"/>
+            <parameter name="stageColumns" type="List"><description>{opportunityStageId, description} in order</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('findOpportunities', context)"/>
+            <set field="opportunityList" from="found.opportunityList"/>
+            <set field="opportunityListCount" from="found.opportunityListCount"/>
+            <set field="opportunityListPageIndex" from="found.opportunityListPageIndex"/>
+            <set field="opportunityListPageSize" from="found.opportunityListPageSize"/>
+            <set field="opportunityListPageMaxIndex" from="found.opportunityListPageMaxIndex"/>
+            <set field="opportunityListPageRangeLow" from="found.opportunityListPageRangeLow"/>
+            <set field="opportunityListPageRangeHigh" from="found.opportunityListPageRangeHigh"/>
+            <set field="totals" from="found.totals"/>
+            <set field="boardPipelineId" from="found.boardPipelineId"/>
+            <set field="stageColumns" from="found.stageColumns"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Opportunity" allow-remote="false" read-only="true">
+        <description>OpportunityDetail's record as the caller may see it (SalesAccess.js opportunityOf), else opportunityFound false:
+            its facts with names (an account the caller may not see unnamed), outcome, stage of its pipeline and the pipeline's
+            stages, its people (owner, team, contacts, dated, ended ones too), competitors, activities (linked tasks), linked quotes
+            and orders (an organization reader's, of the scope's sellers, until P7 and P11), revision, and what the caller may do
+            (canEdit and canClose on an open deal, canReopen on a closed one, canQualify on an open lead).</description>
+        <in-parameters><parameter name="salesOpportunityId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="opportunityFound" type="Boolean"/>
+            <parameter name="opportunity" type="Map"/>
+            <parameter name="stages" type="List"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="competitors" type="List"/>
+            <parameter name="activities" type="List"/>
+            <parameter name="orders" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canClose" type="Boolean"/>
+            <parameter name="canReopen" type="Boolean"/>
+            <parameter name="canQualify" type="Boolean"/>
+            <parameter name="canAddActivity" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('getOpportunity', context)"/>
+            <set field="opportunityFound" from="!!found.opportunityFound"/>
+            <set field="opportunity" from="found.opportunity || null"/>
+            <set field="stages" from="found.stages || []"/>
+            <set field="parties" from="found.parties || []"/>
+            <set field="competitors" from="found.competitors || []"/>
+            <set field="activities" from="found.activities || []"/>
+            <set field="orders" from="found.orders || []"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="canClose" from="!!found.canClose"/>
+            <set field="canReopen" from="!!found.canReopen"/>
+            <set field="canQualify" from="!!found.canQualify"/>
+            <set field="canAddActivity" from="!!found.canAddActivity"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Opportunity" allow-remote="false">
+        <description>A lead (typeEnumId SotLead: no account or stage needed) or an opportunity (SotOpportunity, the default: a
+            current stage of its pipeline, the first by default; the pipeline one the organization uses, its default by default) of
+            an organization of the caller's scope (the one named, else the active one, the scope's only one or the only one of it the caller
+            works for; ORGANIZATION_DENIED), with a name
+            (NAME_REQUIRED), an optional account of the organization or shared (another organization's RECORD_UNAVAILABLE) and
+            contact (a person the caller may see), an owner (the caller by default; a person who works for the organization,
+            OWNER_INVALID; another than the caller a member of one of their teams unless SALES_TEAM_MANAGE) and team (a current
+            team of the organization, the owner's only one by default; TEAM_UNAVAILABLE), the probability (the stage's default in
+            Stage mode, the default, or the value given in Manual), amounts in a currency (the organization's base currency by
+            default), close date, recurring amount and plan, a lead source offered to the organization (SOURCE_INVALID) and a
+            campaign. Outcome Open. The organization, owner, team and contact are dated SalesOpportunityParty rows. Needs
+            SALES_OPPORTUNITY_EDIT and a Sales read (PERMISSION_DENIED).</description>
+        <implements service="mantle.sales.OpportunityServices.define#OpportunityFields"/>
+        <in-parameters>
+            <parameter name="typeEnumId" default-value="SotOpportunity"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="teamPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesOpportunityId"/></out-parameters>
+        <actions>
+            <set field="salesOpportunityId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('createOpportunity', context).salesOpportunityId"/>
+        </actions>
+    </service>
+    <service verb="update" noun="Opportunity" allow-remote="false">
+        <description>An open deal's facts, each given field changed and an empty one cleared (the name and a qualified deal's
+            account kept: NAME_REQUIRED, ACCOUNT_REQUIRED): a value of estimatedProbability is the rep's (Manual mode) unless
+            probabilityModeEnumId SpmStage copies the stage's default. Checked as create#Opportunity's. Names the revision read
+            (REVISION_CHANGED); a closed deal is refused (RECORD_CLOSED); a deal the caller does not see answers RECORD_UNAVAILABLE.
+            Needs SALES_OPPORTUNITY_EDIT.</description>
+        <implements service="mantle.sales.OpportunityServices.define#OpportunityFields"/>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesOpportunityId"/></out-parameters>
+        <actions>
+            <set field="salesOpportunityId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('updateOpportunity', context).salesOpportunityId"/>
+        </actions>
+    </service>
+    <service verb="move" noun="Opportunity" allow-remote="false">
+        <description>An open deal to a current stage of its pipeline, or of another pipeline the organization uses (salesPipelineId),
+            STAGE_INVALID otherwise: the stage's default probability copied in Stage mode only (a Manual value kept), the stage's
+            entry dated, the move audit-logged with its note. A stage move is no closure (a closed deal RECORD_CLOSED). Names the
+            revision read (REVISION_CHANGED). Needs SALES_OPPORTUNITY_EDIT on a deal the caller sees.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="opportunityStageId" required="true"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="probabilityModeEnumId"/>
+            <parameter name="estimatedProbability"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="stageText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('moveOpportunity', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="opportunityStageId" from="found.opportunityStageId"/>
+            <set field="stageText" from="found.stageText"/>
+        </actions>
+    </service>
+    <service verb="close" noun="Opportunity" allow-remote="false">
+        <description>An open deal's outcome (statusId SalesOppWon or SalesOppLost, STATUS_INVALID): Lost needs a current lost reason
+            (REASON_REQUIRED, REASON_INVALID), a lead's disqualification; the close date (now by default) and the actor, the note in
+            the audit log. Won needs no order. Names the revision read. Needs SALES_OPPORTUNITY_EDIT.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="statusId" required="true"/>
+            <parameter name="lostReasonEnumId"/>
+            <parameter name="closedDate" type="Timestamp"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('closeOpportunity', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="reopen" noun="Opportunity" allow-remote="false">
+        <description>A closed deal open again (an open one RECORD_OPEN) with the reason (REASON_REQUIRED), audit-logged beside the
+            close it undoes, and optionally a current stage of its pipeline and a new expected close: the outcome, lost reason and
+            close date cleared, the close history kept in the audit log. Names the revision read. Needs SALES_OPPORTUNITY_EDIT.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="estimatedCloseDate" type="Timestamp" format="yyyy-MM-dd"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('reopenOpportunity', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="qualify" noun="Lead" allow-remote="false">
+        <description>An open lead promoted, atomically, as the same record (salesOpportunityId kept): its account (one given, of
+            the organization or shared, another organization's RECORD_UNAVAILABLE; or a new prospect accountName through
+            mantle.sales.AccountServices.create#Account; or the lead's own; ACCOUNT_REQUIRED), its contact (a person given, made a
+            contact of the account; or a new one named), a current stage of its pipeline, its owner, amount and close; the type
+            Opportunity, the conversion time and actor, audit-logged; the source, activities, files and joins kept. An operation key
+            (operationKey, OPERATION_KEY_REQUIRED) answers a retry with the first result (alreadyApplied), never a second account;
+            the key used for another request is refused (OPERATION_KEY_CONFLICT). An opportunity is refused (ALREADY_QUALIFIED).
+            Names the revision read. Needs SALES_OPPORTUNITY_EDIT (and SALES_ACCOUNT_EDIT to create or join an account's
+            contact).</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="accountName"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="contactFirstName"/>
+            <parameter name="contactLastName"/>
+            <parameter name="contactEmail"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="estimatedAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="estimatedCloseDate" type="Timestamp" format="yyyy-MM-dd"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('qualifyLead', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="accountPartyId" from="found.accountPartyId"/>
+            <set field="contactPartyId" from="found.contactPartyId"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="store" noun="OpportunityParty" allow-remote="false">
+        <description>A deal's people, dated and never deleted (roleTypeId: SalesRepresentative, the one current primary owner, the
+            previous one ended; SalesTeam, its one current team; Contact, several; ROLE_INVALID otherwise): a party added from now
+            (checked as create#Opportunity's owner, team and contact), or with end a current team or contact row ended (an owner is
+            replaced, never ended: OWNER_REQUIRED). The organization's row stays the services' own. Names the deal's revision read
+            (its party rows' stamps are its revision). Needs SALES_OPPORTUNITY_EDIT on a deal the caller sees.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="roleTypeId" required="true"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesOpportunityId"/></out-parameters>
+        <actions>
+            <set field="salesOpportunityId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('storeOpportunityParty', context).salesOpportunityId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Competitor" allow-remote="false">
+        <description>A competitor on a deal (an organization the caller may see, not internal: COMPETITOR_INVALID), its position (a
+            SalesCompetitorPosition), strengths and weaknesses; remove takes it off. Names the deal's revision read, which the competitor
+            rows are part of, so the change advances it. Needs
+            SALES_OPPORTUNITY_EDIT on a deal the caller sees.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="competitorPartyId" required="true"/>
+            <parameter name="positionEnumId"/>
+            <parameter name="strengths"/>
+            <parameter name="weaknesses"/>
+            <parameter name="remove" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="competitorPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('storeCompetitor', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="competitorPartyId" from="found.competitorPartyId"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="OpportunityBatch" allow-remote="false">
+        <description>OpportunityBatch: each chosen deal on its own, in its own transaction, at the revision its key names
+            (opportunityKeys: "salesOpportunityId@revision", find#Opportunities' selectionKey): move (to opportunityStageId,
+            move#Opportunity), assign (to ownerPartyId, store#OpportunityParty) or lose (with lostReasonEnumId, close#Opportunity).
+            A stale, refused or failed deal is named with its reason code and the others go on (results, successCount).
+            OPERATION_INVALID for another operation, SELECTION_REQUIRED for none.</description>
+        <in-parameters>
+            <parameter name="operation" required="true"/>
+            <parameter name="opportunityKeys" type="List" required="true"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="lostReasonEnumId"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"><description>{salesOpportunityId, ok, reasonCode, message}</description></parameter>
+            <parameter name="successCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('applyOpportunityBatch', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="successCount" from="found.successCount"/>
+        </actions>
+    </service>
+    <service verb="add" noun="OpportunityActivity" allow-remote="false">
+        <description>An activity on a deal: a Commons task (mantle.work.TaskServices.create#SimpleTask) assigned to the caller or a
+            person who works for the deal's organization (OWNER_INVALID), due when given, linked to the deal by
+            link#WorkEffortRecord (SalesOpportunityWorkEffort, the opportunity's own join), so it shows in the assignee's Today and
+            calendar. Completing it neither qualifies nor closes the deal. Needs SALES_OPPORTUNITY_EDIT on a deal the caller
+            sees.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="workEffortName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="estimatedCompletionDate" type="Timestamp" format="yyyy-MM-dd"/>
+            <parameter name="assignToPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <set field="workEffortId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('addActivity', context).workEffortId"/>
+        </actions>
+    </service>
+    <service verb="check" noun="OpportunityAccess" allow-remote="false" read-only="true">
+        <description>Whether the caller sees a deal (SalesAccess.js opportunityOf: an organization of their sales scope, and the
+            deal assigned to them or a team of theirs, or SALES_TEAM_VIEW) and may change it (SALES_OPPORTUNITY_EDIT): the record
+            visibility of get#RecordLinkInfo and RecordFiles for the opportunity and its files. A call with no user sees none.</description>
+        <in-parameters><parameter name="salesOpportunityId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('opportunityAccess', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="organizationPartyId" from="found.organizationPartyId || null"/>
+        </actions>
+    </service>
+    <service verb="create" noun="OpportunityContent">
+        <description>A file of a deal (SalesOpportunityContent, the record files of get#RecordLinkInfo): the row, and the uploaded
+            file saved through save#OpportunityContentFile. Needs SALES_OPPORTUNITY_EDIT on a deal the caller sees
+            (RECORD_UNAVAILABLE, PERMISSION_DENIED).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.sales.opportunity.SalesOpportunityContent" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesOpportunityContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/sales/SalesOpportunities.js').execute('contentAccess', context)</script>
+            <service-call name="create#mantle.sales.opportunity.SalesOpportunityContent" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.sales.OpportunityServices.save#OpportunityContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="OpportunityContentFile" allow-remote="false">
+        <description>Internal to create#OpportunityContent, which checks the caller: the file of a SalesOpportunityContent row of that
+            deal.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityContentId" required="true"/>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.sales.opportunity.SalesOpportunityContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.salesOpportunityId != salesOpportunityId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${salesOpportunityContentId} is not of deal ${salesOpportunityId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/salesOpportunity/${salesOpportunityId}/content_${salesOpportunityContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.sales.opportunity.SalesOpportunityContent" disable-authz="true"
+                    in-map="{salesOpportunityContentId:salesOpportunityContentId, contentLocation:contentLocation}"/>
         </actions>
     </service>
 </services>

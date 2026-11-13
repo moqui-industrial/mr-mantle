@@ -26,7 +26,9 @@ feature("sales accounts and contacts", {
         call("mantle.sales.AccountServices.add#Contact", { partyId: personId, accountPartyId: accountId })
         const rels = Array.from(ec.entity.find("mantle.party.PartyRelationship").condition("toPartyId", accountId).condition("relationshipTypeEnumId", "PrtContact").list())
         const delId = rels.find(r => r.fromPartyId == personId).partyRelationshipId
-        call("mantle.sales.AccountServices.delete#Contact", { partyRelationshipId: delId })
+        // the relationship's revision as read (impl-sales P4, F99)
+        const delRevision = String(ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js").ms(rels.find(r => r.fromPartyId == personId).lastUpdatedStamp))
+        call("mantle.sales.AccountServices.delete#Contact", { partyRelationshipId: delId, expectedRevision: delRevision })
         const left = Array.from(ec.entity.find("mantle.party.PartyRelationship").condition("toPartyId", accountId).condition("relationshipTypeEnumId", "PrtContact").condition("thruDate", null).list())
         return { rels: rels.length, left: left.map(r => r.fromPartyId) }
     },

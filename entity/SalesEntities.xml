@@ -28,14 +28,14 @@ along with this software (see the LICENSE.md file). If not, see
 
     <entity entity-name="SalesOpportunity" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>
-        <field name="typeEnumId" type="id"/>
-        <field name="accountPartyId" type="id"/>
+        <field name="typeEnumId" type="id" enable-audit-log="true"/>
+        <field name="accountPartyId" type="id" enable-audit-log="true"/>
         <field name="opportunityName" type="text-medium"/>
         <field name="description" type="text-very-long"/>
         <field name="nextStep" type="text-long"/>
         <field name="estimatedAmount" type="currency-amount" enable-audit-log="true"/>
         <field name="estimatedProbability" type="number-decimal" enable-audit-log="true"/>
-        <field name="estimatedCloseDate" type="date-time"/>
+        <field name="estimatedCloseDate" type="date-time" enable-audit-log="true"/>
         <field name="currencyUomId" type="id"/>
         <field name="marketingCampaignId" type="id"/>
         <field name="dataSourceId" type="id"/>
@@ -47,6 +47,24 @@ along with this software (see the LICENSE.md file). If not, see
         <!-- the outcome (impl-sales P2): SalesOppOpen, SalesOppWon or SalesOppLost (data/SalesCrmSeedData.xml); empty is open. A
             retired stage's open deals are those not Won or Lost (OpportunityServices store#Stage); the lifecycle is P4's -->
         <field name="statusId" type="id" enable-audit-log="true"/>
+        <!-- impl-sales P4 (design-sales §3 OpportunityDetail, SAL-CRM): the pipeline the deal moves through (its stage one of the
+            pipeline's), how its probability is set (SpmStage: copied from the stage on create and move; SpmManual: kept until Stage is
+            chosen again), when and by whom a lead was qualified (conversion) and the deal closed, the reason it was lost (a
+            SalesLostReason value), its recurring amount and plan (a SalesRecurringPlan value, enumCode its months), when it was created
+            and when it entered its stage (stage age). The key fields are audit-logged (typeEnumId, accountPartyId, estimatedCloseDate
+            above too); a reopen clears the outcome's fields and the audit log keeps the close history. Written only by
+            mantle.sales.OpportunityServices (SalesOpportunities.js). -->
+        <field name="salesPipelineId" type="id" enable-audit-log="true"/>
+        <field name="probabilityModeEnumId" type="id" enable-audit-log="true"/>
+        <field name="lostReasonEnumId" type="id" enable-audit-log="true"/>
+        <field name="recurringAmount" type="currency-amount" enable-audit-log="true"/>
+        <field name="recurringPlanEnumId" type="id" enable-audit-log="true"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="stageEnteredDate" type="date-time"/>
+        <field name="convertedDate" type="date-time" enable-audit-log="true"/>
+        <field name="convertedByUserId" type="id"/>
+        <field name="closedDate" type="date-time" enable-audit-log="true"/>
+        <field name="closedByUserId" type="id"/>
         <relationship type="one" title="SalesOpportunityType" related="moqui.basic.Enumeration">
             <key-map field-name="typeEnumId"/></relationship>
         <relationship type="one" title="Account" related="mantle.party.Party">
@@ -59,6 +77,38 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId"/></relationship>
         <relationship type="one" related="moqui.basic.StatusItem"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesPipeline"/>
+        <relationship type="one" title="ProbabilityMode" related="moqui.basic.Enumeration">
+            <key-map field-name="probabilityModeEnumId"/></relationship>
+        <relationship type="one" title="LostReason" related="moqui.basic.Enumeration">
+            <key-map field-name="lostReasonEnumId"/></relationship>
+        <relationship type="one" title="RecurringPlan" related="moqui.basic.Enumeration">
+            <key-map field-name="recurringPlanEnumId"/></relationship>
+        <relationship type="one" related="moqui.basic.DataSource"/>
+        <index name="SALES_OPP_ORG_TYPE" unique="false"><index-field name="organizationPartyId"/><index-field name="typeEnumId"/></index>
+    </entity>
+    <!-- impl-sales P4 (design-sales §12.2 Chatter / RecordFiles, F69): a file of an opportunity, its content host on People's
+        pattern; get#RecordLinkInfo and RecordFiles admit it to a Sales reader of the opportunity
+        (mantle.sales.OpportunityServices check#OpportunityAccess), and it is written through create#OpportunityContent, which
+        needs its editor. -->
+    <entity entity-name="SalesOpportunityContent" package="mantle.sales.opportunity" cache="never">
+        <field name="salesOpportunityContentId" type="id" is-pk="true"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunity"/>
+        <relationship type="one" title="SalesOpportunityContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales Opportunity Content Type" enumTypeId="SalesOpportunityContentType"/>
+            <moqui.basic.Enumeration description="Document" enumId="SocDocument" enumTypeId="SalesOpportunityContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Proposal" enumId="SocProposal" enumTypeId="SalesOpportunityContentType" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Requirements" enumId="SocRequirements" enumTypeId="SalesOpportunityContentType" sequenceNum="3"/>
+        </seed-data>
     </entity>
     <entity entity-name="SalesOpportunityParty" package="mantle.sales.opportunity">
         <field name="salesOpportunityId" type="id" is-pk="true"/>

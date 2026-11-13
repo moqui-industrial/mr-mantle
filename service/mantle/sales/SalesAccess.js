@@ -16,8 +16,8 @@
 //   permission PERMISSION_DENIED.
 //
 // P1 builds the capabilities and the organizations; later phases extend the tables and add the record checks (the account
-// scope P3, the assignment and team scope of opportunities P4, quotes and orders P7 and P11), and this module grants nothing
-// by itself.
+// scope P3, the assignment and team scope of opportunities P4, below, quotes and orders P7 and P11), and this module grants
+// nothing by itself.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {denied} = lib
 const access = lib.access
@@ -167,13 +167,32 @@ function contactAccounts(userScope, partyId) {
     }
     return accounts
 }
-// The organization an account write is for: the one named, which must be in the scope, else the active one, else the scope's
-// only one. Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
+// The organization a new record is for when none is named: the active one, else the scope's only one, else the only one of the
+// scope the caller works for themselves (an agent or employee: a representative of Retail whose scope also holds Retail's rollup
+// children, P4 review); null when that leaves a choice.
+function defaultOrganization(userScope) {
+    if (userScope.activeOrganizationPartyId) return userScope.activeOrganizationPartyId
+    const ids = userScope.organizationPartyIds
+    if (ids?.length === 1) return ids[0]
+    if ((ids != null && !ids.length) || !userScope.partyId) return null
+    let query = lib
+        .find("mantle.party.PartyRelationship")
+        .condition("fromPartyId", userScope.partyId)
+        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .selectField("toPartyId")
+    if (ids != null) query = query.condition("toPartyId", "in", Array.from(ids))
+    const own = Array.from(new Set(Array.from(query.list()).map(row => row.toPartyId))).filter(
+        partyId => ids != null || isInternal(partyId)
+    )
+    return own.length === 1 ? own[0] : null
+}
+// The organization an account write is for: the one named, which must be in the scope, else the default one (defaultOrganization).
+// Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
 // (ORGANIZATION_DENIED).
 function accountOrganization(userScope, organizationPartyId) {
     requireCapability(userScope, "accountEdit")
-    let chosen = organizationPartyId || userScope.activeOrganizationPartyId
-    if (!chosen && userScope.organizationPartyIds?.length === 1) chosen = userScope.organizationPartyIds[0]
+    const chosen = organizationPartyId || defaultOrganization(userScope)
     if (!chosen) denied("ORGANIZATION_DENIED", "Choose the organization the account belongs to")
     if (!isInternal(chosen)) denied("ORGANIZATION_DENIED", "Organization " + chosen + " is not available")
     return requireOrganization(userScope, chosen)
@@ -217,6 +236,72 @@ function memberTeams(partyId, at = ec.user.nowTimestamp) {
     return Array.from(new Set(found))
 }
 
+// ===== P4: opportunities (impl-sales P4; design-sales §1.1, §3) =====
+// A lead or an opportunity (SalesOpportunity) belongs to its selling organization (organizationPartyId, kept equal to its
+// OrgInternal SalesOpportunityParty row by the opportunity services). Inside an organization of the scope a Sales reader sees the
+// deals assigned to them (a current SalesRepresentative row: the primary owner) or to a team they are a current member of (a
+// current SalesTeam row: a team's deal, or an unassigned lead in its queue), and a holder of SALES_TEAM_VIEW (teamRead) the
+// organization's every deal. A customer link (the account, a contact) never widens it. Ending a membership ends the team's deals
+// from that date (memberTeams reads the dated rows). An edit needs SALES_OPPORTUNITY_EDIT on a deal the caller sees. A deal
+// outside the scope answers as a missing one (RECORD_UNAVAILABLE).
+const opportunityRoles = {owner: "SalesRepresentative", team: "SalesTeam", contact: "Contact", organization: "OrgInternal"}
+// The parties whose assignment shows a deal to the caller: their own party and their current teams.
+function assignmentParties(userScope, at = ec.user.nowTimestamp) {
+    return userScope.partyId ? [userScope.partyId].concat(memberTeams(userScope.partyId, at)) : []
+}
+// The ids of the deals assigned now to the caller or a team of theirs (the owner and team rows), or null for a reader of the
+// organizations' whole pipeline (teamRead), whose reads are bounded by the organizations alone.
+function assignedOpportunityIds(userScope) {
+    if (userScope.capabilities.teamRead) return null
+    const partyIds = assignmentParties(userScope)
+    if (!partyIds.length) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.sales.opportunity.SalesOpportunityParty")
+                    .condition("partyId", "in", partyIds)
+                    .condition("roleTypeId", "in", [opportunityRoles.owner, opportunityRoles.team])
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .selectField("salesOpportunityId")
+                    .list()
+            ).map(row => row.salesOpportunityId)
+        )
+    )
+}
+// The deal as the caller may see it, or null: {opportunity, organizationPartyId, canEdit}.
+function opportunityOf(userScope, salesOpportunityId) {
+    if (!salesOpportunityId || !userScope.capabilities.anyRead) return null
+    const opportunity = lib.one("mantle.sales.opportunity.SalesOpportunity", {salesOpportunityId})
+    if (!opportunity || !covers(userScope, opportunity.organizationPartyId)) return null
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned =
+            partyIds.length > 0 &&
+            lib
+                .find("mantle.sales.opportunity.SalesOpportunityParty")
+                .condition("salesOpportunityId", salesOpportunityId)
+                .condition("partyId", "in", partyIds)
+                .condition("roleTypeId", "in", [opportunityRoles.owner, opportunityRoles.team])
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .count() > 0
+        if (!assigned) return null
+    }
+    return {
+        opportunity,
+        organizationPartyId: opportunity.organizationPartyId,
+        canEdit: !!userScope.capabilities.opportunityEdit
+    }
+}
+// The deal or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for an edit without
+// SALES_OPPORTUNITY_EDIT.
+function requireOpportunity(userScope, salesOpportunityId, edit = false) {
+    const found = opportunityOf(userScope, salesOpportunityId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Opportunity " + (salesOpportunityId || "") + " is not available")
+    if (edit) requireCapability(userScope, "opportunityEdit")
+    return found
+}
+
 ;({
     permissions,
     reads,
@@ -225,6 +310,7 @@ function memberTeams(partyId, at = ec.user.nowTimestamp) {
     covers,
     requireCapability,
     requireOrganization,
+    defaultOrganization,
     reportOrganizations,
     // P3: accounts and contacts
     accountRoles,
@@ -238,5 +324,11 @@ function memberTeams(partyId, at = ec.user.nowTimestamp) {
     // P2: sales teams
     teamRelationships,
     teamOrganization,
-    memberTeams
+    memberTeams,
+    // P4: opportunities
+    opportunityRoles,
+    assignmentParties,
+    assignedOpportunityIds,
+    opportunityOf,
+    requireOpportunity
 })
