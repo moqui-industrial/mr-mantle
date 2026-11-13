@@ -1,4 +1,4 @@
-// The PASS authority's one function after the transport's checks (script/PassAuthority.js, mr-moqui plans/Edge-Node.md
+// The PASS authority's one function after the transport's checks (script/PassAuthority.js, mr-moqui plans/archive/Edge-Node.md
 // §5.5), which the REST servlet (script/PassApi.js) and the host's gRPC PassAuthority (PassAuthorityServices.handle#Call)
 // both call: an operation runs its schema service, a field the schema does not list and a delegation that is missing or
 // not good are refused with the REST API's error envelope, an account action runs the framework's account service and
