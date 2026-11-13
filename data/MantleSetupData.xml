@@ -236,6 +236,11 @@ along with this software (see the LICENSE.md file). If not, see
         PEOPLE_CONFIGURE, so payroll configures pay and People's administrator its policies -->
     <userPermissions userPermissionId="PAYROLL_CONFIGURE" description="Payroll Configure (pay components, structures, groups and localizations)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_CONFIGURE" fromDate="0"/>
+    <!-- a salary set outside the pay change, for data repair (impl-people P23 review; the user's call of Nov 12, 2026): only an
+        employment's first salary is set by create#EmploymentSalary, and a salary in place changes through an approved pay change;
+        a holder of this sets one anyway, with a reason the audit log keeps. ADMIN's alone: no BOSS group holds it -->
+    <userPermissions userPermissionId="PAYROLL_REPAIR" description="Payroll Repair (a salary set outside an approved pay change, audited)"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="PAYROLL_REPAIR" fromDate="0"/>
     <!-- approving anyone's timesheet when the organization's timesheet policy says any (mantle.work.TimesheetServices) -->
     <userPermissions userPermissionId="TIMESHEET_APPROVE" description="Timesheet Approve (any person, by policy)"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="TIMESHEET_APPROVE" fromDate="0"/>

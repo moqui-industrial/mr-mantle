@@ -231,11 +231,15 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="create" noun="EmploymentSalary">
         <description>Create an EmploymentSalary record, getting defaults and checking against min/max amounts on
-            PayGrade record from EmplPosition for Employment (a warning outside the band). Extended in IronStone People P23 (F4):
-            needs PAYROLL_EDIT (PERMISSION_DENIED; for a payroll reader, an employment of an employer outside their People scope
-            is RECORD_UNAVAILABLE), and the salary in effect on fromDate ends there (dated rows, never two in effect); a salary
-            from the same moment (SALARY_EXISTS) or one from a later date set already (SALARY_SCHEDULED) is refused
-            (PayrollAssignments.js writeSalary, which the People pay change applies through too).</description>
+            PayGrade record from EmplPosition for Employment (a warning outside the band). Extended in IronStone People P23 (F4)
+            and its review (the user's call of Nov 12, 2026): needs PAYROLL_EDIT (PERMISSION_DENIED) and a payroll reader of the
+            employment's employer (PAYROLL_VIEW in their People scope; else RECORD_UNAVAILABLE); sets an employment's first salary
+            only: an employment with a salary changes it through the People pay change (PeopleServices.apply#EmploymentChange,
+            changeKind pay), which is approved before it applies (PAY_CHANGE_REQUIRED). A holder of PAYROLL_REPAIR (ADMIN's)
+            sets one at any employer for data repair, with comments as its reason (REASON_REQUIRED), kept in the audit log. The
+            salary in effect on fromDate ends there (dated rows, never two in effect); a salary from the same moment
+            (SALARY_EXISTS) or one from a later date set already (SALARY_SCHEDULED) is refused (PayrollAssignments.js
+            writeSalary, which the approved pay change applies through).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <auto-parameters entity-name="mantle.humanres.employment.EmploymentSalary" include="nonpk"/>

@@ -136,7 +136,13 @@ function writeSalary(partyRelationshipId, values, reason) {
     const fromMs = values.fromMs
     checkSalaryDate(partyRelationshipId, fromMs)
     const inEffect = salariesOf(partyRelationshipId).find(row => openAt(row, fromMs))
-    if (inEffect) call("update#" + SALARY, {partyRelationshipId, fromDate: inEffect.fromDate, thruDate: stamp(fromMs)})
+    if (inEffect)
+        call("update#" + SALARY, {
+            partyRelationshipId,
+            fromDate: inEffect.fromDate,
+            thruDate: stamp(fromMs),
+            thruDate_changeReason: reason || null
+        })
     call("create#" + SALARY, {
         partyRelationshipId,
         fromDate: stamp(fromMs),
@@ -150,18 +156,32 @@ function writeSalary(partyRelationshipId, values, reason) {
     })
     return {fromDate: stamp(fromMs), endedFromDate: inEffect ? inEffect.fromDate : null}
 }
-// create#EmploymentSalary (extended in P23, F4): PAYROLL_EDIT is checked, and the row in effect is ended on the new one's date.
-// The defaults and the band's warnings stay the service's own (EmploymentServices.xml), for its existing callers.
+// create#EmploymentSalary (extended in P23, F4; its review, the user's call of Nov 12, 2026): PAYROLL_EDIT is checked, the employer
+// is one of a payroll reader's (another is a missing employment), and only an employment's first salary is set here: a salary in
+// place changes through the pay change, which is approved first (PAY_CHANGE_REQUIRED). A holder of PAYROLL_REPAIR (Mantle grants
+// it to ADMIN alone) still sets one for data repair, with a reason (REASON_REQUIRED) kept as the audit log's change reason, at an
+// employer of any scope. The row in effect is ended on the new one's date. The defaults and the band's warnings stay the service's
+// own (EmploymentServices.xml), for its existing callers, which set first salaries.
 function salaryAccess(p) {
     const userScope = people.scopeOf()
     if (!userScope.capabilities.payrollEdit) denied("PERMISSION_DENIED", "Setting a salary needs PAYROLL_EDIT")
-    const relationship = one(RELATIONSHIP, {partyRelationshipId: text(p.partyRelationshipId)})
-    if (!relationship || !one(EMPLOYMENT, {partyRelationshipId: text(p.partyRelationshipId)}))
-        denied("RECORD_UNAVAILABLE", "Employment " + text(p.partyRelationshipId) + " is not available")
-    // an employer outside the caller's scope is a missing one, for a payroll reader (a payroll editor who reads no employer,
-    // such as a system integration with PAYROLL_EDIT alone, writes the employment it names, as before)
-    if (userScope.capabilities.payrollView && !userScope.organizationPartyIds.includes(relationship.toPartyId))
-        denied("RECORD_UNAVAILABLE", "Employment " + text(p.partyRelationshipId) + " is not available")
+    const id = text(p.partyRelationshipId)
+    const relationship = id ? one(RELATIONSHIP, {partyRelationshipId: id}) : null
+    const repair = lib.access.has("PAYROLL_REPAIR")
+    if (
+        !relationship ||
+        !one(EMPLOYMENT, {partyRelationshipId: id}) ||
+        (!repair && !(userScope.capabilities.payrollView && userScope.organizationPartyIds.includes(relationship.toPartyId)))
+    )
+        denied("RECORD_UNAVAILABLE", "Employment " + id + " is not available")
+    if (salariesOf(id).length) {
+        if (!repair)
+            denied(
+                "PAY_CHANGE_REQUIRED",
+                "The employment has a salary already: change it with a pay change, which is approved before it applies"
+            )
+        if (blank(p.comments)) denied("REASON_REQUIRED", "Say why the salary is repaired outside a pay change")
+    }
     return relationship
 }
 function createSalary(p) {
@@ -877,6 +897,10 @@ const benefitRevision = partyRelationshipId => revisionOf(rows(BENEFIT, {partyRe
 function storeBenefit(employment, p) {
     const benefitTypeId = text(p.benefitTypeId)
     const partyRelationshipId = employment.partyRelationshipId
+    // P23 review: a benefit added or ended names the revision of the employment's benefits read (get#Compensation's benefitRevision)
+    const revision = benefitRevision(partyRelationshipId)
+    if (text(p.expectedRevision) !== revision)
+        denied("REVISION_CHANGED", "The benefits changed since you read them; open them again (revision " + revision + ")")
     if (truthy(p.endBenefit)) {
         const wanted = /^\d+$/.test(text(p.benefitFromDate)) ? Number(text(p.benefitFromDate)) : when(p.benefitFromDate)
         const row = rows(BENEFIT, {partyRelationshipId, benefitTypeId}).find(item => ms(item.fromDate) === wanted)

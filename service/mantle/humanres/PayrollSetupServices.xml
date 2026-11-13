@@ -813,7 +813,8 @@ along with this software (see the LICENSE.md file). If not, see
             (expectedRevision): the profile in effect ends on the date (audited with the reason); a later one set already is
             PROFILE_SCHEDULED. Or, with benefitTypeId, a benefit (Mantle's EmploymentBenefit) from fromDate with its cost and the
             employer's share in percent (BENEFIT_EXISTS when it overlaps one of the type, PERCENT_INVALID, AMOUNT_INVALID), or with
-            endBenefit the benefit from benefitFromDate ended from thruDate (BENEFIT_ENDED). Bank details are not here: they change
+            endBenefit the benefit from benefitFromDate ended from thruDate (BENEFIT_ENDED), each at the benefits' revision
+            (expectedRevision: get#Compensation's benefitRevision; P23 review). Bank details are not here: they change
             through Accounting's payment-method services. Employment's and Employee's historical tax fields are neither read nor
             written. Needs PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED); another employer's employment is RECORD_UNAVAILABLE.
             Refuses also LOCALIZATION_INVALID, NO_FIELDS, REVISION_CHANGED, DATES_INVALID and DATE_OUTSIDE.</description>

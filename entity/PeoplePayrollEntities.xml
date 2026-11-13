@@ -337,7 +337,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payrollGroupId" type="id"/>
         <field name="isPrimary" type="text-indicator"/>
         <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
+            change; "update" would skip it), with its reason (P23 review)</description></field>
         <field name="inputValues" type="text-long"/>
         <field name="electedComponentIds" type="text-medium"><description>The components of elective lines (PleElected) the
             assignment takes, comma separated</description></field>
@@ -367,7 +368,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payrollLocalizationId" type="id"/>
         <field name="profileValues" type="text-long"/>
         <field name="fromDate" type="date-time"/>
-        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
+            change; "update" would skip it), with its reason (P23 review)</description></field>
         <field name="reason" type="text-long"/>
         <field name="createdByUserId" type="id"/>
         <field name="createdDate" type="date-time"/>

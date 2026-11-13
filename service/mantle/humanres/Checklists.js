@@ -805,8 +805,12 @@ function getAssignedEquipment(p) {
     const userScope = people.scopeOf()
     const partyId = text(p.partyId)
     const self = !!partyId && partyId === userScope.partyId && !!userScope.capabilities.self
-    if (!partyId || (!self && !hrReads(userScope, partyId)))
+    if (!partyId || (!self && !hrReads(userScope, partyId))) {
+        // P23 review (F10): Employee360 asks for every viewer, and a viewer who reads no equipment (payroll, a manager) is answered
+        // none rather than a refusal logged on every render
+        if (p.checkOnly === true || p.checkOnly === "true") return {equipmentList: null, canReturn: false}
         denied("RECORD_UNAVAILABLE", "Person " + partyId + " is not available")
+    }
     const at = nowMs()
     const held = rows(CUSTODY, {partyId}).filter(row => openAt(row, at))
     return {equipmentList: equipmentRows(held), canReturn: !!userScope.capabilities.hrEdit && hrReads(userScope, partyId)}

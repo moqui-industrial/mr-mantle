@@ -423,6 +423,8 @@ feature(
                     .statusId,
                 accounts: count("moqui.security.UserAccount", {partyId: state.applicantPartyId}),
                 salaries: count("mantle.humanres.employment.EmploymentSalary", {partyRelationshipId: hired.partyRelationshipId}),
+                // P23 review (the user's call of Nov 12, 2026): the offer's approved pay is the first salary, from the first day
+                salary: read("mantle.humanres.employment.EmploymentSalary", {partyRelationshipId: hired.partyRelationshipId}),
                 change: read("mantle.humanres.employment.EmploymentChange", {employmentChangeId: hired.employmentChangeId}),
                 scheduled: count("mantle.humanres.employment.EmploymentAssignment", {
                     partyRelationshipId: hired.partyRelationshipId,
@@ -481,7 +483,12 @@ feature(
             r.stage == "EaHired"
             r.employments == 1
             r.accounts == 0
-            r.salaries == 0
+            r.salaries == 1
+            Number(String(r.salary.amount)) == 52000
+            r.salary.currencyUomId == "USD"
+            r.salary.thruDate == null
+            r.preview.findings.some(finding => finding.code == "OFFER_PAY")
+            noPay(JSON.stringify(r.preview.findings))
             r.change.accessRequested == "N"
             r.scheduled >= 1
         }

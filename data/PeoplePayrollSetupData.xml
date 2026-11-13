@@ -25,6 +25,12 @@ along with this software (see the LICENSE.md file). If not, see
         organizationName and stepText: never an amount, a formula or a rate. The app that shows them sets the link (IronStone
         People: BossSetupData.xml). -->
     <moqui.basic.Enumeration enumId="PakPayrollConfig" description="Payroll configuration" sequenceNum="10" enumTypeId="PeopleApprovalKind"/>
+    <!-- impl-people P23 review (the user's call of Nov 12, 2026): a pay change (PeopleServices.apply#EmploymentChange, changeKind
+        pay), the first salary included, waits for a People approval of its own kind, on the PeopleEmploymentChangeApproval topic:
+        the employer's payroll approvers (PAYROLL_APPROVE with PAYROLL_VIEW) unless a rule of the kind routes it (to the manager, who
+        then reads the new salary of that change alone); never the payroll editor who asked, nor the person. Its notice names no one
+        and no amount. -->
+    <moqui.basic.Enumeration enumId="PakPayChange" description="Pay change" sequenceNum="11" enumTypeId="PeopleApprovalKind"/>
     <moqui.security.user.NotificationTopic topic="PeoplePayrollConfigApproval" inboxEnumId="NinNotifications"
             description="Payroll configuration to approve" typeString="info" showAlert="Y" persistOnSend="Y"
             receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"

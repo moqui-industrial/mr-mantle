@@ -638,8 +638,8 @@ along with this software (see the LICENSE.md file). If not, see
             revision, so a change of the employment meanwhile supersedes it) and are applied by the last approval; a hire, a
             manager change and a leave of absence are applied at once. Applied, the change has started the assignment
             employmentAssignmentId (a separation ends the employment's). P23: a pay change (payroll's part of a change: a new salary
-            from the date, asked by a payroll editor) waits for approval too, unless it sets the employment's first salary, and once
-            applied has started the EmploymentSalary row from its date; its salary fields are read only by a payroll reader of the
+            from the date, asked by a payroll editor) waits for approval too (its own kind, PakPayChange, the first salary
+            included), and once applied has started the EmploymentSalary row from its date; its salary fields are read only by a payroll reader of the
             employer and the approver of its step. Written only by PeopleServices (Employment.js).</description>
         <field name="employmentChangeId" type="id" is-pk="true"/>
         <field name="partyRelationshipId" type="id"/>
@@ -867,7 +867,8 @@ along with this software (see the LICENSE.md file). If not, see
             filter and sort (filter by fromDate, thruDate; sort by ascending fromDate; use first result).</description>
         <field name="partyRelationshipId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (IronStone People
+            P23 review): a salary ends when the next starts, by an approved pay change or a data repair, with its reason</description></field>
         <field name="payGradeId" type="id"/>
         <field name="comments" type="text-medium"/>
         <field name="amount" type="currency-amount" enable-audit-log="true"/>

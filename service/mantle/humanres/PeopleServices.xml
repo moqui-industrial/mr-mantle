@@ -492,8 +492,8 @@ along with this software (see the LICENSE.md file). If not, see
             application Hired; refused: an offer hired from already (OFFER_USED: a second hire from it), not accepted
             (OFFER_NOT_ACCEPTED), of another person or employer (OFFER_PERSON, OFFER_EMPLOYER), of an application refused or
             withdrawn since (OFFER_APPLICATION_CLOSED), not of the editor's employers
-            (RECORD_UNAVAILABLE). The offer grants nothing else: no pay is recorded and no account is asked but by
-            requestAccount.</description>
+            (RECORD_UNAVAILABLE). The offer's pay, approved with it, is recorded as the employment's first salary from its first day
+            (P23 review, the user's call of Nov 12, 2026; the answer names no amount); no account is asked but by requestAccount.</description>
         <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
         <in-parameters>
             <parameter name="reason"/>
@@ -613,8 +613,10 @@ along with this software (see the LICENSE.md file). If not, see
             editor's (PAYROLL_VIEW and PAYROLL_EDIT, not HR's) at the salary revision get#Compensation answers (payRevision): a new
             salary from the date (salaryAmount, salaryCurrencyUomId, salaryPeriodTypeId, an optional payGradeId; CURRENCY_REQUIRED,
             CURRENCY_INVALID, AMOUNT_INVALID, CURRENCY_PRECISION, FREQUENCY_REQUIRED, FREQUENCY_INVALID, GRADE_INVALID,
-            SALARY_EXISTS, SALARY_SCHEDULED, a note outside the grade's band) that waits for approval like a transfer, unless it is
-            the employment's first salary, applied at once; applied, the salary in effect ends on the date and the new one starts.
+            SALARY_EXISTS, SALARY_SCHEDULED, a note outside the grade's band) that waits for approval, the first salary too (P23
+            review, the user's calls of Nov 12, 2026): a request of its own kind, PakPayChange, decided by the employer's payroll
+            approvers (PAYROLL_APPROVE with PAYROLL_VIEW) unless a rule of the kind routes it, never by who asked; applied, the
+            salary in effect ends on the date and the new one starts.
             It supersedes only a pay change waiting, and only a separation supersedes it. Refuses a caller without PEOPLE_HR_VIEW
             and PEOPLE_HR_EDIT (PERMISSION_DENIED; for a pay change, PAYROLL_VIEW and PAYROLL_EDIT), an employment outside the scope (RECORD_UNAVAILABLE), a revision other than the one
             read (REVISION_CHANGED), no kind (KIND_INVALID), a date outside the employment (DATE_OUTSIDE) or before a change set
@@ -1086,8 +1088,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Employee360's AssignedEquipment: the equipment a person holds now (current AssetPartyAssignment rows: asset,
             product, serial, role, from date, the open return task), for the person themselves (PEOPLE_SELF_SERVICE) or an HR
             reader of an employer of theirs; refused alike when missing or outside (RECORD_UNAVAILABLE). No cost. canReturn for
-            an HR editor.</description>
-        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+            an HR editor. With checkOnly (P23 review), a person the caller may not read answers equipmentList null instead of
+            RECORD_UNAVAILABLE, alike either way.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="checkOnly" type="Boolean" default="false"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="equipmentList" type="List"/>
             <parameter name="canReturn" type="Boolean"/>
