@@ -102,6 +102,23 @@ Grant of Patent License.
 
             <!-- 5. Group entries into transactions and calculate page lines in JS -->
             <script><![CDATA[
+                function toNum(v) {
+                    if (v === null || v === undefined) return 0;
+                    if (typeof v === 'number') return isNaN(v) ? 0 : v;
+                    if (typeof v === 'object' && typeof v.toNumber === 'function') return v.toNumber();
+                    const n = parseFloat(String(v));
+                    return isNaN(n) ? 0 : n;
+                }
+
+                // Check previous finalized sequence number for this fiscalYear
+                const prevLogs = ec.entity.find("mantle.ledger.report.FiscalRegisterLog")
+                    .condition("organizationPartyId", organizationPartyId)
+                    .condition("fiscalYear", fiscalYear)
+                    .condition("registerTypeEnumId", "FregJournal")
+                    .orderBy("-lastSequenceNum")
+                    .list() || [];
+                const prevLastSeq = (prevLogs.length > 0 && prevLogs[0].lastSequenceNum) ? toNum(prevLogs[0].lastSequenceNum) : 0;
+
                 const txMap = {};
                 for (const row of (rawEntries || [])) {
                     const txId = row.acctgTransId;
@@ -121,7 +138,7 @@ Grant of Patent License.
                         txMap[txId] = tx;
                     }
                     const isDebit = (row.debitCreditFlag === 'D');
-                    const amt = Number(row.amount) || 0;
+                    const amt = toNum(row.amount);
                     tx.entries.push({
                         acctgTransEntrySeqId: row.acctgTransEntrySeqId,
                         glAccountId: row.glAccountId,
@@ -138,17 +155,17 @@ Grant of Patent License.
                 context.totalEntries = (rawEntries || []).length;
 
                 // Sequential numbering if missing in preview
-                let seq = 1;
+                let seq = prevLastSeq + 1;
                 for (const tx of txList) {
                     if (!tx.journalSequenceNum) tx.journalSequenceNum = seq;
                     seq++;
                 }
 
                 // Page distribution
-                const maxLines = Number(linesPerPage) || 24;
+                const maxLines = toNum(linesPerPage) || 24;
                 const pages = [];
                 let currentPage = null;
-                let pageNum = Number(startPageNumber) || 1;
+                let pageNum = toNum(startPageNumber) || 1;
                 let runningDebit = 0;
                 let runningCredit = 0;
                 let currentLines = 0;
@@ -214,7 +231,7 @@ Grant of Patent License.
             <parameter name="comments"/>
         </in-parameters>
         <out-parameters>
-            <parameter name="fiscalRegisterLogId"/>
+            <parameter name="registerLogId"/>
             <parameter name="lastPageNumber" type="Integer"/>
             <parameter name="transactionsLocked" type="Integer"/>
         </out-parameters>
@@ -225,33 +242,45 @@ Grant of Patent License.
                     out-map="journalData"/>
 
             <script><![CDATA[
+                const prevLogs = ec.entity.find("mantle.ledger.report.FiscalRegisterLog")
+                    .condition("organizationPartyId", organizationPartyId)
+                    .condition("fiscalYear", fiscalYear)
+                    .condition("registerTypeEnumId", "FregJournal")
+                    .orderBy("-lastSequenceNum")
+                    .list() || [];
+                const startSeq = (prevLogs.length > 0 && prevLogs[0].lastSequenceNum) ? (Number(prevLogs[0].lastSequenceNum) + 1) : 1;
                 let count = 0;
-                let currentSeq = 1;
+                let currentSeq = startSeq;
                 for (const p of (journalData.pages || [])) {
                     for (const tx of (p.transactions || [])) {
-                        ec.entity.find("mantle.ledger.transaction.AcctgTrans")
+                        const txVal = ec.entity.find("mantle.ledger.transaction.AcctgTrans")
                             .condition("acctgTransId", tx.acctgTransId)
-                            .one()
-                            .set("journalSequenceNum", currentSeq)
-                            .set("fiscalYear", fiscalYear)
-                            .update();
+                            .one();
+                        if (txVal) {
+                            txVal.set("journalSequenceNum", currentSeq);
+                            txVal.set("fiscalYear", fiscalYear);
+                            txVal.update();
+                        }
                         currentSeq++;
                         count++;
                     }
                 }
+                context.firstSeqNum = count > 0 ? startSeq : 0;
+                context.lastSeqNum = count > 0 ? (currentSeq - 1) : 0;
                 context.transactionsLocked = count;
             ]]></script>
 
             <service-call name="create#mantle.ledger.report.FiscalRegisterLog"
                     in-map="{organizationPartyId: organizationPartyId, registerTypeEnumId: 'FregJournal',
-                        fiscalYear: fiscalYear, timePeriodId: timePeriodId, fromDate: fromDate, thruDate: thruDate,
+                        fiscalYear: fiscalYear, timePeriodId: timePeriodId,
+                        fromDate: fromDate || journalData.fromDate, thruDate: thruDate || journalData.thruDate,
                         firstPageNumber: journalData.startPageNumber, lastPageNumber: journalData.endPageNumber,
-                        firstSequenceNum: 1, lastSequenceNum: journalData.totalTransactions,
-                        totalDebit: journalData.totalDebit, totalCredit: journalData.totalCredit,
-                        finalizedDate: ec.user.nowTimestamp, finalizedByUserLoginId: ec.user.userId,
-                        isDefinitive: 'Y', comments: comments}"
+                        firstSequenceNum: firstSeqNum, lastSequenceNum: lastSeqNum,
+                        totalDebitAmount: journalData.totalDebit, totalCreditAmount: journalData.totalCredit,
+                        finalizedDate: ec.user.nowTimestamp, finalizedByUserId: ec.user.userId,
+                        isFinalized: 'Y'}"
                     out-map="logOut"/>
-            <set field="fiscalRegisterLogId" from="logOut.fiscalRegisterLogId"/>
+            <set field="registerLogId" from="logOut.registerLogId"/>
             <set field="lastPageNumber" from="journalData.endPageNumber"/>
         </actions>
     </service>
@@ -928,6 +957,7 @@ Grant of Patent License.
 
             <!-- Query purchase invoices with withholding tax items or commission type -->
             <script><![CDATA[
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
                 const conds = ec.entity.conditionFactory;
                 const invFind = ec.entity.find('mantle.account.invoice.Invoice')
                     .condition('toPartyId', 'equals', organizationPartyId)
@@ -956,10 +986,11 @@ Grant of Patent License.
                     let taxCode = '1040';
 
                     for (const it of items) {
-                        const amt = (Number(it.quantity) || 1) * (Number(it.amount) || 0);
+                        const qty = toNum(it.quantity) || 1;
+                        const amt = qty * toNum(it.amount);
                         if (it.withholdingTaxTypeEnumId || it.itemTypeEnumId === 'ItemTaxWithholding') {
                             hasWithholding = true;
-                            const rate = Number(it.withholdingTaxRate) || 20.0;
+                            const rate = toNum(it.withholdingTaxRate) || 20.0;
                             const withheld = (amt * rate / 100);
                             invWithholding += withheld;
                             invTaxable += amt;
