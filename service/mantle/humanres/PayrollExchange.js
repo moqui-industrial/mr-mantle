@@ -1440,24 +1440,10 @@ function findExportScopes() {
             }))
     }
 }
-// The pay inputs file: every cell written as the framework's delimited writer writes it (a cell a spreadsheet would read as a formula
-// written as text), except a number field whose value is a plain number (-10.00, 8): a processor reads it as the number, and a cell
-// of digits, one leading minus and a point is no formula. The framework's writer escapes a leading "-" whatever follows, so a negative
-// amount would reach the processor as '-10.00.
-const numberColumns = new Set(["quantity", "amount", "rate"])
+// The pay inputs file, written as the framework's delimited writer writes it: a cell a spreadsheet would read as a formula written as
+// text, a plain number (-10.00, 8) as it is, so a processor reads a negative amount as the number.
 function inputsFile(headers, records) {
-    const cell = transferLib().delimitedCell
-    const valueCell = (name, value) => {
-        const given = String(value ?? "")
-        return numberColumns.has(name) && /^-?[0-9]+(\.[0-9]+)?$/.test(given) ? '"' + given + '"' : cell(given)
-    }
-    return (
-        "﻿" +
-        headers.map(cell).join(",") +
-        "\r\n" +
-        records.map(record => headers.map(name => valueCell(name, record[name])).join(",")).join("\r\n") +
-        "\r\n"
-    )
+    return transferLib().writeDelimited(headers, records)
 }
 // export#InputsTransfer (run#TargetExport): a pay group's period's approved inputs as delimited text, or an export batch's ready rows
 // (selection.batch), for a payroll exporter of the group's employer: the fields asked for alone (the amount and the rate a payroll
