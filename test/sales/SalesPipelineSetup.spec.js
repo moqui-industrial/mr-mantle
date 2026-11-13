@@ -249,7 +249,41 @@ feature("a team membership is ended, never deleted; a member works for the team'
         // the other organization's team answers as a missing one
         const otherTeam = as(users.adminBoth, "store#SalesTeam", {organizationPartyId: orgB, teamName: "B team"})
         const crossed = as(users.manager, "store#SalesTeamMember", {teamPartyId: otherTeam.teamPartyId, partyId: ids.repA})
-        return {team, joined, again, outsider, backdated, ended, rejoined, endTeam, rows, crossed}
+        // a team ending in two days: a membership after its end is refused, one joining now ends with it
+        const dated = as(users.manager, "store#SalesTeam", {organizationPartyId: orgA, teamName: "Spec dated team"})
+        const datedRevision = as(users.manager, "get#SalesSetup", {organizationPartyId: orgA}).teams?.find(
+            row => row.teamPartyId === dated.teamPartyId
+        )?.revision
+        const teamEnd = Date.now() + 2 * 86400000
+        const scheduled = as(users.manager, "store#SalesTeam", {
+            teamPartyId: dated.teamPartyId,
+            thruDate: teamEnd,
+            expectedRevision: datedRevision
+        })
+        const afterEnd = as(users.manager, "store#SalesTeamMember", {
+            teamPartyId: dated.teamPartyId,
+            partyId: ids.repA,
+            fromDate: teamEnd + 86400000
+        })
+        const withTeam = as(users.manager, "store#SalesTeamMember", {teamPartyId: dated.teamPartyId, partyId: ids.repA})
+        const withTeamRow = read("mantle.party.PartyRelationship", {partyRelationshipId: withTeam.partyRelationshipId})
+        return {
+            team,
+            joined,
+            again,
+            outsider,
+            backdated,
+            ended,
+            rejoined,
+            endTeam,
+            rows,
+            crossed,
+            scheduled,
+            afterEnd,
+            withTeam,
+            withTeamThru: entityLib.ms(withTeamRow?.thruDate),
+            teamEnd
+        }
     },
     then(r) {
         r.team.refused == ""
@@ -264,6 +298,11 @@ feature("a team membership is ended, never deleted; a member works for the team'
         r.rows.length == 2
         r.rows.every(row => row.ended)
         r.crossed.refused.includes("RECORD_UNAVAILABLE")
+        // no membership outlives its team
+        r.scheduled.refused == ""
+        r.afterEnd.refused.includes("DATE_INVALID")
+        r.withTeam.refused == ""
+        Math.abs(r.withTeamThru - r.teamEnd) < 1000
     }
 })
 
@@ -395,9 +434,49 @@ feature("the readiness names a pipeline without stages with its fix place, and a
             }
         })()
         const byKey = Object.fromEntries(Array.from(checks).map(check => [check.checkKey, check]))
-        return {pipeline, byKey, refused}
+        // A's administrator, asking for every organization of theirs, reads A's checks and none of B's
+        const ownChecks = (() => {
+            login(users.admin)
+            try {
+                return Array.from(
+                    ec.service
+                        .sync()
+                        .name("mantle.sales.SalesWorkspaceServices.get#SalesReadiness")
+                        .parameters({})
+                        .disableAuthz()
+                        .call().checks
+                ).map(check => check.organizationPartyId)
+            } finally {
+                login("john.doe")
+            }
+        })()
+        // an open deal of B on the shared pipeline is counted for B's reader, not for A's
+        system(() =>
+            make("mantle.sales.opportunity.SalesOpportunity", {
+                salesOpportunityId: prefix + "_OPP_SHARED_B",
+                organizationPartyId: orgB,
+                opportunityStageId: "SalesQualified",
+                statusId: "SalesOppOpen"
+            })
+        )
+        const sharedCount = (user, organizationPartyId) =>
+            as(user, "get#SalesSetup", {organizationPartyId})
+                .pipelines?.find(row => row.salesPipelineId === "SalesDefault")
+                ?.stages.find(stage => stage.opportunityStageId === "SalesQualified")?.openCount
+        return {
+            pipeline,
+            byKey,
+            refused,
+            ownChecks,
+            countA: sharedCount(users.admin, orgA),
+            countB: sharedCount(users.adminBoth, orgB)
+        }
     },
-    then({pipeline, byKey, refused}) {
+    then({pipeline, byKey, refused, ownChecks, countA, countB}) {
+        ownChecks.includes(orgA)
+        !ownChecks.includes(orgB)
+        countA == 0
+        countB == 1
         byKey["sales.defaultPipeline"].state == "ready"
         byKey["sales.pipelineStages"].state == "failed"
         byKey["sales.pipelineStages"].fixRoute == "salesStages"

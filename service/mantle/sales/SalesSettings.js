@@ -130,24 +130,15 @@ function stagesOf(salesPipelineId, includeEnded = false) {
     )
     return includeEnded ? found : found.filter(row => !ended(row))
 }
-// The open deals on a stage: not Won or Lost.
-function openOnStage(opportunityStageId) {
-    return Array.from(
-        find(OPPORTUNITY)
-            .condition("opportunityStageId", opportunityStageId)
-            .condition("statusId", "not-in", closedStatuses)
-            .selectField("salesOpportunityId")
-            .list()
-    )
-        .concat(
-            Array.from(
-                find(OPPORTUNITY)
-                    .condition("opportunityStageId", opportunityStageId)
-                    .condition("statusId", "is-null", null)
-                    .selectField("salesOpportunityId")
-                    .list()
-            )
-        )
+// The open deals on a stage: not Won or Lost; of one organization when given (a count shown to a reader of that organization
+// alone: the shared pipeline's stages hold every organization's deals).
+function openOnStage(opportunityStageId, organizationPartyId = null) {
+    const onStage = () => {
+        const query = find(OPPORTUNITY).condition("opportunityStageId", opportunityStageId)
+        return organizationPartyId ? query.condition("organizationPartyId", organizationPartyId) : query
+    }
+    return Array.from(onStage().condition("statusId", "not-in", closedStatuses).selectField("salesOpportunityId").list())
+        .concat(Array.from(onStage().condition("statusId", "is-null", null).selectField("salesOpportunityId").list()))
         .map(row => row.salesOpportunityId)
 }
 function requirePipeline(userScope, salesPipelineId) {
@@ -488,8 +479,15 @@ function storeSalesTeamMember(p) {
         denied("MEMBER_INVALID", "A member is a person who works for the team's organization")
     const roleTypeId = text(p.roleTypeId) || "SalesRepresentative"
     if (!Object.hasOwn(memberRoles, roleTypeId)) denied("VALUE_INVALID", "A member is a representative or the manager")
-    const fromDate = fromNow(p.fromDate, "A membership starts")
-    const thruDate = blank(p.thruDate) ? null : p.thruDate
+    // within the team's own dates (impl-sales P2 review): from its start at the earliest, and ending by its scheduled end, so no
+    // membership outlives its team (SalesAccess.js memberTeams reads memberships alone)
+    const teamFrom = team.relationship.fromDate
+    const teamThru = team.relationship.thruDate
+    let fromDate = fromNow(p.fromDate, "A membership starts")
+    if (teamFrom && ms(teamFrom) > ms(fromDate)) fromDate = teamFrom
+    if (teamThru && ms(fromDate) >= ms(teamThru)) denied("DATE_INVALID", "A membership starts before the team ends")
+    let thruDate = blank(p.thruDate) ? null : p.thruDate
+    if (teamThru && (thruDate == null || ms(thruDate) > ms(teamThru))) thruDate = teamThru
     if (thruDate && ms(thruDate) <= ms(fromDate)) denied("DATE_INVALID", "A membership ends after it starts")
     const overlaps = memberRows(team.teamPartyId).some(
         row =>
@@ -644,6 +642,7 @@ const enumOptions = enumTypeId =>
         .filter(row => !ended(row))
         .sort((a, b) => (a.sequenceNum ?? 0) - (b.sequenceNum ?? 0))
         .map(row => ({enumId: row.enumId, description: row.description || row.enumId, enumCode: row.enumCode || null}))
+// withCounts: true for every organization's open deals, or the organization whose deals alone are counted
 const stageView = (stage, withCounts) => {
     const view = {
         opportunityStageId: stage.opportunityStageId,
@@ -657,7 +656,7 @@ const stageView = (stage, withCounts) => {
         stateText: ended(stage) ? "Retired " + dateText(stage.thruDate) : "Current",
         revision: revisionOf(stage)
     }
-    if (withCounts) view.openCount = openOnStage(stage.opportunityStageId).length
+    if (withCounts) view.openCount = openOnStage(stage.opportunityStageId, withCounts === true ? null : withCounts).length
     return view
 }
 function pipelineView(pipeline, organizationPartyId, includeEnded, withCounts) {
@@ -799,7 +798,14 @@ function salesSetup(p) {
             revision: revisionOf(row)
         }))
         pipelines = pipelinesOf(organizationPartyId, includeEnded).map(row => {
-            const view = pipelineView(row, organizationPartyId, includeEnded, true)
+            // the shared pipeline's stages hold every organization's deals: a reader of fewer than every organization counts
+            // the organization's own (impl-sales P2 review)
+            const view = pipelineView(
+                row,
+                organizationPartyId,
+                includeEnded,
+                row.organizationPartyId || shared ? true : organizationPartyId
+            )
             view.canEdit = !view.ended && (!view.shared || shared)
             return view
         })
