@@ -108,7 +108,7 @@ merchantCustomerId of its own (the party id and a random suffix). Profiles kept 
 ## Tests
 
 `test/ext/AuthorizeNetGateway.spec.js` runs the gateway against sanitized provider-shaped answers with the framework's HTTP
-fixtures ([Build-Test](../../../../docs/Build-Test.md#http-fixtures)):
+fixtures ([Build-Test](../../../../../docs/Build-Test.md#http-fixtures)):
 
 ```sh
 ./moq test mr-mantle --spec AuthorizeNetGateway

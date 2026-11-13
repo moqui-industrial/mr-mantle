@@ -17,7 +17,7 @@ moqui test mr-mantle --keep --log-level info          # keep the scratch runtime
 ```
 
 They run while working (the specs of what changed) and in `./moq test-apps` before a commit. Acceptance specs (a
-scenario, a provider sandbox call) go in `../acceptance/` and run with `./moq accept mr-mantle`: on a schedule, before
+scenario, a provider sandbox call) go in `acceptance/` beside this file (the component's `test/acceptance/`) and run with `./moq accept mr-mantle`: on a schedule, before
 a release, when asked, or after adding or changing one.
 
 The spec format, conditions, helpers, pitfalls and a Spock-to-spec table are in `docs/Build-Test.md` in the mr-moqui

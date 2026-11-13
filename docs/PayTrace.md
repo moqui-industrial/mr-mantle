@@ -118,7 +118,7 @@ PayTrace has no card transaction webhooks (its `silent_post` is for Trace AR inv
 ## Tests
 
 `test/ext/PayTraceGateway.spec.js` runs the gateway against sanitized v3-shaped answers with the framework's HTTP fixtures
-([Build-Test](../../../../docs/Build-Test.md#http-fixtures)):
+([Build-Test](../../../../../docs/Build-Test.md#http-fixtures)):
 
 ```sh
 ./moq test mr-mantle --spec PayTraceGateway
