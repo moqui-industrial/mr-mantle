@@ -293,6 +293,8 @@ Grant of Patent License.
             <parameter name="totalDocuments" type="Integer"/>
             <parameter name="salesTaxTotal"/>
             <parameter name="purchaseTaxDeductibleTotal"/>
+            <parameter name="salesTaxableTotal"/>
+            <parameter name="purchaseTaxableTotal"/>
             <parameter name="netVatDue"/>
             <parameter name="startPageNumber" type="Integer"/>
             <parameter name="endPageNumber" type="Integer"/>
@@ -386,6 +388,155 @@ Grant of Patent License.
                 let sumNonDeductible = 0;
                 let salesTaxSum = 0;
                 let purchaseTaxDeductibleSum = 0;
+                let salesTaxableSum = 0;
+                let purchaseTaxableSum = 0;
+
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const taxItemTypes = ['ItemVatTax', 'ItemVatTaxTotal', 'ItemSalesTax', 'ItemTax'];
+                const resolveNatureCode = (raw) => {
+                    if (!raw) return '';
+                    if (/^N[1-7](\.[0-9])?$/.test(raw)) return raw;
+                    const enumRec = ec.entity.find("moqui.basic.Enumeration").condition("enumId", raw).useCache(true).one();
+                    return enumRec?.enumCode || '';
+                };
+                const summarizeInvoiceItems = (inv) => {
+                    const isSale = (inv.fromPartyId === organizationPartyId);
+                    const isCreditNote = (inv.invoiceTypeEnumId === 'InvoiceCreditMemo' || inv.invoiceTypeEnumId === 'InvoiceReturn');
+                    const sign = isCreditNote ? -1 : 1;
+                    const items = ec.entity.find("mantle.account.invoice.InvoiceItem")
+                        .condition("invoiceId", inv.invoiceId)
+                        .orderBy("invoiceItemSeqId")
+                        .list() || [];
+
+                    const goodsItems = [];
+                    const taxItems = [];
+                    for (const item of items) {
+                        const enumRec = ec.entity.find("moqui.basic.Enumeration").condition("enumId", item.itemTypeEnumId).useCache(true).one();
+                        const isTaxLine = taxItemTypes.includes(item.itemTypeEnumId);
+                        if (isTaxLine) {
+                            taxItems.push(item);
+                        } else {
+                            goodsItems.push({ item: item, enumRec: enumRec });
+                        }
+                    }
+
+                    let docTaxable = 0;
+                    let docTax = 0;
+                    let docDeductible = 0;
+                    let docNonDeductible = 0;
+                    const docRatesMap = {};
+                    const goodsBySeq = {};
+
+                    for (const g of goodsItems) {
+                        const item = g.item;
+                        const amt = sign * toNum(item.amount) * (item.quantity != null ? toNum(item.quantity) : 1);
+                        docTaxable += amt;
+                        goodsBySeq[item.invoiceItemSeqId] = { amt: amt, item: item, enumRec: g.enumRec };
+                    }
+
+                    const addBucket = (rate, nature, taxableDelta, taxDelta, nonDedDelta) => {
+                        const rateStr = (Math.round(rate * 100) / 100).toString();
+                        const key = rateStr + '_' + (nature || '');
+                        if (!docRatesMap[key]) {
+                            docRatesMap[key] = { rate: rate, nature: nature || '', taxable: 0, tax: 0, nonDed: 0 };
+                        }
+                        docRatesMap[key].taxable += taxableDelta;
+                        docRatesMap[key].tax += taxDelta;
+                        docRatesMap[key].nonDed += nonDedDelta;
+                    };
+
+                    if (taxItems.length > 0) {
+                        let linkedTaxTotal = 0;
+                        let unlinkedTaxTotal = 0;
+                        const unlinkedRates = [];
+                        for (const t of taxItems) {
+                            const tAmt = sign * toNum(t.amount) * (t.quantity != null ? toNum(t.quantity) : 1);
+                            const tRate = t.taxPercentage != null ? toNum(t.taxPercentage) : 0;
+                            const tNature = resolveNatureCode(t.vatNatureEnumId);
+                            let tNonDed = 0;
+                            if (!isSale) {
+                                if (t.nonDeductibleAmount != null) tNonDed = sign * toNum(t.nonDeductibleAmount);
+                                else if (t.nonDeductiblePercentage != null) tNonDed = tAmt * (toNum(t.nonDeductiblePercentage) / 100);
+                            }
+                            docTax += tAmt;
+                            docNonDeductible += tNonDed;
+                            docDeductible += (tAmt - tNonDed);
+
+                            if (t.parentItemSeqId && goodsBySeq[t.parentItemSeqId]) {
+                                const parent = goodsBySeq[t.parentItemSeqId];
+                                parent._matched = true;
+                                addBucket(tRate, tNature, parent.amt, tAmt, tNonDed);
+                                linkedTaxTotal += tAmt;
+                            } else {
+                                unlinkedTaxTotal += tAmt;
+                                unlinkedRates.push({ rate: tRate, nature: tNature, tax: tAmt, nonDed: tNonDed });
+                            }
+                        }
+                        // Distribute unmatched goods across unlinked tax buckets
+                        const unmatchedGoods = Object.values(goodsBySeq).filter(g => !g._matched);
+                        const unmatchedTaxable = unmatchedGoods.reduce((s, g) => s + g.amt, 0);
+                        if (unlinkedRates.length === 1) {
+                            addBucket(unlinkedRates[0].rate, unlinkedRates[0].nature, unmatchedTaxable, unlinkedRates[0].tax, unlinkedRates[0].nonDed);
+                        } else if (unlinkedRates.length > 1) {
+                            const totalUnlinkedTax = unlinkedRates.reduce((s, r) => s + r.tax, 0);
+                            for (const r of unlinkedRates) {
+                                const share = totalUnlinkedTax !== 0 ? (r.tax / totalUnlinkedTax) : (1 / unlinkedRates.length);
+                                addBucket(r.rate, r.nature, unmatchedTaxable * share, r.tax, r.nonDed);
+                            }
+                        }
+                    } else {
+                        // No explicit tax line: group by goods item taxPercentage / statutory VAT nature (N1-N7)
+                        for (const g of goodsItems) {
+                            const item = g.item;
+                            const amt = sign * toNum(item.amount) * (item.quantity != null ? toNum(item.quantity) : 1);
+                            const nature = resolveNatureCode(item.vatNatureEnumId || g.enumRec?.enumCode);
+                            const rate = item.taxPercentage != null ? toNum(item.taxPercentage) : 0;
+                            const calcTax = rate > 0 ? (amt * rate / 100) : 0;
+                            let nonDed = 0;
+                            if (!isSale && calcTax !== 0 && item.nonDeductiblePercentage != null) {
+                                nonDed = calcTax * (toNum(item.nonDeductiblePercentage) / 100);
+                            }
+                            docTax += calcTax;
+                            docNonDeductible += nonDed;
+                            docDeductible += (calcTax - nonDed);
+                            addBucket(rate, nature, amt, calcTax, nonDed);
+                        }
+                    }
+
+                    const rawInvTotal = inv.invoiceTotal != null ? toNum(inv.invoiceTotal) : null;
+                    return {
+                        isSale: isSale,
+                        docTaxable: docTaxable,
+                        docTax: docTax,
+                        docDeductible: docDeductible,
+                        docNonDeductible: docNonDeductible,
+                        docTotal: rawInvTotal != null ? (sign * Math.abs(rawInvTotal)) : (docTaxable + docTax),
+                        buckets: Object.values(docRatesMap)
+                    };
+                };
+
+                // Always compute period settlement totals across both sales & purchases in date range
+                const condsAll = ec.entity.conditionFactory;
+                let qAll = ec.entity.find("mantle.account.invoice.Invoice")
+                    .condition(condsAll.makeCondition([
+                        condsAll.makeCondition("fromPartyId", "equals", organizationPartyId),
+                        condsAll.makeCondition("toPartyId", "equals", organizationPartyId)
+                    ], "or"))
+                    .condition("invoiceTypeEnumId", "in", validTypes)
+                    .condition("statusId", "not-equals", "InvoiceInProcess");
+                if (fromDate) qAll = qAll.condition("invoiceDate", "greater-equals", fromDate);
+                if (thruDate) qAll = qAll.condition("invoiceDate", "less-equals", thruDate);
+                const allPeriodInvoices = qAll.list() || [];
+                for (const pInv of allPeriodInvoices) {
+                    const pSum = summarizeInvoiceItems(pInv);
+                    if (pSum.isSale) {
+                        salesTaxSum += pSum.docTax;
+                        salesTaxableSum += pSum.docTaxable;
+                    } else {
+                        purchaseTaxDeductibleSum += pSum.docDeductible;
+                        purchaseTaxableSum += pSum.docTaxable;
+                    }
+                }
 
                 let protocolSeq = 1;
 
@@ -403,46 +554,34 @@ Grant of Patent License.
                     const cpIdent = ec.entity.find("mantle.party.PartyIdentification").condition("partyId", counterPartyId).condition("partyIdTypeEnumId", "PtidSsn").one();
                     const cpFiscalCode = cpIdent?.idValue || cpVat;
 
-                    // Fetch invoice items
-                    const items = ec.entity.find("mantle.account.invoice.InvoiceItem")
-                        .condition("invoiceId", inv.invoiceId)
-                        .list() || [];
-
-                    let docTaxable = 0;
-                    let docTax = 0;
-                    const docRates = [];
-
-                    for (const item of items) {
-                        const amt = (Number(item.amount) || 0) * (Number(item.quantity) || 1);
-                        if (['ItemVatTax', 'ItemVatTaxTotal', 'ItemSalesTax', 'ItemTax'].includes(item.itemTypeEnumId)) {
-                            docTax += amt;
-                        } else {
-                            docTaxable += amt;
+                    const summary = summarizeInvoiceItems(inv);
+                    const rateLabels = [];
+                    for (const b of summary.buckets) {
+                        const label = b.nature ? (b.rate + '% (' + b.nature + ')') : (b.rate + '%');
+                        rateLabels.push(label);
+                        const rateKey = (Math.round(b.rate * 100) / 100) + '_' + (b.nature || '');
+                        if (!rateSummaryMap[rateKey]) {
+                            rateSummaryMap[rateKey] = {
+                                rateDescription: b.nature ? ('VAT ' + b.rate + '% - ' + b.nature) : ('VAT ' + b.rate + '%'),
+                                taxPercentage: b.rate,
+                                vatNatureCode: b.nature || '',
+                                taxableAmount: 0,
+                                taxAmount: 0,
+                                deductibleAmount: 0,
+                                nonDeductibleAmount: 0
+                            };
                         }
+                        rateSummaryMap[rateKey].taxableAmount += b.taxable;
+                        rateSummaryMap[rateKey].taxAmount += b.tax;
+                        rateSummaryMap[rateKey].deductibleAmount += (b.tax - b.nonDed);
+                        rateSummaryMap[rateKey].nonDeductibleAmount += b.nonDed;
                     }
 
-                    // Default rate 22% if no specific tax item was split
-                    const effectiveTax = docTax > 0 ? docTax : (docTaxable * 0.22);
-                    const docTotal = Number(inv.invoiceTotal) || (docTaxable + effectiveTax);
-                    const rateKey = '22%';
-
-                    if (!rateSummaryMap[rateKey]) {
-                        rateSummaryMap[rateKey] = { rateDescription: 'Standard Rate 22%', taxPercentage: 22.0, taxableAmount: 0, taxAmount: 0, deductibleAmount: 0, nonDeductibleAmount: 0 };
-                    }
-                    rateSummaryMap[rateKey].taxableAmount += docTaxable;
-                    rateSummaryMap[rateKey].taxAmount += effectiveTax;
-                    rateSummaryMap[rateKey].deductibleAmount += effectiveTax;
-
-                    sumTaxable += docTaxable;
-                    sumTax += effectiveTax;
-                    sumDocTotal += docTotal;
-                    sumDeductible += effectiveTax;
-
-                    if (isInvoiceSale) {
-                        salesTaxSum += effectiveTax;
-                    } else {
-                        purchaseTaxDeductibleSum += effectiveTax;
-                    }
+                    sumTaxable += summary.docTaxable;
+                    sumTax += summary.docTax;
+                    sumDocTotal += summary.docTotal;
+                    sumDeductible += summary.docDeductible;
+                    sumNonDeductible += summary.docNonDeductible;
 
                     docRows.push({
                         invoiceId: inv.invoiceId,
@@ -454,12 +593,12 @@ Grant of Patent License.
                         counterPartyId: counterPartyId,
                         counterPartyName: cpName,
                         counterPartyTaxId: cpVat || cpFiscalCode || '—',
-                        taxableAmount: docTaxable,
-                        taxRateText: '22%',
-                        taxAmount: effectiveTax,
-                        deductibleAmount: effectiveTax,
-                        nonDeductibleAmount: 0,
-                        totalAmount: docTotal
+                        taxableAmount: summary.docTaxable,
+                        taxRateText: rateLabels.length > 0 ? rateLabels.join(', ') : '0%',
+                        taxAmount: summary.docTax,
+                        deductibleAmount: summary.docDeductible,
+                        nonDeductibleAmount: summary.docNonDeductible,
+                        totalAmount: summary.docTotal
                     });
                     protocolSeq++;
                 }
@@ -521,9 +660,230 @@ Grant of Patent License.
                 context.totalDocuments = docRows.length;
                 context.salesTaxTotal = salesTaxSum;
                 context.purchaseTaxDeductibleTotal = purchaseTaxDeductibleSum;
+                context.salesTaxableTotal = salesTaxableSum;
+                context.purchaseTaxableTotal = purchaseTaxableSum;
                 context.netVatDue = salesTaxSum - purchaseTaxDeductibleSum;
                 context.startPageNumber = Number(pageStartingNumber) || 1;
                 context.endPageNumber = pageNumber - 1;
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="post" noun="VatSettlement" allow-remote="true">
+        <description>
+            Posts the periodic VAT settlement (Liquidazione IVA periodica) accounting transaction,
+            closing Output VAT (224000000) and Input VAT Receivable (144000000) against
+            Tax Payable / Erario c/IVA (212300000) for the selected period.
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="previousCreditAmount" type="BigDecimal" default-value="0"/>
+            <parameter name="advancePaymentAmount" type="BigDecimal" default-value="0"/>
+            <parameter name="settlementDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="acctgTransId"/>
+            <parameter name="outputVat" type="BigDecimal"/>
+            <parameter name="inputDeductibleVat" type="BigDecimal"/>
+            <parameter name="netVat" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#VatRegisterData"
+                    in-map="{organizationPartyId:organizationPartyId, registerType:'summary',
+                        fiscalYear:fiscalYear, timePeriodId:timePeriodId, fromDate:fromDate, thruDate:thruDate}"
+                    out-map="vatData"/>
+            <script><![CDATA[
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const round2 = (v) => Math.round(toNum(v) * 100) / 100;
+                const outVat = round2(vatData.salesTaxTotal);
+                const inVat = round2(vatData.purchaseTaxDeductibleTotal);
+                const prevCred = round2(previousCreditAmount);
+                const advPay = round2(advancePaymentAmount);
+                const net = round2(outVat - inVat - prevCred - advPay);
+
+                context.outputVat = toDecimal(outVat).setScale(2, 'HALF_UP');
+                context.inputDeductibleVat = toDecimal(inVat).setScale(2, 'HALF_UP');
+                context.netVat = toDecimal(net).setScale(2, 'HALF_UP');
+
+                if (outVat === 0 && inVat === 0 && net === 0) {
+                    ec.message.addError("No VAT movements found for the selected period.");
+                    return;
+                }
+
+                const acctgPref = ec.entity.find("mantle.ledger.config.PartyAcctgPreference")
+                    .condition("organizationPartyId", organizationPartyId).useCache(true).one();
+                const currencyUomId = acctgPref?.baseCurrencyUomId || 'EUR';
+                const txDate = settlementDate || vatData.thruDate || ec.user.nowTimestamp;
+                const desc = "Periodic VAT Settlement - " + (vatData.periodDescription || vatData.fiscalYear || '');
+
+                const txOut = ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTrans").parameters({
+                    acctgTransTypeEnumId: "AttTaxInvoice",
+                    organizationPartyId: organizationPartyId,
+                    transactionDate: txDate,
+                    amountUomId: currencyUomId,
+                    description: desc
+                }).call();
+                const txId = txOut.acctgTransId;
+                context.acctgTransId = txId;
+
+                if (outVat > 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "D",
+                        amount: toDecimal(outVat).setScale(2, 'HALF_UP'),
+                        glAccountId: "224000000", description: "Output VAT settlement"
+                    }).call();
+                } else if (outVat < 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "C",
+                        amount: toDecimal(Math.abs(outVat)).setScale(2, 'HALF_UP'),
+                        glAccountId: "224000000", description: "Output VAT credit adjustment"
+                    }).call();
+                }
+
+                if (inVat > 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "C",
+                        amount: toDecimal(inVat).setScale(2, 'HALF_UP'),
+                        glAccountId: "144000000", description: "Input VAT deductible settlement"
+                    }).call();
+                } else if (inVat < 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "D",
+                        amount: toDecimal(Math.abs(inVat)).setScale(2, 'HALF_UP'),
+                        glAccountId: "144000000", description: "Input VAT credit adjustment"
+                    }).call();
+                }
+
+                if (prevCred > 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "C",
+                        amount: toDecimal(prevCred).setScale(2, 'HALF_UP'),
+                        glAccountId: "212300000", description: "Previous period VAT credit"
+                    }).call();
+                }
+                if (advPay > 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "C",
+                        amount: toDecimal(advPay).setScale(2, 'HALF_UP'),
+                        glAccountId: "212300000", description: "VAT advance payment"
+                    }).call();
+                }
+
+                if (net > 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "C",
+                        amount: toDecimal(net).setScale(2, 'HALF_UP'),
+                        glAccountId: "212300000", description: "Net VAT payable"
+                    }).call();
+                } else if (net < 0) {
+                    ec.service.sync().name("mantle.ledger.LedgerServices.create#AcctgTransEntry").parameters({
+                        acctgTransId: txId, debitCreditFlag: "D",
+                        amount: toDecimal(Math.abs(net)).setScale(2, 'HALF_UP'),
+                        glAccountId: "212300000", description: "Net VAT credit carried forward"
+                    }).call();
+                }
+
+                ec.service.sync().name("mantle.ledger.LedgerServices.post#AcctgTrans").parameters({
+                    acctgTransId: txId
+                }).call();
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="generate" noun="LipeXml" allow-remote="true">
+        <description>
+            Generates the Italian Periodic VAT Settlement XML (LIPE - Comunicazione Liquidazioni Periodiche IVA)
+            conforming to the Agenzia delle Entrate schema (iv:Fornitura).
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="quarter" type="Integer" default-value="1"/>
+            <parameter name="month" type="Integer"/>
+            <parameter name="previousCreditAmount" type="BigDecimal" default-value="0"/>
+            <parameter name="advancePaymentAmount" type="BigDecimal" default-value="0"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="xmlText"/>
+            <parameter name="filename"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#VatRegisterData"
+                    in-map="{organizationPartyId:organizationPartyId, registerType:'summary',
+                        fiscalYear:fiscalYear, timePeriodId:timePeriodId, fromDate:fromDate, thruDate:thruDate}"
+                    out-map="vatData"/>
+            <script><![CDATA[
+                const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const fmtDec = (n) => (Number(n) || 0).toFixed(2).replace('.', ',');
+                const org = vatData.organization || {};
+                const year = String(vatData.fiscalYear || new Date().getFullYear());
+                const vatId = (org.vatId || '00000000000').replace(/^IT/i, '');
+                const fiscalCode = org.fiscalCode || vatId;
+
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const vp2 = toNum(vatData.salesTaxableTotal);
+                const vp3 = toNum(vatData.purchaseTaxableTotal);
+                const vp4 = toNum(vatData.salesTaxTotal);
+                const vp5 = toNum(vatData.purchaseTaxDeductibleTotal);
+                const vp6Diff = vp4 - vp5;
+                const prevCred = toNum(previousCreditAmount);
+                const advPay = toNum(advancePaymentAmount);
+                const vp14Diff = vp6Diff - prevCred - advPay;
+
+                let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                xml += '<iv:Fornitura xmlns:iv="urn:www.agenziaentrate.gov.it:specificheTecniche:sco:ivp" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">\n';
+                xml += '  <iv:Intestazione>\n';
+                xml += '    <iv:CodiceFornitura>IVP18</iv:CodiceFornitura>\n';
+                xml += '    <iv:CodiceFiscaleDichiarante>' + esc(fiscalCode) + '</iv:CodiceFiscaleDichiarante>\n';
+                xml += '  </iv:Intestazione>\n';
+                xml += '  <iv:Comunicazione identificativo="00001">\n';
+                xml += '    <iv:Frontespizio>\n';
+                xml += '      <iv:CodiceFiscale>' + esc(fiscalCode) + '</iv:CodiceFiscale>\n';
+                xml += '      <iv:AnnoImposta>' + esc(year) + '</iv:AnnoImposta>\n';
+                xml += '      <iv:PartitaIVA>' + esc(vatId) + '</iv:PartitaIVA>\n';
+                xml += '    </iv:Frontespizio>\n';
+                xml += '    <iv:DatiContabili>\n';
+                xml += '      <iv:Modulo>\n';
+                xml += '        <iv:NumeroModulo>1</iv:NumeroModulo>\n';
+                if (month) {
+                    xml += '        <iv:Mese>' + Number(month) + '</iv:Mese>\n';
+                } else {
+                    xml += '        <iv:Trimestre>' + (Number(quarter) || 1) + '</iv:Trimestre>\n';
+                }
+                xml += '        <iv:TotaleOperazioniAttive>' + fmtDec(vp2) + '</iv:TotaleOperazioniAttive>\n';
+                xml += '        <iv:TotaleOperazioniPassive>' + fmtDec(vp3) + '</iv:TotaleOperazioniPassive>\n';
+                xml += '        <iv:IvaEsigibile>' + fmtDec(vp4) + '</iv:IvaEsigibile>\n';
+                xml += '        <iv:IvaDetratta>' + fmtDec(vp5) + '</iv:IvaDetratta>\n';
+                if (vp6Diff >= 0) {
+                    xml += '        <iv:IvaDovuta>' + fmtDec(vp6Diff) + '</iv:IvaDovuta>\n';
+                } else {
+                    xml += '        <iv:IvaCredito>' + fmtDec(Math.abs(vp6Diff)) + '</iv:IvaCredito>\n';
+                }
+                if (prevCred > 0) {
+                    xml += '        <iv:CreditoPeriodoPrecedente>' + fmtDec(prevCred) + '</iv:CreditoPeriodoPrecedente>\n';
+                }
+                if (advPay > 0) {
+                    xml += '        <iv:Acconto>' + fmtDec(advPay) + '</iv:Acconto>\n';
+                }
+                if (vp14Diff >= 0) {
+                    xml += '        <iv:ImportoDaVersare>' + fmtDec(vp14Diff) + '</iv:ImportoDaVersare>\n';
+                } else {
+                    xml += '        <iv:ImportoACredito>' + fmtDec(Math.abs(vp14Diff)) + '</iv:ImportoACredito>\n';
+                }
+                xml += '      </iv:Modulo>\n';
+                xml += '    </iv:DatiContabili>\n';
+                xml += '  </iv:Comunicazione>\n';
+                xml += '</iv:Fornitura>\n';
+
+                context.xmlText = xml;
+                context.filename = 'IT' + vatId + '_LIPE_' + year + '_Q' + (Number(quarter) || 1) + '.xml';
             ]]></script>
         </actions>
     </service>
