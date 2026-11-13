@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <!-- Smithy, the public git hosting app of IronStone PASS (mr-pass plan/design-smithy.md §14.2): groups, the Smithy row
+        beside a hosted moqui.resource.GitRepository, and the role rows of both. Every row has its siteId. The rules are in
+        service/mantle/smithy/SmithyCore.js; a visibility, role, agreement and policy is an Enumeration whose enumCode is
+        the word operations take and return. -->
+    <entity entity-name="SmithySite" package="mantle.smithy">
+        <description>A site's Smithy settings: one row for a site that mounts Smithy, read with the defaults when there
+            is none.</description>
+        <field name="siteId" type="id" is-pk="true"/>
+        <field name="homeGroupId" type="id"><description>The group whose Overview is the app's home; empty: Explore</description></field>
+        <field name="groupCreateEnumId" type="id"><description>SmithyCreatePolicy; ScpRequest when empty</description></field>
+        <field name="repositoryCreateEnumId" type="id"><description>Personal repositories; ScpVerified when empty</description></field>
+        <field name="forkCreateEnumId" type="id"><description>ScpVerified when empty</description></field>
+        <field name="accountContactListId" type="id"><description>The scope category of personal namespaces' conversations</description></field>
+        <field name="defaultMaxRepositories" type="number-integer"><description>An account's; 5 when empty</description></field>
+        <field name="defaultRepositoryBytes" type="number-integer"><description>An account's, for one repository; 1073741824 when empty</description></field>
+        <field name="defaultLfsBytes" type="number-integer"><description>An account's; 1073741824 when empty</description></field>
+        <field name="defaultRunnerMinutes" type="number-integer"><description>An account's, a month; 0 when empty</description></field>
+        <field name="groupRepositoryBytes" type="number-integer"><description>A group's default, for one repository; 5368709120 when empty</description></field>
+        <field name="groupLfsBytes" type="number-integer"><description>A group's default; 5368709120 when empty</description></field>
+        <field name="groupRunnerMinutes" type="number-integer"><description>A group's default, a month; 2000 when empty</description></field>
+        <field name="maxEditBytes" type="number-integer"><description>The page editor's limit; 1048576 when empty</description></field>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" title="Home" related="mantle.smithy.SmithyGroup">
+            <key-map field-name="homeGroupId" related="groupId"/></relationship>
+    </entity>
+    <entity entity-name="SmithyGroup" package="mantle.smithy">
+        <description>A group of repositories and subgroups, to four levels. A subgroup inherits the settings fields it
+            leaves empty from the nearest group above.</description>
+        <field name="groupId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="parentGroupId" type="id"><description>Empty for a top-level group</description></field>
+        <field name="pathSegment" type="text-short"><description>Lower case; ^[a-z0-9][a-z0-9_-]{1,38}$</description></field>
+        <field name="groupPath" type="text-medium"><description>The full path, lower case (moqui, moqui/addons); unique in a site</description></field>
+        <field name="name" type="text-medium"/>
+        <field name="description" type="text-long"><description>Plain text</description></field>
+        <field name="avatarId" type="id"><description>As PublicSiteProfile.avatarId</description></field>
+        <field name="visibilityEnumId" type="id"><description>SmithyVisibility; a subgroup is no wider than its parent, and the evaluator takes the narrowest</description></field>
+        <field name="statusId" type="id"><description>SmgRequested, SmgActive, SmgRefused; only an active group is found by anyone but its requester and the operators</description></field>
+        <field name="requestedByPartyId" type="id"/>
+        <field name="requestReason" type="text-long"/>
+        <field name="decidedByPartyId" type="id"/>
+        <field name="decidedAt" type="date-time"/>
+        <field name="decisionReason" type="text-long"/>
+        <field name="contactListId" type="id"><description>The group's forum category; set when the group becomes active</description></field>
+        <field name="newsContactListId" type="id"><description>The announcements category</description></field>
+        <field name="workEffortId" type="id"><description>One project for all of the group's repositories, optional</description></field>
+        <field name="issueRepositoryId" type="id"><description>The group's tracker</description></field>
+        <field name="landingRepositoryId" type="id"/>
+        <field name="landingPath" type="text-medium"/>
+        <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
+        <field name="agreementPath" type="text-medium"><description>AUTHORS.md when empty</description></field>
+        <field name="runnerPoolId" type="id"><description>Trusted runs</description></field>
+        <field name="outsideRunnerPoolId" type="id"><description>Untrusted runs</description></field>
+        <field name="maxRepositoryBytes" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="maxLfsBytes" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="runnerMinutesMonthly" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="hiddenAt" type="date-time"><description>Set: Not Found to everyone but its Owners and the site's staff</description></field>
+        <field name="hiddenByPartyId" type="id"/>
+        <field name="hideReason" type="text-long"/>
+        <field name="createdByPartyId" type="id"/>
+        <field name="createdAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one" title="Parent" related="mantle.smithy.SmithyGroup">
+            <key-map field-name="parentGroupId" related="groupId"/></relationship>
+        <relationship type="one-nofk" related="mantle.forum.ForumCategory"/>
+        <relationship type="one-nofk" title="SmithyVisibility" related="moqui.basic.Enumeration">
+            <key-map field-name="visibilityEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SmithyAgreement" related="moqui.basic.Enumeration">
+            <key-map field-name="agreementEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SmithyGroup" related="moqui.basic.StatusItem"/>
+        <index name="SMITHY_GROUP_PATH" unique="true"><index-field name="siteId"/><index-field name="groupPath"/></index>
+        <index name="SMITHY_GROUP_PARENT"><index-field name="siteId"/><index-field name="parentGroupId"/><index-field name="pathSegment"/></index>
+        <index name="SMITHY_GROUP_CATEGORY"><index-field name="contactListId"/></index>
+    </entity>
+    <entity entity-name="SmithyGroupParty" package="mantle.smithy">
+        <description>A party's role on a group: one row for a party and a group. A change of role updates it, and the
+            audit log keeps the history.</description>
+        <field name="groupId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="roleEnumId" type="id" enable-audit-log="true"><description>SmithyRole; held on the group, its subgroups and their repositories</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"><description>An end date; empty: none</description></field>
+        <field name="addedByPartyId" type="id"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.smithy.SmithyGroup"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="SmithyRole" related="moqui.basic.Enumeration">
+            <key-map field-name="roleEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_GROUP_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
+    </entity>
+    <entity entity-name="SmithyRepository" package="mantle.smithy">
+        <description>What Smithy keeps of a hosted repository: its group or personal namespace, its slug and path, its
+            visibility and what it has turned on. Its description, default branch, archive date and size are the
+            GitRepository's and are not copied; the fork parent is GitRepository.forkOfRepositoryId.</description>
+        <field name="repositoryId" type="id" is-pk="true"><description>The moqui.resource.GitRepository</description></field>
+        <field name="siteId" type="id"/>
+        <field name="groupId" type="id"><description>Exactly one of groupId and ownerPartyId is set</description></field>
+        <field name="ownerPartyId" type="id"><description>A personal namespace: the party whose handle is the first path segment</description></field>
+        <field name="slug" type="text-medium"><description>Lower case; ^[a-z0-9_][a-z0-9_.-]{0,99}$</description></field>
+        <field name="repositoryPath" type="text-medium"><description>Equal to GitRepository.repositoryPath; written only by SmithyCore.setPath, which writes both</description></field>
+        <field name="name" type="text-medium"><description>As typed</description></field>
+        <field name="visibilityEnumId" type="id"><description>SmithyVisibility; no wider than its group, and the evaluator takes the narrowest</description></field>
+        <field name="issuesEnabled" type="text-indicator"><description>N when empty</description></field>
+        <field name="mergeRequestsEnabled" type="text-indicator"><description>Y when empty</description></field>
+        <field name="pipelinesEnabled" type="text-indicator"><description>N when empty</description></field>
+        <field name="forumEnabled" type="text-indicator"><description>N when empty</description></field>
+        <field name="docsEnabled" type="text-indicator"><description>N when empty</description></field>
+        <field name="docsPath" type="text-medium"><description>docs when empty</description></field>
+        <field name="workEffortId" type="id"><description>The project of its issues</description></field>
+        <field name="contactListId" type="id"><description>Its forum subcategory, when it has one</description></field>
+        <field name="nextIssueNumber" type="number-integer"><description>Starts at 1</description></field>
+        <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
+        <field name="agreementPath" type="text-medium"><description>Empty: inherited</description></field>
+        <field name="pinnedSequence" type="number-integer"><description>Pinned on its group's Overview when set</description></field>
+        <field name="componentName" type="text-medium"><description>From component.xml</description></field>
+        <field name="componentVersion" type="text-short"/>
+        <field name="componentDependsOn" type="text-long"><description>Names, comma separated</description></field>
+        <field name="componentCommitId" type="text-short"><description>The commit it was read at</description></field>
+        <field name="hiddenAt" type="date-time"><description>Set: Not Found to everyone but its Owners and the site's staff</description></field>
+        <field name="hiddenByPartyId" type="id"/>
+        <field name="hideReason" type="text-long"/>
+        <field name="createdByPartyId" type="id"/>
+        <field name="createdAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one-nofk" related="moqui.resource.GitRepository"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one" related="mantle.smithy.SmithyGroup"/>
+        <relationship type="one" title="Owner" related="mantle.party.Party">
+            <key-map field-name="ownerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one-nofk" related="mantle.forum.ForumCategory"/>
+        <relationship type="one-nofk" title="SmithyVisibility" related="moqui.basic.Enumeration">
+            <key-map field-name="visibilityEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SmithyAgreement" related="moqui.basic.Enumeration">
+            <key-map field-name="agreementEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_REPO_PATH" unique="true"><index-field name="repositoryPath"/></index>
+        <index name="SMITHY_REPO_GROUP"><index-field name="siteId"/><index-field name="groupId"/><index-field name="slug"/></index>
+        <index name="SMITHY_REPO_OWNER"><index-field name="siteId"/><index-field name="ownerPartyId"/><index-field name="slug"/></index>
+        <index name="SMITHY_REPO_PROJECT"><index-field name="workEffortId"/></index>
+        <index name="SMITHY_REPO_COMPONENT"><index-field name="siteId"/><index-field name="componentName"/></index>
+        <index name="SMITHY_REPO_CATEGORY"><index-field name="contactListId"/></index>
+    </entity>
+    <entity entity-name="SmithyRepositoryParty" package="mantle.smithy">
+        <description>A party's role on one repository, beside what its groups give.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="roleEnumId" type="id" enable-audit-log="true"><description>SmithyRole</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="addedByPartyId" type="id"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="SmithyRole" related="moqui.basic.Enumeration">
+            <key-map field-name="roleEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_REPO_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
+    </entity>
+</entities>

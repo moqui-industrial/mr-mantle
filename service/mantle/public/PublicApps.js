@@ -35,6 +35,9 @@ const apps = {
         readiness: 'mantle.product.StoreAdminServices.check#StoreReadiness',
         accountCard: 'mantle.party.ShopCustomerServices.get#AccountCard',
     },
+    // Smithy (mr-pass plan/design-smithy.md §4.1): public git hosting, bound to no business record; it may be a site's
+    // one root app, where a page's URL is also a clone address; a site has one Smithy mount
+    smithy: { root: true, onePerSite: true },
 }
 /* The first path segments no app mount, site page route or redirect may take: the BOSS apps, REST and RPC, the framework's
  * routes (public_site.rs FRAMEWORK_ROUTES, so a root app never shadows them; Shop P1, F2) and its sign-in, token and

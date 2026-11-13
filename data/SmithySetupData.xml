@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Smithy (mr-pass plan/design-smithy.md §14.3): the visibility, role, agreement and creation policy enumerations, whose
+    enumCode is the word an operation takes and returns, and a group's statuses. No site, group or repository is made by
+    setup. -->
+<entity-facade-xml type="seed">
+    <!-- from widest to narrowest; the effective visibility of a repository is the narrowest of its own and its groups' -->
+    <moqui.basic.EnumerationType description="Smithy Visibility" enumTypeId="SmithyVisibility"/>
+    <moqui.basic.Enumeration enumId="SmvPublic" enumTypeId="SmithyVisibility" enumCode="public" sequenceNum="1" description="Public"/>
+    <moqui.basic.Enumeration enumId="SmvMembers" enumTypeId="SmithyVisibility" enumCode="members" sequenceNum="2" description="Members"/>
+    <moqui.basic.Enumeration enumId="SmvPrivate" enumTypeId="SmithyVisibility" enumCode="private" sequenceNum="3" description="Private"/>
+    <!-- sequenceNum is the rank: a higher rank holds everything a lower one does -->
+    <moqui.basic.EnumerationType description="Smithy Role" enumTypeId="SmithyRole"/>
+    <moqui.basic.Enumeration enumId="SmrGuest" enumTypeId="SmithyRole" enumCode="guest" sequenceNum="10" description="Guest"/>
+    <moqui.basic.Enumeration enumId="SmrReporter" enumTypeId="SmithyRole" enumCode="reporter" sequenceNum="20" description="Reporter"/>
+    <moqui.basic.Enumeration enumId="SmrDeveloper" enumTypeId="SmithyRole" enumCode="developer" sequenceNum="30" description="Developer"/>
+    <moqui.basic.Enumeration enumId="SmrMaintainer" enumTypeId="SmithyRole" enumCode="maintainer" sequenceNum="40" description="Maintainer"/>
+    <moqui.basic.Enumeration enumId="SmrOwner" enumTypeId="SmithyRole" enumCode="owner" sequenceNum="50" description="Owner"/>
+    <moqui.basic.EnumerationType description="Smithy Contributor Agreement" enumTypeId="SmithyAgreement"/>
+    <moqui.basic.Enumeration enumId="SmaInherit" enumTypeId="SmithyAgreement" enumCode="inherit" sequenceNum="1" description="Inherit"/>
+    <moqui.basic.Enumeration enumId="SmaOff" enumTypeId="SmithyAgreement" enumCode="off" sequenceNum="2" description="Off"/>
+    <moqui.basic.Enumeration enumId="SmaRequired" enumTypeId="SmithyAgreement" enumCode="required" sequenceNum="3" description="Required"/>
+    <moqui.basic.EnumerationType description="Smithy Creation Policy" enumTypeId="SmithyCreatePolicy"/>
+    <moqui.basic.Enumeration enumId="ScpOperators" enumTypeId="SmithyCreatePolicy" enumCode="operators" sequenceNum="1" description="Operators only"/>
+    <moqui.basic.Enumeration enumId="ScpRequest" enumTypeId="SmithyCreatePolicy" enumCode="request" sequenceNum="2" description="By request and approval"/>
+    <moqui.basic.Enumeration enumId="ScpVerified" enumTypeId="SmithyCreatePolicy" enumCode="verified" sequenceNum="3" description="Any verified account"/>
+
+    <moqui.basic.StatusType description="Smithy Group" statusTypeId="SmithyGroup"/>
+    <moqui.basic.StatusItem statusId="SmgRequested" statusTypeId="SmithyGroup" statusCode="requested" sequenceNum="1" description="Requested"/>
+    <moqui.basic.StatusItem statusId="SmgActive" statusTypeId="SmithyGroup" statusCode="active" sequenceNum="2" description="Active"/>
+    <moqui.basic.StatusItem statusId="SmgRefused" statusTypeId="SmithyGroup" statusCode="refused" sequenceNum="3" description="Refused"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmgRequested" toStatusId="SmgActive" transitionName="Approve"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SmgRequested" toStatusId="SmgRefused" transitionName="Refuse"/>
+</entity-facade-xml>

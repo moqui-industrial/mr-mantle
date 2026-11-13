@@ -292,4 +292,21 @@
     // Commerce P14: a store feed's active build at the Shop mount's feed path (feeds/{feedKey}.{extension}), checked against
     // the site's current generation
     ['GET', 'shop/feeds', 'getShopFeed'],
+    // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
+    ['GET', 'smithy/resolve', 'resolveSmithyPath'],
+    ['GET', 'smithy/home', 'getSmithyHome'],
+    ['GET', 'smithy/groups', 'findGroups'],
+    ['GET', 'smithy/groups/{groupId}', 'getGroup'],
+    ['GET', 'smithy/groups/{groupId}/members', 'findGroupMembers'],
+    ['GET', 'smithy/repositories', 'findRepositories'],
+    ['GET', 'smithy/repositories/{repositoryId}', 'getRepository'],
+    ['GET', 'smithy/repositories/{repositoryId}/tree', 'getTree'],
+    ['GET', 'smithy/repositories/{repositoryId}/blob', 'getBlob'],
+    ['GET', 'smithy/repositories/{repositoryId}/raw', 'downloadBlob'],
+    ['GET', 'smithy/repositories/{repositoryId}/blame', 'getBlame'],
+    ['GET', 'smithy/repositories/{repositoryId}/commits', 'findCommits'],
+    ['GET', 'smithy/repositories/{repositoryId}/commits/{commitId}', 'getCommit'],
+    ['GET', 'smithy/repositories/{repositoryId}/compare', 'getCompare'],
+    ['GET', 'smithy/repositories/{repositoryId}/refs', 'findRefs'],
+    ['GET', 'smithy/repositories/{repositoryId}/archive', 'downloadArchive'],
 ]

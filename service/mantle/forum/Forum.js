@@ -562,6 +562,16 @@ methods.storeProfile = (p) => {
     })
     if (dup && dup.partyId !== partyId)
         fail('Conflict', 'Handle is unavailable')
+    // A handle is a first path segment where Smithy is a site's root app, in one set with the group paths and the
+    // reserved words (mr-pass plan/design-smithy.md §4.2), so a new handle takes none of them on any site; the site's
+    // row is locked above, so a handle and a group path are not taken at the same time.
+    if (
+        old?.handle !== p.handle &&
+        !ec.resource
+            .script('component://mr-mantle/service/mantle/smithy/SmithyCore.js')
+            .nameFree(p.siteId, p.handle, partyId, 'handle')
+    )
+        fail('Conflict', 'Handle is unavailable')
     const avatarId =
         p.avatarId === undefined ? old?.avatarId || null : p.avatarId || null
     if (avatarId && avatarId !== old?.avatarId) {
@@ -2118,6 +2128,12 @@ methods.storeMounts = (p) => {
     )
     const existing = rows(S + 'PublicSiteApp', { siteId: p.siteId }, 100)
     const named = new Set(mounts.map((m) => m.app))
+    // a mount takes no group path of the site, nor a handle where the site has Smithy (design-smithy §4.2)
+    const smithyCore = ec.resource.script(
+        'component://mr-mantle/service/mantle/smithy/SmithyCore.js',
+    )
+    const smithyHere =
+        named.has('smithy') || existing.some((old) => old.app === 'smithy')
     const kept = existing.filter(
         (old) => registry.apps[old.app]?.target && !named.has(old.app),
     )
@@ -2134,7 +2150,9 @@ methods.storeMounts = (p) => {
             invalid('Invalid or reserved mount')
         // one root app per site, Forum or Shop: two at '/' overlap below
         if (m.pathPrefix === '/' && !app.root)
-            invalid('ROOT_NOT_ALLOWED[pathPrefix]: Only Forum or Shop may mount at root')
+            invalid('ROOT_NOT_ALLOWED[pathPrefix]: Only Forum, Shop or Smithy may mount at root')
+        if (smithyCore.nameHeld(p.siteId, m.pathPrefix.split('/')[1], smithyHere))
+            invalid('NAME_TAKEN[pathPrefix]: A group or an account of the site has that path')
         if (
             app.onePerSite &&
             mounts.slice(0, i).concat(kept).some((other) => other.app === m.app)

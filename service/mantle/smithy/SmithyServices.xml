@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Smithy (mr-pass plan/design-smithy.md §15.2, DG1 public read). Each operation takes PASS's input map (its fields
+        are SmithySchema.js's, siteId among them) and answers result; Smithy.js execute() refuses a field the schema does
+        not list. Every read applies the view rule of SmithyCore.js: a record the caller may not view is Not Found, exactly
+        as one that is not there. No operation needs a sign-in. -->
+    <service verb="resolve" noun="Path" authenticate="anonymous-all" allow-remote="false">
+        <description>What the name segments of a page's path are (design-smithy §4.4 step 4): a repository, a group, an account (a handle), or a redirect from a repository's old path or a GitHub form after a repository's path. Out: kind, groupId, repositoryId, handle, canonicalPath, redirectPath. Not Found for a path with no row and, exactly the same, for what the caller may not view.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("resolveSmithyPath", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Home" authenticate="anonymous-all" allow-remote="false">
+        <description>The site's home group (SmithySite.homeGroupId) when the caller may view it: homeGroupId and groupPath, both empty when the home is Explore. Not Found on a site that is not open to the caller.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getSmithyHome", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Groups" authenticate="anonymous-all" allow-remote="false">
+        <description>The groups the caller may view, by path, paged (the query takes what the caller's rows and the visibility allow, and the evaluator decides each): the top-level ones, the subgroups of parentGroupId, those matching query in path or name, or (mine) those the caller has a role row on. Each with the counts of the repositories and subgroups the caller may view. Not Found for a parent the caller may not view; sign-in required for mine.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findGroups", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Group" authenticate="anonymous-all" allow-remote="false">
+        <description>A group, the groups above it (each with its name only when the caller may view that group itself, else its id and path), the caller's effective role and capabilities. Not Found for a group that is not there or that the caller may not view: narrower than the caller's access in effect, hidden, not yet active, or on a site that is not published.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getGroup", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="GroupMembers" authenticate="anonymous-all" allow-remote="false">
+        <description>The members of a group, each with the highest role of its rows on the group and the groups above and the path that row is on. An Owner sees every member, another viewer the members whose profile is shown to them. No party id is returned. Not Found as get#Group.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findGroupMembers", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Repositories" authenticate="anonymous-all" allow-remote="false">
+        <description>The repositories the caller may view, paged: of a group (with includeSubgroups those below it too), of a handle's namespace, matching query in path or name, pinned ones in their order, or (mine) those of the caller's namespace, rows and groups; sorted by path (sort pushed is by path too until a stored date of the last push is kept). Not Found for a group that is not there or not viewable, and for a handle whose profile is not shown to the caller and that has no repository the caller may view; sign-in required for mine.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findRepositories", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Repository" authenticate="anonymous-all" allow-remote="false">
+        <description>A repository with its group (the group's view when the caller may view the group itself, else only its id and path), clone addresses (the page's own only where Smithy is the site's root app), the caller's effective role, capabilities and counts. Not Found for a repository that has no Smithy row in this site or that the caller may not view.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getRepository", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Tree" authenticate="anonymous-all" allow-remote="false">
+        <description>The directory at a refPath (a ref name followed by a path; empty: the default branch's root): up to 1,000 entries from offset, each with the framework's type (dir, file, executable, link, submodule), whether Git LFS keeps it and its last commit, the path's last commit and the directory's README rendered and cleaned. empty for a repository with no commit; isFile when the path is a file. Not Found as get#Repository, and for a ref or path that names nothing.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getTree", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Blob" authenticate="anonymous-all" allow-remote="false">
+        <description>A file at a refPath: its size, blob id and last commit, its text up to 1 MiB (tooLarge beyond), Markdown rendered and cleaned unless plain, binary and lfs marked with no content. Not Found as get#Repository, and for a refPath that is no file.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getBlob", input)</script>
+        </actions>
+    </service>
+    <service verb="download" noun="Blob" authenticate="anonymous-all" allow-remote="false">
+        <description>A file's raw content: file (filename, mimeType, size, inline) with text or bytes. The type is text/plain, a raster image's, or application/octet-stream, never one a browser runs. Refused (notAvailable) for a file kept in Git LFS. Not Found as get#Blob.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("downloadBlob", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Blame" authenticate="anonymous-all" allow-remote="false">
+        <description>Blame of a file. Not Found as get#Blob; otherwise refused (notBuilt) until the framework has its blame service.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getBlame", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Commits" authenticate="anonymous-all" allow-remote="false">
+        <description>The history of a ref, or of a path at a ref, newest first: 30 commits a page (limit to 100), the next page after afterCommitId. A commit has the author's name and no address (authorHandle is always empty: an address is not matched to an account). Not Found as get#Repository and for a ref that names nothing.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findCommits", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Commit" authenticate="anonymous-all" allow-remote="false">
+        <description>A commit by its id (7 to 40 hex digits): the files it changed with their counts, their diffs within the page's limits (100 files, 20,000 changed lines; truncated says more were left out) or the one of path, in one diff call (a commit of more than 100 files has its file list and no diffs: truncated), and its statuses. Not Found as get#Repository and for an id that names no commit.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getCommit", input)</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Compare" authenticate="anonymous-all" allow-remote="false">
+        <description>What head has that base (the default branch when empty) lacks, each side a branch, a tag or a commit id and nothing else: the commits, ahead and behind, the files, with withDiffs their diffs within the page's limits, with checkMergeable whether it merges cleanly (a trial merge; mergeable is empty without it), and the open merge request of the two branches. Refused (notBuilt) for a head in another repository. Not Found as get#Repository and for a side that names no branch, tag or commit.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getCompare", input)</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Refs" authenticate="anonymous-all" allow-remote="false">
+        <description>The branches and tags of a repository, paged: the default branch first, branches by name, tags newest first, each with its name, commit, summary and date. With refType branch and without namesOnly also each branch's ahead and behind the default branch, whether a rule protects it and its open merge request (the Branches page; a ref picker asks namesOnly). Not Found as get#Repository.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findRefs", input)</script>
+        </actions>
+    </service>
+    <service verb="download" noun="Archive" authenticate="anonymous-all" allow-remote="false">
+        <description>A tree as a zip or tar.gz. Not Found as get#Repository and for a ref that names nothing; otherwise refused (notBuilt) until the framework has its archive service.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("downloadArchive", input)</script>
+        </actions>
+    </service>
+
+    <!-- Not operations: called by check#GitRepositoryAuthz, by Forum's storeProfile, and by operators and specs. -->
+    <service verb="get" noun="RepositoryRights" authenticate="anonymous-all" allow-remote="false">
+        <description>What a user, or no user (an empty userId, or one with no UserAccount), holds on a hosted repository by
+            Smithy's rules (design-smithy §5.1, §5.2, §5.4): known is false for a repository with no SmithyRepository row,
+            and then nothing else is said. canView is the effective visibility (the narrowest of the repository's and its
+            groups': anyone for public, the site's active members for members, a role for private), the hidden and group
+            status rules, the site's publication and the role; role is the effective
+            role's SmithyRole id, the highest of the party's active rows on the repository and its groups, its personal
+            namespace and its project roles, and empty when the repository may not be viewed or the party is suspended in
+            the site; confirmed is whether the account has a confirmed address (an internal account: an address). An operator's page role is not counted
+            here: git has the ADMIN grant for it.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="userId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="known" type="Boolean"/>
+            <parameter name="canView" type="Boolean"/>
+            <parameter name="role"/>
+            <parameter name="rank" type="Integer"><description>The role's rank (10 Guest to 50 Owner), 0 for none</description></parameter>
+            <parameter name="confirmed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const held = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").rights(repositoryId, userId)
+                known = held.known
+                canView = held.canView
+                role = held.role
+                rank = held.rank
+                confirmed = held.confirmed
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="create" noun="Group" allow-remote="false">
+        <description>Make an active group: a top-level one by the site's owner or an operator (not a moderator), who
+            becomes its Owner, or a subgroup by an Owner of parentGroupId. Until DG2's requestGroup and createSubgroup,
+            which add the site's creation policy. Refused: no confirmed address (addressUnconfirmed; an operator needs
+            none); a path segment that is not 2 to 39 lower case letters, digits, '_' or '-' (nameInvalid); a top-level
+            name in the site's name set, which is its groups, its handles, the reserved paths, the apps' mounts and
+            Smithy's own words, or a subgroup name its parent's subgroups or repositories have (nameTaken; a refused group's path is free, and its row is taken over); a subgroup
+            wider than its parent or below the fourth level (policyRefused); a caller without the role (accessDenied).</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="parentGroupId"/>
+            <parameter name="pathSegment" required="true"/>
+            <parameter name="name"><description>The path segment when empty</description></parameter>
+            <parameter name="description"/>
+            <parameter name="visibility"><description>public, members or private; the parent's effective one, else
+                private, when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="groupId"/>
+            <parameter name="groupPath"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const made = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").createGroup(
+                        {siteId, parentGroupId, pathSegment, name, description, visibility})
+                groupId = made.groupId
+                groupPath = made.groupPath
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="create" noun="Repository" allow-remote="false">
+        <description>Make a repository in a group, by a Maintainer of it, or in the caller's own namespace (its handle), by
+            the site's owner or an operator: a new hosted repository (local, or db). Its path is the group's path or the handle, then the
+            slug, set through set#GitRepositoryPath. Until DG2's createRepository, which adds the policy, quotas and the
+            README. Refused: no confirmed address (addressUnconfirmed; an operator needs none); a slug that is not a
+            repository name (nameInvalid); a name its group's subgroups or repositories have, or a path that is taken
+            (nameTaken); a visibility wider than its group's effective one, or a group that is not active
+            (policyRefused); a caller without the role (accessDenied).</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="groupId"><description>Empty: the caller's namespace</description></parameter>
+            <parameter name="slug"><description>Lowered; the name when empty</description></parameter>
+            <parameter name="name"><description>As typed; the slug when empty</description></parameter>
+            <parameter name="description"/>
+            <parameter name="visibility"><description>public, members or private; private when empty</description></parameter>
+            <parameter name="repositoryKind"><description>local (the default) or db, for a new one</description></parameter>
+            <parameter name="branch"><description>The default branch of a new one; main when empty</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="repositoryId"/>
+            <parameter name="repositoryPath"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const made = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").createRepository(
+                        {siteId, groupId, slug, name, description, visibility, repositoryKind, branch})
+                repositoryId = made.repositoryId
+                repositoryPath = made.repositoryPath
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="bind" noun="Repository" allow-remote="false">
+        <description>Bind a hosted repository that is there (a moqui.resource.GitRepository of any kind, a remote mirror
+            included) to a group of a site, with a slug and a visibility: its SmithyRepository row, and its path (the
+            group's path, then the slug) set through set#GitRepositoryPath. For an operator. Refused: a caller who is
+            no operator (accessDenied); a repositoryId that names no hosted repository, or one Smithy has already; a slug
+            that is not a repository name (nameInvalid); a name the group's subgroups or repositories have, or a path
+            that is taken (nameTaken); a visibility wider than the group's effective one, or a group that is not active
+            (policyRefused). A group of another site is Not Found.</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="groupId" required="true"/>
+            <parameter name="slug"><description>Lowered; the name when empty</description></parameter>
+            <parameter name="name"><description>As typed; the slug when empty</description></parameter>
+            <parameter name="visibility"><description>public, members or private; private when empty, never the
+                group's</description></parameter>
+        </in-parameters>
+        <out-parameters><parameter name="repositoryPath"/></out-parameters>
+        <actions>
+            <script><![CDATA[
+                repositoryPath = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").bindRepository(
+                        {siteId, repositoryId, groupId, slug, name, visibility}).repositoryPath
+            ]]></script>
+        </actions>
+    </service>
+</services>
