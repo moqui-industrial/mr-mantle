@@ -364,6 +364,20 @@ feature(
             const reader = as(users.reader, "store#LeadIntake", staff)
             const outsider = as(users.outsider, "store#LeadIntake", staff)
             const byRep = as(users.rep, "store#LeadIntake", staff)
+            // another team's rep (P5 review R1): a repeat of the rep's entry or of East's form response names no lead, and the same
+            // email as East's open lead makes a lead of their own rather than joining one they do not see
+            const westReplay = as(users.westRep, "store#LeadIntake", staff)
+            const westSource = as(users.westRep, "store#LeadIntake", {
+                organizationPartyId: orgA,
+                sourceKind: "formResponse",
+                sourceId: prefix + "-resp-1"
+            })
+            const westJoin = as(users.westRep, "store#LeadIntake", {
+                organizationPartyId: orgA,
+                sourceKind: "staff",
+                operationKey: prefix + "-staff-west",
+                submittedEmail: "a@one.example"
+            })
             const repOwner = system(() =>
                 rowsOf("mantle.sales.opportunity.SalesOpportunityParty", {
                     salesOpportunityId: byRep.salesOpportunityId,
@@ -394,6 +408,9 @@ feature(
                 reader,
                 outsider,
                 byRep,
+                westReplay,
+                westSource,
+                westJoin,
                 repOwner,
                 list,
                 tagTaken,
@@ -423,6 +440,14 @@ feature(
             r.outsider.refused.includes("ORGANIZATION_DENIED")
             r.byRep.refused == ""
             r.repOwner.map(row => row.partyId).includes(users.rep)
+            r.westReplay.refused.includes("INTAKE_TAKEN")
+            !r.westReplay.refused.includes(r.byRep.salesOpportunityId)
+            r.westReplay.salesOpportunityId == null
+            r.westSource.refused.includes("INTAKE_TAKEN")
+            !r.westSource.refused.includes(r.both.salesOpportunityId)
+            r.westJoin.refused == ""
+            r.westJoin.duplicate == false
+            r.westJoin.salesOpportunityId != r.both.salesOpportunityId
             r.tagTaken.refused.includes("TAG_TAKEN")
             r.tagSet.refused == ""
             r.tagByRep.refused.includes("PERMISSION_DENIED")

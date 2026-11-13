@@ -139,8 +139,10 @@ function assignmentOf(userScope, organizationPartyId, p) {
     if (!ownerPartyId && !chosenTeam) denied("ASSIGNMENT_REQUIRED", "Choose the lead's owner or team")
     return {teamPartyId: chosenTeam, ownerPartyId}
 }
-// The open lead of the organization an earlier intake with this email made or joined (the duplicate policy), or null.
-function openLeadOf(organizationPartyId, submittedEmail) {
+// The open lead of the organization an earlier intake with this email made or joined (the duplicate policy), or null; for a user
+// caller only a lead they see (P5 review R1), so a rep's inquiry is never filed out of their sight on another team's lead and the
+// answer names no lead they may not open.
+function openLeadOf(organizationPartyId, submittedEmail, userScope) {
     if (!submittedEmail) return null
     const leadIds = Array.from(
         new Set(
@@ -162,10 +164,17 @@ function openLeadOf(organizationPartyId, submittedEmail) {
                 .condition("typeEnumId", "SotLead")
                 .condition("statusId", "in", ["SalesOppOpen"])
                 .orderBy("createdDate")
-                .limit(1)
+                .limit(userScope ? 50 : 1)
                 .list()
-        )[0] || null
+        ).find(row => !userScope || salesAccess.opportunityOf(userScope, row.salesOpportunityId)) || null
     )
+}
+// The first result of an intake for a repeat: a system caller's whoever made it; a user's only when they see its lead (P5 review
+// R1), else one refusal that names no lead and no organization.
+function replayOf(intake, userScope) {
+    if (userScope && !(intake.salesOpportunityId && salesAccess.opportunityOf(userScope, intake.salesOpportunityId)))
+        denied("INTAKE_TAKEN", "This inquiry is already a lead you cannot open")
+    return answerOf(intake, true)
 }
 function storeLeadIntake(p) {
     const system = isSystem()
@@ -212,16 +221,18 @@ function storeLeadIntake(p) {
         if (old) {
             if (old.requestHash !== requestHash || old.organizationPartyId !== organizationPartyId)
                 denied("OPERATION_KEY_CONFLICT", "Operation key was used for another request")
-            return answerOf(old, true)
+            return replayOf(old, userScope)
         }
     }
     // one source identity, one intake
     if (sourceId) {
         const old = one(INTAKE, {sourceKindEnumId, sourceId})
         if (old) {
-            if (old.organizationPartyId !== organizationPartyId)
+            if (!userScope && old.organizationPartyId !== organizationPartyId)
                 denied("SOURCE_TAKEN", "This inquiry already came in for another organization")
-            return answerOf(old, true)
+            if (userScope && old.organizationPartyId !== organizationPartyId)
+                denied("INTAKE_TAKEN", "This inquiry is already a lead you cannot open")
+            return replayOf(old, userScope)
         }
     }
     const assignment = assignmentOf(userScope, organizationPartyId, p)
@@ -242,7 +253,7 @@ function storeLeadIntake(p) {
     if (marketingCampaignId && !one("mantle.marketing.campaign.MarketingCampaign", {marketingCampaignId}))
         denied("CAMPAIGN_INVALID", "Campaign " + marketingCampaignId + " is not available")
     // the duplicate policy: an open lead an intake with this email made joins this one too
-    const existing = openLeadOf(organizationPartyId, submittedEmail)
+    const existing = openLeadOf(organizationPartyId, submittedEmail, userScope)
     let salesOpportunityId = existing?.salesOpportunityId || null
     if (!existing) {
         const opportunityName =
@@ -367,6 +378,8 @@ function leadFromEmail(p) {
         })
         // the message on the lead's history, as the evidence of the intake (its files stay on the message)
         if (!answer.alreadyApplied) {
+            // in an error frame of its own, so a failure to file leaves the lead made (P5 review R2)
+            ec.message.pushErrors()
             try {
                 const event = call("mantle.party.CommunicationServices.create#EmailCommunicationEvent", {emailMessageId})
                 if (event.communicationEventId)
@@ -385,6 +398,9 @@ function leadFromEmail(p) {
                         " but was not filed on it: " +
                         error.message
                 )
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
             }
         }
         return answer
@@ -571,7 +587,8 @@ function purgeLeadIntakes(p) {
                 keptCount++
                 continue
             }
-            call("update#" + INTAKE, {
+            // in a transaction and error frame of its own (P5 review R2), so one row's failure is that row's alone
+            lib.probe("update#" + INTAKE, {
                 salesLeadIntakeId: intake.salesLeadIntakeId,
                 submittedName: null,
                 submittedOrganization: null,
@@ -727,9 +744,12 @@ function accountContactProjection(p) {
                 .condition("salesOpportunityId", "in", Array.from(new Set(assigned)))
                 .condition("accountPartyId", "is-not-null", null)
                 .selectField("accountPartyId")
+                .selectField("organizationPartyId")
                 .list()
         ))
-            accountIds.add(row.accountPartyId)
+            // only a deal of an organization of the scope (P5 review R3): a deal left assigned in an organization the user no
+            // longer sells for brings no account, a shared one included
+            if (salesAccess.covers(userScope, row.organizationPartyId)) accountIds.add(row.accountPartyId)
     const visibleAccounts = Array.from(accountIds).filter(partyId => salesAccess.accountOf(userScope, partyId))
     if (!visibleAccounts.length) return {admitted: true, partyIdList: []}
     const contacts = new Set()

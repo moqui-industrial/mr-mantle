@@ -670,7 +670,8 @@ along with this software (see the LICENSE.md file). If not, see
             made or joined is joined (duplicate, outcome SlioDuplicate, a review item on that lead), never merged. One source identity
             (sourceKind and sourceId) makes one intake, and a repeated operationKey answers the first result (alreadyApplied), whoever
             calls; another request under the key is OPERATION_KEY_CONFLICT, a source already taken by another organization
-            SOURCE_TAKEN. A user caller needs SALES_OPPORTUNITY_EDIT and the organization in their scope (PERMISSION_DENIED,
+            SOURCE_TAKEN. A user caller gets the first result only of a lead they see and joins only an open lead they see
+            (INTAKE_TAKEN, naming no lead, for a repeat of one they do not, or another organization's source). A user caller needs SALES_OPPORTUNITY_EDIT and the organization in their scope (PERMISSION_DENIED,
             ORGANIZATION_DENIED) and assigns as create#Opportunity does (themselves by default; TEAM_UNAVAILABLE,
             ASSIGNMENT_REQUIRED); a system caller (no user, or authorization disabled: the mail rule, Marketing's capture job)
             vouches for its source and names a current team of the organization (TEAM_REQUIRED, TEAM_UNAVAILABLE).</description>

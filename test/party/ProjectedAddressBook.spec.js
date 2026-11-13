@@ -153,6 +153,32 @@ spec({
             contactOf(parties.managedContact, parties.managed)
             contactOf(parties.dealContact, parties.deal)
             contactOf(parties.westContact, parties.west)
+            // a deal of an organization the rep does not sell for, left assigned to them, on a shared account (_NA_) with a shared
+            // contact: it brings no account (P5 review R3)
+            const elsewhere = prefix + "_ORG_ELSEWHERE"
+            make("mantle.party.Party", {partyId: elsewhere, partyTypeEnumId: "PtyOrganization", ownerPartyId: elsewhere})
+            make("mantle.party.Organization", {partyId: elsewhere, organizationName: "Elsewhere"})
+            make("mantle.party.PartyRole", {partyId: elsewhere, roleTypeId: "OrgInternal"})
+            parties.shared = prefix + "_ACC_SHARED"
+            make("mantle.party.Party", {partyId: parties.shared, partyTypeEnumId: "PtyOrganization", ownerPartyId: "_NA_"})
+            make("mantle.party.Organization", {partyId: parties.shared, organizationName: "Account shared"})
+            make("mantle.party.PartyRole", {partyId: parties.shared, roleTypeId: "Customer"})
+            parties.sharedContact = person("SC", "Shared", "_NA_")
+            contactOf(parties.sharedContact, parties.shared)
+            make("mantle.sales.opportunity.SalesOpportunity", {
+                salesOpportunityId: prefix + "_OPP_ELSEWHERE",
+                typeEnumId: "SotOpportunity",
+                organizationPartyId: elsewhere,
+                opportunityName: "Deal elsewhere",
+                accountPartyId: parties.shared,
+                statusId: "SalesOppOpen"
+            })
+            make("mantle.sales.opportunity.SalesOpportunityParty", {
+                salesOpportunityId: prefix + "_OPP_ELSEWHERE",
+                partyId: users.rep,
+                roleTypeId: "SalesRepresentative",
+                fromDate: 0
+            })
         })
     }
 })
@@ -189,6 +215,7 @@ feature(
             r.objects.map(row => row.name).includes(parties.managedContact + ".vcf")
             r.objects.map(row => row.name).includes(parties.dealContact + ".vcf")
             !r.objects.map(row => row.name).includes(parties.westContact + ".vcf")
+            !r.objects.map(row => row.name).includes(parties.sharedContact + ".vcf")
             r.objects.find(row => row.name === parties.dealContact + ".vcf").data.includes("Deal")
             r.otherObjects.map(row => row.name).includes(parties.westContact + ".vcf")
             !r.otherObjects.map(row => row.name).includes(parties.dealContact + ".vcf")
