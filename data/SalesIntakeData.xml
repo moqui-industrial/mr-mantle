@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' lead intake and its stack contributions (impl-sales P5; IronStone Sales design §3 Leads, §9 LeadSources, §1.4 Comms hooks,
+    CX-MAIL-INTAKE and CX-SYNC; SAL-CRM, SAL-MAIL-INTAKE, SAL-SYNC):
+    - SalesLeadIntakeSource: where an intake came from (mantle.sales.OpportunityServices store#LeadIntake's sourceKind), and
+      SalesLeadIntakeOutcome: whether it made its lead or joined an open one (a review item).
+    - createLead, the mail rule action beside Mantle's createRequest and createWorkItem (MantleSetupData.xml, F27): a message to a
+      sales team's plus-tag address (sales+leads@...) or to the team the rule's value names becomes an intake in that team's queue
+      (OpportunityServices create#LeadFromEmail). A team's plus tag and its default lead source are PartySettings of the team.
+    - My accounts, a projected CardDAV address book (mantle.party.ContactDavServices: collectionId projected-SalesMyAccounts, read
+      only) answered by SalesWorkspaceServices get#AccountContactProjection as the user.
+    - The purge of unverified intakes whose lead never qualified (purge#LeadIntakes), nightly, registered for Admin's jobs. -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="SalesLeadIntakeSource" description="Sales Lead Intake Source"/>
+    <moqui.basic.Enumeration enumId="SlisFormResponse" enumTypeId="SalesLeadIntakeSource" enumCode="formResponse" description="Form" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SlisEmailMessage" enumTypeId="SalesLeadIntakeSource" enumCode="emailMessage" description="Mail" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="SlisCommEvent" enumTypeId="SalesLeadIntakeSource" enumCode="communicationEvent" description="Message" sequenceNum="3"/>
+    <moqui.basic.Enumeration enumId="SlisChatMessage" enumTypeId="SalesLeadIntakeSource" enumCode="chatMessage" description="Chat" sequenceNum="4"/>
+    <moqui.basic.Enumeration enumId="SlisVoicemail" enumTypeId="SalesLeadIntakeSource" enumCode="voicemail" description="Voicemail" sequenceNum="5"/>
+    <moqui.basic.Enumeration enumId="SlisStaff" enumTypeId="SalesLeadIntakeSource" enumCode="staff" description="Staff entry" sequenceNum="6"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesLeadIntakeOutcome" description="Sales Lead Intake Outcome"/>
+    <moqui.basic.Enumeration enumId="SlioCreated" enumTypeId="SalesLeadIntakeOutcome" description="New lead" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SlioDuplicate" enumTypeId="SalesLeadIntakeOutcome" description="Joined an open lead" sequenceNum="2"/>
+
+    <moqui.basic.Enumeration enumId="ErActCreateLead" enumTypeId="EmailRuleAction" enumCode="createLead" sequenceNum="6"
+            description="Make a sales lead" optionValue="mantle.sales.OpportunityServices.create#LeadFromEmail"/>
+    <mantle.party.PartySettingType partySettingTypeId="SalesIntakePlusTag" description="Sales intake plus tag"/>
+    <mantle.party.PartySettingType partySettingTypeId="SalesIntakeSource" description="Sales intake default lead source"/>
+
+    <mantle.party.contact.ContactProjection projectionId="SalesMyAccounts" title="My accounts"
+            description="The contacts of the sales accounts you manage or have deals with" sequenceNum="20"
+            ownerServiceName="mantle.sales.SalesWorkspaceServices.get#AccountContactProjection"/>
+
+    <!-- The purge: nightly at 2:30 am; a run again changes nothing it changed, as a purged intake is left out -->
+    <moqui.service.job.ServiceJob jobName="purge_SalesLeadIntakes" description="Purge unverified sales lead intakes"
+            serviceName="mantle.sales.OpportunityServices.purge#LeadIntakes" cronExpression="0 30 2 * * ?" paused="N"
+            transactionTimeout="1800"/>
+    <moqui.server.JobRegistration jobName="purge_SalesLeadIntakes" ownerApp="Sales" title="Purge unverified lead intakes"
+            description="Blanks the submitted name, organization, email and phone of the unverified intakes whose lead never qualified, after the retention days"
+            managePermission="SALES_CONFIGURE" scheduleEditable="Y" minIntervalMinutes="60" pauseEditable="Y"
+            priorityEditable="Y" retryEditable="Y" recipientPermission="SALES_CONFIGURE" sequenceNum="50"/>
+    <moqui.server.JobParameterDefinition jobName="purge_SalesLeadIntakes" parameterName="retentionDays"
+            title="Retention days" description="Days an unverified intake keeps what was submitted; 30 until Sales' defaults set them"
+            valueType="integer" minValue="1" maxValue="3650" sequenceNum="1"/>
+</entity-facade-xml>

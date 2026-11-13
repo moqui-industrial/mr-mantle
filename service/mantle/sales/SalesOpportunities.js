@@ -20,6 +20,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
 const settings = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesSettings.js")
+// P5: the intakes of a lead (what came in, from where), read for LeadList's columns and OpportunityDetail
+const intake = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesIntake.js")
 const {find, one, rows, denied, call, ms} = lib
 
 const OPPORTUNITY = "mantle.sales.opportunity.SalesOpportunity"
@@ -804,6 +806,7 @@ function findOpportunities(p) {
     const people = peopleOf(pageIds)
     const competitorRowsOf = competitorsOf(pageIds)
     const activities = nextActivities(pageIds)
+    const intakes = intake.summaries(pageIds)
     const stageIds = Array.from(new Set(pageRows.map(row => row.opportunityStageId).filter(Boolean)))
     const stages = stageIds.length
         ? Object.fromEntries(
@@ -868,6 +871,15 @@ function findOpportunities(p) {
             teamName: entry.team ? names[entry.team] || entry.team : "",
             sourceText: sources[row.dataSourceId] || "",
             marketingCampaignId: row.marketingCampaignId || null,
+            // P5: how the lead came in (its first intake), when, and whether the inquirer verified the email
+            intakeKindText: intakes[row.salesOpportunityId]?.kindText || "",
+            receivedText: intakes[row.salesOpportunityId]?.receivedText || "",
+            verificationText: intakes[row.salesOpportunityId]
+                ? intakes[row.salesOpportunityId].verified
+                    ? L("Verified")
+                    : L("Unverified")
+                : "",
+            intakeCount: intakes[row.salesOpportunityId]?.count || 0,
             createdText: dayText(row.createdDate),
             ageText: row.createdDate ? Math.floor((at - ms(row.createdDate)) / dayMs) + " d" : "",
             nextActivityText: next
@@ -1091,6 +1103,8 @@ function getOpportunity(p) {
         competitors,
         activities,
         orders,
+        // P5: what came in for it (the submitted details, blank once purged)
+        intakes: intake.details(row.salesOpportunityId),
         canEdit: canEdit && open,
         canClose: canEdit && open,
         canReopen: canEdit && !open,
