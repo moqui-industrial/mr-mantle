@@ -60,8 +60,11 @@ const capabilityPermissions = {
     allOrganizations: "PEOPLE_ALL_ORGANIZATIONS"
 }
 // The capabilities that read across an employer. An edit, import or approve permission alone reads nothing, nor does
-// PEOPLE_ALL_ORGANIZATIONS, which only widens a read's employers.
-const staffReads = ["directory", "hrView", "recruitView", "developView", "caseHandle", "configure", "payrollView"]
+// PEOPLE_ALL_ORGANIZATIONS, which only widens a read's employers. PAYROLL_VIEW is no staff read either (People P31, the lead's call,
+// impl-people §4, Nov 13, 2026): a payroll reader reads People's people and pay with a People read permission beside it (the payroll
+// groups hold PEOPLE_DIRECTORY_VIEW), and a finance group's PAYROLL_VIEW, which opens payroll-origin documents in Accounting
+// (mantle/account/PayrollOrigin.js), reads nothing here.
+const staffReads = ["directory", "hrView", "recruitView", "developView", "caseHandle", "configure"]
 
 function capabilities() {
     const found = {}

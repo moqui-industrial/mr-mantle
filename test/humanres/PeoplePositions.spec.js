@@ -99,9 +99,13 @@ spec({
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgA])
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [orgB])
         state.reader = user("READER", ["PEOPLE_DIRECTORY_VIEW"], [orgA])
-        state.payroll = user("PAY", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
-        state.payrollB = user("PAYB", ["PAYROLL_VIEW", "PAYROLL_EDIT"], [orgB])
-        state.payrollAll = user("PAYALL", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_ALL_ORGANIZATIONS"], [orgA])
+        state.payroll = user("PAY", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgA])
+        state.payrollB = user("PAYB", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"], [orgB])
+        state.payrollAll = user(
+            "PAYALL",
+            ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_ALL_ORGANIZATIONS"],
+            [orgA]
+        )
         state.manager = user("LEAD", ["PEOPLE_TEAM_VIEW"], [], state.LEAD)
         // A's departments (Stores led by LEAD, Office) with a team under Stores; B's department
         const unit = (username, unitKind, organizationName, parentPartyId, headPartyId = null) =>

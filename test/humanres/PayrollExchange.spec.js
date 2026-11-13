@@ -228,12 +228,18 @@ spec({
             activeEntitlementKey: prefix + ":ADJ:CAL",
             isAdjustment: "Y"
         }).payrollInputId
-        state.payroll = account("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_IMPORT"])
+        state.payroll = account("PAYROLL", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_IMPORT"])
         // P28 review: a second importer who also approves pay runs
-        state.importer2 = account("IMPORTER2", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PEOPLE_IMPORT", "PAYROLL_APPROVE"])
-        state.noImport = account("NOIMPORT", ["PAYROLL_VIEW", "PAYROLL_EDIT"])
-        state.configurer = account("CONFIG", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"])
-        state.approver = account("APPROVER", ["PAYROLL_VIEW", "PAYROLL_APPROVE"])
+        state.importer2 = account("IMPORTER2", [
+            "PEOPLE_DIRECTORY_VIEW",
+            "PAYROLL_VIEW",
+            "PAYROLL_EDIT",
+            "PEOPLE_IMPORT",
+            "PAYROLL_APPROVE"
+        ])
+        state.noImport = account("NOIMPORT", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"])
+        state.configurer = account("CONFIG", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_CONFIGURE"])
+        state.approver = account("APPROVER", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_APPROVE"])
     },
     cleanupSpec() {
         ec.message.clearErrors()

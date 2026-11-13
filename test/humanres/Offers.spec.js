@@ -104,7 +104,7 @@ spec({
         organization(orgB, "Offers Spec B")
         state.recruiter = user("RECRUITER", orgA, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT", "PEOPLE_REQUEST_APPROVE"])
         state.hr = user("HR", orgA, ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_REQUEST_APPROVE"])
-        state.payroll = user("PAYROLL", orgA, ["PAYROLL_VIEW", "PAYROLL_EDIT"])
+        state.payroll = user("PAYROLL", orgA, ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT"])
         state.reader = user("READER", orgA, ["PEOPLE_DIRECTORY_VIEW"])
         state.recruiterB = user("RECRUITER_B", orgB, ["PEOPLE_RECRUIT_VIEW", "PEOPLE_RECRUIT_EDIT"])
         state.seat = seat("ASSOC", orgA)
