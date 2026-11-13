@@ -401,6 +401,9 @@ feature(
             out.self = run(uHolder, P + "get#AssignedEquipment", {partyId: holder}).equipmentList?.length
             out.reader = code(run(state.reader, P + "get#AssignedEquipment", {partyId: holder}))
             out.hrB = code(run(state.hrB, P + "get#AssignedEquipment", {partyId: holder}))
+            // P23 review (F10): with checkOnly, as Employee360 asks for every viewer, one who reads none is answered none, not refused
+            const checked = run(state.reader, P + "get#AssignedEquipment", {partyId: holder, checkOnly: true})
+            out.readerChecked = [checked.error, checked.equipmentList == null]
             // a return task of the holding (as a separation raises one)
             const rootId = call("create#mantle.work.effort.WorkEffort", {
                 workEffortTypeEnumId: "WetTask",
@@ -481,6 +484,7 @@ feature(
             out.self === 1
             out.reader === "RECORD_UNAVAILABLE"
             out.hrB === "RECORD_UNAVAILABLE"
+            out.readerChecked == ["", true]
             out.listed === true
             out.outside === "CUSTODIAN_INVALID"
             out.readerReturn === "PERMISSION_DENIED"

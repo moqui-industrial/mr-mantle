@@ -637,7 +637,10 @@ along with this software (see the LICENSE.md file). If not, see
             separation wait for approval (a PeopleApproval of kind PakEmploymentChange, bound to this row and the employment's
             revision, so a change of the employment meanwhile supersedes it) and are applied by the last approval; a hire, a
             manager change and a leave of absence are applied at once. Applied, the change has started the assignment
-            employmentAssignmentId (a separation ends the employment's). Written only by PeopleServices (Employment.js).</description>
+            employmentAssignmentId (a separation ends the employment's). P23: a pay change (payroll's part of a change: a new salary
+            from the date, asked by a payroll editor) waits for approval too (its own kind, PakPayChange, the first salary
+            included), and once applied has started the EmploymentSalary row from its date; its salary fields are read only by a payroll reader of the
+            employer and the approver of its step. Written only by PeopleServices (Employment.js).</description>
         <field name="employmentChangeId" type="id" is-pk="true"/>
         <field name="partyRelationshipId" type="id"/>
         <field name="partyId" type="id"/>
@@ -654,6 +657,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="holidayCategoryId" type="id"><description>The assignment's holiday calendar in place of the schedule's (P9)</description></field>
         <field name="terminationReasonEnumId" type="id"/>
         <field name="terminationTypeEnumId" type="id"/>
+        <field name="salaryAmount" type="currency-amount"><description>A pay change's new salary (P23)</description></field>
+        <field name="salaryCurrencyUomId" type="id"/>
+        <field name="salaryPeriodTypeId" type="id"><description>The salary's pay frequency, a Payroll time period type</description></field>
+        <field name="payGradeId" type="id"><description>A pay change's pay grade, when it names one</description></field>
         <field name="reason" type="text-long"/>
         <field name="employmentRevision" type="text-short"><description>The employment's revision the change was asked at</description></field>
         <field name="operationKey" type="text-short"><description>The requester's key: a retry with it answers the first</description></field>
@@ -701,6 +708,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="EckReorganization" description="Reorganization" sequenceNum="7"
                     enumTypeId="EmploymentChangeKind"/>
             <moqui.basic.Enumeration enumId="EckSchedule" description="Working schedule" sequenceNum="8" enumTypeId="EmploymentChangeKind"/>
+            <moqui.basic.Enumeration enumId="EckPayChange" description="Pay change" sequenceNum="9" enumTypeId="EmploymentChangeKind"/>
             <moqui.basic.StatusType description="Employment Change" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchRequested" description="Waiting for approval" sequenceNum="1" statusTypeId="EmploymentChange"/>
             <moqui.basic.StatusItem statusId="EchApplied" description="Applied" sequenceNum="2" statusTypeId="EmploymentChange"/>
@@ -859,7 +867,8 @@ along with this software (see the LICENSE.md file). If not, see
             filter and sort (filter by fromDate, thruDate; sort by ascending fromDate; use first result).</description>
         <field name="partyRelationshipId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
-        <field name="thruDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (IronStone People
+            P23 review): a salary ends when the next starts, by an approved pay change or a data repair, with its reason</description></field>
         <field name="payGradeId" type="id"/>
         <field name="comments" type="text-medium"/>
         <field name="amount" type="currency-amount" enable-audit-log="true"/>

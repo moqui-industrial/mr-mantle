@@ -18,7 +18,8 @@
 // - pay never leaves its lane (design §1.1, §2): the pay terms are set only with PAYROLL_VIEW and PAYROLL_EDIT and read only with
 //   PAYROLL_VIEW, on every path (an offer's answer, the list, the letter's preview, the stored letter holding them, the approval's
 //   notice and summary, the hire's terms); a reader without it learns only that the offer has pay terms;
-// - an offer grants nothing: the hire from it records no pay and asks for no account but as HR chooses on the hire.
+// - an offer grants no access: the hire from it asks for no account but as HR chooses on the hire; its approved pay becomes the
+//   employment's first salary (Employment.js hireEmployee; P23 review, the user's call of Nov 12, 2026).
 // Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")

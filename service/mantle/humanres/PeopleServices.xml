@@ -193,10 +193,11 @@ along with this software (see the LICENSE.md file). If not, see
             (the person, and an HR reader of an employer of theirs): personalInfo holds the private contacts, birth date, gender
             and the revision store#PersonalInfo checks, the emergency contacts (P8, each with its own revision), and for HR the identifications other than tax ones, values masked.
             FilesAndActivity (an HR reader of the employer of the employment opened): hostEmploymentId, the employment content
-            host. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
+            host. Compensation (P23; a payroll reader, PAYROLL_VIEW, of the opened employment's employer): the region alone, its
+            content read through PayrollSetupServices.get#Compensation; absent for anyone else, HR included. partyRelationshipId opens an employment the scope shows (else RECORD_UNAVAILABLE); without it, the current
             one, then the newest. A person outside the scope is refused as a missing one (RECORD_UNAVAILABLE). Never pay, review,
             case or leave data. A manager shown is one of a shown employment's employer (or employed by none); HR's dates and
-            employment ids are of the employments by an employer in their scope.</description>
+            employment ids are of the employments by an employer in their scope (and a payroll reader's ids, P23).</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="partyRelationshipId"/>
@@ -208,15 +209,16 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="partyId"/>
             <parameter name="access" type="List"><description>self, team and staff, as get#Scope admits the person</description></parameter>
-            <parameter name="regions" type="List"><description>overview, and employmentHistory, personalInfo and
-                filesAndActivity as admitted</description></parameter>
+            <parameter name="regions" type="List"><description>overview, and employmentHistory, personalInfo,
+                filesAndActivity and compensation (P23) as admitted</description></parameter>
             <parameter name="overview" type="Map"/>
             <parameter name="personalInfo" type="Map"/>
             <parameter name="partyRelationshipId"><description>The employment opened, for the person and HR; null for a directory
                 or team reader</description></parameter>
             <parameter name="hostEmploymentId"/>
             <parameter name="capabilities" type="Map"><description>editPersonal, editHr, selfFields (the fields the caller may
-                change), files, changeEmployment (an HR editor of the opened employment's employer, P6)</description></parameter>
+                change), files, changeEmployment (an HR editor of the opened employment's employer, P6), changePay (a payroll editor
+                of it, P23)</description></parameter>
         </out-parameters>
         <actions>
             <set field="module" value="component://mr-mantle/service/mantle/humanres/Employees.js"/>
@@ -490,8 +492,8 @@ along with this software (see the LICENSE.md file). If not, see
             application Hired; refused: an offer hired from already (OFFER_USED: a second hire from it), not accepted
             (OFFER_NOT_ACCEPTED), of another person or employer (OFFER_PERSON, OFFER_EMPLOYER), of an application refused or
             withdrawn since (OFFER_APPLICATION_CLOSED), not of the editor's employers
-            (RECORD_UNAVAILABLE). The offer grants nothing else: no pay is recorded and no account is asked but by
-            requestAccount.</description>
+            (RECORD_UNAVAILABLE). The offer's pay, approved with it, is recorded as the employment's first salary from its first day
+            (P23 review, the user's call of Nov 12, 2026; the answer names no amount); no account is asked but by requestAccount.</description>
         <implements service="mantle.humanres.PeopleServices.define#HireTerms"/>
         <in-parameters>
             <parameter name="reason"/>
@@ -522,9 +524,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="define" noun="EmploymentChangeTerms" type="interface">
-        <description>An employment change: the employment, what changes (changeKind: transfer, manager, leave, return or
-            separation), from when, the new terms (a term not passed is kept, an empty one cleared), a leave's return date, a
-            separation's termination reason and type (People's lookups), and why.</description>
+        <description>An employment change: the employment, what changes (changeKind: transfer, manager, leave, return,
+            separation, or pay, P23), from when, the new terms (a term not passed is kept, an empty one cleared), a leave's return
+            date, a separation's termination reason and type (People's lookups), a pay change's salary (amount, currency, pay
+            frequency and an optional pay grade), and why.</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <parameter name="changeKind"/>
@@ -536,6 +539,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="returnDate"/>
             <parameter name="terminationReasonEnumId"/>
             <parameter name="terminationTypeEnumId"/>
+            <parameter name="salaryAmount"/>
+            <parameter name="salaryCurrencyUomId"/>
+            <parameter name="salaryPeriodTypeId"/>
+            <parameter name="payGradeId"/>
             <parameter name="reason"/>
         </in-parameters>
     </service>
@@ -602,8 +609,16 @@ along with this software (see the LICENSE.md file). If not, see
             assignment and projections, the person's lead and team memberships at the employer and the lines they manage there
             (each report's assignment continues with no manager), leaves another employer's employment alone and routes the
             employer's waiting People decisions again (a leaver decides nothing). A new change supersedes one of the employment
-            still waiting. A retry with the same operationKey answers the first. Refuses a caller without PEOPLE_HR_VIEW and
-            PEOPLE_HR_EDIT (PERMISSION_DENIED), an employment outside the scope (RECORD_UNAVAILABLE), a revision other than the one
+            still waiting. A retry with the same operationKey answers the first. P23: a pay change (changeKind pay) is a payroll
+            editor's (PAYROLL_VIEW and PAYROLL_EDIT, not HR's) at the salary revision get#Compensation answers (payRevision): a new
+            salary from the date (salaryAmount, salaryCurrencyUomId, salaryPeriodTypeId, an optional payGradeId; CURRENCY_REQUIRED,
+            CURRENCY_INVALID, AMOUNT_INVALID, CURRENCY_PRECISION, FREQUENCY_REQUIRED, FREQUENCY_INVALID, GRADE_INVALID,
+            SALARY_EXISTS, SALARY_SCHEDULED, a note outside the grade's band) that waits for approval, the first salary too (P23
+            review, the user's calls of Nov 12, 2026): a request of its own kind, PakPayChange, decided by the employer's payroll
+            approvers (PAYROLL_APPROVE with PAYROLL_VIEW) unless a rule of the kind routes it, never by who asked; applied, the
+            salary in effect ends on the date and the new one starts.
+            It supersedes only a pay change waiting, and only a separation supersedes it. Refuses a caller without PEOPLE_HR_VIEW
+            and PEOPLE_HR_EDIT (PERMISSION_DENIED; for a pay change, PAYROLL_VIEW and PAYROLL_EDIT), an employment outside the scope (RECORD_UNAVAILABLE), a revision other than the one
             read (REVISION_CHANGED), no kind (KIND_INVALID), a date outside the employment (DATE_OUTSIDE) or before a change set
             for it or later (ASSIGNMENT_SCHEDULED), terms that change nothing (NOTHING_CHANGES), no reason for one that waits for
             approval (REASON_REQUIRED), a leave while on leave (ALREADY_ON_LEAVE), a return while working (NOT_ON_LEAVE), a
@@ -1073,8 +1088,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Employee360's AssignedEquipment: the equipment a person holds now (current AssetPartyAssignment rows: asset,
             product, serial, role, from date, the open return task), for the person themselves (PEOPLE_SELF_SERVICE) or an HR
             reader of an employer of theirs; refused alike when missing or outside (RECORD_UNAVAILABLE). No cost. canReturn for
-            an HR editor.</description>
-        <in-parameters><parameter name="partyId" required="true"/></in-parameters>
+            an HR editor. With checkOnly (P23 review), a person the caller may not read answers equipmentList null instead of
+            RECORD_UNAVAILABLE, alike either way.</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="checkOnly" type="Boolean" default="false"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="equipmentList" type="List"/>
             <parameter name="canReturn" type="Boolean"/>

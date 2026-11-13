@@ -23,7 +23,17 @@
 // A separation ends the employment, its assignment and their projections, the person's lead and team memberships at the employer
 // and the reporting lines they manage there (each report's assignment continues with no manager), leaves another employer's
 // employment alone, and routes again the People decisions waiting on the leaver (Approvals.js reroute) and the confidential cases
-// they handled there (PeopleCases.js rerouteCases, P21). The person's Party owner is left as it is (F59). Pay is never read or written here. Missing and unauthorized records are refused alike (RECORD_UNAVAILABLE).
+// they handled there (PeopleCases.js rerouteCases, P21). The person's Party owner is left as it is (F59). Missing and unauthorized
+// records are refused alike (RECORD_UNAVAILABLE).
+// P23: the pay change (kind EckPayChange), payroll's part of a change: a new salary from a date asked by a payroll editor of the
+// employer (PAYROLL_VIEW and PAYROLL_EDIT, not HR), checked by PayrollAssignments.js checkPayTerms; it waits for approval on the
+// same topic, a request of its own kind (Approvals.js PakPayChange: the employer's payroll approvers by default, or whom its rules
+// name; never who asked), the first salary too (the user's calls of Nov 12, 2026), and is applied by writing the salary from its
+// date (PayrollAssignments.js writeSalary: the row in effect ends there). Its request is bound to the change and the employment's
+// salary rows, not its assignments, so a transfer and a pay change neither supersede nor invalidate each other; a separation
+// supersedes both. Its salary is read only by a payroll reader of the employer and the approver of its step; HR without
+// PAYROLL_VIEW does not see a pay change. A hire from an accepted offer records the offer's approved pay as the first salary
+// (hireEmployee). Other pay is never read or written here.
 const people = ec.resource.script("component://mr-mantle/service/mantle/humanres/People.js")
 const positions = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Positions.js")
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Approvals.js")
@@ -31,6 +41,7 @@ const schedules = () => ec.resource.script("component://mr-mantle/service/mantle
 const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/PeopleCases.js")
 const offers = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Offers.js")
 const letters = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/Letters.js")
+const payroll = () => ec.resource.script("component://mr-mantle/service/mantle/humanres/PayrollAssignments.js")
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied, call, dateText} = lib
 
@@ -42,6 +53,9 @@ const POSITION = "mantle.humanres.position.EmplPosition"
 const HOLDER = "mantle.humanres.position.EmplPositionParty"
 const FACILITY = "mantle.facility.Facility"
 const approvalKind = "PakEmploymentChange"
+// P23 review: a pay change's approval is a kind of its own (Approvals.js PakPayChange: payroll approvers by default)
+const payApprovalKind = "PakPayChange"
+const kindOfChange = change => (change?.changeKindEnumId === "EckPayChange" ? payApprovalKind : approvalKind)
 // the kinds of change apply#EmploymentChange takes, and those that wait for approval (the PeopleEmploymentChangeApproval topic:
 // a transfer and a separation, design §12)
 const changeKinds = {
@@ -49,9 +63,12 @@ const changeKinds = {
     manager: "EckManager",
     leave: "EckLeave",
     return: "EckReturn",
-    separation: "EckSeparation"
+    separation: "EckSeparation",
+    // P23: payroll's part of a change
+    pay: "EckPayChange"
 }
-const approvalKinds = ["EckTransfer", "EckSeparation"]
+const approvalKinds = ["EckTransfer", "EckSeparation", "EckPayChange"]
+const payKind = "EckPayChange"
 const kindTexts = {
     EckHire: "Hire",
     EckTransfer: "Transfer",
@@ -60,7 +77,8 @@ const kindTexts = {
     EckReturn: "Return from leave",
     EckSeparation: "Separation",
     EckReorganization: "Reorganization",
-    EckSchedule: "Working schedule"
+    EckSchedule: "Working schedule",
+    EckPayChange: "Pay change"
 }
 const statusTexts = {
     EchRequested: "Waiting for approval",
@@ -116,6 +134,14 @@ function editorScope(what) {
     const userScope = people.scopeOf()
     const caps = userScope.capabilities
     if (!caps.hrView || !caps.hrEdit) denied("PERMISSION_DENIED", what + " needs PEOPLE_HR_VIEW and PEOPLE_HR_EDIT")
+    return userScope
+}
+// P23: a change's asker: a pay change is a payroll editor's (PAYROLL_VIEW and PAYROLL_EDIT), every other kind an HR editor's
+function changeScope(changeKind) {
+    if (text(changeKind) !== "pay") return editorScope("Changing an employment")
+    const userScope = people.scopeOf()
+    const caps = userScope.capabilities
+    if (!caps.payrollView || !caps.payrollEdit) denied("PERMISSION_DENIED", "A pay change needs PAYROLL_VIEW and PAYROLL_EDIT")
     return userScope
 }
 const employmentOf = row => ({
@@ -663,12 +689,15 @@ function createChange(employment, kindEnumId, values) {
 }
 // The changes of the employment still waiting, other than one, superseded (their requests too, with their notices read): a change
 // applied to the employment, or a new one asked for, replaces them.
-function supersedeWaiting(partyRelationshipId, exceptId = null) {
+// P23: a pay change supersedes only a pay change waiting, and any other change but a separation leaves a waiting pay change as it is
+function supersedeWaiting(partyRelationshipId, exceptId = null, kindEnumId = null) {
     let superseded = 0
     for (const row of rows(CHANGE, {partyRelationshipId, statusId: "EchRequested"})) {
         if (row.employmentChangeId === exceptId) continue
+        if (kindEnumId && kindEnumId !== "EckSeparation" && (row.changeKindEnumId === payKind) !== (kindEnumId === payKind))
+            continue
         call("update#" + CHANGE, {employmentChangeId: row.employmentChangeId, statusId: "EchSuperseded"})
-        approvals().sourceChanged(approvalKind, row.employmentChangeId)
+        approvals().sourceChanged(kindOfChange(row), row.employmentChangeId)
         superseded++
     }
     return superseded
@@ -908,7 +937,7 @@ function withdrawEmploymentChange(p) {
         const waiting = rows(CHANGE, {partyRelationshipId: employment.partyRelationshipId, statusId: "EchRequested"})
         done = approvals().keepWaiting(
             approvalKind,
-            waiting.map(row => row.employmentChangeId),
+            waiting.filter(row => row.changeKindEnumId !== payKind).map(row => row.employmentChangeId),
             () => {
                 const out = withdraw()
                 carrySchedule(employment, waiting)
@@ -917,7 +946,7 @@ function withdrawEmploymentChange(p) {
         )
     } else {
         done = withdraw()
-        supersedeWaiting(employment.partyRelationshipId)
+        supersedeWaiting(employment.partyRelationshipId, null, change.changeKindEnumId)
     }
     const after = changeOf(change.employmentChangeId)
     return {
@@ -982,6 +1011,29 @@ function applyChange(change) {
     const kind = change.changeKindEnumId
     const reason = change.reason || kindTexts[kind]
     const findings = []
+    // P23: a pay change writes the salary from its date (the row in effect ends there), checked again, and moves no assignment
+    if (kind === payKind) {
+        if ((employment.fromMs ?? -Infinity) > at || (employment.thruMs ?? Infinity) <= at)
+            denied("DATE_OUTSIDE", "The date is outside the employment")
+        payroll().writeSalary(
+            change.partyRelationshipId,
+            {
+                fromMs: at,
+                amount: change.salaryAmount,
+                currencyUomId: change.salaryCurrencyUomId,
+                timePeriodTypeId: change.salaryPeriodTypeId,
+                payGradeId: change.payGradeId || null
+            },
+            reason
+        )
+        call("update#" + CHANGE, {
+            employmentChangeId: change.employmentChangeId,
+            statusId: "EchApplied",
+            appliedDate: ec.user.nowTimestamp
+        })
+        supersedeWaiting(change.partyRelationshipId, change.employmentChangeId, payKind)
+        return {employmentAssignmentId: null}
+    }
     // a separation supersedes the changes set for its date or later, a return the leave's scheduled return (P7, F131)
     const allow = supersedesFor(kind)
     // a working schedule from the day the assignment in effect starts changes that assignment's (P9)
@@ -1072,7 +1124,7 @@ function applyChange(change) {
     )
     // a working schedule leaves the changes waiting as they were (assign#Schedule keeps their approval, P9); any other change
     // supersedes them
-    if (kind !== "EckSchedule") supersedeWaiting(change.partyRelationshipId, change.employmentChangeId)
+    if (kind !== "EckSchedule") supersedeWaiting(change.partyRelationshipId, change.employmentChangeId, kind)
     if (kind === "EckSeparation" || before.managerPartyId !== (change.managerPartyId || null))
         approvals().reroute(employment.organizationPartyId)
     // P21 (the user's call of Nov 12, 2026): a leaver's confidential cases there go back to the employer's intake handlers, once
@@ -1400,6 +1452,8 @@ const overlaps = (row, fromMs, thruMs) => (row.fromMs ?? -Infinity) < (thruMs ??
 // terms, and the findings (errors refuse the hire; warnings and notes inform it). P17: a hire from an accepted offer
 // (employmentOfferId; the offer locked by hire#Employee) is of its employer and applicant, and once (Offers.js hireProblem:
 // OFFER_USED, OFFER_NOT_ACCEPTED, OFFER_PERSON, OFFER_EMPLOYER); its working schedule follows the hire.
+// P23 review: whether an offer carries pay approved with it (an amount and a currency on an offer approved before it was accepted)
+const offerPay = offer => !!offer && offer.payAmount != null && !!offer.currencyUomId && !!offer.approvedDate
 function planHire(p, userScope, lockedOffer = null) {
     const findings = []
     const offer = lockedOffer || (text(p.employmentOfferId) ? offers().offerForHire(p.employmentOfferId, userScope) : null)
@@ -1416,6 +1470,13 @@ function planHire(p, userScope, lockedOffer = null) {
                 code: "FROM_OFFER",
                 severity: "info",
                 message: "From the accepted offer " + offer.employmentOfferId + ": it is hired from once"
+            })
+        // P23 review: the offer's approved pay becomes the first salary (named without its amount: HR reads no pay)
+        if (!problem && offerPay(offer))
+            findings.push({
+                code: "OFFER_PAY",
+                severity: "info",
+                message: "The offer's approved pay becomes the employment's first salary from its first day"
             })
     }
     const fromMs = effective(term("fromDate"))
@@ -1670,8 +1731,10 @@ function hireEmployee(p) {
         employmentChangeId
     })
     call("update#" + CHANGE, {employmentChangeId, employmentAssignmentId})
-    // P17: the offer's working schedule from the first day, and the offer consumed (its application hired); the offer grants
-    // nothing else: no pay is recorded and no account asked but as HR chose above
+    // P17: the offer's working schedule from the first day, and the offer consumed (its application hired); no account asked but as
+    // HR chose above. P23 review (the user's call of Nov 12, 2026): the offer's pay, approved with the offer, is the employment's
+    // first salary from its first day, recorded at once (no pay change: its approval was the offer's); the hire's answer names no
+    // amount
     if (plan.offer) {
         if (plan.offer.workingScheduleId)
             assignSchedule({
@@ -1680,6 +1743,17 @@ function hireEmployee(p) {
                 fromDate: stamp(plan.assignmentFromMs),
                 reason: "From offer " + plan.offer.employmentOfferId
             })
+        if (offerPay(plan.offer) && !payroll().salariesOf(partyRelationshipId).length)
+            payroll().writeSalary(
+                partyRelationshipId,
+                {
+                    fromMs: plan.assignmentFromMs,
+                    amount: plan.offer.payAmount,
+                    currencyUomId: plan.offer.currencyUomId,
+                    timePeriodTypeId: plan.offer.timePeriodTypeId || null
+                },
+                "From offer " + plan.offer.employmentOfferId
+            )
         offers().consumeOffer(plan.offer, {partyRelationshipId, employmentChangeId})
     }
     return {
@@ -1735,8 +1809,33 @@ function planChange(p, userScope) {
     const before = termsAt(employment, at)
     let terms = termsOfRow(before)
     const impact = []
+    let pay = null
     if (!kindEnumId) findings.push({code: "KIND_INVALID", severity: "error", message: "Choose what changes"})
-    else {
+    else if (kindEnumId === payKind) {
+        // P23: the date inside the employment, the salary's terms and the salary rows from the date; no assignment moves
+        attempt(findings, () => {
+            if ((employment.fromMs ?? -Infinity) > at || (employment.thruMs ?? Infinity) <= at)
+                denied("DATE_OUTSIDE", "The date is outside the employment")
+        })
+        pay = attempt(findings, () => payroll().checkPayTerms(employment, p, at))
+        attempt(findings, () => payroll().checkSalaryDate(employment.partyRelationshipId, at))
+        if (pay?.note) findings.push({code: "OUTSIDE_BAND", severity: "note", message: pay.note})
+        const first = !payroll().salariesOf(employment.partyRelationshipId).length
+        if (pay)
+            impact.push({
+                kind: "pay",
+                impactText:
+                    (first ? "The first salary, " : "The salary becomes ") +
+                    payroll().salaryText({
+                        amount: pay.amount,
+                        currencyUomId: pay.currencyUomId,
+                        timePeriodTypeId: pay.timePeriodTypeId
+                    }) +
+                    " from " +
+                    dateText(at)
+            })
+        if (pay) pay.first = first
+    } else {
         checkDate(employment, at, findings, supersedesFor(kindEnumId))
         if (kindEnumId === "EckTransfer" || kindEnumId === "EckManager") {
             const asked = Object.assign({}, terms)
@@ -1767,7 +1866,7 @@ function planChange(p, userScope) {
     }
     if (!text(p.reason) && kindEnumId && approvalKinds.includes(kindEnumId))
         findings.push({code: "REASON_REQUIRED", severity: "error", message: "Say why"})
-    return {employment, kindEnumId, at, before, current, terms, findings, impact}
+    return {employment, kindEnumId, at, before, current, terms, findings, impact, pay}
 }
 // An HR vocabulary value (People's lookups): of the family and not ended.
 function checkVocabulary(enumTypeId, enumId) {
@@ -1904,8 +2003,11 @@ function impactOf(employment, kindEnumId, before, terms, at) {
     }
     return items
 }
+// P23: whether a planned change waits for approval: a transfer, a separation and a pay change do (the first salary too: the user's
+// call of Nov 12, 2026; only a hire from an accepted offer records the offer's approved pay at once, hireEmployee)
+const waitsFor = plan => !!plan.kindEnumId && approvalKinds.includes(plan.kindEnumId)
 function previewEmploymentChange(p) {
-    const userScope = editorScope("Changing an employment")
+    const userScope = changeScope(p.changeKind)
     const plan = planChange(p, userScope)
     const employment = plan.employment
     const org = employment.organizationPartyId
@@ -1917,7 +2019,11 @@ function previewEmploymentChange(p) {
         organizationName: people.organizationNames([org])[org] || org,
         employmentFromDateText: dateText(employment.fromMs),
         employmentThruDateText: dateText(employment.thruMs),
-        revision: people.employmentRevision(employment.partyRelationshipId),
+        // P23 review: a pay change names the salary revision, every other change the employment's
+        revision:
+            plan.kindEnumId === payKind
+                ? payroll().salaryRevision(employment.partyRelationshipId)
+                : people.employmentRevision(employment.partyRelationshipId),
         current: Object.assign(termsOfRow(plan.current), termTexts(plan.current), {
             stateEnumId: plan.current.stateEnumId,
             stateText: stateTexts[plan.current.stateEnumId] || "Working"
@@ -1928,16 +2034,28 @@ function previewEmploymentChange(p) {
         terms: Object.assign({}, termsOfRow(plan.terms), termTexts(plan.terms)),
         impact: plan.impact,
         findings: plan.findings,
-        needsApproval: !!plan.kindEnumId && approvalKinds.includes(plan.kindEnumId),
+        needsApproval: waitsFor(plan),
         canApply: !!plan.kindEnumId && !firstError(plan.findings),
         route: []
     }
-    // who would decide it (the default: the person's manager at the employer)
-    if (out.needsApproval)
+    // who would decide it (the default: the person's manager at the employer). P23 review: a pay change's route is read through the
+    // module, the caller checked already (a payroll editor reads no approval rules, so resolve#Approvers would refuse them and mark
+    // the transaction); the employer's payroll approvers by default
+    if (out.needsApproval && plan.kindEnumId === payKind)
+        out.route = Array.from(
+            approvals().previewRoute({
+                approvalKindEnumId: payApprovalKind,
+                organizationPartyId: org,
+                departmentPartyId: plan.before.departmentPartyId || null,
+                subjectPartyId: employment.partyId,
+                requesterPartyId: ec.user.userAccount?.partyId || null
+            }).steps || []
+        ).map(step => ({stepText: step.stepText, explanation: step.explanation, unresolved: !!step.unresolved}))
+    else if (out.needsApproval)
         try {
             out.route = Array.from(
                 call("mantle.humanres.PeopleApprovalServices.resolve#Approvers", {
-                    approvalKindEnumId: approvalKind,
+                    approvalKindEnumId: plan.kindEnumId === payKind ? payApprovalKind : approvalKind,
                     organizationPartyId: org,
                     departmentPartyId: plan.before.departmentPartyId,
                     subjectPartyId: employment.partyId,
@@ -1955,7 +2073,7 @@ function previewEmploymentChange(p) {
 // default, never the requester or the person); a manager change, a leave of absence and a return are applied now. A new change
 // supersedes one of the employment still waiting.
 function applyEmploymentChange(p) {
-    const userScope = editorScope("Changing an employment")
+    const userScope = changeScope(p.changeKind)
     const operationKey = text(p.operationKey) || null
     if (operationKey) {
         const first = rows(CHANGE, {operationKey, requestedByUserId: ec.user.userId}).find(
@@ -1964,12 +2082,16 @@ function applyEmploymentChange(p) {
         if (first) return Object.assign(changeAnswer(first), {repeated: true})
     }
     const employment = employmentIn(userScope, p.partyRelationshipId)
-    const revision = people.employmentRevision(employment.partyRelationshipId)
+    // P23: a pay change names the salary revision it read (get#Compensation's payRevision), every other change the employment's
+    const revision =
+        text(p.changeKind) === "pay"
+            ? payroll().salaryRevision(employment.partyRelationshipId)
+            : people.employmentRevision(employment.partyRelationshipId)
     if (text(p.expectedRevision) !== revision)
         denied("REVISION_CHANGED", "This employment changed since you read it; open it again (revision " + revision + ")")
     const plan = planChange(p, userScope)
     refuseErrors(plan.findings)
-    const needsApproval = approvalKinds.includes(plan.kindEnumId)
+    const needsApproval = waitsFor(plan)
     const values = {
         statusId: needsApproval ? "EchRequested" : "EchApplied",
         effectiveDate: stamp(plan.at),
@@ -1983,13 +2105,20 @@ function applyEmploymentChange(p) {
             terminationReasonEnumId: text(p.terminationReasonEnumId) || null,
             terminationTypeEnumId: text(p.terminationTypeEnumId) || null
         })
+    else if (plan.kindEnumId === payKind)
+        Object.assign(values, {
+            salaryAmount: plan.pay.amount,
+            salaryCurrencyUomId: plan.pay.currencyUomId,
+            salaryPeriodTypeId: plan.pay.timePeriodTypeId,
+            payGradeId: plan.pay.payGradeId
+        })
     else Object.assign(values, termsOfRow(plan.terms))
     if (needsApproval) {
-        supersedeWaiting(employment.partyRelationshipId)
+        supersedeWaiting(employment.partyRelationshipId, null, plan.kindEnumId)
         values.statusId = "EchRequested"
         const employmentChangeId = createChange(employment, plan.kindEnumId, values)
         approvals().request({
-            approvalKindEnumId: approvalKind,
+            approvalKindEnumId: plan.kindEnumId === payKind ? payApprovalKind : approvalKind,
             sourceId: employmentChangeId,
             organizationPartyId: employment.organizationPartyId,
             departmentPartyId: plan.before.departmentPartyId,
@@ -2020,15 +2149,26 @@ function changeAnswer(change) {
         unresolved: !!summary?.unresolved
     }
 }
-const approvalOf = change => approvals().sourceSummary(approvalKind, change.employmentChangeId)
+const approvalOf = change => approvals().sourceSummary(kindOfChange(change), change.employmentChangeId)
 
 // ===== decide#EmploymentChange and the topic's services =====
 // The step waiting of a change's request decided (record#Decision rechecks the decider and the change's and employment's
 // revision); the last approval applies the change, a refusal refuses it. A decision retried answers the first and applies nothing
 // again.
 function decideEmploymentChange(p) {
+    // P23 review: the kind of the change's request (a pay change's is PakPayChange), from the change or the request named
+    const named = text(p.employmentChangeId) ? changeOf(text(p.employmentChangeId)) : null
+    const asked =
+        !named && text(p.peopleApprovalId)
+            ? one("mantle.humanres.approval.PeopleApproval", {peopleApprovalId: text(p.peopleApprovalId)})
+            : null
+    const kindEnumId = named
+        ? kindOfChange(named)
+        : asked?.approvalKindEnumId === payApprovalKind
+          ? payApprovalKind
+          : approvalKind
     const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
-        approvalKindEnumId: approvalKind,
+        approvalKindEnumId: kindEnumId,
         peopleApprovalId: text(p.peopleApprovalId) || null,
         sourceId: text(p.employmentChangeId) || null,
         decision: text(p.decision) || "approve",
@@ -2081,14 +2221,17 @@ function findEmploymentChanges(p) {
     if (text(p.partyRelationshipId)) query = query.condition("partyRelationshipId", text(p.partyRelationshipId))
     const found = Array.from(query.orderBy("-requestedDate").limit(50).list())
     const hrOf = row => !!caps.hrView && userScope.organizationPartyIds.includes(row.organizationPartyId)
+    // P23: a pay change is payroll's to read (PAYROLL_VIEW of the employer), not HR's; its approver reads the one they decide
+    const payOf = row => !!caps.payrollView && userScope.organizationPartyIds.includes(row.organizationPartyId)
+    const readerOf = row => (row.changeKindEnumId === payKind ? payOf(row) : hrOf(row))
     const includeDone = truthy(p.includeDone)
     const changes = []
     for (const row of found) {
         const waiting = row.statusId === "EchRequested"
-        if (!waiting && !(includeDone && hrOf(row))) continue
+        if (!waiting && !(includeDone && readerOf(row))) continue
         const approval = waiting || row.statusId === "EchRefused" ? approvalOf(row) : null
-        if (!hrOf(row) && !approval?.canDecide) continue
-        changes.push(changeRow(row, approval, hrOf(row) && !!caps.hrEdit))
+        if (!readerOf(row) && !approval?.canDecide) continue
+        changes.push(changeRow(row, approval, hrOf(row) && !!caps.hrEdit, readerOf(row) || !!approval?.canDecide))
     }
     // P17: each applied change's lifecycle letter (Letters.js): offered to an HR editor, and whether it is issued
     const issued = letters().issuedFor(changes.map(row => row.employmentChangeId))
@@ -2102,7 +2245,7 @@ function findEmploymentChanges(p) {
     }
     return {changes}
 }
-function changeRow(row, approval, hrEdit = false) {
+function changeRow(row, approval, hrEdit = false, readsPay = false) {
     const texts = termTexts(row)
     const reasons = enumNames([row.terminationReasonEnumId, row.terminationTypeEnumId])
     // P7: a change applied for a date still to come (a leave's return too) is withdrawn by HR (F131); the access request's state
@@ -2146,6 +2289,16 @@ function changeRow(row, approval, hrEdit = false) {
             hrEdit,
             accessOperationId: hrEdit ? row.accessOperationId || null : null,
             accessFailure: hrEdit ? row.accessRequestFailure || "" : "",
+            // P23: a pay change's new salary, to a payroll reader of the employer and the approver of its step alone
+            isPayChange: row.changeKindEnumId === payKind,
+            salaryText:
+                row.changeKindEnumId === payKind && readsPay
+                    ? payroll().salaryText({
+                          amount: row.salaryAmount,
+                          currencyUomId: row.salaryCurrencyUomId,
+                          timePeriodTypeId: row.salaryPeriodTypeId
+                      })
+                    : "",
             canRequestAccess:
                 hrEdit &&
                 row.statusId === "EchApplied" &&
@@ -2453,7 +2606,7 @@ function assignSchedule(p) {
     )
     approvals().keepWaiting(
         approvalKind,
-        waiting.map(row => row.employmentChangeId),
+        waiting.filter(row => row.changeKindEnumId !== payKind).map(row => row.employmentChangeId),
         () => {
             applyChange(changeOf(employmentChangeId))
             carrySchedule(employment, waiting)

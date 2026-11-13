@@ -103,7 +103,7 @@ const kinds = {
     },
     // P6: a transfer or a separation (PeopleServices.apply#EmploymentChange and decide#EmploymentChange). The request is bound to
     // the change row and the employment's revision (People.js employmentRevision), so a change of the employment meanwhile (another
-    // change applied, a manager changed on the chart) supersedes it.
+    // change applied, a manager changed on the chart) supersedes it. A pay change is a kind of its own (PakPayChange, P23 review).
     PakEmploymentChange: {
         topic: "PeopleEmploymentChangeApproval",
         sourceEntityName: CHANGE,
@@ -131,6 +131,52 @@ const kinds = {
                     personName,
                     subjectText: separation ? "an employment's end" : "the " + kindText + " of " + personName,
                     organizationName,
+                    departmentName: change.departmentPartyId ? names[change.departmentPartyId] || "" : ""
+                }
+            }
+        }
+    },
+    // P23 review (the user's call of Nov 12, 2026): a pay change (PeopleServices.apply#EmploymentChange with changeKind pay), payroll's
+    // part of a change, on the same topic as the other employment changes but a kind of its own, so its rules are its own. Bound to
+    // the change row and the employment's salary rows (a transfer meanwhile leaves it as it is; another salary written supersedes
+    // it). With no rule the employer's payroll approvers decide it: staff of the employer holding PAYROLL_APPROVE and PAYROLL_VIEW
+    // (design §1.1: a manager has no compensation access by default); an employer's rule may route a step to the manager or another
+    // approver (PEOPLE_REQUEST_APPROVE), who then reads the new salary of the change they decide, and only that. Never the payroll
+    // editor who asked, nor the person. Its notice names no one and no amount (a lock-screen-safe title, design §1.4).
+    PakPayChange: {
+        topic: "PeopleEmploymentChangeApproval",
+        sourceEntityName: CHANGE,
+        sourceField: "employmentChangeId",
+        defaultRole: "ParHr",
+        defaultBasis: "defaultPayApprover",
+        defaultRoleText: "Payroll approver",
+        defaultCandidates(request, at) {
+            const readers = new Set(holdersOf("PAYROLL_VIEW", request.organizationPartyId, at))
+            return holdersOf("PAYROLL_APPROVE", request.organizationPartyId, at).filter(partyId => readers.has(partyId))
+        },
+        decidePermissions: ["PAYROLL_APPROVE", "PEOPLE_REQUEST_APPROVE"],
+        revision(sourceId) {
+            const change = one(CHANGE, {employmentChangeId: sourceId})
+            if (!change) return "0"
+            const salaries = rows("mantle.humanres.employment.EmploymentSalary", {
+                partyRelationshipId: change.partyRelationshipId
+            })
+            return String(ms(change.lastUpdatedStamp) ?? 0) + ":pay:" + String(Math.max(0, ...salaries.map(stampOf)))
+        },
+        describe(sourceId) {
+            const change = one(CHANGE, {employmentChangeId: sourceId})
+            if (!change) return {label: "pay change " + sourceId}
+            const personName = people.personNames([change.partyId])[change.partyId] || change.partyId
+            const names = people.organizationNames([change.organizationPartyId, change.departmentPartyId].filter(Boolean))
+            return {
+                label: "pay change of " + personName,
+                message: {
+                    employmentChangeId: sourceId,
+                    partyId: change.partyId,
+                    changeText: "pay change",
+                    personName,
+                    subjectText: "a pay change",
+                    organizationName: names[change.organizationPartyId] || change.organizationPartyId || "",
                     departmentName: change.departmentPartyId ? names[change.departmentPartyId] || "" : ""
                 }
             }
@@ -668,6 +714,7 @@ const basisTexts = {
     default: "No rule: the manager decides",
     defaultHr: "No rule: HR decides",
     defaultPayroll: "No rule: a payroll approver or HR officer who reads payroll decides",
+    defaultPayApprover: "No rule: a payroll approver decides",
     defaultHead: "No rule: the head of the department decides"
 }
 // The candidates of a step's role, before who may decide: the department head (the lead of the nearest department with one), the
