@@ -29,6 +29,12 @@ const money = (value, currencyUomId) =>
 const likeText = text => "%" + String(text).replace(/[\\%_]/g, character => "\\" + character) + "%"
 const factory = () => ec.entity.conditionFactory
 const now = () => ec.user.nowTimestamp
+// the revision a write names (§2 "Revisions and operations"; P4, F99): a row's lastUpdatedStamp in milliseconds, "0" for none
+const revisionOf = row => String(ms(row?.lastUpdatedStamp) ?? 0)
+function requireRevision(revision, expected, label) {
+    if (String(expected ?? "").trim() !== revision)
+        denied("REVISION_CHANGED", label + " changed since you read it; open it again (revision " + revision + ")")
+}
 
 // ===== helpers =====
 function nameOf(row) {
@@ -304,6 +310,7 @@ function findContacts(p) {
         .selectField("accountLastName")
         .selectField("relationshipName")
         .selectField("fromDate")
+        .selectField("relationshipStamp")
         .distinct(true)
         .orderBy(["lastName", "firstName", "partyRelationshipId"])
     const paged = lib.page(query, p, "contactList", query.count(), {noLimitCap: 1000})
@@ -320,7 +327,8 @@ function findContacts(p) {
         titleText: row.relationshipName || "",
         email: emailOf(row.contactPartyId),
         phone: phoneOf(row.contactPartyId),
-        fromText: dayText(row.fromDate)
+        fromText: dayText(row.fromDate),
+        revision: String(ms(row.relationshipStamp) ?? 0)
     }))
     return Object.assign(paged, {contactList})
 }
@@ -346,7 +354,8 @@ function customerSales(p) {
         partyRelationshipId: row.partyRelationshipId,
         partyId: row.fromPartyId,
         name: partyName(row.fromPartyId),
-        fromText: dayText(row.fromDate)
+        fromText: dayText(row.fromDate),
+        revision: revisionOf(row)
     }))
     const parentRow = Array.from(
         find("mantle.party.PartyRelationship")
@@ -374,7 +383,8 @@ function customerSales(p) {
             titleText: row.relationshipName || "",
             email: emailOf(row.fromPartyId),
             phone: phoneOf(row.fromPartyId),
-            fromText: dayText(row.fromDate)
+            fromText: dayText(row.fromDate),
+            revision: revisionOf(row)
         })
     }
     const ordersRead = !!caps.teamRead
@@ -398,6 +408,8 @@ function customerSales(p) {
             phone: phoneOf(customerPartyId),
             comments: party.comments || "",
             managers,
+            // the revision set#AccountManager names: the current manager relationship's, "0" when there is none (P4, F99)
+            managerRevision: managerRevision(managers.map(row => ({lastUpdatedStamp: Number(row.revision)}))),
             parent: parentRow ? {partyId: parentRow.toPartyId, name: partyName(parentRow.toPartyId)} : null,
             children,
             contacts,
@@ -616,6 +628,11 @@ function accountForWrite(userScope, accountPartyId, organizationPartyId) {
     }
 }
 
+// The revision of an account's management: its latest current manager relationship's, "0" with none.
+function managerRevision(current) {
+    return String(current.reduce((max, row) => Math.max(max, ms(row.lastUpdatedStamp) ?? 0), 0))
+}
+
 // ===== set#AccountManager =====
 // The account's manager from now (design §4 Customer360's Overview): the current one ended, the new one started, a person who works
 // for the account's organization. A manager or administrator (SALES_TEAM_MANAGE or SALES_CONFIGURE) changes any account of their
@@ -630,6 +647,8 @@ function setManager(p) {
         denied("PERMISSION_DENIED", "Only a sales manager changes an account's manager")
     if (!p.managerPartyId || !worksFor(p.managerPartyId, account.organizationPartyId))
         denied("MANAGER_INVALID", "The account manager must work for the account's organization")
+    // the management read (P4, F99): its current manager relationship's revision, "0" when it had none
+    requireRevision(managerRevision(current), p.expectedRevision, "The account's manager")
     if (current.some(row => row.fromPartyId === p.managerPartyId)) return {accountPartyId: p.accountPartyId}
     for (const row of current)
         lib.call("update#mantle.party.PartyRelationship", {partyRelationshipId: row.partyRelationshipId, thruDate: now()})
@@ -689,6 +708,8 @@ function endContact(p) {
     const row = one("mantle.party.PartyRelationship", {partyRelationshipId: p.partyRelationshipId})
     if (!row || row.relationshipTypeEnumId !== "PrtContact" || !salesAccess.accountOf(userScope, row.toPartyId))
         denied("RECORD_UNAVAILABLE", "Contact relationship " + (p.partyRelationshipId || "") + " is not available")
+    // the relationship read (P4, F99)
+    requireRevision(revisionOf(row), p.expectedRevision, "This contact")
     if (row.thruDate && ms(row.thruDate) <= ms(now())) return {partyRelationshipId: row.partyRelationshipId}
     lib.call("update#mantle.party.PartyRelationship", {partyRelationshipId: row.partyRelationshipId, thruDate: now()})
     return {partyRelationshipId: row.partyRelationshipId}

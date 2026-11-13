@@ -54,10 +54,12 @@ along with this software (see the LICENSE.md file). If not, see
             the new one started. A sales manager or administrator (SALES_TEAM_MANAGE or SALES_CONFIGURE) changes the manager of any
             account of their organization; a representative may only take an account with no manager. Refuses a caller without
             SALES_ACCOUNT_EDIT, an account outside the scope (RECORD_UNAVAILABLE), a shared account (ACCOUNT_SHARED) and a person who
-            does not work for the account's organization (MANAGER_INVALID).</description>
+            does not work for the account's organization (MANAGER_INVALID). Names the revision read (P4, F99): get#CustomerSales'
+            managerRevision, the current manager relationship's ("0" with none); a stale one is refused (REVISION_CHANGED).</description>
         <in-parameters>
             <parameter name="accountPartyId" required="true"/>
             <parameter name="managerPartyId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="accountPartyId"/></out-parameters>
         <actions>
@@ -112,9 +114,11 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="delete" noun="Contact">
         <description>Does not delete: ends a contact's relationship (PrtContact) with an account of the caller's sales scope from
             now; the person is kept, with their other accounts. Refuses a caller without SALES_ACCOUNT_EDIT and a relationship of
-            another kind or of an account outside the scope (RECORD_UNAVAILABLE).</description>
+            another kind or of an account outside the scope (RECORD_UNAVAILABLE). Names the relationship's revision read (P4, F99:
+            find#AccountContacts' and get#CustomerSales' revision); a stale one is refused (REVISION_CHANGED).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
         </in-parameters>
         <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
         <actions>

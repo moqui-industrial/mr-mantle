@@ -38,6 +38,8 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="relationshipName" entity-alias="PREL"/>
         <alias name="fromDate" entity-alias="PREL"/>
         <alias name="thruDate" entity-alias="PREL"/>
+        <!-- the relationship's revision, which delete#Contact names (impl-sales P4, F99) -->
+        <alias name="relationshipStamp" entity-alias="PREL" field="lastUpdatedStamp"/>
         <alias name="accountPartyId" entity-alias="PREL" field="toPartyId"/>
         <alias name="accountRoleTypeId" entity-alias="ACRL" field="roleTypeId"/>
         <alias name="accountOwnerPartyId" entity-alias="ACCT" field="ownerPartyId"/>

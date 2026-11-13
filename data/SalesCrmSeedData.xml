@@ -42,6 +42,16 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.EnumerationType enumTypeId="SalesLostReason" description="Sales Lost Reason"/>
     <moqui.basic.EnumerationType enumTypeId="SalesRecurringPlan" description="Sales Recurring Plan (enumCode: months)"/>
 
+    <!-- P4 (design-sales §3 OpportunityDetail): how a deal's probability is set (Stage: the stage's default, copied on create and
+        move; Manual: the rep's value, kept until Stage is chosen again), and a competitor's position on a deal -->
+    <moqui.basic.EnumerationType enumTypeId="SalesProbabilityMode" description="Sales Probability Mode"/>
+    <moqui.basic.Enumeration enumId="SpmStage" enumTypeId="SalesProbabilityMode" description="From the stage" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SpmManual" enumTypeId="SalesProbabilityMode" description="Manual" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesCompetitorPosition" description="Sales Competitor Position"/>
+    <moqui.basic.Enumeration enumId="ScpLeading" enumTypeId="SalesCompetitorPosition" description="Ahead of us" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="ScpEven" enumTypeId="SalesCompetitorPosition" description="Even" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="ScpTrailing" enumTypeId="SalesCompetitorPosition" description="Behind us" sequenceNum="3"/>
+
     <mantle.party.RoleType roleTypeId="SalesTeam" description="Sales Team"/>
     <moqui.basic.Enumeration enumId="PrtSalesTeamOf" description="Sales Team of" enumTypeId="PartyRelationshipType"/>
     <moqui.basic.Enumeration enumId="PrtSalesTeamMember" description="Sales Team Member" enumTypeId="PartyRelationshipType"/>

@@ -96,6 +96,8 @@ spec({
             users.adminBoth = user("adminboth", [orgA, orgB], ["SALES_VIEW", "SALES_CONFIGURE"])
             users.manager = user("manager", [orgA], ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_TEAM_MANAGE"])
             users.reader = user("reader", [orgA], ["SALES_VIEW"])
+            // P4: a configurer of every organization (SALES_ALL_ORGANIZATIONS), who alone changes the instance's lost reasons
+            users.adminAll = user("adminall", [orgA], ["SALES_VIEW", "SALES_CONFIGURE", "SALES_ALL_ORGANIZATIONS"])
             ids.repA = person("repa", [orgA])
             ids.repB = person("repb", [orgB])
         })
@@ -375,7 +377,12 @@ feature("the settings are refused without SALES_CONFIGURE, the shared pipeline o
             otherOptions: as(users.reader, "get#SalesOptions", {organizationPartyId: orgB}),
             sharedStage: as(users.admin, "store#Stage", {salesPipelineId: "SalesDefault", description: "Admin's"}),
             otherPipeline: as(users.admin, "store#Pipeline", {organizationPartyId: orgB, pipelineName: "Not mine"}),
+            // P4 (the user's call, impl-sales §4 Nov 13): the lost reasons are the instance's, changed with every organization's
+            // scope only; a configurer of one organization reads them
             reason: as(users.admin, "store#LostReason", {description: "Spec reason"}),
+            adminSetup: as(users.admin, "get#SalesSetup", {organizationPartyId: orgA}),
+            reasonAll: as(users.adminAll, "store#LostReason", {description: "Spec reason"}),
+            allSetup: as(users.adminAll, "get#SalesSetup", {organizationPartyId: orgA}),
             managerSetup: as(users.manager, "get#SalesSetup", {organizationPartyId: orgA})
         }
     },
@@ -390,7 +397,11 @@ feature("the settings are refused without SALES_CONFIGURE, the shared pipeline o
         r.otherOptions.refused.includes("ORGANIZATION_DENIED")
         r.sharedStage.refused.includes("ORGANIZATION_DENIED")
         r.otherPipeline.refused.includes("ORGANIZATION_DENIED")
-        r.reason.refused == ""
+        r.reason.refused.includes("ORGANIZATION_DENIED")
+        r.adminSetup.canEditReasons == false
+        r.adminSetup.lostReasons.length > 0
+        r.reasonAll.refused == ""
+        r.allSetup.canEditReasons == true
         // a team manager reads the teams and nothing of the configuration
         r.managerSetup.refused == ""
         r.managerSetup.canConfigure == false

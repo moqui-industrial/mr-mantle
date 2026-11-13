@@ -599,9 +599,18 @@ function reasonsOf(includeEnded = false) {
     )
     return includeEnded ? found : found.filter(row => !ended(row))
 }
-// store#LostReason: a new reason, a reason's name or order, or its end (now or later); never deleted.
+// The instance's shared values (the lost reasons; the recurring plans, which no service writes yet) are changed only by a caller
+// of every organization's scope, as the shared pipeline is (the user's call, impl-sales §4 Nov 13; built in P4): a configurer of
+// one organization reads them only.
+function sharedConfigurer(label) {
+    const userScope = configurer()
+    if (userScope.organizationPartyIds != null)
+        denied("ORGANIZATION_DENIED", label + " are the instance's and changed by an administrator of every organization")
+    return userScope
+}
+// store#LostReason: a new reason, a reason's name or order, or its end (now or later); never deleted. Every organization's scope.
 function storeLostReason(p) {
-    configurer()
+    sharedConfigurer("The lost reasons")
     const sequenceNum = blank(p.sequenceNum) ? null : Number(text(p.sequenceNum))
     if (sequenceNum != null && (!Number.isInteger(sequenceNum) || sequenceNum < 0 || sequenceNum > 9999))
         denied("SEQUENCE_INVALID", "The order is a whole number from 0 to 9999")
@@ -823,7 +832,9 @@ function salesSetup(p) {
         recurringPlans: enumOptions("SalesRecurringPlan"),
         canConfigure,
         canManageTeams: !!(userScope.capabilities.configure || userScope.capabilities.teamManage),
-        canEditShared: canConfigure && shared
+        canEditShared: canConfigure && shared,
+        // P4: the lost reasons and recurring plans are the instance's, changed with every organization's scope
+        canEditReasons: canConfigure && shared
     }
 }
 const enumOptionsOf = enumIds =>
@@ -993,5 +1004,12 @@ const operations = {
     teamsOf,
     sourcesOffered,
     defaultPipeline,
-    worksFor
+    worksFor,
+    // P4: the opportunity services' pipeline, stage, team and reason reads
+    pipelinesOf,
+    stagesOf,
+    teamRow,
+    reasonsOf,
+    inEffect,
+    ended
 })
