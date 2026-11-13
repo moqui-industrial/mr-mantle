@@ -81,6 +81,12 @@ feature("two organizations with an order each, and users: an author and a viewer
         call("create#moqui.security.UserGroup", { userGroupId: "CGS_NOPROFILE", description: "CalcGrid with no profile" })
         call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CGS_NOPROFILE_GRID", userGroupId: "CGS_NOPROFILE", artifactGroupId: "CALC_GRID",
                 authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        // the authors also check who a scheduled export of a document may go to (report delivery's audience check)
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CGS_AUDIENCE", description: "CalcGrid sales: report audience" })
+        for (const artifactName of ["org.moqui.report.ReportServices.check#ReportAudience", "org.moqui.report.delivery.group"])
+            call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CGS_AUDIENCE", artifactName, artifactTypeEnumId: "AT_SERVICE" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CGS_AUTHORS_AUDIENCE", userGroupId: "CGS_AUTHORS", artifactGroupId: "CGS_AUDIENCE",
+                authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
         // a group all of them share a document with
         call("create#moqui.security.UserGroup", { userGroupId: "CGS_SHARED", description: "CalcGrid sales readers" })
         for (const [first, username, groups, orgId] of [["Ann", "cgs.ann", ["CGS_AUTHORS"], "CGS_ORG"], ["Vic", "cgs.vic", ["CGS_VIEWERS"], "CGS_ORG"],
@@ -202,12 +208,31 @@ feature("a document an author saves and shares shows each reader their own organ
         const vic = readAs("cgs.vic")
         const otto = readAs("cgs.otto")
         const paul = as("cgs.paul", () => calc("open#CalcDocument", { profileId: "sales", definitionId: "cgs-sales-orders" }))
+        // the scope of each reader: the same organization is the same scope, another is not; a scheduled export of the
+        // document may go to a reader of the author's scope only
+        const scope = (username) => as(username, () => calc("get#CalcScope", { definitionId: "cgs-sales-orders" }).out.scope)
+        const scopes = { ann: scope("cgs.ann"), vic: scope("cgs.vic"), otto: scope("cgs.otto") }
+        const audience = as("cgs.ann", () => {
+            const out = ec.service.sync().name("org.moqui.report.ReportServices.check#ReportAudience")
+                .parameters({ definitionId: "cgs-sales-orders", recipientUserIds: [users.Vic, users.Otto] }).call() || {}
+            const errors = ec.message.hasError() ? ec.message.getErrorsString() : ""
+            ec.message.clearErrors()
+            const reasons = {}
+            for (const recipient of Array.from(out.recipients || [])) reasons[recipient.userId] = recipient.reasonCode || "eligible"
+            return { errors, vic: reasons[users.Vic], otto: reasons[users.Otto] }
+        })
         // the document is its author's to delete; the spec takes its rows away
         for (const entityName of ["moqui.report.DefinitionVersion", "moqui.report.Definition"])
             ec.entity.find(entityName).condition("definitionId", "cgs-sales-orders").deleteAll()
-        return { saved, stored, vic, otto, paul }
+        return { saved, stored, vic, otto, paul, scopes, audience }
     },
-    then({ saved, stored, vic, otto, paul }) {
+    then({ saved, stored, vic, otto, paul, scopes, audience }) {
+        !!scopes.ann
+        scopes.ann == scopes.vic
+        scopes.ann != scopes.otto
+        audience.errors == ""
+        audience.vic == "eligible"
+        audience.otto == "scope-differs"
         saved.errors == ""
         saved.definitionId == "cgs-sales-orders"
         saved.otherWay.includes("Not authorized for the Tools app")
@@ -223,6 +248,55 @@ feature("a document an author saves and shares shows each reader their own organ
         !otto.texts.includes("CGS-O1")
         paul.errors.includes("Not available")
         !paul.out.roomId
+    },
+})
+
+feature("a document is edited together: readers of one organization share a room, another's follows the same edits over its own rows", {
+    when() {
+        const open = (username) => as(username, () => calc("open#CalcDocument", { profileId: "sales", definitionId: "cgs-together" }).out)
+        const total = (username, roomId) => as(username, () => {
+            const answer = calc("get#CalcCells", { roomId, profileId: "sales", sheet: 1, row: 1, column: 1, width: 1, height: 2 })
+            const texts = answer.errors ? [] : Array.from(JSON.parse(String(answer.out.blockJson)).texts || [])
+            return { errors: answer.errors, cells: texts.map((cell) => `${cell.row}:${cell.text}`) }
+        })
+        const edit = (username, roomId, ops) => as(username, () => calc("edit#CalcDocument", { roomId, profileId: "sales", ops }))
+        // Ann makes and shares a document with a sheet of her own over the orders
+        const annRoom = as("cgs.ann", () => {
+            const opened = calc("open#CalcDocument", { profileId: "sales", source: { type: "entity", entityName: ORDERS }, columns: ["orderId", "grandTotal"], title: "Together" })
+            calc("edit#CalcDocument", { roomId: opened.out.roomId, profileId: "sales", ops: [{ op: "addSheet" }, { op: "renameSheet", sheet: 1, name: "Sum" }] })
+            return calc("save#CalcDocument", { roomId: opened.out.roomId, profileId: "sales", definitionId: "cgs-together", userGroupId: "CGS_SHARED" }).out.roomId
+        })
+        const vicRoom = open("cgs.vic").roomId
+        const ottoRoom = open("cgs.otto").roomId
+        // Ann types a total over the table and a label; Vic, in her room, and Otto, in his, see them over their rows
+        const typed = edit("cgs.ann", annRoom, [{ op: "input", sheet: 1, row: 1, column: 1, value: "=SUM(OrderHeaderAndPart[grandTotal])" },
+            { op: "input", sheet: 1, row: 2, column: 1, value: "Sales" }])
+        const vic = total("cgs.vic", vicRoom)
+        const otto = total("cgs.otto", ottoRoom)
+        // a viewer does not edit; Otto, an author, has nothing of his own to undo; Ann's undo reaches Otto's room too
+        const vicEdit = edit("cgs.vic", vicRoom, [{ op: "input", sheet: 1, row: 3, column: 1, value: "mine" }])
+        const ottoUndo = edit("cgs.otto", ottoRoom, [{ op: "undo" }])
+        edit("cgs.ann", annRoom, [{ op: "undo" }])
+        const ottoAfter = total("cgs.otto", ottoRoom)
+        for (const entityName of ["moqui.calc.CalcDocumentEdit", "moqui.calc.CalcDocumentHead", "moqui.report.DefinitionVersion", "moqui.report.Definition"])
+            ec.entity.find(entityName).condition("definitionId", "cgs-together").deleteAll()
+        return { annRoom, vicRoom, ottoRoom, typed, vic, otto, vicEdit, ottoUndo, ottoAfter }
+    },
+    then({ annRoom, vicRoom, ottoRoom, typed, vic, otto, vicEdit, ottoUndo, ottoAfter }) {
+        String(annRoom).startsWith("d")
+        vicRoom == annRoom
+        ottoRoom != annRoom
+        typed.errors == ""
+        typed.out.seq == 1
+        vic.errors == ""
+        vic.cells.join(",") == "1:110,2:Sales"
+        otto.errors == ""
+        otto.cells.join(",") == "1:220,2:Sales"
+        vicEdit.errors.includes("Not available")
+        ottoUndo.errors.includes("Nothing of yours to undo")
+        // her last edit typed both cells: both are gone from Otto's room too
+        ottoAfter.errors == ""
+        ottoAfter.cells.length == 0
     },
 })
 
