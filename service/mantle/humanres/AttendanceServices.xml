@@ -23,7 +23,8 @@ along with this software (see the LICENSE.md file). If not, see
     worked intervals with a reason and waits for a People approval (PeopleAttendanceApproval, decide#Correction); approved, it is the
     day's attendance, and the punches stay as they were. Nothing here approves timesheets or makes pay. Each service checks the
     caller's People scope (People.js) and the People permissions itself, then reads and writes with authorization off, and names no
-    application group. -->
+    application group. P30 adds the clocking kiosk: a worker's punch at a registered shared device by badge and PIN, only in that
+    device's request (record#KioskPunch), and the badges HR issues, prints once and revokes (KioskIdentity.js). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="record" noun="Punch" allow-remote="false">
@@ -390,6 +391,200 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="runList" type="List"/></out-parameters>
         <actions>
             <set field="runList" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('findImportRuns', context).runList"/>
+        </actions>
+    </service>
+
+    <!-- P30, the clocking kiosk (design-people §6 ClockingKiosk, §15 the badge, PE-05; impl-people P30): a worker clocks in and out at a
+        registered shared device by badge and PIN (record#KioskPunch, only in that device's request, as its display account with
+        PEOPLE_KIOSK_PUNCH), HR issues, prints, revokes, resets and reads the badges, and the worker sets their own PIN
+        (KioskIdentity.js). -->
+    <service verb="record" noun="KioskPunch" allow-remote="false">
+        <description>A worker clocks in or out now (the server's time) at a registered clocking device: only in the device's own request,
+            whose display account is the user and holds PEOPLE_KIOSK_PUNCH (DEVICE_REQUIRED, PERMISSION_DENIED). The worker is the one
+            the badge's number (badgeText, typed or scanned) and the PIN prove: an unknown number (BADGE_UNKNOWN), a revoked badge
+            (BADGE_REVOKED), a locked one (PIN_LIMITED), one whose worker has not set their PIN in self-service yet (PIN_NOT_SET) and
+            a wrong PIN (PIN_WRONG; the fifth in a row locks the badge for fifteen minutes) are refused and counted at the device;
+            after many refusals at the device lately its next proof is checked only once a growing pause after the last refusal has
+            passed (KIOSK_WAIT, at most a few seconds, nothing looked up or counted), and a burst tells the HR editors of its
+            organizations at most hourly (PeopleKioskRefusals); the employment must be current (EMPLOYMENT_ENDED) and with an organization of the display account's (ORGANIZATION_DENIED),
+            and clock (CLOCKING_OFF). The direction is the one asked, else the other of the worker's state (ALREADY_IN, NOT_IN). A
+            retry with the same operationKey at the device answers the first punch (repeated). Answers the worker's name, the
+            direction and the time; the punch is at the device's site and names the device and the badge.</description>
+        <in-parameters>
+            <parameter name="badgeText"/>
+            <parameter name="pin"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="attendancePunchId"/>
+            <parameter name="directionEnumId"/>
+            <parameter name="directionText"/>
+            <parameter name="punchTimeText"/>
+            <parameter name="personName"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Attendance.js').execute('recordKioskPunch', context)"/>
+            <set field="attendancePunchId" from="out.attendancePunchId"/>
+            <set field="directionEnumId" from="out.directionEnumId"/>
+            <set field="directionText" from="out.directionText"/>
+            <set field="punchTimeText" from="out.punchTimeText"/>
+            <set field="personName" from="out.personName"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="KioskBadge" allow-remote="false">
+        <description>The scan-input resolver of a clocking device (only in a registered device's request with PEOPLE_KIOSK_PUNCH): the
+            scanned or typed text, when it is a badge's number, answered as the badge read with nothing looked up, so a scan tells
+            nothing of whom it belongs to; record#KioskPunch checks it with the PIN. No match otherwise.</description>
+        <in-parameters>
+            <parameter name="scanText" required="true"/>
+            <parameter name="allowedTypes" type="List"/>
+            <parameter name="scanId"/>
+        </in-parameters>
+        <out-parameters><parameter name="matches" type="List"/><parameter name="parsed" type="Map"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('resolveBadge', context)"/>
+            <set field="matches" from="out.matches"/>
+            <set field="parsed" from="out.parsed"/>
+        </actions>
+    </service>
+    <service verb="issue" noun="KioskBadge" allow-remote="false">
+        <description>A new clocking badge of a current employment (EMPLOYMENT_ENDED), issued by an HR editor of the employer
+            (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT; anyone else is refused as missing, RECORD_UNAVAILABLE), with a one-time PIN of 4 to 8
+            digits (PIN_INVALID) or none, kept only as its hash: it only lets the worker set their own PIN in self-service
+            (set#MyKioskPin) and never works at a kiosk, where the badge works once the worker has set theirs. The employment's
+            badge before it is revoked. The badge's number is made when its issuer prints it (print#KioskBadge).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="oneTimePin"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="kioskBadgeId"/>
+            <parameter name="replacedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('issueBadge', context)"/>
+            <set field="kioskBadgeId" from="out.kioskBadgeId"/>
+            <set field="replacedCount" from="out.replacedCount"/>
+        </actions>
+    </service>
+    <service verb="print" noun="KioskBadge" allow-remote="false">
+        <description>A badge's number made and printed, once, by its issuer (NOT_ISSUER), still an HR editor of the employer, within
+            fifteen minutes of the issue (PRINT_EXPIRED): its Code 128 barcode as SVG, the number in groups of four for typing, the
+            person, the employer and when it was issued. The number is kept only as its hash, so a second print is refused (PRINTED)
+            and a lost badge is revoked and another issued; a revoked badge is not printed (BADGE_REVOKED).</description>
+        <in-parameters><parameter name="kioskBadgeId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="personName"/>
+            <parameter name="organizationName"/>
+            <parameter name="numberText"/>
+            <parameter name="barcodeSvg"/>
+            <parameter name="issuedDateText"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('printBadge', context)"/>
+            <set field="personName" from="out.personName"/>
+            <set field="organizationName" from="out.organizationName"/>
+            <set field="numberText" from="out.numberText"/>
+            <set field="barcodeSvg" from="out.barcodeSvg"/>
+            <set field="issuedDateText" from="out.issuedDateText"/>
+        </actions>
+    </service>
+    <service verb="revoke" noun="KioskBadge" allow-remote="false">
+        <description>A badge revoked by an HR editor of the employer (anyone else is refused as missing, RECORD_UNAVAILABLE), with a
+            reason: every kiosk refuses it from then on. A revoked badge answers as it is (repeated).</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="reason" allow-html="none"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="revoked" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('revokeBadge', context)"/>
+            <set field="revoked" from="out.revoked"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="reset" noun="KioskPin" allow-remote="false">
+        <description>A badge's PIN reset by an HR editor of the employer (anyone else is refused as missing, RECORD_UNAVAILABLE) for a
+            worker who forgot it, with a new one-time PIN of 4 to 8 digits (PIN_INVALID) or none: the worker's PIN, its wrong count
+            and its lock are cleared, so the badge works at no kiosk until the worker sets their PIN again in self-service. A revoked
+            badge is not reset (BADGE_REVOKED).</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="oneTimePin"/>
+        </in-parameters>
+        <out-parameters><parameter name="reset" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('resetPin', context)"/>
+            <set field="reset" from="out.reset"/>
+        </actions>
+    </service>
+    <service verb="get" noun="MyKioskBadges" allow-remote="false">
+        <description>The caller's own clocking badges in use (PEOPLE_SELF_SERVICE; their own current employments' badges not
+            revoked; it takes no party): each one's employer, state, whether its PIN is set and whether setting it asks the PIN they
+            have (their own, or the one-time PIN HR gave them). Never a number or a PIN; nothing for a caller without
+            self-service.</description>
+        <out-parameters><parameter name="badges" type="List"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('myBadges', context)"/>
+            <set field="badges" from="out.badges"/>
+        </actions>
+    </service>
+    <service verb="set" noun="MyKioskPin" allow-remote="false">
+        <description>The caller sets or changes the PIN of their own badge in use (anyone else's, or a revoked one, is refused as
+            missing, RECORD_UNAVAILABLE): the new PIN of 4 to 8 digits (PIN_INVALID), not the one-time PIN HR gave (PIN_REUSED), so
+            HR never learns it; the PIN they have now (their own, else the one-time PIN when HR gave one) is asked, a wrong one
+            counted on the badge as at a kiosk (PIN_WRONG; the fifth in a row locks it for fifteen minutes, PIN_LIMITED). Kept only
+            as its argon2 hash; the badge works at a kiosk from then on.</description>
+        <in-parameters>
+            <parameter name="kioskBadgeId" required="true"/>
+            <parameter name="currentPin"/>
+            <parameter name="newPin" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="pinSet" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('setMyPin', context)"/>
+            <set field="pinSet" from="out.pinSet"/>
+        </actions>
+    </service>
+    <service verb="prune" noun="KioskAttempts" allow-remote="false" authenticate="anonymous-all" transaction-timeout="1800">
+        <description>The daily job's prune: clocking kiosk attempts (and the devices' notice marks) older than 90 days deleted, a
+            batch at a time each in a transaction of its own; a failing batch deleted row by row, a failing row logged by its id and
+            left for the next run.</description>
+        <out-parameters>
+            <parameter name="deletedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('pruneAttempts', context)"/>
+            <set field="deletedCount" from="out.deletedCount"/>
+            <set field="failedCount" from="out.failedCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="KioskBadge" allow-remote="false">
+        <description>An employment's clocking badge as an HR reader of the employer reads it (PEOPLE_HR_VIEW; anyone else is refused as
+            missing, RECORD_UNAVAILABLE), never its number or PIN: the latest badge with its state (issued and not printed, active,
+            locked after wrong PINs, waiting for the worker's PIN, revoked), when it was issued, printed, its PIN set and last used,
+            and whether the reader prints it now; whether the reader issues a badge (an HR editor, a current employment), revokes this
+            one and resets its PIN.</description>
+        <in-parameters><parameter name="partyRelationshipId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="badge" type="Map"/>
+            <parameter name="canIssue" type="Boolean"/>
+            <parameter name="canRevoke" type="Boolean"/>
+            <parameter name="canResetPin" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/KioskIdentity.js').execute('getBadge', context)"/>
+            <set field="badge" from="out.badge"/>
+            <set field="canIssue" from="out.canIssue"/>
+            <set field="canRevoke" from="out.canRevoke"/>
+            <set field="canResetPin" from="out.canResetPin"/>
         </actions>
     </service>
 </services>
