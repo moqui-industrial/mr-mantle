@@ -1149,14 +1149,25 @@ along with this software (see the LICENSE.md file). If not, see
             changing nothing: the person (an existing one by partyId, admitted as the hire wizard admits one, or a new one by first
             and last name and work email, a person matching refused unless the row confirms a new one), the start and optional end,
             and the first assignment (department, position, manager, work location by id). An HR editor's who also holds
-            PEOPLE_IMPORT; refuses an employer outside the scope.</description>
+            PEOPLE_IMPORT; refuses an employer outside the scope. A first salary (salaryAmount, salaryCurrencyUomId,
+            salaryPeriodTypeId, salaryFromDate; the user's call of Nov 12, 2026): for an importer who also holds PAYROLL_EDIT and
+            PAYROLL_VIEW its terms are checked as a pay change's, an error of the row; for anyone else its columns alone are
+            refused (a warning, PERMISSION_DENIED), as is a salary the employment has already (PAY_CHANGE_REQUIRED).</description>
+        <out-parameters><parameter name="salaryReasonCode"><description>Why the row's salary is refused or invalid, else empty</description></parameter></out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('validateRow', context))</script></actions>
     </service>
     <service verb="apply" noun="EmployeeImportRow" allow-remote="false">
         <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
         <description>One hire#Employee for a validated row, with the row's operation key, so a repeat answers the hire it made
             (resultRef: the employment). No account is requested (provisioning follows a hire only when HR asks for it). An HR
-            editor's who also holds PEOPLE_IMPORT.</description>
+            editor's who also holds PEOPLE_IMPORT. The row's first salary is written at once for an importer who also holds
+            PAYROLL_EDIT and PAYROLL_VIEW (the import's exception to a first salary's approval: logged, its audit reason "Employee
+            import"); for anyone else, or for an employment with a salary already (PAY_CHANGE_REQUIRED), the hire is made and the
+            salary named as not imported in the result.</description>
+        <out-parameters>
+            <parameter name="salaryWritten" type="Boolean"/>
+            <parameter name="salaryReasonCode"><description>Why the row's salary was not written, else empty</description></parameter>
+        </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleImport.js').execute('applyRow', context))</script></actions>
     </service>
     <service verb="find" noun="EmployeeImportScopes" allow-remote="false">

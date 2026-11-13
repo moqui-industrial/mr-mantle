@@ -24,10 +24,13 @@ along with this software (see the LICENSE.md file). If not, see
             lockedPartyIds the employees whose pay rate the user may not read or set (empty with the permission). For time
             entries (entryList of {key, partyId, date}: the entry's id, its person and its date, fromDate else thruDate) the
             worker counts as an employee when employed on the entry's date or now, so an employee's past pay stays hidden after
-            the employment ends: employeeKeys, hiddenKeys and lockedKeys. One query for all the people. Answers only: it adds no
-            error, so a caller asks it in its own transaction.</description>
+            the employment ends: employeeKeys, hiddenKeys and lockedKeys. With organizationPartyId only the employments at that
+            employer count (the worker invoice's refusal of an employee's time, InvoiceServices create#TimeEntryInvoiceItems and
+            ApprovedTimeBilling: worker invoices are for contractors, the user's call of Nov 12, 2026). One query for all the
+            people. Answers only: it adds no error, so a caller asks it in its own transaction.</description>
         <in-parameters>
             <parameter name="partyIdList" type="List"/>
+            <parameter name="organizationPartyId"><description>Only employments at this employer</description></parameter>
             <parameter name="entryList" type="List"><parameter name="entry" type="Map"><description>key, partyId, date</description></parameter></parameter>
         </in-parameters>
         <out-parameters>
@@ -55,8 +58,10 @@ along with this software (see the LICENSE.md file). If not, see
                     .concat(entries.map((entry) => String(entry.partyId)))))
             // every employment of the people, ended ones too, in one query
             const spans = new Map()
-            if (people.length) for (const row of Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtEmployee')
-                    .condition('fromPartyId', 'in', people).selectField('fromPartyId,fromDate,thruDate').disableAuthz().list())) {
+            let employmentFind = ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtEmployee')
+                    .condition('fromPartyId', 'in', people).selectField('fromPartyId,fromDate,thruDate').disableAuthz()
+            if (organizationPartyId) employmentFind = employmentFind.condition('toPartyId', organizationPartyId)
+            if (people.length) for (const row of Array.from(employmentFind.list())) {
                 if (!spans.has(row.fromPartyId)) spans.set(row.fromPartyId, [])
                 spans.get(row.fromPartyId).push([millis(row.fromDate), millis(row.thruDate)])
             }

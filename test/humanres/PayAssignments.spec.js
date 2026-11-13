@@ -9,7 +9,9 @@
 // amount, never decided by who asked, then applied, a manager reading the salary of the one change a rule routes to them alone,
 // and HR neither asking for it nor reading it (the user's calls of Nov 12, 2026); compensation absent for HR without PAYROLL_VIEW, with the same
 // parameters, and another employer's employment missing to its payroll; the tax profile holding the demonstration localization's
-// declared fields alone, benefits added and ended, and the readiness clear once salary, assignment and profile are in place.
+// declared fields alone, benefits added and ended, and the readiness clear once salary, assignment and profile are in place;
+// the employees import's first salary (the user's call of Nov 12, 2026) written at once for an importer who holds PAYROLL_EDIT,
+// its columns alone refused for one who does not with the same row, and a salary present never changed by import.
 // Standalone: spec-local organizations, people, employments, structures, groups and users, with artifact authorization disabled
 // (the rules are the services' own checks). Run: ./moq test mr-mantle --spec PayAssignments
 const prefix = "PAY_ASGN_SPEC"
@@ -192,6 +194,10 @@ spec({
         state.payApprover = user("PAYAPPROVER", ["PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_APPROVE"], [orgA])
         state.editOnly = user("EDITONLY", ["PAYROLL_EDIT"], [orgA])
         state.repair = user("REPAIR", ["PAYROLL_EDIT", "PAYROLL_REPAIR"], [])
+        // the employees import (the user's call of Nov 12, 2026): an importer who may change pay, and an HR importer who may not
+        const importer = ["PEOPLE_IMPORT", "PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"]
+        state.importPay = user("IMPORTPAY", importer.concat(["PAYROLL_VIEW", "PAYROLL_EDIT"]), [orgA])
+        state.importHr = user("IMPORTHR", importer, [orgA])
         state.salaryComp = component(orgA, "BASE", {basisEnumId: "PcbAmount", amount: "100"})
         state.pensionComp = component(orgA, "PENSION", {
             basisEnumId: "PcbFormula",
@@ -713,6 +719,111 @@ feature(
             // Ben's first salary is not set (a pay change waits for approval; P23 review)
             result.readinessAfter[state.ben] == "SALARY_MISSING"
             result.legacyUntouched
+        }
+    }
+)
+
+feature(
+    "the employees import writes a first salary at once for an importer holding PAYROLL_EDIT, logged and audited; for an HR importer the same row is hired and its salary columns alone refused; a salary present is not changed by import; a staged row's salary is masked for a reader without PAYROLL_VIEW",
+    {
+        when() {
+            const row = {
+                firstName: "Imre",
+                lastName: "Import",
+                workEmail: "imre.import@payassignments.example",
+                fromDate: dayText(-3),
+                confirmNewPerson: "Y",
+                salaryAmount: "4100",
+                salaryCurrencyUomId: "USD",
+                salaryPeriodTypeId: "PayrollMonth"
+            }
+            const importRow = (username, operationKey, values = row) => {
+                const parameters = {targetId: "employees", scopeKey: orgA, rowValues: values, operationKey}
+                const validated = run(username, P + "validate#EmployeeImportRow", parameters)
+                const applied = validated.valid ? run(username, P + "apply#EmployeeImportRow", parameters) : {}
+                return {validated, applied}
+            }
+            const outcome = ({validated, applied}) => [
+                validated.valid,
+                validated.salaryReasonCode || "",
+                applied.applied,
+                applied.salaryWritten,
+                applied.salaryReasonCode || ""
+            ]
+            const pay = importRow(state.importPay, prefix + "-IMPORT-PAY")
+            const again = (salaryAmount, operationKey = prefix + "-IMPORT-PAY") =>
+                run(state.importPay, P + "apply#EmployeeImportRow", {
+                    targetId: "employees",
+                    scopeKey: orgA,
+                    rowValues: Object.assign({}, row, {salaryAmount}),
+                    operationKey
+                })
+            // a repeat under the row's key answers its salary; one with other terms finds a salary present and changes nothing
+            const repeat = again("4100")
+            const present = again("5000")
+            const hr = importRow(state.importHr, prefix + "-IMPORT-HR")
+            const badFrequency = run(state.importPay, P + "validate#EmployeeImportRow", {
+                targetId: "employees",
+                scopeKey: orgA,
+                rowValues: Object.assign({}, row, {salaryPeriodTypeId: "Month"})
+            })
+            // P25 review (the user's call of Nov 12, 2026): a staged row's salary is masked for a batch reader without
+            // PAYROLL_VIEW, the HR importer included
+            const staged = run(state.importHr, "org.moqui.admin.DataTransferServices.stage#Import", {
+                targetId: "employees",
+                organizationPartyId: orgA,
+                sourceText: "firstName,lastName,fromDate,salaryAmount\nSten,Staged," + dayText(-3) + ",4400"
+            })
+            const stagedRow = Array.from(staged.importRows || [])[0]?.sourceValues || {}
+            const payEmp = pay.applied.resultRef
+            const written = salaries(payEmp)
+            return {
+                pay: outcome(pay),
+                payText: pay.applied.resultText,
+                written: written.map(row => [
+                    Number(String(row.amount)),
+                    row.currencyUomId,
+                    row.timePeriodTypeId,
+                    ms(row.fromDate)
+                ]),
+                audit: rows("moqui.entity.EntityAuditLog", {
+                    changedEntityName: "mantle.humanres.employment.EmploymentSalary",
+                    changedFieldName: "amount",
+                    pkPrimaryValue: payEmp
+                }).map(row => row.changeReason),
+                payChanges: rows("mantle.humanres.employment.EmploymentChange", {
+                    partyRelationshipId: payEmp,
+                    changeKindEnumId: "EckPayChange"
+                }).length,
+                repeat: [repeat.applied, repeat.salaryWritten, repeat.salaryReasonCode || "", repeat.resultText],
+                hr: outcome(hr),
+                hrWarnings: Array.from(hr.validated.warnings || []).join("|"),
+                hrText: hr.applied.resultText,
+                hrHired: rows("mantle.humanres.employment.Employment", {partyRelationshipId: hr.applied.resultRef || "-"}).length,
+                hrSalaries: salaries(hr.applied.resultRef || "-").length,
+                present: [present.applied, present.salaryWritten, present.salaryReasonCode],
+                badFrequency: [badFrequency.valid, badFrequency.salaryReasonCode],
+                staged: [staged.error || "", stagedRow.firstName, stagedRow.salaryAmount]
+            }
+        },
+        then(result) {
+            result.pay == [true, "", true, true, ""]
+            result.payText.includes("first salary set")
+            result.written == [[4100, "USD", "PayrollMonth", dayMs(-3)]]
+            result.audit == ["Employee import"]
+            result.payChanges == 0
+            result.repeat[0] == true
+            result.repeat[1] == false
+            result.repeat[2] == ""
+            result.repeat[3].includes("salary set already")
+            result.hr == [true, "PERMISSION_DENIED", true, false, "PERMISSION_DENIED"]
+            result.hrWarnings.includes("Salary not imported")
+            result.hrText.includes("Salary not imported")
+            result.hrHired == 1
+            result.hrSalaries == 0
+            result.present == [true, false, "PAY_CHANGE_REQUIRED"]
+            result.badFrequency == [false, "FREQUENCY_INVALID"]
+            result.staged == ["", "Sten", "Restricted"]
         }
     }
 )

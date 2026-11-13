@@ -488,6 +488,32 @@ feature("finance bills only approved project time without a Projects permission 
 })
 feature("worker billing uses vendor-unbilled time and vendor rates after the client side has already been billed", {
     when() {
+        // worker billing is for contractors (the user's call of Nov 12, 2026): an employee's approved time of the project,
+        // billed to the client already, is left out of the payable list
+        const billed = helper().lib.one("mantle.work.time.TimeEntry", {timeEntryId: "NATIVE_AR_TIME"})
+        helper().call("create#mantle.party.Party", {partyId: "NATIVE_AR_EMPLOYEE", partyTypeEnumId: "PtyPerson"})
+        helper().call("create#mantle.party.Person", {partyId: "NATIVE_AR_EMPLOYEE", firstName: "Native", lastName: "Employee"})
+        helper().call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtEmployee",
+            fromPartyId: "NATIVE_AR_EMPLOYEE",
+            toPartyId: f.org,
+            fromDate: 0
+        })
+        helper().call("create#mantle.work.time.TimeEntry", {
+            timeEntryId: "NATIVE_AR_EMPLOYEE_TIME",
+            timesheetId: billed.timesheetId,
+            partyId: "NATIVE_AR_EMPLOYEE",
+            vendorPartyId: f.org,
+            clientPartyId: f.customer,
+            workEffortId: "NATIVE_AR_PROJECT",
+            fromDate: billed.fromDate,
+            thruDate: billed.thruDate,
+            hours: "1",
+            clientHourRate: "85",
+            vendorHourRate: "30",
+            hasModifiedRates: "Y",
+            invoiceId: billed.invoiceId
+        })
         login(f.users.ar)
         const refused = helper().rejected("mantle.account.InvoiceServices.find#ApprovedTimeBilling", {
             organizationPartyId: f.org,
@@ -514,6 +540,7 @@ feature("worker billing uses vendor-unbilled time and vendor rates after the cli
     then({refused, ready, made, invoice, entry}) {
         refused.includes("PERMISSION_DENIED")
         ready.records.length == 1
+        ready.records[0].workerPartyId == f.users.ar
         ready.records[0].approvedAmount.eq(40)
         made.invoiceItemCreatedCount == 1
         invoice.fromPartyId == f.users.ar

@@ -274,6 +274,10 @@ function termRow(term, at, exampleCounts, waiting) {
             roundingEnumId: term.roundingEnumId || null,
             roundingText: roundingText(term),
             payslipVisible: term.payslipVisible === "Y",
+            prorated:
+                term.basisEnumId === "PcbAmount"
+                    ? proratesFixed(term, one(COMPONENT, {payrollComponentId: term.payrollComponentId}))
+                    : null,
             expenseGlAccountId: term.expenseGlAccountId || null,
             expenseAccountText: accountText(term.expenseGlAccountId),
             liabilityGlAccountId: term.liabilityGlAccountId || null,
@@ -447,6 +451,7 @@ const termFields = [
     "roundingPlaces",
     "roundingEnumId",
     "payslipVisible",
+    "prorated",
     "expenseGlAccountId",
     "liabilityGlAccountId",
     "fromDate",
@@ -607,6 +612,10 @@ function checkTerm(component, term) {
     out.roundingPlaces = places
     out.roundingEnumId = roundingEnumId
     out.payslipVisible = blank(term.payslipVisible) ? (statistical ? "N" : "Y") : flag(term.payslipVisible) ? "Y" : "N"
+    // a fixed amount's proration in a part period (P25 review, the user's call of Nov 12, 2026): payroll's setting, else yes for a
+    // money component (it recurs each period), no for a statistical value; a formula prorates by reading periodFraction
+    out.prorated =
+        basisEnumId !== "PcbAmount" ? null : blank(term.prorated) ? (statistical ? "N" : "Y") : flag(term.prorated) ? "Y" : "N"
     // the account mapping the kind takes: an expense account for an earning or contribution, a liability account for a
     // deduction or contribution, none for a statistical value (it posts nothing)
     out.expenseGlAccountId = text(term.expenseGlAccountId) || null
@@ -683,14 +692,27 @@ function exampleChanged(term) {
 }
 
 // ===== a term computed =====
+// Whether a pay run prorates a term's fixed amount in a part period (impl-people P25 review, the user's call of Nov 12, 2026): its
+// own setting, else yes for a money component and no for a statistical value; never a formula's (it reads periodFraction).
+function proratesFixed(term, component) {
+    if (term?.basisEnumId !== "PcbAmount") return false
+    if (term.prorated === "Y") return true
+    if (term.prorated === "N") return false
+    return !!component && component.componentKindEnumId !== "PckStatistical"
+}
 // A term's amount for the values given: the fixed amount, or the formula through the evaluator, then its rounding stage. A
 // refusal (a missing input, a division by zero) is answered with its code, never thrown.
-function computeTerm(term, values) {
+// A fixed amount prorated (proration: {fraction, text}, a pay run's part period, P25 review) is the amount times the fraction.
+function computeTerm(term, values, proration = null) {
     let raw
     let explanation
     if (term.basisEnumId === "PcbAmount") {
         raw = toDecimal(term.amount)
         explanation = "Fixed amount " + String(raw)
+        if (proration) {
+            raw = raw.multiply(proration.fraction)
+            explanation += " prorated by " + proration.text + " = " + String(raw)
+        }
     } else {
         const out = evaluate(term.formula, values)
         if (!out.valid)
@@ -2085,5 +2107,13 @@ function run(op, p) {
     execute: run,
     groupReadiness,
     // P23 (PayrollAssignments.js): an assignment's input values are read as a structure's parameter values are
-    valuesOf
+    valuesOf,
+    // P25 (PayrollRuns.js): a run calculates a structure's lines as a preview does, from published terms alone
+    computeTerm,
+    proratesFixed,
+    calculationOrder,
+    componentsById,
+    storedValues,
+    termAt,
+    splitNames
 })
