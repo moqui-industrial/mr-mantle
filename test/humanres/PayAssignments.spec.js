@@ -724,7 +724,7 @@ feature(
 )
 
 feature(
-    "the employees import writes a first salary at once for an importer holding PAYROLL_EDIT, logged and audited; for an HR importer the same row is hired and its salary columns alone refused; a salary present is not changed by import",
+    "the employees import writes a first salary at once for an importer holding PAYROLL_EDIT, logged and audited; for an HR importer the same row is hired and its salary columns alone refused; a salary present is not changed by import; a staged row's salary is masked for a reader without PAYROLL_VIEW",
     {
         when() {
             const row = {
@@ -767,6 +767,14 @@ feature(
                 scopeKey: orgA,
                 rowValues: Object.assign({}, row, {salaryPeriodTypeId: "Month"})
             })
+            // P25 review (the user's call of Nov 12, 2026): a staged row's salary is masked for a batch reader without
+            // PAYROLL_VIEW, the HR importer included
+            const staged = run(state.importHr, "org.moqui.admin.DataTransferServices.stage#Import", {
+                targetId: "employees",
+                organizationPartyId: orgA,
+                sourceText: "firstName,lastName,fromDate,salaryAmount\nSten,Staged," + dayText(-3) + ",4400"
+            })
+            const stagedRow = Array.from(staged.importRows || [])[0]?.sourceValues || {}
             const payEmp = pay.applied.resultRef
             const written = salaries(payEmp)
             return {
@@ -794,7 +802,8 @@ feature(
                 hrHired: rows("mantle.humanres.employment.Employment", {partyRelationshipId: hr.applied.resultRef || "-"}).length,
                 hrSalaries: salaries(hr.applied.resultRef || "-").length,
                 present: [present.applied, present.salaryWritten, present.salaryReasonCode],
-                badFrequency: [badFrequency.valid, badFrequency.salaryReasonCode]
+                badFrequency: [badFrequency.valid, badFrequency.salaryReasonCode],
+                staged: [staged.error || "", stagedRow.firstName, stagedRow.salaryAmount]
             }
         },
         then(result) {
@@ -814,6 +823,7 @@ feature(
             result.hrSalaries == 0
             result.present == [true, false, "PAY_CHANGE_REQUIRED"]
             result.badFrequency == [false, "FREQUENCY_INVALID"]
+            result.staged == ["", "Sten", "Restricted"]
         }
     }
 )

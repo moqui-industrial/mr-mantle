@@ -98,6 +98,11 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="roundingPlaces" type="number-integer"/>
         <field name="roundingEnumId" type="id"><description>PayrollRounding</description></field>
         <field name="payslipVisible" type="text-indicator"/>
+        <field name="prorated" type="text-indicator"><description>A fixed amount's proration (impl-people P25 review, the user's
+            call of Nov 12, 2026): Y, a pay run multiplies it by the period fraction in a part period (a mid-period hire or leaver,
+            a split period's segments); N, it is paid whole. Set when the term is stored: yes for an earning, a deduction and an
+            employer contribution unless payroll says otherwise, no for a statistical value; empty for a formula, which reads
+            periodFraction to prorate. Empty on a fixed amount stored before it reads by the same kind default.</description></field>
         <field name="expenseGlAccountId" type="id"/>
         <field name="liabilityGlAccountId" type="id"/>
         <field name="publishedDate" type="date-time"><description>When it was published: its approval's (impl-people P22 review)</description></field>
@@ -534,6 +539,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="approvedRevision" type="text-medium"><description>The revision the approval was made at</description></field>
         <field name="approvedDate" type="date-time"/>
         <field name="returnedReason" type="text-long"><description>Why the approver returned it, when they did</description></field>
+        <field name="cancelReason" type="text-long"><description>Why a payroll editor cancelled it (cancel#Run, a run not approved;
+            impl-people P25 review): its inputs released and its activeRunKey freed</description></field>
         <field name="calculatedDate" type="date-time"/>
         <field name="operationKey" type="text-medium"/>
         <field name="createdByUserId" type="id"/>
@@ -574,6 +581,7 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnApproved" toStatusId="PrnFinalizing" transitionName="Finalize"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnFinalizing" toStatusId="PrnFinalized" transitionName="Finalized"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnDraft" toStatusId="PrnCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnCalculating" toStatusId="PrnCancelled" transitionName="Cancel"/>
             <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrnReview" toStatusId="PrnCancelled" transitionName="Cancel"/>
         </seed-data>
     </entity>

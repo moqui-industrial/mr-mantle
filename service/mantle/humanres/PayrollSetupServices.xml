@@ -177,7 +177,11 @@ along with this software (see the LICENSE.md file). If not, see
             formula (the framework's decimal expression over the declared inputNames and the codes of the components it reads, which
             become its dependencies), in its currency (required for money: no implicit currency) or a statistical value's unit, with
             an optional rounding stage (places and direction), payslip visibility and its account mapping (an earning's expense
-            account, a deduction's liability account, a contribution's both, a statistical value's none). Refuses a caller without
+            account, a deduction's liability account, a contribution's both, a statistical value's none). A fixed amount says
+            whether a pay run prorates it by the period fraction in a part period (prorated Y or N; when not given, yes for an
+            earning, a deduction and an employer contribution, which recur each period, no for a statistical value; a formula
+            prorates by reading periodFraction, and a one-off amount is an adjustment, never prorated: the user's call of Nov 12,
+            2026, impl-people P25 review). Refuses a caller without
             PAYROLL_VIEW, PAYROLL_EDIT and PAYROLL_CONFIGURE (PERMISSION_DENIED), an employer outside the scope (ORGANIZATION_DENIED,
             ORGANIZATION_REQUIRED), another employer's component (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), and
             CODE_REQUIRED, CODE_INVALID, CODE_TAKEN, NAME_REQUIRED, KIND_INVALID, COMPONENT_ENDED, COMPONENT_IN_USE, TERM_PUBLISHED
@@ -207,6 +211,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="roundingPlaces"/>
             <parameter name="roundingEnumId"/>
             <parameter name="payslipVisible"/>
+            <parameter name="prorated"><description>A fixed amount's proration in a part period: Y or N</description></parameter>
             <parameter name="expenseGlAccountId"/>
             <parameter name="liabilityGlAccountId"/>
         </in-parameters>

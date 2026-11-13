@@ -217,15 +217,32 @@ function employmentIn(userScope, partyRelationshipId) {
 // ===== the group's employments =====
 // The employments whose primary pay assignment puts them in the group on a day of the period, each with those days (the
 // assignment and the employment both in effect at noon of the day, in the group's zone).
-function groupMembers(group, period, zone, wanted = null) {
+// P25 review: the assignments of the period are found by their dates in the database and in employment order, so a group with
+// many past assignments loses no current member and a cut is always the same one; at most cap employments (a preparation's
+// memberCap; a pay run asks more), the answer marked truncated when there are more, so a caller that must have every member
+// (a run's population) refuses instead of paying some.
+function groupMembers(group, period, zone, wanted = null, cap = memberCap) {
     const fromMs = dayStart(period.fromDay, zone)
     const thruMs = dayStart(addDays(period.thruDay, 1), zone)
-    const assignments = Array.from(
-        find(ASSIGNMENT).condition({payrollGroupId: group.payrollGroupId, isPrimary: "Y"}).limit(listCap).list()
-    ).filter(row => overlaps(row, fromMs, thruMs) && (!wanted || wanted.includes(row.partyRelationshipId)))
+    const factory = ec.entity.conditionFactory
+    const query = find(ASSIGNMENT)
+        .condition({payrollGroupId: group.payrollGroupId, isPrimary: "Y"})
+        .condition(factory.makeCondition("fromDate", "less", new Date(thruMs), true))
+        .condition(factory.makeCondition("thruDate", "greater", new Date(fromMs), true))
+    if (wanted) query.condition("partyRelationshipId", "in", wanted.length ? wanted : ["-"])
+    const assignmentCap = cap * 4
+    const found = Array.from(
+        query
+            .orderBy("partyRelationshipId")
+            .limit(assignmentCap + 1)
+            .list()
+    )
+    const assignments = found.slice(0, assignmentCap).filter(row => overlaps(row, fromMs, thruMs))
     const byEmployment = {}
     for (const row of assignments) (byEmployment[row.partyRelationshipId] ||= []).push(row)
-    const relationships = rowsIn(RELATIONSHIP, "partyRelationshipId", Object.keys(byEmployment))
+    const relationships = rowsIn(RELATIONSHIP, "partyRelationshipId", Object.keys(byEmployment)).sort((a, b) =>
+        String(a.partyRelationshipId).localeCompare(String(b.partyRelationshipId))
+    )
     const periodDays = daysFrom(period.fromDay, period.thruDay)
     const members = []
     for (const relationship of relationships) {
@@ -243,7 +260,9 @@ function groupMembers(group, period, zone, wanted = null) {
             days
         })
     }
-    return members.slice(0, memberCap)
+    const kept = members.slice(0, cap)
+    kept.truncated = members.length > cap || found.length > assignmentCap
+    return kept
 }
 
 // ===== fingerprints =====

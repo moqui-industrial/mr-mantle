@@ -13,7 +13,8 @@
 //
 // The calculation of an employment (design §8.1's sequence; the rules this module decides, recorded in impl-people P25):
 // - its days in the group (its primary assignment of the group in effect at noon of the day, P24's groupMembers) are split into
-//   segments where its primary assignment, its salary or its pay rates change (a mid-period change splits);
+//   segments where its primary assignment, its salary, its pay rates or the structure's lines and their terms change (a mid-period
+//   change splits; P25 review, finding 3);
 // - each segment is prorated by the group's policy: calendar days, or the working days or scheduled hours of the employee's working
 //   schedule (no schedule blocks a part period then: NO_SCHEDULE); the numerator and denominator are shown;
 // - each segment computes its structure's published lines in dependency order (PayrollConfiguration.js calculationOrder and
@@ -22,8 +23,13 @@
 //   made annual by its frequency and multiplied by periodFraction), fullAnnualSalary (not prorated), hourlyRate and pieceRate (the
 //   worker pay rates in effect), and the approved inputs of the segment's days: workedHours, paidLeaveHours, unpaidLeaveHours,
 //   pieces and reimbursement (zero when there are none);
-// - a component that reads a segment's input (directly or through a component it depends on) is summed over the segments; one that
-//   reads none (a fixed amount, a constant formula) is computed once, from the last segment;
+// - a fixed amount is prorated by the segment's share in a part period when its term says so (PayrollComponentTerm.prorated, by
+//   default for an earning, a deduction and an employer contribution; the user's call of Nov 12, 2026), else paid whole;
+// - a component that reads a segment's input (directly or through a component it depends on, a prorated fixed amount included) is
+//   summed over the segments; one that reads none (a fixed amount paid whole, a constant formula) is computed once, from the last
+//   segment;
+// - an input of time is the segment's of its day, and one on a day the group does not pay the employee blocks (INPUT_OUTSIDE_DAYS);
+//   a reimbursement, owed whatever its day, is paid with the last segment;
 // - an approved adjustment or advance recovery adds its amount to its component's line;
 // - each money line is rounded to the currency (ec.l10n.roundCurrency) once, after its segments and adjustments: a payslip line is
 //   money, so gross, deductions, contributions and net are sums of rounded lines; a statistical value keeps its precision and unit
@@ -62,6 +68,8 @@ const day = 24 * 60 * 60 * 1000
 const listCap = 2000
 const batchDefault = 100
 const batchCap = 500
+// the most employments a run's population holds: a group with more is refused (POPULATION_TOO_LARGE), never paid in part
+const populationCap = 10000
 // a calculation call stops taking new employments after this long; the rest stay pending for the next call
 const timeBudgetMs = 60 * 1000
 
@@ -252,7 +260,12 @@ const dayOf = value => {
 // longer pays (and has not been excluded) leaves; excluded employments stay with their reason. A unit leaving or changing state
 // releases the inputs its calculation took.
 function syncPopulation(run, group, period, zone) {
-    const members = inputs().groupMembers(group, period, zone)
+    const members = inputs().groupMembers(group, period, zone, null, populationCap)
+    if (members.truncated)
+        denied(
+            "POPULATION_TOO_LARGE",
+            "The pay group pays more than " + populationCap + " employees in the period; split it into smaller groups"
+        )
     const memberIds = new Set(members.map(member => member.partyRelationshipId))
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
     const byEmployment = Object.fromEntries(units.map(unit => [unit.partyRelationshipId, unit]))
@@ -376,89 +389,232 @@ function periodFacts(run) {
     return {group, period, zone, periodDays: inputs().daysFrom(period.fromDay, period.thruDay)}
 }
 const noonOf = (dayText, zone) => inputs().dayStart(dayText, zone) + day / 2
-// The rows an employment's calculation reads: its primary assignments of the group, its salaries, the person's worker pay rates
-// (RaprVendor, not a project's: an hour's TF_hr and a piece's OTH_ea, the employer's or general), the approved inputs of the
-// group's period (and those still waiting, which are only noted).
-function employmentRows(run, group, unitRow) {
-    const partyRelationshipId = unitRow.partyRelationshipId
-    const relationship = one(RELATIONSHIP, {partyRelationshipId})
-    const assignments = rows(ASSIGNMENT, {partyRelationshipId, payrollGroupId: group.payrollGroupId}).filter(
-        row => row.isPrimary !== "N" && !voided(row)
-    )
-    const salaries = rows(SALARY, {partyRelationshipId}).filter(row => !voided(row))
-    const rates = Array.from(
-        find(RATE)
-            .condition("partyId", relationship?.fromPartyId || "-")
-            .condition("ratePurposeEnumId", "RaprVendor")
-            .condition("workEffortId", "is-null", null)
-            .list()
-    ).filter(row => !row.organizationPartyId || row.organizationPartyId === group.organizationPartyId)
-    const periodInputs = rows(INPUT, {
-        partyRelationshipId,
-        payrollGroupId: group.payrollGroupId,
-        timePeriodId: run.timePeriodId
-    })
-    return {relationship, assignments, salaries, rates, periodInputs}
+const groupBy = (list, field) => {
+    const out = {}
+    for (const row of list) (out[row[field]] ||= []).push(row)
+    return out
 }
-// the inputs a run takes: approved, not finalized, not taken by another live run
-function takenInputs(run, periodInputs) {
-    const otherRunIds = unique(periodInputs.map(row => row.payrollRunId).filter(id => id && id !== run.payrollRunId))
+// rows by an id list, a thousand ids a query
+function rowsInChunks(entityName, field, ids, filter = null) {
+    const out = []
+    for (let index = 0; index < ids.length; index += 1000) {
+        const query = find(entityName).condition(field, "in", ids.slice(index, index + 1000))
+        if (filter) filter(query)
+        out.push(...Array.from(query.list()))
+    }
+    return out
+}
+// The rows the calculation of a run's employments reads, for many employments at once (P25 review: a run's revision and its stale
+// check read them in a few queries for the whole run, not a few for each employee): each employment's relationship and its days
+// in the group (P24's groupMembers), its primary assignments of the group, its salaries, the person's worker pay rates
+// (RaprVendor, not a project's: an hour's TF_hr and a piece's OTH_ea, the employer's or general), the inputs of the group's period
+// (approved, and those still waiting, which are only noted) and its tax profiles; shared, the structures, their lines and their
+// components' published terms, and the other live runs that took inputs. forUnit answers one employment's.
+function factsOf(run, facts, units) {
+    const {group, period, zone} = facts
+    const ids = unique(units.map(unit => unit.partyRelationshipId))
+    const few = ids.length <= 200
+    const members = new Map(
+        inputs()
+            .groupMembers(group, period, zone, few ? ids : null, populationCap)
+            .map(member => [member.partyRelationshipId, member])
+    )
+    const relationships = Object.fromEntries(
+        rowsInChunks(RELATIONSHIP, "partyRelationshipId", ids).map(row => [row.partyRelationshipId, row])
+    )
+    const assignments = groupBy(
+        rowsInChunks(ASSIGNMENT, "partyRelationshipId", ids, query =>
+            query.condition("payrollGroupId", group.payrollGroupId)
+        ).filter(row => row.isPrimary !== "N" && !voided(row)),
+        "partyRelationshipId"
+    )
+    const salaries = groupBy(
+        rowsInChunks(SALARY, "partyRelationshipId", ids).filter(row => !voided(row)),
+        "partyRelationshipId"
+    )
+    const partyIds = unique(Object.values(relationships).map(row => row.fromPartyId))
+    const rates = groupBy(
+        rowsInChunks(RATE, "partyId", partyIds, query =>
+            query.condition("ratePurposeEnumId", "RaprVendor").condition("workEffortId", "is-null", null)
+        ).filter(row => !row.organizationPartyId || row.organizationPartyId === group.organizationPartyId),
+        "partyId"
+    )
+    const periodInputs = groupBy(
+        few
+            ? rowsInChunks(INPUT, "partyRelationshipId", ids, query =>
+                  query.condition({payrollGroupId: group.payrollGroupId, timePeriodId: run.timePeriodId})
+              )
+            : rows(INPUT, {payrollGroupId: group.payrollGroupId, timePeriodId: run.timePeriodId}),
+        "partyRelationshipId"
+    )
+    const profiles = groupBy(rowsInChunks(PROFILE, "partyRelationshipId", ids), "partyRelationshipId")
+    const structureIds = unique(
+        Object.values(assignments)
+            .flat()
+            .map(row => row.payrollStructureId)
+            .filter(Boolean)
+    )
+    const structures = Object.fromEntries(
+        rowsIn(STRUCTURE, "payrollStructureId", structureIds).map(row => [row.payrollStructureId, row])
+    )
+    const lines = groupBy(rowsIn(LINE, "payrollStructureId", structureIds), "payrollStructureId")
+    const componentIds = unique(
+        Object.values(lines)
+            .flat()
+            .map(line => line.payrollComponentId)
+    )
+    const terms = groupBy(
+        rowsIn(TERM, "payrollComponentId", componentIds).filter(term => term.statusId === "PtsPublished"),
+        "payrollComponentId"
+    )
+    const otherRunIds = unique(
+        Object.values(periodInputs)
+            .flat()
+            .map(row => row.payrollRunId)
+            .filter(id => id && id !== run.payrollRunId)
+    )
     const liveOthers = new Set(
         rowsIn(RUN, "payrollRunId", otherRunIds)
             .filter(row => row.statusId !== "PrnCancelled")
             .map(row => row.payrollRunId)
     )
-    const approved = periodInputs.filter(row => row.statusId === "PinApproved")
+    const shared = {structures, lines, terms, liveOthers}
     return {
-        taken: approved.filter(
-            row => !row.payrollRunId || row.payrollRunId === run.payrollRunId || !liveOthers.has(row.payrollRunId)
-        ),
-        elsewhere: approved.filter(
-            row => row.payrollRunId && row.payrollRunId !== run.payrollRunId && liveOthers.has(row.payrollRunId)
-        ),
+        members,
+        forUnit(unitRow) {
+            const id = unitRow.partyRelationshipId
+            const relationship = relationships[id] || null
+            return {
+                relationship,
+                member: members.get(id) || null,
+                assignments: assignments[id] || [],
+                salaries: salaries[id] || [],
+                rates: (relationship && rates[relationship.fromPartyId]) || [],
+                periodInputs: periodInputs[id] || [],
+                profiles: profiles[id] || [],
+                shared
+            }
+        }
+    }
+}
+// the inputs a run takes: approved, not finalized, not taken by another live run
+function takenInputs(run, found) {
+    const liveOthers = found.shared.liveOthers
+    const periodInputs = found.periodInputs
+    const approved = periodInputs.filter(row => row.statusId === "PinApproved")
+    const elsewhere = row => row.payrollRunId && row.payrollRunId !== run.payrollRunId && liveOthers.has(row.payrollRunId)
+    return {
+        taken: approved.filter(row => !elsewhere(row)),
+        elsewhere: approved.filter(elsewhere),
         waiting: periodInputs.filter(row => row.statusId === "PinProposed")
     }
 }
-// What an employment's results were calculated from, as one fingerprint: its assignments, salaries and pay rates (each row's
-// last change), the inputs it takes (their kind, quantity, amount, day and component), the structures' lines and their
-// components' terms, the group's policy and the employment's tax profiles. A change of any makes the results stale and an
-// approval of them no longer good.
-function fingerprint(run, group, unitRow, facts = null) {
-    const found = facts || employmentRows(run, group, unitRow)
-    const stamp = row => ms(row?.lastUpdatedStamp) ?? 0
-    const structureIds = unique(found.assignments.map(row => row.payrollStructureId))
-    const structures = rowsIn(STRUCTURE, "payrollStructureId", structureIds)
-    const lines = rowsIn(LINE, "payrollStructureId", structureIds)
-    const terms = rowsIn(TERM, "payrollComponentId", unique(lines.map(line => line.payrollComponentId))).filter(
-        term => term.statusId === "PtsPublished"
-    )
-    const profiles = rows(PROFILE, {partyRelationshipId: unitRow.partyRelationshipId})
-    const {taken} = takenInputs(run, found.periodInputs)
-    const value = {
-        group: stamp(group),
-        assignments: found.assignments.map(row => row.payrollAssignmentId + ":" + stamp(row)).sort(),
-        salaries: found.salaries.map(row => ms(row.fromDate) + ":" + stamp(row)).sort(),
-        rates: found.rates.map(row => row.rateAmountId + ":" + stamp(row)).sort(),
-        inputs: taken
-            .map(row =>
-                [
-                    row.payrollInputId,
-                    row.inputTypeEnumId,
-                    row.quantity,
-                    row.amount,
-                    lib.calendarDateText(row.inputDate),
-                    row.payrollComponentId
-                ]
-                    .map(part => (part == null ? "" : String(part)))
-                    .join("|")
+// A structure's lines in effect at a moment for an assignment: published, within their dates (a line's own, else the
+// structure's), an elective one only when the assignment elects it; and a component's published term then.
+function linesIn(structure, found, at, assignment) {
+    const elected = splitIds(assignment.electedComponentIds)
+    return (found.shared.lines[structure.payrollStructureId] || []).filter(line => {
+        if (line.statusId !== "PtsPublished") return false
+        const from = ms(line.fromDate) ?? ms(structure.fromDate) ?? -Infinity
+        if (from > at || (ms(line.thruDate) ?? Infinity) <= at) return false
+        return line.eligibilityEnumId !== "PleElected" || elected.includes(line.payrollComponentId)
+    })
+}
+const termIn = (found, payrollComponentId, at) =>
+    (found.shared.terms[payrollComponentId] || []).find(term => openAt(term, at)) || null
+// The rules a day is calculated by (P25 review, finding 3): the structure in effect or not, its lines and each line's term, so a
+// term or a line that changes within the period splits it as a salary does.
+function rulesKey(assignment, found, at) {
+    const structure = found.shared.structures[assignment.payrollStructureId]
+    if (!structure) return "none"
+    const open = structure.statusId === "PtsPublished" && openAt(structure, at)
+    return (
+        (open ? "open:" : "closed:") +
+        linesIn(structure, found, at, assignment)
+            .map(
+                line =>
+                    line.payrollStructureComponentId +
+                    "=" +
+                    (termIn(found, line.payrollComponentId, at)?.payrollComponentTermId || "")
             )
-            .sort(),
-        structures: structures.map(row => row.payrollStructureId + ":" + stamp(row)).sort(),
-        lines: lines.map(row => row.payrollStructureComponentId + ":" + stamp(row)).sort(),
-        terms: terms.map(row => row.payrollComponentTermId + ":" + stamp(row)).sort(),
-        profiles: profiles.map(row => row.payrollTaxProfileId + ":" + stamp(row)).sort()
+            .sort()
+            .join(",")
+    )
+}
+// What an employment's results were calculated from, as one fingerprint: its days in the group and the employment's dates, its
+// assignments, salaries and pay rates (each row's last change), the inputs it takes (their kind, quantity, amount, day and
+// component), the structures' lines and their components' terms, the group's policy, the employment's tax profiles, and for a part
+// period prorated by the schedule the scheduled hours of each day. A change of any makes the results stale and an approval of them
+// no longer good. For many employments at once: a Map of payrollRunEmploymentId to fingerprint.
+function fingerprintsOf(run, facts, units, loaded = null) {
+    const out = new Map()
+    if (!units.length) return out
+    const {group, zone, periodDays} = facts
+    const all = loaded || factsOf(run, facts, units)
+    const stamp = row => ms(row?.lastUpdatedStamp) ?? 0
+    const founds = units.map(unit => all.forUnit(unit))
+    // the scheduled hours of a part period, when the group prorates by the schedule
+    const planned = {}
+    if (group.prorationEnumId === "PprWorkingDays" || group.prorationEnumId === "PprHours") {
+        const partial = founds
+            .filter(found => found.member)
+            .filter(found => {
+                const segments = segmentsOf(found.member, found, zone)
+                return segments.length > 1 || found.member.days.length < periodDays.length
+            })
+            .map(found => found.member.partyId)
+        if (partial.length)
+            try {
+                Object.assign(planned, schedules().scheduledDays(unique(partial), periodDays))
+            } catch (error) {
+                ec.logger.error(
+                    "The working schedules of a pay run's employees were not read for its fingerprint: " + error.message
+                )
+            }
     }
-    return revisionText(value)
+    units.forEach((unit, index) => {
+        const found = founds[index]
+        const structureIds = unique(found.assignments.map(row => row.payrollStructureId))
+        const lines = structureIds.flatMap(id => found.shared.lines[id] || [])
+        const terms = unique(lines.map(line => line.payrollComponentId)).flatMap(id => found.shared.terms[id] || [])
+        const {taken} = takenInputs(run, found)
+        const scheduled = found.member && planned[found.member.partyId]
+        const value = {
+            group: stamp(group),
+            employment: found.relationship
+                ? (ms(found.relationship.fromDate) ?? "") + ":" + (ms(found.relationship.thruDate) ?? "")
+                : "",
+            days: found.member ? found.member.days.join(",") : "",
+            assignments: found.assignments.map(row => row.payrollAssignmentId + ":" + stamp(row)).sort(),
+            salaries: found.salaries.map(row => ms(row.fromDate) + ":" + stamp(row)).sort(),
+            rates: found.rates.map(row => row.rateAmountId + ":" + stamp(row)).sort(),
+            inputs: taken
+                .map(row =>
+                    [
+                        row.payrollInputId,
+                        row.inputTypeEnumId,
+                        row.quantity,
+                        row.amount,
+                        lib.calendarDateText(row.inputDate),
+                        row.payrollComponentId
+                    ]
+                        .map(part => (part == null ? "" : String(part)))
+                        .join("|")
+                )
+                .sort(),
+            structures: structureIds
+                .map(id => found.shared.structures[id])
+                .filter(Boolean)
+                .map(row => row.payrollStructureId + ":" + stamp(row))
+                .sort(),
+            lines: lines.map(row => row.payrollStructureComponentId + ":" + stamp(row)).sort(),
+            terms: terms.map(row => row.payrollComponentTermId + ":" + stamp(row)).sort(),
+            profiles: found.profiles.map(row => row.payrollTaxProfileId + ":" + stamp(row)).sort(),
+            schedule: scheduled ? periodDays.map(dayText => String(scheduled[dayText]?.hours ?? "")).join(",") : ""
+        }
+        out.set(unit.payrollRunEmploymentId, revisionText(value))
+    })
+    return out
 }
 
 // ===== an employment calculated =====
@@ -470,7 +626,8 @@ function salaryPeriodsPerYear(salary, group) {
     return null
 }
 const quotient = (numerator, denominator) => toDecimal(String(numerator)).divide(toDecimal(String(denominator)), 20)
-// The segments of an employment's days: consecutive days with one assignment, salary and pair of pay rates.
+// The segments of an employment's days: consecutive days with one assignment, salary, pair of pay rates and set of rules (the
+// structure's lines and their terms in effect).
 function segmentsOf(member, found, zone) {
     const segments = []
     for (const dayText of member.days) {
@@ -485,7 +642,13 @@ function segmentsOf(member, found, zone) {
             found.rates
                 .filter(row => openAt(row, noon) && row.timePeriodUomId === "OTH_ea")
                 .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0] || null
-        const key = [assignment?.payrollAssignmentId, ms(salary?.fromDate), hourly?.rateAmountId, piece?.rateAmountId].join("|")
+        const key = [
+            assignment?.payrollAssignmentId,
+            ms(salary?.fromDate),
+            hourly?.rateAmountId,
+            piece?.rateAmountId,
+            assignment ? rulesKey(assignment, found, noon) : ""
+        ].join("|")
         const last = segments[segments.length - 1]
         if (last && last.key === key && inputs().addDays(last.days[last.days.length - 1], 1) === dayText) last.days.push(dayText)
         else segments.push({key, days: [dayText], assignment, salary, hourly, piece})
@@ -544,11 +707,13 @@ function prorate(segments, member, group, periodDays) {
     }
 }
 // A segment's structure computed: its published lines in effect at its first day (an elective line only when the assignment
-// elects it), in dependency order, each term over the segment's values. Answers the lines by code, or the first blocking finding.
-function computeSegment(segment, values, group, zone) {
+// elects it; the segment has the same lines and terms on each of its days), in dependency order, each term over the segment's
+// values, a prorated fixed amount by the segment's share in a part period (the term's setting, the user's call of Nov 12, 2026).
+// Answers the lines by code, or the first blocking finding.
+function computeSegment(segment, values, group, zone, found, share) {
     const config = configuration()
     const at = noonOf(segment.days[0], zone)
-    const structure = one(STRUCTURE, {payrollStructureId: segment.assignment.payrollStructureId})
+    const structure = found.shared.structures[segment.assignment.payrollStructureId] || null
     if (!structure || structure.statusId !== "PtsPublished" || !openAt(structure, at))
         return failure("STRUCTURE_NOT_IN_EFFECT", "The pay structure " + (structure?.structureName || "") + " is not in effect")
     if (structure.currencyUomId !== group.currencyUomId)
@@ -556,18 +721,13 @@ function computeSegment(segment, values, group, zone) {
             "CURRENCY_MISMATCH",
             "The structure is in " + structure.currencyUomId + ", the group pays in " + group.currencyUomId
         )
-    const elected = splitIds(segment.assignment.electedComponentIds)
-    const lines = rows(LINE, {payrollStructureId: structure.payrollStructureId}).filter(line => {
-        if (line.statusId !== "PtsPublished") return false
-        const from = ms(line.fromDate) ?? ms(structure.fromDate) ?? -Infinity
-        if (from > at || (ms(line.thruDate) ?? Infinity) <= at) return false
-        return line.eligibilityEnumId !== "PleElected" || elected.includes(line.payrollComponentId)
-    })
+    const lines = linesIn(structure, found, at, segment.assignment)
     const components = config.componentsById(lines.map(line => line.payrollComponentId))
     const working = lines.map(line => {
         const component = components[line.payrollComponentId]
-        return {line, component, term: component ? config.termAt(component.payrollComponentId, at) : null}
+        return {line, component, term: component ? termIn(found, component.payrollComponentId, at) : null}
     })
+    const part = share && !share.fraction.eq(toDecimal(1)) ? share : null
     const ordered = config.calculationOrder(working)
     const firstBlocking = ordered.findings.find(finding => finding.blocking)
     if (firstBlocking) return failure(firstBlocking.code, firstBlocking.message)
@@ -585,7 +745,14 @@ function computeSegment(segment, values, group, zone) {
             )
         const named = Object.assign({}, config.storedValues(item.line.parameterValues), assignmentValues, values)
         for (const dependency of config.splitNames(term.dependencyCodes)) named[dependency] = String(computed[dependency])
-        const result = config.computeTerm(term, named)
+        const prorated = part && config.proratesFixed(term, item.component)
+        const result = config.computeTerm(
+            term,
+            named,
+            prorated
+                ? {fraction: part.fraction, text: String(part.numerator) + "/" + String(part.denominator) + " " + part.unit}
+                : null
+        )
         if (!result.ok)
             return failure(
                 result.errorCode,
@@ -598,20 +765,23 @@ function computeSegment(segment, values, group, zone) {
     }
     return {ok: true, order: ordered.order, lines: lineOf}
 }
-// Whether a component's term reads an input that changes within the period, directly or through a component it reads.
+// Whether a component's term reads an input that changes within the period, directly or through a component it reads (a fixed
+// amount prorated in a part period reads the share).
 function readsSegment(code, lines, seen = new Set()) {
     if (seen.has(code)) return false
     seen.add(code)
     const line = lines[code]
     if (!line) return false
     const config = configuration()
+    // a prorated fixed amount reads the segment's share
+    if (config.proratesFixed(line.term, line.item.component)) return true
     if (config.splitNames(line.term.inputNames).some(name => segmentNames.includes(name))) return true
     return config.splitNames(line.term.dependencyCodes).some(dependency => readsSegment(dependency, lines, seen))
 }
 // The calculation of one employment of a run: its segments, each computed, the lines combined, its adjustments, rounding,
 // the localization and the totals. Reads and computes only; answers {ok, results, totals, ...} or a blocking failure.
 function computeEmployment(run, group, period, zone, periodDays, member, found) {
-    const {taken, elsewhere, waiting} = takenInputs(run, found.periodInputs)
+    const {taken, elsewhere, waiting} = takenInputs(run, found)
     if (elsewhere.length)
         return failure("INPUTS_CONSUMED", "Some of this employee's inputs are taken by pay run " + elsewhere[0].payrollRunId)
     const segments = segmentsOf(member, found, zone)
@@ -619,12 +789,32 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
         return failure("NO_ASSIGNMENT", "The employee has no primary pay assignment in this group on a day of the period")
     const prorated = prorate(segments, member, group, periodDays)
     if (!prorated.ok) return prorated
+    // each input of time or a reimbursement to the segment of its day (P25 review): an hour or a piece on a day the group does not
+    // pay the employee is not paid quietly (INPUT_OUTSIDE_DAYS: the period's inputs are prepared again), and a reimbursement, an
+    // amount owed whatever its day, is paid with the last segment
+    const segmentOfDay = new Map()
+    segments.forEach((segment, index) => segment.days.forEach(dayText => segmentOfDay.set(dayText, index)))
+    const segmentInputs = segments.map(() => [])
+    for (const input of taken) {
+        if (!input.inputName) continue
+        const dayText = lib.calendarDateText(input.inputDate)
+        let index = segmentOfDay.get(dayText)
+        if (index == null && input.inputName === "reimbursement") index = segments.length - 1
+        if (index == null)
+            return failure(
+                "INPUT_OUTSIDE_DAYS",
+                "An input of " +
+                    (dayText || "no day") +
+                    " is on a day the group does not pay the employee; prepare the inputs again"
+            )
+        segmentInputs[index].push(input)
+    }
     const results = []
     const segmentResults = []
     const splitParts = []
     for (const [index, segment] of segments.entries()) {
         const share = prorated.shares[index]
-        const structure = one(STRUCTURE, {payrollStructureId: segment.assignment.payrollStructureId})
+        const structure = found.shared.structures[segment.assignment.payrollStructureId] || null
         const basis = structure?.payBasisEnumId
         if ((basis === "PpbSalaried" || basis === "PpbMixed") && !segment.salary)
             return failure("SALARY_MISSING", "The structure pays a salary and the employee has none from " + segment.days[0])
@@ -656,14 +846,12 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
                     return failure("CURRENCY_MISMATCH", "The pay rate is not in the pay group's currency, " + group.currencyUomId)
                 values[name] = String(rate.rateAmount)
             }
-        const segmentDays = new Set(segment.days)
         for (const name of timeInputNames.concat(["reimbursement"])) values[name] = "0"
-        for (const input of taken) {
-            if (!input.inputName || !segmentDays.has(lib.calendarDateText(input.inputDate))) continue
+        for (const input of segmentInputs[index]) {
             const add = input.inputName === "reimbursement" ? input.amount : input.quantity
             values[input.inputName] = String(decimalOf(values[input.inputName]).add(decimalOf(add)))
         }
-        const computed = computeSegment(segment, values, group, zone)
+        const computed = computeSegment(segment, values, group, zone, found, share)
         if (!computed.ok) return computed
         segmentResults.push(computed)
         const daysText =
@@ -817,13 +1005,18 @@ function computeEmployment(run, group, period, zone, periodDays, member, found) 
 }
 // One unit calculated and written, in the caller's transaction (calculateRun gives each its own): the employment locked, its results
 // replaced, the inputs it takes marked with the run and those it no longer takes released; a blocking finding leaves it in error.
+// One another call calculated since it was listed, as it still is, is left as it is ("unchanged").
 function calculateUnit(run, facts, unitId) {
     const {group, period, zone, periodDays} = facts
     let unit = one(UNIT, {payrollRunEmploymentId: unitId})
     find(RELATIONSHIP, {partyRelationshipId: unit.partyRelationshipId}).forUpdate(true).one()
     unit = one(UNIT, {payrollRunEmploymentId: unitId})
-    const member = inputs().groupMembers(group, period, zone, [unit.partyRelationshipId])[0] || null
-    const found = employmentRows(run, group, unit)
+    if (unit.statusId === "PruExcluded") return "unchanged"
+    const loaded = factsOf(run, facts, [unit])
+    if (unit.statusId === "PruCalculated" && unit.sourceRevision === fingerprintsOf(run, facts, [unit], loaded).get(unitId))
+        return "unchanged"
+    const found = loaded.forUnit(unit)
+    const member = found.member
     const outcome = member
         ? computeEmployment(run, group, period, zone, periodDays, member, found)
         : failure("NOT_IN_GROUP", "The group no longer pays this employee in the period; select the population again")
@@ -849,7 +1042,7 @@ function calculateUnit(run, facts, unitId) {
                 employerCostAmount: null,
                 splitText: null,
                 segmentCount: null,
-                sourceRevision: fingerprint(run, group, unit, found)
+                sourceRevision: fingerprintsOf(run, facts, [unit], loaded).get(unitId)
             })
         )
         return "error"
@@ -884,7 +1077,7 @@ function calculateUnit(run, facts, unitId) {
             employerCostAmount: totals.employerCost,
             segmentCount: outcome.segmentCount,
             splitText: outcome.splitText,
-            sourceRevision: fingerprint(run, group, unit, employmentRows(run, group, unit))
+            sourceRevision: fingerprintsOf(run, facts, [unit]).get(unitId)
         })
     )
     return "calculated"
@@ -903,11 +1096,17 @@ function calculateRun(p) {
     const facts = periodFacts(run)
     const batchSize = Math.min(batchCap, Math.max(1, Number(p.batchSize) || batchDefault))
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
-    const work = []
-    for (const unit of units) {
-        if (unit.statusId === "PruPending" || unit.statusId === "PruError") work.push(unit)
-        else if (unit.statusId === "PruCalculated" && unit.sourceRevision !== fingerprint(run, facts.group, unit)) work.push(unit)
-    }
+    const prints = fingerprintsOf(
+        run,
+        facts,
+        units.filter(unit => unit.statusId === "PruCalculated")
+    )
+    const work = units.filter(
+        unit =>
+            unit.statusId === "PruPending" ||
+            unit.statusId === "PruError" ||
+            (unit.statusId === "PruCalculated" && unit.sourceRevision !== prints.get(unit.payrollRunEmploymentId))
+    )
     const startedMs = Date.now()
     let calculatedCount = 0
     let errorCount = 0
@@ -946,7 +1145,7 @@ function calculateRun(p) {
             ec.message.popErrors()
         }
         if (outcome === "calculated") calculatedCount++
-        else errorCount++
+        else if (outcome === "error") errorCount++
     }
     const after = rows(UNIT, {payrollRunId: run.payrollRunId})
     const remainingCount = after.filter(unit => unit.statusId === "PruPending").length + Math.max(0, work.length - done)
@@ -968,13 +1167,18 @@ function calculateRun(p) {
 // ===== the run's revision =====
 // What an approval binds: the pay date, each employment's state, exclusion and totals, and the fingerprint its results came from
 // beside the fingerprint of its sources now (so a changed input, salary, rate, assignment, rule or profile is another revision).
-function runRevision(payrollRunId) {
+function runRevision(payrollRunId, known = null) {
     const run = one(RUN, {payrollRunId})
     if (!run) return "0"
-    const group = groupOfRun(run)
-    const units = rows(UNIT, {payrollRunId}).sort((a, b) =>
-        String(a.payrollRunEmploymentId).localeCompare(String(b.payrollRunEmploymentId))
-    )
+    const all = rows(UNIT, {payrollRunId})
+    const prints =
+        known ||
+        fingerprintsOf(
+            run,
+            periodFacts(run),
+            all.filter(unit => unit.statusId === "PruCalculated")
+        )
+    const units = all.sort((a, b) => String(a.payrollRunEmploymentId).localeCompare(String(b.payrollRunEmploymentId)))
     const value = {
         payDate: lib.calendarDateText(run.payDate),
         period: run.timePeriodId,
@@ -990,7 +1194,7 @@ function runRevision(payrollRunId) {
                 unit.netAmount,
                 unit.employerCostAmount,
                 unit.sourceRevision,
-                unit.statusId === "PruCalculated" ? fingerprint(run, group, unit) : ""
+                unit.statusId === "PruCalculated" ? prints.get(unit.payrollRunEmploymentId) : ""
             ]
                 .map(part => (part == null ? "" : String(part)))
                 .join("|")
@@ -998,10 +1202,16 @@ function runRevision(payrollRunId) {
     }
     return revisionText(value)
 }
-// the calculated employments whose sources changed since
-function staleUnits(run, group, units) {
-    return units.filter(unit => unit.statusId === "PruCalculated" && unit.sourceRevision !== fingerprint(run, group, unit))
+// the calculated employments' fingerprints now, and those whose sources changed since
+function nowPrints(run, units) {
+    return fingerprintsOf(
+        run,
+        periodFacts(run),
+        units.filter(unit => unit.statusId === "PruCalculated")
+    )
 }
+const staleOf = (units, prints) =>
+    units.filter(unit => unit.statusId === "PruCalculated" && unit.sourceRevision !== prints.get(unit.payrollRunEmploymentId))
 
 // ===== submit#Run =====
 // Approval asked of a run in review: every employment calculated or excluded (an error is resolved or excluded first:
@@ -1011,7 +1221,6 @@ function submitRun(p) {
     const userScope = editorScope()
     const run = runIn(userScope, p.payrollRunId)
     if (run.statusId !== "PrnReview") denied("NOT_IN_REVIEW", "Only a run in review is sent for approval")
-    const group = groupOfRun(run)
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
     if (units.some(unit => unit.statusId === "PruPending"))
         denied("CALCULATION_INCOMPLETE", "Some employees are not calculated yet")
@@ -1024,7 +1233,7 @@ function submitRun(p) {
                 " in error: fix and calculate again, or exclude with a reason"
         )
     if (!units.some(unit => unit.statusId === "PruCalculated")) denied("NOTHING_CALCULATED", "No employee is calculated")
-    if (staleUnits(run, group, units).length)
+    if (staleOf(units, nowPrints(run, units)).length)
         denied("SOURCE_CHANGED", "Some results changed since they were calculated; calculate again")
     const asked = approvals().request({
         approvalKindEnumId: KIND,
@@ -1076,6 +1285,43 @@ function decideRun(p, decision) {
         approved: after.statusId === "PrnApproved",
         repeated: !!decided.repeated
     }
+}
+
+// ===== cancel#Run =====
+// A run not approved (draft, calculating or in review; P25 review, finding 5) cancelled by a payroll editor, with the reason: the
+// inputs its calculation took are released, its regular key is freed so the period may be run again, and a request waiting for
+// its approval is superseded. Its population and draft results stay as they were, read as a cancelled run's. An approved run is
+// returned or changed first (RUN_NOT_CANCELLABLE); a finalizing, finalized or cancelled one is not cancelled. A repeat answers the
+// cancellation.
+const cancellableStatuses = ["PrnDraft", "PrnCalculating", "PrnReview"]
+function cancelRun(p) {
+    const userScope = editorScope()
+    let run = runIn(userScope, p.payrollRunId)
+    run = find(RUN, {payrollRunId: run.payrollRunId}).forUpdate(true).one()
+    if (run.statusId === "PrnCancelled") return {payrollRunId: run.payrollRunId, statusId: run.statusId, repeated: true}
+    if (!cancellableStatuses.includes(run.statusId))
+        denied(
+            "RUN_NOT_CANCELLABLE",
+            run.statusId === "PrnApproved"
+                ? "An approved pay run is not cancelled: select or calculate it again first, which takes back its approval"
+                : "This pay run is " + (runStateTexts[run.statusId] || run.statusId).toLowerCase() + "; it is not cancelled"
+        )
+    const reason = text(p.reason)
+    if (!reason) denied("REASON_REQUIRED", "Say why the pay run is cancelled")
+    let releasedCount = 0
+    for (const input of rows(INPUT, {payrollRunId: run.payrollRunId})) {
+        call("update#" + INPUT, {payrollInputId: input.payrollInputId, payrollRunId: null})
+        releasedCount++
+    }
+    call("update#" + RUN, {
+        payrollRunId: run.payrollRunId,
+        statusId: "PrnCancelled",
+        statusId_changeReason: reason,
+        cancelReason: reason,
+        activeRunKey: null
+    })
+    approvals().sourceChanged(KIND, run.payrollRunId, RUN, true)
+    return {payrollRunId: run.payrollRunId, statusId: "PrnCancelled", releasedCount, repeated: false}
 }
 
 // ===== get#Run =====
@@ -1140,7 +1386,8 @@ function getRun(p) {
     const group = groupOfRun(run)
     const currencyUomId = run.currencyUomId
     const units = rows(UNIT, {payrollRunId: run.payrollRunId})
-    const stale = staleUnits(run, group, units)
+    const prints = nowPrints(run, units)
+    const stale = staleOf(units, prints)
     const staleIds = new Set(stale.map(unit => unit.payrollRunEmploymentId))
     const counts = {total: units.length, pending: 0, calculated: 0, error: 0, excluded: 0, stale: stale.length}
     for (const unit of units)
@@ -1159,7 +1406,7 @@ function getRun(p) {
     const totalsText = Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, moneyText(value, currencyUomId)]))
     const approval = approvals().sourceSummary(KIND, run.payrollRunId, RUN)
     const approvedNow = run.statusId === "PrnApproved"
-    const approvalHolds = approvedNow && run.approvedRevision === runRevision(run.payrollRunId)
+    const approvalHolds = approvedNow && run.approvedRevision === runRevision(run.payrollRunId, prints)
     const canEdit = edits(userScope) && changeableStatuses.includes(run.statusId)
     const done = counts.calculated + counts.error + counts.excluded
     const label = runLabel(run)
@@ -1170,6 +1417,7 @@ function getRun(p) {
     else if (run.statusId === "PrnReview" && run.returnedReason)
         [state, stateText] = ["returned", "Returned: " + run.returnedReason]
     else if (approvedNow && !approvalHolds) [state, stateText] = ["stale", "Approval no longer holds: calculate again"]
+    else if (run.statusId === "PrnCancelled" && run.cancelReason) stateText = "Cancelled: " + run.cancelReason
     const names = people.personNames(unique(units.map(unit => unit.partyId)))
     const prior = priorNets(run)
     let list = units.map(unit => unitRow(unit, names, currencyUomId, prior, staleIds))
@@ -1234,6 +1482,7 @@ function getRun(p) {
                 state,
                 stateText,
                 returnedReason: run.returnedReason || "",
+                cancelReason: run.cancelReason || "",
                 approvedDateText: dateText(run.approvedDate),
                 calculatedDateText: dateText(run.calculatedDate),
                 readinessText: configuration().groupReadiness(
@@ -1255,6 +1504,7 @@ function getRun(p) {
                 approved: approvalHolds
             },
             canEdit,
+            canCancel: edits(userScope) && cancellableStatuses.includes(run.statusId),
             canCalculate: canEdit && (counts.pending > 0 || counts.error > 0 || stale.length > 0),
             canSubmit:
                 edits(userScope) &&
@@ -1346,6 +1596,7 @@ const operations = {
     calculateRun,
     getRun,
     submitRun,
+    cancelRun,
     approveRun: p => decideRun(p, "approve"),
     returnRun: p => decideRun(p, "refuse")
 }

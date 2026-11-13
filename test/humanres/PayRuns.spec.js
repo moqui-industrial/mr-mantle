@@ -4,7 +4,9 @@
 // only the pending and failed ones, making no second result; a mid-period salary change splits the period, prorated by calendar
 // days; salaried, hourly and piece pay, an adjustment and the demonstration localization reconcile to the cent; the run's approval
 // is a payroll approver's, never a preparer's, and a changed input invalidates it; a second regular run over consumed inputs is
-// refused. No invoice or payment is made.
+// refused. No invoice or payment is made. P25 review: a mid-period hire's fixed allowance is prorated or paid whole by its term's
+// setting (the user's call of Nov 12, 2026), a term changed inside the period splits it, a reimbursement dated before the hire is
+// paid, an employment ended after its calculation makes it stale, and a draft run is cancelled with its reason, releasing its inputs.
 // Standalone: spec-local organizations, people, employments, pay configuration (published as data: publishing is PayConfiguration's
 // spec), salaries, rates, approved inputs and users. Run: ./moq test mr-mantle --spec PayRuns
 const prefix = "PAY_RUN_SPEC"
@@ -291,6 +293,65 @@ spec({
             currencyUomId: "USD",
             isAdjustment: "Y"
         })
+        // P25 review: a second group of the same period, its own structures and employees
+        state.group2 = prefix + "_ALLOWANCES"
+        call("create#mantle.humanres.payroll.PayrollGroup", {
+            payrollGroupId: state.group2,
+            organizationPartyId: orgA,
+            groupName: "Run spec allowances",
+            currencyUomId: "USD",
+            timePeriodTypeId: "PayrollMonth",
+            firstPeriodFromDate: "2026-03-01",
+            periodsPerYear: 12,
+            payDateOffsetDays: 0,
+            prorationEnumId: "PprCalendarDays",
+            timeBasisEnumId: "PtbTimesheets",
+            payrollLocalizationId: "PlzDemonstration",
+            liveEnabled: "N",
+            fromDate: since
+        })
+        call("create#mantle.humanres.payroll.PayrollGroupPeriod", {
+            payrollGroupId: state.group2,
+            timePeriodId: state.march,
+            payDate: "2026-03-31"
+        })
+        // a fixed allowance prorated by default (an earning), a one-off amount paid whole, a reimbursement
+        const allowance = component("ALLOW", "PckEarning", {amount: "310"})
+        const whole = component("ONEOFF", "PckEarning", {amount: "100", prorated: "N"})
+        const reimburse = component("REIMB", "PckEarning", {formula: "reimbursement", inputNames: "reimbursement"})
+        // a fixed allowance of 200 through March 15 and 400 from March 16: two published terms
+        const stepped = component("STEP", "PckEarning", {amount: "200", thruDate: "2026-03-16T06:00:00Z"})
+        call("create#mantle.humanres.payroll.PayrollComponentTerm", {
+            payrollComponentId: stepped,
+            statusId: "PtsPublished",
+            fromDate: "2026-03-16T06:00:00Z",
+            basisEnumId: "PcbAmount",
+            amount: "400",
+            currencyUomId: "USD"
+        })
+        structure(prefix + "_ALLOW", "PpbSalaried", [[salaryC], [allowance], [whole], [reimburse]])
+        structure(prefix + "_STEP", "PpbSalaried", [[salaryC], [stepped]])
+        state.HIRE = person("HIRE")
+        state.HIREEmp = call("mantle.humanres.EmploymentServices.create#Employment", {
+            fromPartyId: state.HIRE,
+            toPartyId: orgA,
+            fromDate: "2026-03-16T06:00:00Z"
+        }).partyRelationshipId
+        state.STEP = person("STEP")
+        state.STEPEmp = employ(state.STEP, orgA)
+        assign(state.HIREEmp, state.HIRE, prefix + "_ALLOW", {payrollGroupId: state.group2})
+        assign(state.STEPEmp, state.STEP, prefix + "_STEP", {payrollGroupId: state.group2})
+        salary(state.HIREEmp, "36000", "2026-03-16T06:00:00Z")
+        salary(state.STEPEmp, "12000", payFrom)
+        // a claim reserved for payroll before the hire's first day, paid with the period
+        state.claimInput = input(state.HIREEmp, state.HIRE, {
+            payrollGroupId: state.group2,
+            inputTypeEnumId: "PitReimbursement",
+            inputName: "reimbursement",
+            inputDate: "2026-03-05",
+            amount: "50",
+            currencyUomId: "USD"
+        })
         state.invoicesBefore = rows("mantle.account.invoice.Invoice", {toPartyId: orgA}).length
     },
     cleanupSpec() {
@@ -499,3 +560,81 @@ feature("a second regular run over the period's consumed inputs is refused, and 
         found.employments.find(row => row.partyRelationshipId == state.PCEEmp).exclusionReason == "Paid by hand this month"
     }
 })
+
+feature("a mid-period hire's fixed allowance is prorated by its term's setting, and a term changed inside the period splits it", {
+    when() {
+        const created = run(state.payroll, S + "create#Run", {payrollGroupId: state.group2, timePeriodId: state.march})
+        state.run2 = created.payrollRunId
+        const calculated = run(state.payroll, S + "calculate#Run", {payrollRunId: state.run2})
+        const unit = partyRelationshipId => one(UNIT, {payrollRunId: state.run2, partyRelationshipId})
+        const line = (partyRelationshipId, componentCode) =>
+            money(one(RESULT, {payrollRunEmploymentId: unit(partyRelationshipId).payrollRunEmploymentId, componentCode})?.amount)
+        return {
+            created,
+            calculated,
+            hire: unit(state.HIREEmp),
+            step: unit(state.STEPEmp),
+            lines: {
+                salary: line(state.HIREEmp, "SALARY"),
+                allowance: line(state.HIREEmp, "ALLOW"),
+                oneOff: line(state.HIREEmp, "ONEOFF"),
+                reimbursement: line(state.HIREEmp, "REIMB"),
+                stepSalary: line(state.STEPEmp, "SALARY"),
+                step: line(state.STEPEmp, "STEP")
+            }
+        }
+    },
+    then({created, calculated, hire, step, lines}) {
+        created.selectedCount == 2
+        calculated.calculatedCount == 2
+        hire.splitText.includes("16/31 calendar days")
+        // hired March 16: 36,000 x 16/31 / 12; the allowance 310 x 16/31; the one-off 100 whole; the claim of March 5 paid
+        lines.salary == "1548.39"
+        lines.allowance == "160.00"
+        lines.oneOff == "100.00"
+        lines.reimbursement == "50.00"
+        // the whole month split where STEP's term changes: 200 x 15/31 + 400 x 16/31; the salary 12,000 / 12 over both parts
+        step.segmentCount == 2
+        lines.step == "303.23"
+        lines.stepSalary == "1000.00"
+    }
+})
+
+feature(
+    "an employment ended after its calculation makes it stale, and a run not approved is cancelled with its reason, releasing its inputs",
+    {
+        when() {
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            call("update#mantle.party.PartyRelationship", {partyRelationshipId: state.STEPEmp, thruDate: "2026-03-21T06:00:00Z"})
+            const ended = run(state.payroll, S + "get#Run", {payrollRunId: state.run2})
+            const takenBefore = one(INPUT, {payrollInputId: state.claimInput}).payrollRunId
+            const noReason = run(state.payroll, S + "cancel#Run", {payrollRunId: state.run2})
+            const byHr = run(state.hr, S + "cancel#Run", {payrollRunId: state.run2, reason: "Wrong period"})
+            const byOther = run(state.payrollB, S + "cancel#Run", {payrollRunId: state.run2, reason: "Wrong period"})
+            const cancelled = run(state.payroll, S + "cancel#Run", {payrollRunId: state.run2, reason: "Wrong period"})
+            const again = run(state.payroll, S + "cancel#Run", {payrollRunId: state.run2, reason: "Wrong period"})
+            const recalculate = run(state.payroll, S + "calculate#Run", {payrollRunId: state.run2})
+            const takenAfter = one(INPUT, {payrollInputId: state.claimInput}).payrollRunId
+            const listed = run(state.payroll, S + "find#Runs", {})
+            const rerun = run(state.payroll, S + "create#Run", {payrollGroupId: state.group2, timePeriodId: state.march})
+            return {ended, takenBefore, noReason, byHr, byOther, cancelled, again, recalculate, takenAfter, listed, rerun}
+        },
+        then({ended, takenBefore, noReason, byHr, byOther, cancelled, again, recalculate, takenAfter, listed, rerun}) {
+            ended.counts.stale == 1
+            ended.employments.find(row => row.partyRelationshipId == state.STEPEmp).state == "stale"
+            takenBefore == state.run2
+            code(noReason) == "REASON_REQUIRED"
+            code(byHr) == "PERMISSION_DENIED"
+            code(byOther) == "RECORD_UNAVAILABLE"
+            cancelled.statusId == "PrnCancelled"
+            cancelled.releasedCount == 1
+            again.repeated == true
+            code(recalculate) == "RUN_CLOSED"
+            takenAfter == null
+            !listed.runs.some(row => row.payrollRunId == state.run2)
+            rerun.error == ""
+            rerun.payrollRunId != state.run2
+        }
+    }
+)

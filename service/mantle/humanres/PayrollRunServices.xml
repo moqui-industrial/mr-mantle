@@ -178,6 +178,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="approvalHolds" type="Boolean"/>
             <parameter name="steps" type="Map"/>
             <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canCancel" type="Boolean"/>
             <parameter name="canCalculate" type="Boolean"/>
             <parameter name="canSubmit" type="Boolean"/>
             <parameter name="canDecide" type="Boolean"/>
@@ -201,6 +202,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="approvalHolds" from="found.approvalHolds"/>
             <set field="steps" from="found.steps"/>
             <set field="canEdit" from="found.canEdit"/>
+            <set field="canCancel" from="found.canCancel"/>
             <set field="canCalculate" from="found.canCalculate"/>
             <set field="canSubmit" from="found.canSubmit"/>
             <set field="canDecide" from="found.canDecide"/>
@@ -236,6 +238,31 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="payrollRunId" from="out.payrollRunId"/>
             <set field="peopleApprovalId" from="out.peopleApprovalId"/>
             <set field="waitingText" from="out.waitingText"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Run" allow-remote="false">
+        <description>A run not approved cancelled with the reason (PAYROLL_VIEW and PAYROLL_EDIT; impl-people P25 review): a draft,
+            calculating or in review, a request waiting for its approval superseded. The inputs its calculation took are released
+            and its regular key freed, so the group's period may be run again; its population and draft results stay, read as a
+            cancelled run's. Refuses an approved, finalizing or finalized run (RUN_NOT_CANCELLABLE: an approved one is returned or
+            calculated again first), no reason (REASON_REQUIRED) and another employer's run (RECORD_UNAVAILABLE). A repeat answers
+            the cancellation. No invoice or payment is made or undone.</description>
+        <in-parameters>
+            <parameter name="payrollRunId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollRunId"/>
+            <parameter name="statusId"/>
+            <parameter name="releasedCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('cancelRun', context)"/>
+            <set field="payrollRunId" from="out.payrollRunId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="releasedCount" from="out.releasedCount"/>
+            <set field="repeated" from="out.repeated"/>
         </actions>
     </service>
     <service verb="approve" noun="Run" allow-remote="false">
