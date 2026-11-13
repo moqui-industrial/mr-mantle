@@ -15,7 +15,73 @@ Grant of Patent License.
         <field name="vatProtocolNum" type="text-short"/>
         <field name="vatProtocolDate" type="date"/>
         <field name="vatRegisterSeries" type="id"/>
+        <field name="electronicInvoiceTypeEnumId" type="id"/>
+        <field name="sdiFormatEnumId" type="id"/>
+        <field name="sdiStatusEnumId" type="id"/>
+        <field name="sdiIdent" type="text-short"/>
+        <field name="sdiFilename" type="text-medium"/>
+        <field name="sdiMessageId" type="text-medium"/>
+        <field name="sdiReceiptDate" type="date-time"/>
+        <relationship type="one" title="ElectronicInvoiceType" related="moqui.basic.Enumeration">
+            <key-map field-name="electronicInvoiceTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SdiStatus" related="moqui.basic.Enumeration">
+            <key-map field-name="sdiStatusEnumId" related="enumId"/></relationship>
     </extend-entity>
+
+    <extend-entity entity-name="InvoiceItem" package="mantle.account.invoice">
+        <field name="vatNatureEnumId" type="id"/>
+        <field name="withholdingTaxTypeEnumId" type="id"/>
+        <field name="withholdingTaxRate" type="number-decimal"/>
+        <field name="withholdingPaymentReason" type="text-short"/>
+        <relationship type="one" title="VatNature" related="moqui.basic.Enumeration">
+            <key-map field-name="vatNatureEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="WithholdingTaxType" related="moqui.basic.Enumeration">
+            <key-map field-name="withholdingTaxTypeEnumId" related="enumId"/></relationship>
+    </extend-entity>
+
+    <entity entity-name="CustomsDeclaration" package="mantle.shipment.customs" use="transactional" cache="never">
+        <field name="customsDeclarationId" type="id" is-pk="true"/>
+        <field name="mrn" type="text-short" not-null="true"/>
+        <field name="organizationPartyId" type="id" not-null="true"/>
+        <field name="customsOfficeId" type="text-short"/>
+        <field name="declarationDate" type="date"/>
+        <field name="declarationTypeEnumId" type="id"/>
+        <field name="customsBrokerPartyId" type="id"/>
+        <field name="foreignSupplierPartyId" type="id"/>
+        <field name="customsTaxableValue" type="currency-amount"/>
+        <field name="dutyAmount" type="currency-amount"/>
+        <field name="importVatAmount" type="currency-amount"/>
+        <field name="otherChargesAmount" type="currency-amount"/>
+        <field name="vatRegisterInvoiceId" type="id"/>
+        <field name="brokerInvoiceId" type="id"/>
+        <field name="statusId" type="id"/>
+
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="CustomsBroker" related="mantle.party.Party">
+            <key-map field-name="customsBrokerPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="ForeignSupplier" related="mantle.party.Party">
+            <key-map field-name="foreignSupplierPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="VatRegisterInvoice" related="mantle.account.invoice.Invoice">
+            <key-map field-name="vatRegisterInvoiceId" related="invoiceId"/></relationship>
+        <relationship type="one" title="BrokerInvoice" related="mantle.account.invoice.Invoice">
+            <key-map field-name="brokerInvoiceId" related="invoiceId"/></relationship>
+    </entity>
+
+    <entity entity-name="SdiNotification" package="mantle.account.invoice" use="transactional" cache="never">
+        <field name="sdiNotificationId" type="id" is-pk="true"/>
+        <field name="invoiceId" type="id" not-null="true"/>
+        <field name="notificationTypeEnumId" type="id" not-null="true"/>
+        <field name="notificationDate" type="date-time"/>
+        <field name="sdiIdent" type="text-short"/>
+        <field name="fileLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+
+        <relationship type="one" related="mantle.account.invoice.Invoice">
+            <key-map field-name="invoiceId"/></relationship>
+        <relationship type="one" title="NotificationType" related="moqui.basic.Enumeration">
+            <key-map field-name="notificationTypeEnumId" related="enumId"/></relationship>
+    </entity>
 
     <entity entity-name="FiscalRegisterLog" package="mantle.ledger.report" use="transactional" cache="never">
         <field name="registerLogId" type="id" is-pk="true"/>

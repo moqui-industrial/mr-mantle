@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+-->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <!-- ================================================================= -->
+    <!-- RECORD CUSTOMS DECLARATION & PROSPETTO CONTABILE ADM              -->
+    <!-- ================================================================= -->
+    <service verb="record" noun="CustomsDeclaration" allow-remote="true">
+        <description>
+            Records an ADM Customs Declaration (Prospetto di Riepilogo Contabile della dichiarazione doganale)
+            based on EUCDM messages (H1-H7). Automatically creates the customs VAT entry in the Purchase
+            VAT Register (Registro IVA Acquisti) for the deductible import VAT (Codice tributo 421).
+        </description>
+        <in-parameters>
+            <parameter name="mrn" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="customsOfficeId"/>
+            <parameter name="declarationDate" type="Date" required="true"/>
+            <parameter name="declarationTypeEnumId" default-value="H1"/>
+            <parameter name="customsBrokerPartyId"/>
+            <parameter name="foreignSupplierPartyId"/>
+            <parameter name="customsTaxableValue" type="BigDecimal" required="true"/>
+            <parameter name="dutyAmount" type="BigDecimal" default="0.0"/>
+            <parameter name="importVatAmount" type="BigDecimal" required="true"/>
+            <parameter name="otherChargesAmount" type="BigDecimal" default="0.0"/>
+            <parameter name="brokerInvoiceId"/>
+            <parameter name="vatRegisterSeries" default-value="DOG"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="customsDeclarationId"/>
+            <parameter name="vatRegisterInvoiceId"/>
+            <parameter name="vatProtocolNum"/>
+        </out-parameters>
+        <actions>
+            <entity-make-value entity-name="mantle.shipment.customs.CustomsDeclaration" value-field="decl"/>
+            <entity-set-pk entity-field="decl" value-field="decl"/>
+            <set field="decl.mrn" from="mrn"/>
+            <set field="decl.organizationPartyId" from="organizationPartyId"/>
+            <set field="decl.customsOfficeId" from="customsOfficeId"/>
+            <set field="decl.declarationDate" from="declarationDate"/>
+            <set field="decl.declarationTypeEnumId" from="declarationTypeEnumId"/>
+            <set field="decl.customsBrokerPartyId" from="customsBrokerPartyId"/>
+            <set field="decl.foreignSupplierPartyId" from="foreignSupplierPartyId"/>
+            <set field="decl.customsTaxableValue" from="customsTaxableValue"/>
+            <set field="decl.dutyAmount" from="dutyAmount"/>
+            <set field="decl.importVatAmount" from="importVatAmount"/>
+            <set field="decl.otherChargesAmount" from="otherChargesAmount"/>
+            <set field="decl.brokerInvoiceId" from="brokerInvoiceId"/>
+            <set field="decl.statusId" value="CustDeclDraft"/>
+            <entity-create value-field="decl"/>
+            <set field="customsDeclarationId" from="decl.customsDeclarationId"/>
+
+            <!-- Generate Purchase VAT registration for Import VAT -->
+            <script><![CDATA[
+                const yr = ec.l10n.format(declarationDate, 'yyyy');
+                // Auto sequence for customs VAT protocol
+                const prefix = vatRegisterSeries + '-' + yr + '-';
+                const countFind = ec.entity.find('mantle.account.invoice.Invoice')
+                    .condition('vatRegisterSeries', vatRegisterSeries)
+                    .condition('vatProtocolDate', 'greater-equals', yr + '-01-01')
+                    .condition('vatProtocolDate', 'less-equals', yr + '-12-31');
+                const existing = countFind.list();
+                const nextSeq = (existing ? existing.length : 0) + 1;
+                context.vatProtocolNum = prefix + String(nextSeq).padStart(4, '0');
+            ]]></script>
+
+            <service-call name="mantle.account.InvoiceServices.create#Invoice" out-map="invResult" in-map="{
+                fromPartyId: 'IT_ADM',
+                toPartyId: organizationPartyId,
+                invoiceTypeEnumId: 'InvoiceSales',
+                invoiceDate: declarationDate,
+                currencyUomId: 'EUR',
+                referenceNumber: 'Prospetto Doganale MRN ' + mrn,
+                description: 'Importazione beni EUCDM ' + declarationTypeEnumId + ' - MRN: ' + mrn + ' (Dogana ' + (customsOfficeId || 'ADM') + ')',
+                statusId: 'InvoiceApproved'
+            }"/>
+            <set field="vatRegisterInvoiceId" from="invResult.invoiceId"/>
+
+            <!-- Add Import VAT Item (detraibile art. 19) -->
+            <service-call name="mantle.account.InvoiceServices.create#InvoiceItem" in-map="{
+                invoiceId: vatRegisterInvoiceId,
+                itemTypeEnumId: 'ItemTax',
+                description: 'IVA Importazione Doganale (Cod. 421) - Imponibile ' + customsTaxableValue + ' EUR',
+                quantity: 1,
+                amount: importVatAmount,
+                taxableAmount: customsTaxableValue,
+                taxPercentage: 22.0,
+                taxAuthorityId: 'IT_ADM',
+                taxAuthorityRateId: 'IT_VAT_22'
+            }"/>
+
+            <!-- Update protocol fields on invoice and link on declaration -->
+            <service-call name="mantle.account.InvoiceServices.update#Invoice" in-map="{
+                invoiceId: vatRegisterInvoiceId,
+                vatProtocolNum: vatProtocolNum,
+                vatProtocolDate: declarationDate,
+                vatRegisterSeries: vatRegisterSeries
+            }"/>
+
+            <set field="decl.vatRegisterInvoiceId" from="vatRegisterInvoiceId"/>
+            <set field="decl.statusId" value="CustDeclRegistered"/>
+            <entity-update value-field="decl"/>
+        </actions>
+    </service>
+</services>

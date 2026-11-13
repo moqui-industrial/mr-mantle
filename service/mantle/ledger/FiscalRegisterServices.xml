@@ -530,4 +530,161 @@ Grant of Patent License.
             ]]></script>
         </actions>
     </service>
+
+    <!-- ================================================================= -->
+    <!-- RITENUTE D'ACCONTO / CERTIFICAZIONE UNICA (CU) / MODELLO 770      -->
+    <!-- ================================================================= -->
+    <service verb="get" noun="WithholdingTaxRegisterData" allow-remote="true">
+        <description>
+            Retrieves Withholding Tax details (Ritenute d'Acconto) for independent contractors,
+            freelancers, and commissions. Aggregates data per beneficiary (Percipiente) for
+            Modello 770 and Certificazione Unica (CU), detailing gross fees, non-taxable amounts,
+            taxable base, withheld amounts (RT01/RT02), and F24 payment references (Codice tributo 1040/1038).
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="fiscalYear" type="String"/>
+            <parameter name="organization" type="Map"/>
+            <parameter name="beneficiaries" type="List"/>
+            <parameter name="totalGrossAmount"/>
+            <parameter name="totalNonTaxableAmount"/>
+            <parameter name="totalTaxableAmount"/>
+            <parameter name="totalWithheldAmount"/>
+            <parameter name="totalNetAmount"/>
+            <parameter name="totalInvoicesCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <if condition="!fiscalYear">
+                <set field="fiscalYear" from="ec.l10n.format(fromDate || ec.user.nowTimestamp, 'yyyy')"/>
+            </if>
+            <if condition="!fromDate">
+                <set field="fromDate" from="ec.l10n.parseTimestamp(fiscalYear + '-01-01 00:00:00', 'yyyy-MM-dd HH:mm:ss')"/>
+            </if>
+            <if condition="!thruDate">
+                <set field="thruDate" from="ec.l10n.parseTimestamp(fiscalYear + '-12-31 23:59:59', 'yyyy-MM-dd HH:mm:ss')"/>
+            </if>
+
+            <!-- Query purchase invoices with withholding tax items or commission type -->
+            <script><![CDATA[
+                const conds = ec.entity.conditionFactory;
+                const invFind = ec.entity.find('mantle.account.invoice.Invoice')
+                    .condition('toPartyId', 'equals', organizationPartyId)
+                    .condition('invoiceDate', 'greater-equals', fromDate)
+                    .condition('invoiceDate', 'less-equals', thruDate);
+                const invList = invFind.list() || [];
+
+                let totalGross = 0;
+                let totalNonTaxable = 0;
+                let totalTaxable = 0;
+                let totalWithheld = 0;
+                let totalNet = 0;
+                let invoiceCount = 0;
+                const beneficiaryMap = {};
+
+                for (const inv of invList) {
+                    const itemsFind = ec.entity.find('mantle.account.invoice.InvoiceItem')
+                        .condition('invoiceId', 'equals', inv.invoiceId);
+                    const items = itemsFind.list() || [];
+
+                    let invWithholding = 0;
+                    let invTaxable = 0;
+                    let invNonTaxable = 0;
+                    let hasWithholding = false;
+                    let reason = 'A';
+                    let taxCode = '1040';
+
+                    for (const it of items) {
+                        const amt = (Number(it.quantity) || 1) * (Number(it.amount) || 0);
+                        if (it.withholdingTaxTypeEnumId || it.itemTypeEnumId === 'ItemTaxWithholding') {
+                            hasWithholding = true;
+                            const rate = Number(it.withholdingTaxRate) || 20.0;
+                            const withheld = (amt * rate / 100);
+                            invWithholding += withheld;
+                            invTaxable += amt;
+                            if (it.withholdingPaymentReason) reason = it.withholdingPaymentReason;
+                            if (it.withholdingTaxTypeEnumId === 'RT04') taxCode = '1038';
+                        } else if (it.taxPercentage === 0) {
+                            invNonTaxable += amt;
+                        } else {
+                            // Standard service item
+                            if (inv.invoiceTypeEnumId === 'InvoiceCommission' || inv.description?.toLowerCase().includes('parcella')) {
+                                hasWithholding = true;
+                                invTaxable += amt;
+                                invWithholding += (amt * 0.20);
+                            }
+                        }
+                    }
+
+                    if (hasWithholding || inv.invoiceTypeEnumId === 'InvoiceCommission') {
+                        invoiceCount++;
+                        const partyId = inv.fromPartyId;
+                        let b = beneficiaryMap[partyId];
+                        if (!b) {
+                            // Find party info
+                            const pFind = ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'equals', partyId);
+                            const pDetail = pFind.one();
+                            const idents = ec.entity.find('mantle.party.PartyIdentification').condition('partyId', 'equals', partyId).list() || [];
+                            const cf = idents.find(i => i.partyIdTypeEnumId === 'PtidSsn')?.idValue || '';
+                            const vatFind = ec.entity.find('mantle.other.tax.TaxAuthorityParty').condition('partyId', 'equals', partyId).list() || [];
+                            const piva = vatFind?.[0]?.partyTaxId || '';
+
+                            b = {
+                                partyId: partyId,
+                                beneficiaryName: pDetail?.organizationName || (pDetail?.firstName ? (pDetail.firstName + ' ' + pDetail.lastName) : partyId),
+                                fiscalCode: cf,
+                                vatNumber: piva,
+                                paymentReason: reason,
+                                f24TaxCode: taxCode,
+                                grossAmount: 0,
+                                nonTaxableAmount: 0,
+                                taxableAmount: 0,
+                                withheldAmount: 0,
+                                netAmount: 0,
+                                invoices: []
+                            };
+                            beneficiaryMap[partyId] = b;
+                        }
+
+                        const gross = invTaxable + invNonTaxable;
+                        const net = gross - invWithholding;
+                        b.grossAmount += gross;
+                        b.nonTaxableAmount += invNonTaxable;
+                        b.taxableAmount += invTaxable;
+                        b.withheldAmount += invWithholding;
+                        b.netAmount += net;
+                        b.invoices.push({
+                            invoiceId: inv.invoiceId,
+                            invoiceNumber: inv.referenceNumber || inv.invoiceId,
+                            invoiceDate: inv.invoiceDate,
+                            paidDate: inv.paidDate || inv.dueDate,
+                            grossAmount: gross,
+                            taxableAmount: invTaxable,
+                            withheldAmount: invWithholding,
+                            netAmount: net
+                        });
+
+                        totalGross += gross;
+                        totalNonTaxable += invNonTaxable;
+                        totalTaxable += invTaxable;
+                        totalWithheld += invWithholding;
+                        totalNet += net;
+                    }
+                }
+
+                context.fiscalYear = fiscalYear;
+                context.beneficiaries = Object.values(beneficiaryMap);
+                context.totalGrossAmount = totalGross;
+                context.totalNonTaxableAmount = totalNonTaxable;
+                context.totalTaxableAmount = totalTaxable;
+                context.totalWithheldAmount = totalWithheld;
+                context.totalNetAmount = totalNet;
+                context.totalInvoicesCount = invoiceCount;
+            ]]></script>
+        </actions>
+    </service>
 </services>
