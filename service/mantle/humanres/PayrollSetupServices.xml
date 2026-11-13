@@ -652,7 +652,7 @@ along with this software (see the LICENSE.md file). If not, see
             ORGANIZATION_REQUIRED), another employer's group (RECORD_UNAVAILABLE), a stale revision (REVISION_CHANGED), live pay
             where the group's readiness does not allow it (LIVE_NOT_AVAILABLE: a real localization covering today and Accounting's
             payroll-origin projection are needed, impl-people P27; no group can be live in this build, whose one localization is the
-            demonstration), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
+            demonstration; P28: a group in external processing needs no localization, only the projection), a localization payee that is no party (PAYEE_INVALID) or an account that is none (ACCOUNT_INVALID),
             GROUP_ENDED, NAME_REQUIRED, CURRENCY_REQUIRED,
             CURRENCY_INVALID, FREQUENCY_REQUIRED, FREQUENCY_INVALID, FIRST_PERIOD_REQUIRED, DIVISOR_REQUIRED, DIVISOR_INVALID,
             PAY_DATE_REQUIRED, PAY_DATE_INVALID, PRORATION_REQUIRED, TIME_BASIS_REQUIRED, LOCALIZATION_INVALID, ZONE_INVALID,
@@ -675,6 +675,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="localizationLiabilityGlAccountId"/>
             <parameter name="localizationExpenseGlAccountId"/>
             <parameter name="liveEnabled"/>
+            <parameter name="externalProcessing"><description>Y: an external processor calculates the group's pay (P28: its inputs
+                exported and its results imported in the payroll exchange; never calculated here; live with no localization once
+                Accounting's payroll-origin projection is in place)</description></parameter>
             <parameter name="description"/>
             <parameter name="end" type="Boolean"/>
             <parameter name="thruDate" type="Timestamp"/>

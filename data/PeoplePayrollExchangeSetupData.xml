@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- impl-people P28 (design-people §8.4, PayrollExchange, §15; design-admin §11.1; impl-people §4, F16): the payroll exchange's two
+    registrations of the framework's org.moqui.admin.DataTransferServices, owner contracts of Admin's data transfer:
+    - the export target payrollExchangeInputs (a file target, on the pattern of PartyContactExportData.xml): a pay group's prepared
+      period's approved pay inputs as delimited text, for a payroll exporter (PAYROLL_VIEW and PAYROLL_EDIT, which the registration
+      asks and export#InputsTransfer checks again with the employer); each field names its permission: the amount and the source's
+      rate PAYROLL_VIEW, the rest none beyond the export's own. Its scopes are the groups' periods; its one option, an exchange batch,
+      is how People's PayrollExchange writes an export it reconciled, so Admin's Exports lists both. No ADMIN_* permission;
+    - the import target payrollExchange (a wizard target, on the pattern of the time-and-attendance target): People keeps its own
+      wizard (PayrollExchange: history and a processor's results need their scope, sign-off and reconciliation), so only its result
+      contract is registered, the imports of the employers the caller reads with the place that opens each. Its import permissions
+      are all that preview#Batch and execute#Batch require: People's own import permission PEOPLE_IMPORT with PAYROLL_VIEW and
+      PAYROLL_EDIT (the user's call of Nov 11, 2026: an app's targets name its own import permission, never an ADMIN_* one); its runs
+      are read with PAYROLL_VIEW and People's scope, which find#ExchangeRuns checks again.
+    Nothing is staged, applied or exported through a registration on anyone's behalf, and it adds no right. Their owner place is
+    People's PayrollExchange (the app maps ownerRoute). -->
+<entity-facade-xml type="seed">
+    <moqui.server.TransferTarget targetId="payrollExchangeInputs" direction="export" targetMode="file" title="Pay inputs for a payroll processor"
+            description="A pay group's period's approved pay inputs (hours, leave, pieces, reimbursements, adjustments and recoveries), each with its source key, as a file an external payroll processor reads"
+            ownerApp="People" targetVersion="1" scopeLabel="Pay group and period"
+            columnsJson="[{&quot;name&quot;:&quot;worker&quot;,&quot;label&quot;:&quot;Worker&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;workerName&quot;,&quot;label&quot;:&quot;Worker name&quot;},{&quot;name&quot;:&quot;employment&quot;,&quot;label&quot;:&quot;Employment&quot;},{&quot;name&quot;:&quot;inputKind&quot;,&quot;label&quot;:&quot;Kind of input&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;component&quot;,&quot;label&quot;:&quot;Pay component&quot;},{&quot;name&quot;:&quot;inputName&quot;,&quot;label&quot;:&quot;Formula input&quot;},{&quot;name&quot;:&quot;date&quot;,&quot;label&quot;:&quot;Day&quot;,&quot;required&quot;:true},{&quot;name&quot;:&quot;quantity&quot;,&quot;label&quot;:&quot;Quantity&quot;},{&quot;name&quot;:&quot;unit&quot;,&quot;label&quot;:&quot;Unit&quot;},{&quot;name&quot;:&quot;amount&quot;,&quot;label&quot;:&quot;Amount&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;},{&quot;name&quot;:&quot;currency&quot;,&quot;label&quot;:&quot;Currency&quot;},{&quot;name&quot;:&quot;rate&quot;,&quot;label&quot;:&quot;Source rate&quot;,&quot;permission&quot;:&quot;PAYROLL_VIEW&quot;,&quot;selected&quot;:false},{&quot;name&quot;:&quot;sourceKey&quot;,&quot;label&quot;:&quot;Source key&quot;,&quot;required&quot;:true}]"
+            optionsJson="[{&quot;name&quot;:&quot;batch&quot;,&quot;label&quot;:&quot;Payroll exchange (empty: every approved input of the period)&quot;,&quot;type&quot;:&quot;text&quot;,&quot;maxLength&quot;:40}]"
+            exportService="mantle.humanres.PayrollExchangeServices.export#InputsTransfer"
+            scopeService="mantle.humanres.PayrollExchangeServices.find#ExportScopes"
+            maxRows="5000" maxBytes="2097152"
+            exportPermission="PAYROLL_VIEW,PAYROLL_EDIT" viewPermission="PAYROLL_VIEW"
+            ownerRoute="peoplePayrollExchange" sequenceNum="42"/>
+    <moqui.server.TransferTarget targetId="payrollExchange" direction="import" targetMode="wizard" title="Payroll history and processor results"
+            description="A former system's pay records before the cutover, or an external processor's signed-off results of a pay group's period, previewed, reconciled and imported in People's Payroll exchange"
+            effectsNote="History becomes read-only historical pay records and makes no invoice; a day People paid is refused. A processor's results become a pay run of the period, approved and finalized as any run. Rows recorded already are skipped."
+            ownerApp="People" targetVersion="1" scopeLabel="Employer"
+            findService="mantle.humanres.PayrollExchangeServices.find#ExchangeRuns"
+            importPermission="PEOPLE_IMPORT,PAYROLL_VIEW,PAYROLL_EDIT" viewPermission="PAYROLL_VIEW"
+            ownerRoute="peoplePayrollExchange" sequenceNum="43"/>
+    <!-- the services the framework calls as the reader or exporter wherever it shows the targets (Admin's Exports, Imports and Data
+        export): every user may call them, and each checks its permissions and People's scope itself; the registration's grant does
+        not carry into them (call#TargetService) -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantlePeoplePayrollExchange" description="People's payroll exchange transfer contracts"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantlePeoplePayrollExchange" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y" nameIsPattern="Y"
+            artifactName="mantle\.humanres\.PayrollExchangeServices\.(find#ExchangeRuns|find#ExportScopes|export#InputsTransfer)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantlePeoplePayrollExchangeALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantlePeoplePayrollExchange" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

@@ -478,15 +478,17 @@ function lastWageNet(partyRelationshipId) {
         .sort((a, b) => (lib.ms(b.run.payDate) ?? 0) - (lib.ms(a.run.payDate) ?? 0))
     return regular.length ? decimalOf(regular[0].row.amount) : null
 }
-// The cap of a period's recovery for an employment: the amount, or the percentage of its last wage net (rounded to the currency;
-// none known yet: the whole rest, as with no cap).
+// The cap of a period's recovery for an employment: the amount, or the percentage of its last finalized regular wage net (rounded to
+// the currency). With no earlier net to take the percentage of, the amount when one is set, else zero: the recovery waits for the
+// period after the employee's first finalized regular run, never uncapped (the user's call of Nov 13, 2026, impl-people P28). None:
+// no cap, the whole rest.
 function capFor(setup, partyRelationshipId, currencyUomId) {
-    if (setup.cap && setup.cap.compare(0) > 0) return setup.cap
     if (setup.capPercent && setup.capPercent.compare(0) > 0) {
         const net = lastWageNet(partyRelationshipId)
-        if (net == null) return null
-        return ec.l10n.roundCurrency(net.multiply(setup.capPercent).divide(toDecimal(100)), currencyUomId)
+        if (net != null) return ec.l10n.roundCurrency(net.multiply(setup.capPercent).divide(toDecimal(100)), currencyUomId)
+        return setup.cap && setup.cap.compare(0) > 0 ? setup.cap : zero()
     }
+    if (setup.cap && setup.cap.compare(0) > 0) return setup.cap
     return null
 }
 
@@ -529,7 +531,8 @@ function getRecoverySettings(p) {
                     setup.cap != null
                         ? String(setup.cap) + " a period"
                         : setup.capPercent != null
-                          ? String(setup.capPercent) + "% of net pay a period"
+                          ? String(setup.capPercent) +
+                            "% of net pay a period (from the period after the employee's first finalized pay)"
                           : "No cap: the whole rest on the next run",
                 deductions,
                 revision: settingsRevision(organizationPartyId)
@@ -1163,7 +1166,9 @@ function recoveryInputs(member, group, period) {
         let left = elsewhere.reduce((sum, input) => sum.subtract(decimalOf(input.amount)), state.remaining)
         if (left.compare(0) <= 0) continue
         const cap = capFor(recoverySetup(recovery.organizationPartyId), member.partyRelationshipId, recovery.currencyUomId)
-        if (cap && cap.compare(0) > 0 && left.compare(cap) > 0) left = cap
+        if (cap != null && left.compare(cap) > 0) left = cap
+        // a percentage cap with no earlier net waits a period (P28's call): no input this period
+        if (left.compare(0) <= 0) continue
         const key = "RECOVERY:" + recovery.payrollRecoveryId + ":" + period.timePeriodId
         out.push({
             entitlementKey: key,
