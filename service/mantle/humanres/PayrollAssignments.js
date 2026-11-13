@@ -157,11 +157,15 @@ function writeSalary(partyRelationshipId, values, reason) {
     return {fromDate: stamp(fromMs), endedFromDate: inEffect ? inEffect.fromDate : null}
 }
 // create#EmploymentSalary (extended in P23, F4; its review, the user's call of Nov 12, 2026): PAYROLL_EDIT is checked, the employer
-// is one of a payroll reader's (another is a missing employment), and only an employment's first salary is set here: a salary in
+// is one of a payroll reader's (another is a missing employment), and only an employment's first salary is asked here: a salary in
 // place changes through the pay change, which is approved first (PAY_CHANGE_REQUIRED). A holder of PAYROLL_REPAIR (Mantle grants
-// it to ADMIN alone) still sets one for data repair, with a reason (REASON_REQUIRED) kept as the audit log's change reason, at an
-// employer of any scope. The row in effect is ended on the new one's date. The defaults and the band's warnings stay the service's
-// own (EmploymentServices.xml), for its existing callers, which set first salaries.
+// it to ADMIN alone) still sets one at once for data repair, with a reason (REASON_REQUIRED) for a salary in place, kept as the
+// audit log's change reason, at an employer of any scope. The row in effect is ended on the new one's date. The defaults and the
+// band's warnings stay the service's own (EmploymentServices.xml), for its existing callers.
+// P24 review (the user's call of Nov 12, 2026): a first salary asked here by a payroll editor waits for approval like any pay
+// change: it is asked as one (PeopleServices.apply#EmploymentChange, changeKind pay; PakPayChange, the employer's payroll approvers)
+// and written when approved. Only a repair writes at once; a hire from an accepted offer records the offer's approved pay itself
+// (Employment.js hireEmployee), and the employees import sets no pay (its target refuses pay columns).
 function salaryAccess(p) {
     const userScope = people.scopeOf()
     if (!userScope.capabilities.payrollEdit) denied("PERMISSION_DENIED", "Setting a salary needs PAYROLL_EDIT")
@@ -187,7 +191,26 @@ function salaryAccess(p) {
 function createSalary(p) {
     const relationship = salaryAccess(p)
     if (p.amount == null || p.amount === "") denied("AMOUNT_REQUIRED", "Enter the salary")
-    return writeSalary(
+    if (!lib.access.has("PAYROLL_REPAIR")) {
+        const asked = call("mantle.humanres.PeopleServices.apply#EmploymentChange", {
+            changeKind: "pay",
+            partyRelationshipId: relationship.partyRelationshipId,
+            effectiveDate: stamp(effective(p.fromDate)),
+            salaryAmount: String(p.amount),
+            salaryCurrencyUomId: text(p.currencyUomId) || null,
+            salaryPeriodTypeId: text(p.timePeriodTypeId) || null,
+            payGradeId: text(p.payGradeId) || null,
+            reason: text(p.comments) || "First salary",
+            expectedRevision: salaryRevision(relationship.partyRelationshipId)
+        })
+        return {
+            fromDate: stamp(effective(p.fromDate)),
+            employmentChangeId: asked.employmentChangeId || null,
+            applied: !!asked.applied,
+            waitingText: asked.waitingText || ""
+        }
+    }
+    const written = writeSalary(
         relationship.partyRelationshipId,
         {
             fromMs: effective(p.fromDate),
@@ -200,6 +223,7 @@ function createSalary(p) {
         },
         text(p.comments) || null
     )
+    return Object.assign(written, {applied: true})
 }
 // The salary checks of a change from a date (SALARY_EXISTS, SALARY_SCHEDULED), as writeSalary makes them, without writing.
 function checkSalaryDate(partyRelationshipId, fromMs) {

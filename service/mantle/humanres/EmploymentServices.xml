@@ -239,13 +239,23 @@ along with this software (see the LICENSE.md file). If not, see
             sets one at any employer for data repair, with comments as its reason (REASON_REQUIRED), kept in the audit log. The
             salary in effect on fromDate ends there (dated rows, never two in effect); a salary from the same moment
             (SALARY_EXISTS) or one from a later date set already (SALARY_SCHEDULED) is refused (PayrollAssignments.js
-            writeSalary, which the approved pay change applies through).</description>
+            writeSalary, which the approved pay change applies through). P24 review (the user's call of Nov 12, 2026): a first salary
+            asked by a payroll editor waits for approval like any pay change: it is asked as one (PeopleServices.apply#EmploymentChange,
+            changeKind pay, comments its reason, else "First salary"; the pay change's checks of the currency and the pay frequency)
+            and written when the employer's payroll approvers approve it (employmentChangeId, applied false); only a holder of
+            PAYROLL_REPAIR writes at once (applied true).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <auto-parameters entity-name="mantle.humanres.employment.EmploymentSalary" include="nonpk"/>
             <parameter name="fromDate" default="ec.user.nowTimestamp"/>
         </in-parameters>
-        <out-parameters><parameter name="fromDate"/></out-parameters>
+        <out-parameters>
+            <parameter name="fromDate"/>
+            <parameter name="applied" type="Boolean"><description>The salary was written (a repair); else it waits as the pay
+                change employmentChangeId</description></parameter>
+            <parameter name="employmentChangeId"/>
+            <parameter name="waitingText"/>
+        </out-parameters>
         <actions>
             <!-- P23: the caller first, so a refused caller reads nothing of the grade's band in a warning -->
             <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('salaryAccess', context)</script>
@@ -276,6 +286,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <set field="written" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('createSalary', context)"/>
             <set field="fromDate" from="written.fromDate"/>
+            <set field="applied" from="!!written.applied"/>
+            <set field="employmentChangeId" from="written.employmentChangeId"/>
+            <set field="waitingText" from="written.waitingText"/>
         </actions>
     </service>
 

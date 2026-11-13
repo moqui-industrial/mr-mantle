@@ -657,7 +657,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="holidayCategoryId" type="id"><description>The assignment's holiday calendar in place of the schedule's (P9)</description></field>
         <field name="terminationReasonEnumId" type="id"/>
         <field name="terminationTypeEnumId" type="id"/>
-        <field name="salaryAmount" type="currency-amount"><description>A pay change's new salary (P23)</description></field>
+        <field name="salaryAmount" type="currency-amount" ai-opt-out="true"><description>A pay change's new salary (P23)</description></field>
         <field name="salaryCurrencyUomId" type="id"/>
         <field name="salaryPeriodTypeId" type="id"><description>The salary's pay frequency, a Payroll time period type</description></field>
         <field name="payGradeId" type="id"><description>A pay change's pay grade, when it names one</description></field>
@@ -781,7 +781,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="benefitTypeId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time"/>
-        <field name="cost" type="currency-amount"/>
+        <field name="cost" type="currency-amount" ai-opt-out="true"/>
         <field name="actualEmployerPaidPercent" type="number-float"/>
         <field name="availableTime" type="number-integer"/>
         <relationship type="one" related="mantle.humanres.employment.Employment"/>
@@ -871,7 +871,7 @@ along with this software (see the LICENSE.md file). If not, see
             P23 review): a salary ends when the next starts, by an approved pay change or a data repair, with its reason</description></field>
         <field name="payGradeId" type="id"/>
         <field name="comments" type="text-medium"/>
-        <field name="amount" type="currency-amount" enable-audit-log="true"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true" enable-audit-log="true"/>
         <field name="currencyUomId" type="id"/>
         <field name="timePeriodTypeId" type="id"/>
         <relationship type="one" related="mantle.humanres.employment.Employment"/>
@@ -1326,9 +1326,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payGradeId" type="id" is-pk="true"/>
         <field name="fromDate" type="date-time" is-pk="true"/>
         <field name="thruDate" type="date-time"/>
-        <field name="amount" type="currency-amount"/>
-        <field name="minAmount" type="currency-amount"/>
-        <field name="maxAmount" type="currency-amount"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="minAmount" type="currency-amount" ai-opt-out="true"/>
+        <field name="maxAmount" type="currency-amount" ai-opt-out="true"/>
         <field name="currencyUomId" type="id"/>
         <field name="timePeriodTypeId" type="id"/>
         <relationship type="one" related="mantle.humanres.rate.PayGrade"/>
@@ -1357,7 +1357,7 @@ along with this software (see the LICENSE.md file). If not, see
             the other purposes (Projects' client billing and worker pay) leave it empty and their lookup reads none -->
         <field name="organizationPartyId" type="id"/>
         <!-- what we're looking for -->
-        <field name="rateAmount" type="number-decimal"/>
+        <field name="rateAmount" type="number-decimal" ai-opt-out="true"/>
 
         <relationship type="one" title="RateType" related="moqui.basic.Enumeration" short-alias="type">
             <key-map field-name="rateTypeEnumId"/></relationship>

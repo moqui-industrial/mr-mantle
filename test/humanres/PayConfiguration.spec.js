@@ -804,6 +804,40 @@ feature(
             state.structureId = id
             state.list = run(state.config, G + "find#Structures", {organizationPartyId: orgA, term: "store STAFF"})
             state.otherEmployer = code(run(state.configB, G + "preview#Structure", {payrollStructureId: id}))
+            // a structure published within the same second as its component's term, after it: its lines start at the publishing
+            // moment, never at the start of that second (a Date read as text lost its milliseconds, so this was refused about one
+            // run in five when HOURS above was published in the second the structure was)
+            const second = Math.floor((state.now + 3 * day) / 1000) * 1000
+            const sameSecond = component(
+                {
+                    componentCode: "MSC",
+                    componentName: "Same second",
+                    componentKindEnumId: "PckEarning",
+                    basisEnumId: "PcbAmount",
+                    amount: "1.00",
+                    currencyUomId: "USD",
+                    expenseGlAccountId: prefix + "_WAGES",
+                    fromDate: new Date(second + 500)
+                },
+                [{exampleName: "One", inputValues: "", expectedAmount: "1.00"}]
+            )
+            const msStructure = run(state.config, G + "store#Structure", {
+                organizationPartyId: orgA,
+                structureName: "Same second",
+                currencyUomId: "USD",
+                payBasisEnumId: "PpbMixed"
+            }).payrollStructureId
+            const msRevision = () => run(state.config, G + "find#Structures", {payrollStructureId: msStructure}).structure.revision
+            run(state.config, G + "store#StructureComponent", {
+                payrollStructureId: msStructure,
+                payrollComponentId: sameSecond,
+                expectedRevision: msRevision()
+            })
+            state.sameSecond = publishApproved("publish#Structure", {
+                payrollStructureId: msStructure,
+                expectedRevision: msRevision(),
+                fromDate: new Date(second + 700)
+            })
         },
         then() {
             state.hoursPublished === ""
@@ -834,6 +868,7 @@ feature(
             state.twice === "TERMS_OVERLAP"
             state.list.structures.length === 1 && state.list.structures[0].state === "current"
             state.otherEmployer === "RECORD_UNAVAILABLE"
+            state.sameSecond === ""
         }
     }
 )

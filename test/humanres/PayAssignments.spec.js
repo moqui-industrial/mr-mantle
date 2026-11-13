@@ -3,8 +3,8 @@
 // pay change; IronStone People design §8.1, §8 PayAssignments, §4 Employee360's Compensation and EmploymentChange; PE-08,
 // PE-12; impl-people P23, F4, F33): overlapping primary assignments refused (one per employment and date, or the one in effect
 // replaced from the date with a reason), the assignment's employer, currency, published structure, inputs and elections checked,
-// a structure in use not ended; only a first salary set directly, a later one through the approved pay change or by an audited
-// repair (PAYROLL_REPAIR), the row in effect ended, a later or same-dated one refused, PAYROLL_EDIT and the employer's scope
+// a structure in use not ended; a first salary asked directly waiting as a pay change for the payroll approver (the user's call of
+// Nov 12, 2026, P24 review), a later one through the approved pay change or by an audited repair (PAYROLL_REPAIR, which sets one at once), the row in effect ended, a later or same-dated one refused, PAYROLL_EDIT and the employer's scope
 // required; a pay change (the first salary too) waiting for the employer's payroll approvers with a notice naming no one and no
 // amount, never decided by who asked, then applied, a manager reading the salary of the one change a rule routes to them alone,
 // and HR neither asking for it nor reading it (the user's calls of Nov 12, 2026); compensation absent for HR without PAYROLL_VIEW, with the same
@@ -339,7 +339,7 @@ feature(
 )
 
 feature(
-    "only a first salary is set directly; a later one is refused but to an audited repair, dated, the row in effect ended; a later or same-dated row refused; PAYROLL_EDIT and the employer's scope required",
+    "a first salary asked directly waits for the payroll approver as a pay change, then is set; a later one is refused but to an audited repair, dated, the row in effect ended; a later or same-dated row refused; PAYROLL_EDIT and the employer's scope required",
     {
         when() {
             const set = (username, offset, amount, comments = null, partyRelationshipId = state.anaEmp) =>
@@ -353,9 +353,26 @@ feature(
                         comments
                     })
                 )
+            // the user's call of Nov 12, 2026 (P24 review): a first salary asked directly is a pay change waiting for approval
+            const editOnly = set(state.editOnly, -60, "4000")
+            const firstAsked = run(state.payroll, SALARY, {
+                partyRelationshipId: state.anaEmp,
+                amount: "4000",
+                currencyUomId: "USD",
+                timePeriodTypeId: "PayrollMonth",
+                fromDate: dayText(-60)
+            })
+            const whileWaiting = salaries(state.anaEmp).length
+            const firstKind = rows("mantle.humanres.employment.EmploymentChange", {
+                employmentChangeId: firstAsked.employmentChangeId || "-"
+            })[0]?.changeKindEnumId
+            const firstApproved = run(state.approver, P + "decide#EmploymentChange", {
+                employmentChangeId: firstAsked.employmentChangeId,
+                decision: "approve"
+            })
             const codes = {
-                editOnly: set(state.editOnly, -60, "4000"),
-                first: set(state.payroll, -60, "4000"),
+                editOnly,
+                first: code(firstAsked),
                 raise: set(state.payroll, -20, "4200"),
                 repairNoReason: set(state.repair, -20, "4200"),
                 repaired: set(state.repair, -20, "4200", "Imported at the wrong amount"),
@@ -372,13 +389,15 @@ feature(
             })
             return {
                 codes,
+                first: {applied: firstAsked.applied, whileWaiting, firstKind, approved: firstApproved.applied},
                 amounts: list.map(row => String(row.amount)),
                 endedOnRaise: ms(list[0].thruDate) == dayMs(-20),
                 openLast: list[1].thruDate == null,
                 auditReasons: audit.map(row => row.changeReason)
             }
         },
-        then({codes, amounts, endedOnRaise, openLast, auditReasons}) {
+        then({codes, first, amounts, endedOnRaise, openLast, auditReasons}) {
+            first == {applied: false, whileWaiting: 0, firstKind: "EckPayChange", approved: true}
             codes ==
                 {
                     editOnly: "RECORD_UNAVAILABLE",

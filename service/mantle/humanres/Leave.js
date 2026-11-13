@@ -2762,5 +2762,6 @@ function run(op, p) {
     if (!Object.hasOwn(operations, op)) throw new Error("Unknown leave operation " + op)
     return operations[op](p || {})
 }
-// colleaguesOf: for the team calendar's shifts (Shifts.js, P14), which reach the same people as its absences
-;({execute: run, colleaguesOf})
+// colleaguesOf: for the team calendar's shifts (Shifts.js, P14), which reach the same people as its absences; chargedDays (P24):
+// the hours of a request's days as its employment's schedule and holidays charge them, for hours for pay (PayInputs.js)
+;({execute: run, colleaguesOf, chargedDays})

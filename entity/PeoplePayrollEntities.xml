@@ -88,7 +88,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="update"/>
         <field name="statusId" type="id" enable-audit-log="update"><description>PayrollTerm: draft or published</description></field>
         <field name="basisEnumId" type="id"><description>PayrollComponentBasis</description></field>
-        <field name="amount" type="number-decimal"><description>A fixed amount's value</description></field>
+        <field name="amount" type="number-decimal" ai-opt-out="true"><description>A fixed amount's value</description></field>
         <field name="formula" type="text-long"/>
         <field name="inputNames" type="text-medium"><description>The declared inputs, comma separated</description></field>
         <field name="dependencyCodes" type="text-medium"><description>The codes of the components the formula reads, comma
@@ -127,8 +127,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="payrollComponentExampleId" type="id" is-pk="true"/>
         <field name="payrollComponentTermId" type="id"/>
         <field name="exampleName" type="text-medium"/>
-        <field name="inputValues" type="text-long"/>
-        <field name="expectedAmount" type="number-decimal"/>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
+        <field name="expectedAmount" type="number-decimal" ai-opt-out="true"/>
         <relationship type="one" related="mantle.humanres.payroll.PayrollComponentTerm" short-alias="term"/>
         <index name="PAY_COMP_EX_TERM"><index-field name="payrollComponentTermId"/></index>
     </entity>
@@ -339,7 +339,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="fromDate" type="date-time"/>
         <field name="thruDate" type="date-time" enable-audit-log="true"><description>Audited from its first value (an end is the
             change; "update" would skip it), with its reason (P23 review)</description></field>
-        <field name="inputValues" type="text-long"/>
+        <field name="inputValues" type="text-long" ai-opt-out="true"/>
         <field name="electedComponentIds" type="text-medium"><description>The components of elective lines (PleElected) the
             assignment takes, comma separated</description></field>
         <field name="reason" type="text-long"/>
@@ -376,5 +376,128 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
         <relationship type="one" related="mantle.humanres.payroll.PayrollLocalization" short-alias="localization"/>
         <index name="PAY_TAXPROF_EMPL"><index-field name="partyRelationshipId"/></index>
+    </entity>
+    <!-- impl-people P24 (design-people §6 HoursForPay, §8.1 PayrollInput and PayrollInputSource, §8 PayAdjustments; PE-09, PE-07,
+        PE-05): an employment's approved pay inputs for a pay group's period (PayrollInput: worked hours of a day from the group's time
+        basis, paid or unpaid leave of a day, a time entry's pieces, an expense claim reserved for payroll, or a reasoned adjustment
+        a payroll approver approved) and the source records each consumed (PayrollInputSource). Written only by
+        mantle.humanres.PayrollInputServices (PayInputs.js), which checks PAYROLL_VIEW and PAYROLL_EDIT and the employer first. Each
+        entitlement is paid once (activeEntitlementKey, unique: a day's worked time whichever stream it came from, a leave day, an
+        entry's pieces, a claim) and each source consumed once (activeSourceKey, unique), so preparing again makes nothing twice and a
+        worker invoice and payroll never both take a time entry. A voided or refused input releases both keys; a finalized one is
+        never changed (a correction is a new input linked to it). Nothing here is the legacy PayrollAdjustment, which no People
+        service reads (design §8.4). -->
+    <entity entity-name="PayrollInput" package="mantle.humanres.payroll" cache="never">
+        <description>An approved (or, for an adjustment, proposed) pay input of an employment for a pay group's period: its kind
+            (PayrollInputType), the day or date it is for (inputDate), the formula input it supplies (inputName: workedHours,
+            paidLeaveHours, unpaidLeaveHours, pieces, reimbursement) or the component an adjustment is to (payrollComponentId), a
+            quantity with its unit or an amount with its currency (never assumed), the source's own rate where it has one
+            (rateAmount: a time entry's worker rate, evidence for the calculation), its state (PayrollInput status: proposed,
+            approved, refused, voided, finalized) and the entitlement it pays (entitlementKey; activeEntitlementKey while it is
+            neither voided nor refused, unique). An adjustment carries its reason and evidence, the inputs of one recurrence share
+            seriesInputId, and a correction of a finalized input links it (correctionOfInputId). Created, approved and voided by
+            PayrollInputServices; finalized by the pay run's finalization, after which it is never changed.</description>
+        <field name="payrollInputId" type="id" is-pk="true"/>
+        <field name="partyRelationshipId" type="id"><description>The employment</description></field>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The employer</description></field>
+        <field name="payrollGroupId" type="id"/>
+        <field name="timePeriodId" type="id"><description>The group's pay period it is for</description></field>
+        <field name="inputTypeEnumId" type="id"><description>PayrollInputType</description></field>
+        <field name="inputName" type="text-short"><description>The formula input it supplies, for an input of time, pieces or a
+            reimbursement</description></field>
+        <field name="payrollComponentId" type="id"><description>The component an adjustment is to</description></field>
+        <field name="inputDate" type="date"><description>The day it is for (an adjustment's date)</description></field>
+        <field name="quantity" type="number-decimal"/>
+        <field name="quantityUomId" type="id"/>
+        <field name="amount" type="currency-amount" ai-opt-out="true"/>
+        <field name="currencyUomId" type="id"/>
+        <field name="rateAmount" type="number-decimal" ai-opt-out="true"><description>The source's own rate (a time entry's worker rate), kept as
+            evidence</description></field>
+        <field name="statusId" type="id" enable-audit-log="update"><description>PayrollInput: PinProposed, PinApproved, PinRefused,
+            PinVoided, PinFinalized</description></field>
+        <field name="entitlementKey" type="text-medium"/>
+        <field name="activeEntitlementKey" type="text-medium"><description>The entitlementKey while the input is neither voided
+            nor refused; unique, so an entitlement is paid once</description></field>
+        <field name="isAdjustment" type="text-indicator"><description>Y: made by store#Adjustment (approved by a payroll approver),
+            not prepared from a source</description></field>
+        <field name="reason" type="text-long"><description>An adjustment's reason, a payroll working note</description></field>
+        <field name="evidence" type="text-medium"><description>An adjustment's evidence: what it rests on</description></field>
+        <field name="seriesInputId" type="id"><description>The first input of a recurring adjustment, which every input of the
+            recurrence names</description></field>
+        <field name="correctionOfInputId" type="id"><description>The finalized input a correction changes</description></field>
+        <field name="voidReason" type="text-medium"/>
+        <field name="voidedDate" type="date-time"/>
+        <field name="operationKey" type="text-medium"><description>The preparation or adjustment's key: a retry answers the first</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="changedByUserIds" type="text-medium"><description>Each user who made or changed an adjustment, comma separated:
+            none of them decides it</description></field>
+        <relationship type="one" related="mantle.humanres.employment.Employment" short-alias="employment"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollGroup" short-alias="group"/>
+        <relationship type="one-nofk" related="mantle.party.time.TimePeriod" short-alias="period"/>
+        <relationship type="one-nofk" related="mantle.humanres.payroll.PayrollComponent" short-alias="component"/>
+        <relationship type="one" title="PayrollInputType" related="moqui.basic.Enumeration" short-alias="inputType">
+            <key-map field-name="inputTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one" related="moqui.basic.StatusItem" short-alias="status"/>
+        <relationship type="many" related="mantle.humanres.payroll.PayrollInputSource" short-alias="sources">
+            <key-map field-name="payrollInputId"/></relationship>
+        <index name="PAY_INPUT_EMPL"><index-field name="partyRelationshipId"/><index-field name="inputDate"/></index>
+        <index name="PAY_INPUT_GROUP"><index-field name="payrollGroupId"/><index-field name="timePeriodId"/></index>
+        <index name="PAY_INPUT_ORG"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <index name="PAY_INPUT_SERIES"><index-field name="seriesInputId"/></index>
+        <index name="PAY_INPUT_ENTITLE" unique="true"><index-field name="activeEntitlementKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Payroll Input Type" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitWorked" enumCode="workedHours" description="Worked hours" sequenceNum="1"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitPaidLeave" enumCode="paidLeaveHours" description="Paid leave" sequenceNum="2"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitUnpaidLeave" enumCode="unpaidLeaveHours" description="Unpaid leave" sequenceNum="3"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitPieces" enumCode="pieces" description="Pieces" sequenceNum="4"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitReimbursement" enumCode="reimbursement" description="Expense reimbursement"
+                    sequenceNum="5" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitAdjustment" description="Adjustment" sequenceNum="6" enumTypeId="PayrollInputType"/>
+            <moqui.basic.Enumeration enumId="PitAdvanceRecovery" description="Advance recovery" sequenceNum="7"
+                    enumTypeId="PayrollInputType"/>
+            <moqui.basic.StatusType description="Payroll Input" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinProposed" description="Waiting for approval" sequenceNum="1" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinApproved" description="Approved" sequenceNum="2" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinRefused" description="Refused" sequenceNum="3" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinVoided" description="Voided" sequenceNum="4" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusItem statusId="PinFinalized" description="Finalized" sequenceNum="5" statusTypeId="PayrollInput"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinRefused" transitionName="Refuse"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinProposed" toStatusId="PinVoided" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinApproved" toStatusId="PinVoided" transitionName="Void"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PinApproved" toStatusId="PinFinalized" transitionName="Finalize"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="PayrollInputSource" package="mantle.humanres.payroll" cache="never">
+        <description>A source record a pay input consumed (design §8.1 PayrollInputSource): a time entry (its hours or its pieces),
+            an attendance day, a day of a leave request, an expense claim, or the advance an adjustment recovers; its part
+            (quantity or amount), the source's fingerprint when it was prepared (sourceRevision: its hours, rates, minutes or state,
+            so a change since is seen) and its key (sourceKey; activeSourceKey while its input is neither voided nor refused,
+            unique, so a source is consumed once). Mantle's time writers read it: a worker invoice refuses a time entry a pay input
+            consumed, and a change of a consumed entry or the reopening of its week voids an input not finalized and is refused for
+            a finalized one.</description>
+        <field name="payrollInputSourceId" type="id" is-pk="true"/>
+        <field name="payrollInputId" type="id"/>
+        <field name="sourceEntityName" type="text-medium"/>
+        <field name="sourceId" type="id"/>
+        <field name="sourcePart" type="text-short"><description>The part of the source: hours or pieces of a time entry, the day of
+            a leave request</description></field>
+        <field name="sourceKey" type="text-medium"/>
+        <field name="activeSourceKey" type="text-medium"/>
+        <field name="quantity" type="number-decimal"/>
+        <field name="amount" type="currency-amount"/>
+        <field name="sourceRevision" type="text-medium"/>
+        <field name="createdDate" type="date-time"/>
+        <relationship type="one" related="mantle.humanres.payroll.PayrollInput" short-alias="input"/>
+        <index name="PAY_INSRC_INPUT"><index-field name="payrollInputId"/></index>
+        <index name="PAY_INSRC_SOURCE"><index-field name="sourceEntityName"/><index-field name="sourceId"/></index>
+        <index name="PAY_INSRC_ACTIVE" unique="true"><index-field name="activeSourceKey"/></index>
     </entity>
 </entities>

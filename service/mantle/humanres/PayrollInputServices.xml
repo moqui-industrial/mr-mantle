@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's pay inputs and hours for pay (IronStone People design §6 HoursForPay, §8.1 PayrollInput and PayrollInputSource, §8
+    PayAdjustments, §12 ApprovalPolicies; PE-09, PE-07, PE-05; impl-people P24, F44; PayInputs.js): a pay group's period
+    reconciled employment by employment (scheduled, present, submitted, approved and payable hours, leave, pieces, claims, what is
+    prepared and what blocks it) and its approved inputs prepared once per source entitlement, the group's time basis deciding
+    which stream pays worked hours; payroll's reasoned adjustments, each decided on a People approval of kind PakPayAdjustment
+    (PeoplePayAdjustmentApproval); and the source guards Mantle's time and invoice writers call, so a worker invoice and payroll
+    never both take a time entry and a finalized pay source is not changed. Read with PAYROLL_VIEW (the reconciliation, which has
+    no amount, also by a manager for their reports) and changed with PAYROLL_VIEW and PAYROLL_EDIT; another employer's record is a
+    missing one. Preparing, adjusting and approving change no money (design §2); the legacy payroll services and PayrollAdjustment
+    rows are not read. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="Reconciliation" allow-remote="false">
+        <description>A pay group's prepared period (payrollGroupId, timePeriodId), employment by employment: the employments whose
+            primary pay assignment puts them in the group on a day of it, each with the group's time basis, its hours scheduled,
+            present (attendance), submitted and approved (timesheets) and payable by the basis, paid and unpaid leave, pieces, the
+            claims reserved for payroll (a count), the other stream's difference, what is prepared, what preparing would make or
+            void, its state (ready, blocked, prepared, changed since prepared, nothing to pay) and its problems (an unapproved week,
+            unresolved attendance, a time entry on a worker invoice, time of another employment, a conflicting claim) and notes;
+            with partyRelationshipId, that employment's days, its timesheets, attendance days to resolve, leave requests and
+            inputs. Hours and counts only, never an amount. For a payroll reader of the group's employer, or a manager
+            (PEOPLE_TEAM_VIEW) for their live reports. Refuses anyone else (PERMISSION_DENIED), a group outside the reader's
+            employers (RECORD_UNAVAILABLE) and a period not of the group (PERIOD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="payrollGroupId" required="true"/>
+            <parameter name="timePeriodId" required="true"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="term"><description>Part of the person's name</description></parameter>
+            <parameter name="state"><description>ready, blocked, prepared, changed or nothing</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="employments" type="List"><description>partyRelationshipId, partyId, personName, organizationPartyId,
+                dayCount, scheduledText, presentText, submittedText, approvedText, payableText, paidLeaveText, unpaidLeaveText,
+                piecesText, claimCount, differenceText, preparedCount, toPrepareCount, toVoidCount, state, stateText, problems,
+                notes, problemsText, notesText</description></parameter>
+            <parameter name="employmentsCount" type="Integer"/>
+            <parameter name="employmentsPageIndex" type="Integer"/>
+            <parameter name="employmentsPageSize" type="Integer"/>
+            <parameter name="employmentsPageMaxIndex" type="Integer"/>
+            <parameter name="employmentsPageRangeLow" type="Integer"/>
+            <parameter name="employmentsPageRangeHigh" type="Integer"/>
+            <parameter name="group" type="Map"/>
+            <parameter name="period" type="Map"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="employment" type="Map"><description>The employment asked for: days, timesheets, unresolvedDays, leave,
+                inputs, problems and notes</description></parameter>
+            <parameter name="canPrepare" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('getReconciliation', context)"/>
+            <set field="employments" from="found.employments"/>
+            <set field="employmentsCount" from="found.employmentsCount"/>
+            <set field="employmentsPageIndex" from="found.employmentsPageIndex"/>
+            <set field="employmentsPageSize" from="found.employmentsPageSize"/>
+            <set field="employmentsPageMaxIndex" from="found.employmentsPageMaxIndex"/>
+            <set field="employmentsPageRangeLow" from="found.employmentsPageRangeLow"/>
+            <set field="employmentsPageRangeHigh" from="found.employmentsPageRangeHigh"/>
+            <set field="group" from="found.group"/>
+            <set field="period" from="found.period"/>
+            <set field="counts" from="found.counts"/>
+            <set field="employment" from="found.employment"/>
+            <set field="canPrepare" from="found.canPrepare"/>
+        </actions>
+    </service>
+    <service verb="prepare" noun="Inputs" allow-remote="false">
+        <description>A pay group's period prepared (or previewed, which writes nothing and needs only PAYROLL_VIEW): for each
+            employment of it (or of partyRelationshipIds), in its own transaction under its lock, an approved input made once per
+            source entitlement: the worked hours of each day from the group's time basis alone (approved timesheets, or approved
+            attendance: a corrected day or a past day recorded with no flag; the working schedule records none), a time entry's
+            pieces, each working day of approved leave (paid or unpaid as its policy says, in the hours the schedule plans) and an
+            approved expense claim reserved for payroll; an input whose sources changed since (a rate, the hours, a cancelled
+            leave) voided and made again, one finalized left and said. Nothing is made for an employment something blocks: an
+            unapproved week (on the timesheet basis), unresolved attendance (on the attendance basis), a time entry on a worker
+            invoice, time of another employment no entry's employer settles, a claim that conflicts with its reservation, or a
+            source another input holds; each is named and the rest go on. With cutoffDate, an entitlement whose sources changed
+            after it waits for the next preparation. A retry, or preparing again, makes nothing twice. Refuses a caller without
+            PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED), another employer's group (RECORD_UNAVAILABLE), a period not of the
+            group (PERIOD_UNAVAILABLE) and a group ended before the period (GROUP_ENDED). Changes no money.</description>
+        <in-parameters>
+            <parameter name="payrollGroupId" required="true"/>
+            <parameter name="timePeriodId" required="true"/>
+            <parameter name="partyRelationshipIds"><description>Some of the group's employments, comma separated (a list too); all
+                when empty</description></parameter>
+            <parameter name="cutoffDate"/>
+            <parameter name="preview" type="Boolean" default="false"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rows" type="List"><description>partyRelationshipId, partyId, personName, outcome (ready, done,
+                repeated, blocked, refused), createdCount, keptCount, voidedCount, reasonCode, message</description></parameter>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="blockedCount" type="Integer"/>
+            <parameter name="period" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('prepareInputs', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="createdCount" from="found.createdCount"/>
+            <set field="blockedCount" from="found.blockedCount"/>
+            <set field="period" from="found.period"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Adjustment" allow-remote="false">
+        <description>A payroll editor's adjustment of an employment of an employer in scope, which waits for a People approval
+            of kind PakPayAdjustment: an amount of an earning or deduction component of the employer with a published term on the
+            date in the pay group's currency (PitAdjustment; recurring with recurThruDate, one dated input in each prepared period
+            through it, at most 24), a recovery of an employee advance's outstanding amount through a deduction
+            (PitAdvanceRecovery, employeeAdvanceId), or the hours or pieces of a day (PitWorked, PitPaidLeave, PitUnpaidLeave,
+            PitPieces, quantity: a worked day's hours are that day's entitlement, so its stream does not pay it again); with
+            correctionOfInputId, a difference to a finalized input of the employment (negative allowed). The date's period must be
+            prepared for the employment's primary pay group. A reason is required. With payrollInputId, a waiting adjustment
+            changed (amount or quantity, component, reason, evidence) and asked for again, or withdrawn (void, with a reason)
+            while not finalized, at its revision (expectedRevision). Refuses a caller without PAYROLL_VIEW and PAYROLL_EDIT
+            (PERMISSION_DENIED), another employer's employment, component or input (RECORD_UNAVAILABLE), TYPE_INVALID,
+            REASON_REQUIRED, DATE_OUTSIDE, NO_PAY_GROUP, PERIOD_NOT_PREPARED, KIND_INVALID, COMPONENT_ENDED,
+            COMPONENT_NOT_IN_EFFECT, CURRENCY_MISMATCH, AMOUNT_REQUIRED, AMOUNT_INVALID, QUANTITY_REQUIRED, QUANTITY_INVALID,
+            ENTITLEMENT_PAID (a day already prepared), AMOUNT_OVER_OUTSTANDING, RECURRENCE_INVALID, CORRECTION_INVALID,
+            NOT_ADJUSTMENT, NOT_PROPOSED, NOT_LIVE, INPUT_FINALIZED and REVISION_CHANGED. A retry with operationKey answers the
+            first. Changes no money.</description>
+        <in-parameters>
+            <parameter name="payrollInputId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="void" type="Boolean" default="false"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="inputTypeEnumId"/>
+            <parameter name="payrollComponentId"/>
+            <parameter name="inputDate"/>
+            <parameter name="amount"/>
+            <parameter name="quantity"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="recurThruDate"/>
+            <parameter name="employeeAdvanceId"/>
+            <parameter name="correctionOfInputId"/>
+            <parameter name="reason"/>
+            <parameter name="evidence"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollInputId"/>
+            <parameter name="statusId"/>
+            <parameter name="revision"/>
+            <parameter name="inputCount" type="Integer"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('storeAdjustment', context)"/>
+            <set field="payrollInputId" from="stored.payrollInputId"/>
+            <set field="statusId" from="stored.statusId"/>
+            <set field="revision" from="stored.revision"/>
+            <set field="inputCount" from="stored.inputCount"/>
+            <set field="repeated" from="stored.repeated"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Adjustments" allow-remote="false">
+        <description>The adjustments of the employers a payroll reader (PAYROLL_VIEW) reads, newest first, by employer, employment,
+            person's name (term), component, group, period or state, or those waiting for the caller's decision (show decide);
+            each with its type, component, date and period, quantity or amount, source (an advance, the input it corrects, its
+            evidence), state, reason, its series' place, its approval and what the caller may do (canDecide, canChange,
+            canWithdraw, canCorrect). Paged. Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED) and an employer outside the
+            scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="payrollComponentId"/>
+            <parameter name="payrollGroupId"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="statusId"/>
+            <parameter name="term"/>
+            <parameter name="show"><description>decide: those waiting for the caller's decision</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="adjustments" type="List"/>
+            <parameter name="adjustmentsCount" type="Integer"/>
+            <parameter name="adjustmentsPageIndex" type="Integer"/>
+            <parameter name="adjustmentsPageSize" type="Integer"/>
+            <parameter name="adjustmentsPageMaxIndex" type="Integer"/>
+            <parameter name="adjustmentsPageRangeLow" type="Integer"/>
+            <parameter name="adjustmentsPageRangeHigh" type="Integer"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('findAdjustments', context)"/>
+            <set field="adjustments" from="found.adjustments"/>
+            <set field="adjustmentsCount" from="found.adjustmentsCount"/>
+            <set field="adjustmentsPageIndex" from="found.adjustmentsPageIndex"/>
+            <set field="adjustmentsPageSize" from="found.adjustmentsPageSize"/>
+            <set field="adjustmentsPageMaxIndex" from="found.adjustmentsPageMaxIndex"/>
+            <set field="adjustmentsPageRangeLow" from="found.adjustmentsPageRangeLow"/>
+            <set field="adjustmentsPageRangeHigh" from="found.adjustmentsPageRangeHigh"/>
+            <set field="canEdit" from="found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="Adjustment" allow-remote="false">
+        <description>A decision of the waiting request of an adjustment (payrollInputId: any input of it), by an approver of its
+            step who reads payroll (PAYROLL_VIEW; with no rule the employer's payroll approvers, PAYROLL_APPROVE): approve, or
+            refuse with a reason, through PeopleApprovalServices.record#Decision at the revision asked (sourceRevision, from the
+            notice). The last approval approves every input of the adjustment; a refusal refuses them and frees their
+            entitlement. Refuses a caller without PAYROLL_VIEW (PERMISSION_DENIED), another employer's input
+            (RECORD_UNAVAILABLE), a prepared input (NOT_ADJUSTMENT), one who made or changed it or the person it pays
+            (SELF_APPROVAL), anyone else not an approver of the step (NOT_APPROVER), an adjustment changed since (SOURCE_CHANGED)
+            and a refusal with no reason (REASON_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="payrollInputId" required="true"/>
+            <parameter name="decision" default-value="approve"><description>approve or refuse</description></parameter>
+            <parameter name="reason"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="sourceRevision"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="payrollInputId"/>
+            <parameter name="peopleApprovalId"/>
+            <parameter name="statusId"/>
+            <parameter name="approved" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('decideAdjustment', context)"/>
+            <set field="payrollInputId" from="out.payrollInputId"/>
+            <set field="peopleApprovalId" from="out.peopleApprovalId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="approved" from="out.approved"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="Adjustment" allow-remote="false">
+        <description>The PeoplePayAdjustmentApproval topic's approve service (approve#NotificationMessage calls it as the user):
+            decide#Adjustment approve at the input and revision in the message; refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('approveNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="Adjustment" allow-remote="false">
+        <description>The PeoplePayAdjustmentApproval topic's refuse service (refuse#NotificationMessage calls it as the user, with
+            the reason): decide#Adjustment refuse at the input and revision in the message; refuses a notice of another record
+            (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/><parameter name="repeated" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('refuseNotice', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="repeated" from="out.repeated"/>
+        </actions>
+    </service>
+
+    <!-- the source guards (owner contracts, impl-people P24, F44): Mantle's own writers call these with authorization off after
+        their own checks; they answer no amount -->
+    <service verb="check" noun="SourceUse" allow-remote="false">
+        <description>Of the source records named (sourceEntityName and sourceIdList: time entries, attendance days, leave requests,
+            expense claims), those a live pay input consumed and those a finalized one did. For Mantle's writers: a worker invoice
+            (InvoiceServices create#TimeEntryInvoiceItems with RaprVendor) refuses a consumed time entry, and a timesheet whose
+            entries a finalized input paid is not reopened (TimesheetServices get#TimesheetAccess).</description>
+        <in-parameters>
+            <parameter name="sourceEntityName" required="true"/>
+            <parameter name="sourceIdList" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="consumedIdList" type="List"/>
+            <parameter name="finalizedIdList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('checkSourceUse', context)"/>
+            <set field="consumedIdList" from="found.consumedIds"/>
+            <set field="finalizedIdList" from="found.finalizedIds"/>
+        </actions>
+    </service>
+    <service verb="release" noun="Sources" allow-remote="false">
+        <description>A change of source records a pay input consumed (an authorized change of a time entry's rate or hours, its
+            removal, a reopened week, a payroll claim's reservation released): refused when a finalized input paid one
+            (PAY_FINALIZED: a correction pays a difference); an input not finalized is voided with the reason and its
+            entitlement and sources freed, so the next preparation reads them again (a payroll approval of what it read is no
+            longer good). For Mantle's writers, called after their own checks.</description>
+        <in-parameters>
+            <parameter name="sourceEntityName" required="true"/>
+            <parameter name="sourceIdList" type="List" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="voidedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayInputs.js').execute('releaseSources', context)"/>
+            <set field="voidedCount" from="out.voidedCount"/>
+        </actions>
+    </service>
+</services>

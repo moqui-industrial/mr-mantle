@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<entity-facade-xml type="seed-initial">
+    <!-- impl-people P24 (design-people §8 PayAdjustments, §12 ApprovalPolicies): a payroll editor's adjustment of an employment
+        (PayrollInputServices store#Adjustment: an amount of a component, an advance's recovery, or a day's hours payroll resolves)
+        waits for a People approval of kind PakPayAdjustment, sent to the approvers of the step waiting: the employer's payroll
+        approvers (PAYROLL_APPROVE, reading payroll) unless a rule says otherwise; never one who made or changed it, nor the person
+        it pays; with none it waits. approve#NotificationMessage and refuse#NotificationMessage call the topic's approve and refuse
+        services as the user, which decide it at the revision in the message (PayrollInputServices decide#Adjustment over
+        PeopleApprovalServices.record#Decision): the last approval approves its inputs, a refusal (its reason required) refuses
+        them. The message holds peopleApprovalId, sourceRevision, payrollInputId, subjectText ("a pay adjustment"),
+        organizationName and stepText: never a person, an amount or a component. The app that shows them sets the link
+        (IronStone People: BossSetupData.xml). -->
+    <moqui.basic.Enumeration enumId="PakPayAdjustment" description="Pay adjustment" sequenceNum="11" enumTypeId="PeopleApprovalKind"/>
+    <moqui.security.user.NotificationTopic topic="PeoplePayAdjustmentApproval" inboxEnumId="NinNotifications"
+            description="Pay adjustments to approve" typeString="info" showAlert="Y" persistOnSend="Y"
+            receiveNotifications="Y" isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.humanres.PayrollInputServices.approve#Adjustment"
+            refuseServiceName="mantle.humanres.PayrollInputServices.refuse#Adjustment" refuseReasonRequired="Y"
+            titleTemplate="Approve ${subjectText} (${organizationName}, ${stepText})"/>
+</entity-facade-xml>
