@@ -158,6 +158,7 @@ Grant of Patent License.
                 }
 
                 const lines = [];
+                const seqToLineNum = {};
                 const vatSummary = {};
                 let totalWithholding = 0;
                 let withholdingType = null;
@@ -165,12 +166,31 @@ Grant of Patent License.
                 let withholdingReason = 'A';
                 let lineSeq = 1;
 
+                const resolveNatureCode = (raw) => {
+                    if (!raw) return '';
+                    if (/^N[1-7](\.[0-9])?$/.test(raw)) return raw;
+                    const enumRec = ec.entity.find('moqui.basic.Enumeration').condition('enumId', raw).useCache(true).one();
+                    return enumRec?.enumCode || raw;
+                };
+                const resolveCountryAlpha2 = (geoId) => {
+                    if (!geoId || geoId === 'ITA') return 'IT';
+                    const geoRec = ec.entity.find('moqui.basic.Geo').condition('geoId', geoId).useCache(true).one();
+                    return geoRec?.geoCodeAlpha2 || (geoId.length === 2 ? geoId : 'IT');
+                };
+                const resolveProvinceCode = (geoId) => {
+                    if (!geoId) return '';
+                    const geoRec = ec.entity.find('moqui.basic.Geo').condition('geoId', geoId).useCache(true).one();
+                    if (geoRec?.geoCodeAlpha2) return geoRec.geoCodeAlpha2.slice(0, 2);
+                    return geoId.replace(/^ITA_/, '').slice(0, 2);
+                };
+                defaultNature = resolveNatureCode(defaultNature);
+
                 for (const item of goodsItems) {
                     const qty = toNum(item.quantity) || 1;
                     const price = toNum(item.amount) || 0;
                     const lineTotal = toNum(item.lineTotal) || (qty * price);
                     let rate = item.taxPercentage != null ? toNum(item.taxPercentage) : defaultTaxRate;
-                    let nature = item.vatNatureEnumId || (rate === 0 ? (defaultNature || 'N4') : '');
+                    let nature = resolveNatureCode(item.vatNatureEnumId) || (rate === 0 ? (defaultNature || 'N4') : '');
 
                     if (item.withholdingTaxTypeEnumId) {
                         withholdingType = item.withholdingTaxTypeEnumId;
@@ -179,10 +199,22 @@ Grant of Patent License.
                         totalWithholding += (lineTotal * withholdingRate / 100);
                     }
 
+                    const curLineNum = lineSeq++;
+                    seqToLineNum[item.invoiceItemSeqId] = curLineNum;
+                    let uomCode = '';
+                    if (item.quantityUomId) {
+                        if (item.quantityUomId === 'OTH_ea') uomCode = 'PZ';
+                        else {
+                            const uomRec = ec.entity.find('moqui.basic.Uom').condition('uomId', item.quantityUomId).useCache(true).one();
+                            uomCode = uomRec?.abbreviation || item.quantityUomId;
+                        }
+                    }
+
                     lines.push({
-                        lineNum: lineSeq++,
+                        lineNum: curLineNum,
                         desc: item.description || ('Item ' + item.invoiceItemSeqId),
                         qty: qty,
+                        uom: uomCode,
                         price: price,
                         lineTotal: lineTotal,
                         vatRate: rate,
@@ -273,34 +305,34 @@ Grant of Patent License.
                 xml += '        </Anagrafica>\n';
                 xml += '        <RegimeFiscale>RF01</RegimeFiscale>\n';
                 xml += '      </DatiAnagrafici>\n';
+                const fromCountry = resolveCountryAlpha2(fromAddr.countryGeoId);
+                const fromProv = resolveProvinceCode(fromAddr.stateProvinceGeoId);
                 xml += '      <Sede>\n';
-                xml += '        <Indirizzo>' + escapeXml(fromAddr.address1 || 'Via Principale 1') + '</Indirizzo>\n';
-                xml += '        <CAP>' + escapeXml(fromAddr.postalCode || '20100') + '</CAP>\n';
-                xml += '        <Comune>' + escapeXml(fromAddr.city || 'Milano') + '</Comune>\n';
-                if (fromAddr.stateProvinceGeoId) {
-                    xml += '        <Provincia>' + escapeXml(fromAddr.stateProvinceGeoId.replace(/^ITA_/,'').slice(0,2)) + '</Provincia>\n';
-                } else {
-                    xml += '        <Provincia>MI</Provincia>\n';
+                xml += '        <Indirizzo>' + escapeXml(fromAddr.address1 || '-') + '</Indirizzo>\n';
+                xml += '        <CAP>' + escapeXml(fromAddr.postalCode || '00000') + '</CAP>\n';
+                xml += '        <Comune>' + escapeXml(fromAddr.city || '-') + '</Comune>\n';
+                if (fromProv) {
+                    xml += '        <Provincia>' + escapeXml(fromProv) + '</Provincia>\n';
                 }
-                xml += '        <Nazione>IT</Nazione>\n';
+                xml += '        <Nazione>' + escapeXml(fromCountry) + '</Nazione>\n';
                 xml += '      </Sede>\n';
                 if (fromRea) {
                     xml += '      <IscrizioneREA>\n';
                     xml += '        <Ufficio>' + escapeXml(fromRea.split('-')[0] || 'MI') + '</Ufficio>\n';
                     xml += '        <NumeroREA>' + escapeXml(fromRea.split('-')[1] || fromRea) + '</NumeroREA>\n';
-                    xml += '        <CapitaleSociale>50000.00</CapitaleSociale>\n';
-                    xml += '        <SocioUnico>SM</SocioUnico>\n';
                     xml += '        <StatoLiquidazione>LN</StatoLiquidazione>\n';
                     xml += '      </IscrizioneREA>\n';
                 }
                 xml += '    </CedentePrestatore>\n';
 
                 // CessionarioCommittente
+                const toCountry = resolveCountryAlpha2(toAddr.countryGeoId);
+                const toProv = resolveProvinceCode(toAddr.stateProvinceGeoId);
                 xml += '    <CessionarioCommittente>\n';
                 xml += '      <DatiAnagrafici>\n';
                 if (toVat) {
                     xml += '        <IdFiscaleIVA>\n';
-                    xml += '          <IdPaese>IT</IdPaese>\n';
+                    xml += '          <IdPaese>' + escapeXml(toCountry) + '</IdPaese>\n';
                     xml += '          <IdCodice>' + escapeXml(toVat) + '</IdCodice>\n';
                     xml += '        </IdFiscaleIVA>\n';
                 }
@@ -312,15 +344,13 @@ Grant of Patent License.
                 xml += '        </Anagrafica>\n';
                 xml += '      </DatiAnagrafici>\n';
                 xml += '      <Sede>\n';
-                xml += '        <Indirizzo>' + escapeXml(toAddr.address1 || 'Piazza Garibaldi 10') + '</Indirizzo>\n';
-                xml += '        <CAP>' + escapeXml(toAddr.postalCode || '00100') + '</CAP>\n';
-                xml += '        <Comune>' + escapeXml(toAddr.city || 'Roma') + '</Comune>\n';
-                if (toAddr.stateProvinceGeoId) {
-                    xml += '        <Provincia>' + escapeXml(toAddr.stateProvinceGeoId.replace(/^ITA_/,'').slice(0,2)) + '</Provincia>\n';
-                } else {
-                    xml += '        <Provincia>RM</Provincia>\n';
+                xml += '        <Indirizzo>' + escapeXml(toAddr.address1 || '-') + '</Indirizzo>\n';
+                xml += '        <CAP>' + escapeXml(toAddr.postalCode || '00000') + '</CAP>\n';
+                xml += '        <Comune>' + escapeXml(toAddr.city || '-') + '</Comune>\n';
+                if (toProv) {
+                    xml += '        <Provincia>' + escapeXml(toProv) + '</Provincia>\n';
                 }
-                xml += '        <Nazione>IT</Nazione>\n';
+                xml += '        <Nazione>' + escapeXml(toCountry) + '</Nazione>\n';
                 xml += '      </Sede>\n';
                 xml += '    </CessionarioCommittente>\n';
                 xml += '  </FatturaElettronicaHeader>\n';
@@ -363,7 +393,10 @@ Grant of Patent License.
                         xml += '        <NumeroDDT>' + escapeXml(ship.trackingNumber || ship.shipmentId) + '</NumeroDDT>\n';
                         xml += '        <DataDDT>' + ddtDateStr + '</DataDDT>\n';
                         for (const lineSeq of ddtMap[shipId]) {
-                            xml += '        <RiferimentoNumeroLinea>' + escapeXml(lineSeq) + '</RiferimentoNumeroLinea>\n';
+                            const mappedLineNum = seqToLineNum[lineSeq];
+                            if (mappedLineNum != null) {
+                                xml += '        <RiferimentoNumeroLinea>' + mappedLineNum + '</RiferimentoNumeroLinea>\n';
+                            }
                         }
                         xml += '      </DatiDDT>\n';
                     }
@@ -378,7 +411,9 @@ Grant of Patent License.
                     xml += '        <NumeroLinea>' + l.lineNum + '</NumeroLinea>\n';
                     xml += '        <Descrizione>' + escapeXml(l.desc) + '</Descrizione>\n';
                     xml += '        <Quantita>' + format2(l.qty) + '</Quantita>\n';
-                    xml += '        <UnitaMisura>PZ</UnitaMisura>\n';
+                    if (l.uom) {
+                        xml += '        <UnitaMisura>' + escapeXml(l.uom) + '</UnitaMisura>\n';
+                    }
                     xml += '        <PrezzoUnitario>' + format2(l.price) + '</PrezzoUnitario>\n';
                     xml += '        <PrezzoTotale>' + format2(l.lineTotal) + '</PrezzoTotale>\n';
                     xml += '        <AliquotaIVA>' + format2(l.vatRate) + '</AliquotaIVA>\n';
