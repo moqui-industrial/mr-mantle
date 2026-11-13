@@ -417,7 +417,7 @@ Grant of Patent License.
 
                     for (const item of items) {
                         const amt = (Number(item.amount) || 0) * (Number(item.quantity) || 1);
-                        if (item.itemTypeEnumId === 'ItemVatTax' || item.itemTypeEnumId === 'ItemSalesTax') {
+                        if (['ItemVatTax', 'ItemVatTaxTotal', 'ItemSalesTax', 'ItemTax'].includes(item.itemTypeEnumId)) {
                             docTax += amt;
                         } else {
                             docTaxable += amt;
@@ -430,7 +430,7 @@ Grant of Patent License.
                     const rateKey = '22%';
 
                     if (!rateSummaryMap[rateKey]) {
-                        rateSummaryMap[rateKey] = { rateDescription: 'Aliquota Ordinaria 22%', taxPercentage: 22.0, taxableAmount: 0, taxAmount: 0, deductibleAmount: 0, nonDeductibleAmount: 0 };
+                        rateSummaryMap[rateKey] = { rateDescription: 'Standard Rate 22%', taxPercentage: 22.0, taxableAmount: 0, taxAmount: 0, deductibleAmount: 0, nonDeductibleAmount: 0 };
                     }
                     rateSummaryMap[rateKey].taxableAmount += docTaxable;
                     rateSummaryMap[rateKey].taxAmount += effectiveTax;

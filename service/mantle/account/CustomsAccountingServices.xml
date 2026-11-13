@@ -36,23 +36,22 @@ Grant of Patent License.
             <parameter name="vatProtocolNum"/>
         </out-parameters>
         <actions>
-            <entity-make-value entity-name="mantle.shipment.customs.CustomsDeclaration" value-field="decl"/>
-            <entity-set-pk entity-field="decl" value-field="decl"/>
-            <set field="decl.mrn" from="mrn"/>
-            <set field="decl.organizationPartyId" from="organizationPartyId"/>
-            <set field="decl.customsOfficeId" from="customsOfficeId"/>
-            <set field="decl.declarationDate" from="declarationDate"/>
-            <set field="decl.declarationTypeEnumId" from="declarationTypeEnumId"/>
-            <set field="decl.customsBrokerPartyId" from="customsBrokerPartyId"/>
-            <set field="decl.foreignSupplierPartyId" from="foreignSupplierPartyId"/>
-            <set field="decl.customsTaxableValue" from="customsTaxableValue"/>
-            <set field="decl.dutyAmount" from="dutyAmount"/>
-            <set field="decl.importVatAmount" from="importVatAmount"/>
-            <set field="decl.otherChargesAmount" from="otherChargesAmount"/>
-            <set field="decl.brokerInvoiceId" from="brokerInvoiceId"/>
-            <set field="decl.statusId" value="CustDeclDraft"/>
-            <entity-create value-field="decl"/>
-            <set field="customsDeclarationId" from="decl.customsDeclarationId"/>
+            <service-call name="create#mantle.shipment.customs.CustomsDeclaration" out-map="declOut" in-map="{
+                mrn: mrn,
+                organizationPartyId: organizationPartyId,
+                customsOfficeId: customsOfficeId,
+                declarationDate: declarationDate,
+                declarationTypeEnumId: declarationTypeEnumId,
+                customsBrokerPartyId: customsBrokerPartyId,
+                foreignSupplierPartyId: foreignSupplierPartyId,
+                customsTaxableValue: customsTaxableValue,
+                dutyAmount: dutyAmount,
+                importVatAmount: importVatAmount,
+                otherChargesAmount: otherChargesAmount,
+                brokerInvoiceId: brokerInvoiceId,
+                statusId: 'CustDeclDraft'
+            }"/>
+            <set field="customsDeclarationId" from="declOut.customsDeclarationId"/>
 
             <!-- Generate Purchase VAT registration for Import VAT -->
             <script><![CDATA[
@@ -101,9 +100,11 @@ Grant of Patent License.
                 vatRegisterSeries: vatRegisterSeries
             }"/>
 
-            <set field="decl.vatRegisterInvoiceId" from="vatRegisterInvoiceId"/>
-            <set field="decl.statusId" value="CustDeclRegistered"/>
-            <entity-update value-field="decl"/>
+            <service-call name="update#mantle.shipment.customs.CustomsDeclaration" in-map="{
+                customsDeclarationId: customsDeclarationId,
+                vatRegisterInvoiceId: vatRegisterInvoiceId,
+                statusId: 'CustDeclRegistered'
+            }"/>
         </actions>
     </service>
 </services>

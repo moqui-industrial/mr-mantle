@@ -454,16 +454,15 @@ Grant of Patent License.
         </out-parameters>
         <actions>
             <set field="notifDate" from="notificationDate || ec.user.nowTimestamp"/>
-            <entity-make-value entity-name="mantle.account.invoice.SdiNotification" value-field="notif"/>
-            <entity-set-pk entity-field="notif" value-field="notif"/>
-            <set field="notif.invoiceId" from="invoiceId"/>
-            <set field="notif.notificationTypeEnumId" from="notificationTypeEnumId"/>
-            <set field="notif.notificationDate" from="notifDate"/>
-            <set field="notif.sdiIdent" from="sdiIdent"/>
-            <set field="notif.fileLocation" from="fileLocation"/>
-            <set field="notif.description" from="description"/>
-            <entity-create value-field="notif"/>
-            <set field="sdiNotificationId" from="notif.sdiNotificationId"/>
+            <service-call name="create#mantle.account.invoice.SdiNotification" out-map="notifOut" in-map="{
+                invoiceId: invoiceId,
+                notificationTypeEnumId: notificationTypeEnumId,
+                notificationDate: notifDate,
+                sdiIdent: sdiIdent,
+                fileLocation: fileLocation,
+                description: description
+            }"/>
+            <set field="sdiNotificationId" from="notifOut.sdiNotificationId"/>
 
             <!-- Map notification to Invoice status -->
             <script><![CDATA[
