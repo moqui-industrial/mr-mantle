@@ -1,9 +1,11 @@
 // Sales' leads and opportunities (impl-sales P4; design-sales §3, §1.1; mantle/sales/SalesOpportunities.js, SalesAccess.js
 // opportunityOf): a representative finds their own and their team's deals and not another team's, a manager the organization's,
-// and ending a membership ends the team's deals; another organization's deal answers as missing; a stale move is refused naming
-// the stamp, and a manual probability is kept across a move; Lost needs a reason, and a reopen keeps the close history; a batch
-// names the stale deal and moves the rest. Standalone: spec-local organizations, teams, users and records; the users' services run
-// with artifact authorization on under a spec grant of the sales services, as an app root's grant gives them.
+// the totals count only the deals the reader sees, and ending a membership ends the team's deals; another organization's deal
+// answers as missing; with no organization named, a new deal and the board are for the one of the scope the rep works for; a stale
+// move is refused naming the stamp, a competitor's change advances the revision, and a manual probability is kept across a move;
+// Lost needs a reason, and a reopen keeps the close history; a batch names the stale deal and moves the rest. Standalone:
+// spec-local organizations, teams, users and records; the users' services run with artifact authorization on under a spec grant
+// of the sales services, as an app root's grant gives them.
 // Run: ./moq test mr-mantle --spec SalesOpportunities
 const prefix = "SOP"
 const orgA = prefix + "_ORG_A",
@@ -135,6 +137,20 @@ spec({
         system(() => {
             organization(orgA, "Deals A")
             organization(orgB, "Deals B")
+            // a rollup child of A, in the scope of A's people, who do not work for it (as a returns center under Retail): a new deal
+            // and the board default to A, the one organization of the scope they work for
+            organization(prefix + "_ORG_A_CHILD", "Deals A child")
+            make("mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtOrgRollup",
+                fromPartyId: prefix + "_ORG_A_CHILD",
+                fromRoleTypeId: "OrgInternal",
+                toPartyId: orgA,
+                toRoleTypeId: "OrgInternal",
+                fromDate: 0
+            })
+            // a competitor any scope may see
+            make("mantle.party.Party", {partyId: prefix + "_RIVAL", partyTypeEnumId: "PtyOrganization", ownerPartyId: "_NA_"})
+            make("mantle.party.Organization", {partyId: prefix + "_RIVAL", organizationName: "Deals rival"})
             make("moqui.security.UserGroup", {userGroupId: prefix + "_GRANT", description: "Deals spec grant"})
             make("moqui.security.ArtifactGroup", {artifactGroupId: prefix + "_SERVICES", description: "Deals spec services"})
             make("moqui.security.ArtifactGroupMember", {
@@ -166,7 +182,9 @@ spec({
         // each rep's deal, on their team (the owner's only team), and a deal of B
         deals.rep = as(users.rep, "create#Opportunity", {
             organizationPartyId: orgA,
-            opportunityName: "Rep's deal"
+            opportunityName: "Rep's deal",
+            estimatedAmount: "100",
+            currencyUomId: "USD"
         }).salesOpportunityId
         deals.mate = as(users.mate, "create#Opportunity", {
             organizationPartyId: orgA,
@@ -174,7 +192,9 @@ spec({
         }).salesOpportunityId
         deals.other = as(users.other, "create#Opportunity", {
             organizationPartyId: orgA,
-            opportunityName: "Other's deal"
+            opportunityName: "Other's deal",
+            estimatedAmount: "1000",
+            currencyUomId: "USD"
         }).salesOpportunityId
         deals.b = as(users.repB, "create#Opportunity", {
             organizationPartyId: orgB,
@@ -185,7 +205,17 @@ spec({
 
 feature("a rep finds their own and their team's deals, not another team's or organization's; a manager the organization's", {
     when() {
-        const find = username => idsOf(as(username, "find#Opportunities", {pageSize: 100}))
+        const found = {
+            rep: as(users.rep, "find#Opportunities", {pageSize: 100}),
+            manager: as(users.manager, "find#Opportunities", {pageSize: 100})
+        }
+        const find = username => idsOf(found[username === users.rep ? "rep" : "manager"])
+        const usd = which => Array.from(found[which].totals || []).find(total => total.currencyUomId === "USD")
+        // no organization named: the one of the scope the rep works for (A, not its rollup child), for a new deal and the board
+        const defaulted = as(users.rep, "create#Opportunity", {opportunityName: "Defaulted deal", typeEnumId: "SotLead"})
+        const defaultedRow = system(() =>
+            one("mantle.sales.opportunity.SalesOpportunity", {salesOpportunityId: defaulted.salesOpportunityId || "_NA_"})
+        )
         const created = system(() => one("mantle.sales.opportunity.SalesOpportunity", {salesOpportunityId: deals.rep}))
         const parties = system(() => rowsOf("mantle.sales.opportunity.SalesOpportunityParty", {salesOpportunityId: deals.rep}))
         return {
@@ -204,7 +234,12 @@ feature("a rep finds their own and their team's deals, not another team's or org
             access: as(users.other, "check#OpportunityAccess", {salesOpportunityId: deals.rep}).recordVisible,
             // get#RecordLinkInfo's rule holds whatever the authorization: asked as the other team's rep with it off
             linkInfo: linkVisible(users.other, deals.rep),
-            ownLink: linkVisible(users.rep, deals.rep)
+            ownLink: linkVisible(users.rep, deals.rep),
+            // the totals count only the deals the reader sees
+            repTotal: usd("rep"),
+            managerTotal: usd("manager"),
+            defaulted: defaulted.refused || defaultedRow?.organizationPartyId,
+            boardColumns: Array.from(found.rep.stageColumns || []).length
         }
     },
     then(r) {
@@ -228,6 +263,10 @@ feature("a rep finds their own and their team's deals, not another team's or org
         r.access == false
         r.linkInfo == false
         r.ownLink == true
+        Number(String(r.repTotal.amount)) == 100 && r.repTotal.count == 1
+        Number(String(r.managerTotal.amount)) == 1100 && r.managerTotal.count == 2
+        r.defaulted == orgA
+        r.boardColumns > 0
     }
 })
 
@@ -284,6 +323,18 @@ feature("a stale move is refused naming the stamp; a manual probability is kept 
             expectedRevision: revision(users.rep, deals.rep)
         }).refused
         const afterStage = system(() => one("mantle.sales.opportunity.SalesOpportunity", {salesOpportunityId: deals.rep}))
+        // a competitor's change advances the deal's revision: a write at the revision read before it is stale
+        const beforeRival = revision(users.rep, deals.rep)
+        const rival = as(users.rep, "store#Competitor", {
+            salesOpportunityId: deals.rep,
+            competitorPartyId: prefix + "_RIVAL",
+            expectedRevision: beforeRival
+        }).refused
+        const afterRival = as(users.rep, "move#Opportunity", {
+            salesOpportunityId: deals.rep,
+            opportunityStageId: "SalesNegotiation",
+            expectedRevision: beforeRival
+        }).refused
         const audit = system(() =>
             rowsOf("moqui.entity.EntityAuditLog", {
                 changedEntityName: "mantle.sales.opportunity.SalesOpportunity",
@@ -291,7 +342,7 @@ feature("a stale move is refused naming the stamp; a manual probability is kept 
                 pkPrimaryValue: deals.rep
             }).map(row => row.changeReason)
         )
-        return {read, stale, manual, moved, afterMove, otherPipeline, staged, afterStage, audit}
+        return {read, stale, manual, moved, afterMove, otherPipeline, staged, afterStage, audit, rival, afterRival}
     },
     then(r) {
         r.stale.includes("REVISION_CHANGED")
@@ -306,6 +357,8 @@ feature("a stale move is refused naming the stamp; a manual probability is kept 
         r.afterStage.probabilityModeEnumId == "SpmStage"
         Number(String(r.afterStage.estimatedProbability)) == 50
         r.audit.includes("Call booked")
+        r.rival == ""
+        r.afterRival.includes("REVISION_CHANGED")
     }
 })
 

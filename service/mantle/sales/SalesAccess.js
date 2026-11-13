@@ -167,13 +167,32 @@ function contactAccounts(userScope, partyId) {
     }
     return accounts
 }
-// The organization an account write is for: the one named, which must be in the scope, else the active one, else the scope's
-// only one. Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
+// The organization a new record is for when none is named: the active one, else the scope's only one, else the only one of the
+// scope the caller works for themselves (an agent or employee: a representative of Retail whose scope also holds Retail's rollup
+// children, P4 review); null when that leaves a choice.
+function defaultOrganization(userScope) {
+    if (userScope.activeOrganizationPartyId) return userScope.activeOrganizationPartyId
+    const ids = userScope.organizationPartyIds
+    if (ids?.length === 1) return ids[0]
+    if ((ids != null && !ids.length) || !userScope.partyId) return null
+    let query = lib
+        .find("mantle.party.PartyRelationship")
+        .condition("fromPartyId", userScope.partyId)
+        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .selectField("toPartyId")
+    if (ids != null) query = query.condition("toPartyId", "in", Array.from(ids))
+    const own = Array.from(new Set(Array.from(query.list()).map(row => row.toPartyId))).filter(
+        partyId => ids != null || isInternal(partyId)
+    )
+    return own.length === 1 ? own[0] : null
+}
+// The organization an account write is for: the one named, which must be in the scope, else the default one (defaultOrganization).
+// Refuses a caller without SALES_ACCOUNT_EDIT (PERMISSION_DENIED) and an organization outside the scope or none chosen
 // (ORGANIZATION_DENIED).
 function accountOrganization(userScope, organizationPartyId) {
     requireCapability(userScope, "accountEdit")
-    let chosen = organizationPartyId || userScope.activeOrganizationPartyId
-    if (!chosen && userScope.organizationPartyIds?.length === 1) chosen = userScope.organizationPartyIds[0]
+    const chosen = organizationPartyId || defaultOrganization(userScope)
     if (!chosen) denied("ORGANIZATION_DENIED", "Choose the organization the account belongs to")
     if (!isInternal(chosen)) denied("ORGANIZATION_DENIED", "Organization " + chosen + " is not available")
     return requireOrganization(userScope, chosen)
@@ -291,6 +310,7 @@ function requireOpportunity(userScope, salesOpportunityId, edit = false) {
     covers,
     requireCapability,
     requireOrganization,
+    defaultOrganization,
     reportOrganizations,
     // P3: accounts and contacts
     accountRoles,

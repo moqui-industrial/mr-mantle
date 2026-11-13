@@ -266,7 +266,8 @@ along with this software (see the LICENSE.md file). If not, see
             team, pipeline and stage, outcome (SalesOppOpen: not Won or Lost; closed; a status), close period, account, source and
             campaign, and text (name or id, ignoring case), paged in the query. Each row's names, stage, owner, team, source, next
             activity, stage age and revision (selectionKey: id@revision, for a batch); the totals of the whole filtered result by
-            currency; the board's stage columns (the pipeline asked, else the organization's default, empty stages too). Needs a
+            currency; the board's stage columns (the pipeline asked, when shared or of the scope, else the default organization's default pipeline,
+            empty stages too). Needs a
             Sales read (PERMISSION_DENIED); an organization outside the scope is refused (ORGANIZATION_DENIED). An account the
             caller may not see is named nowhere.</description>
         <in-parameters>
@@ -355,7 +356,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="Opportunity" allow-remote="false">
         <description>A lead (typeEnumId SotLead: no account or stage needed) or an opportunity (SotOpportunity, the default: a
             current stage of its pipeline, the first by default; the pipeline one the organization uses, its default by default) of
-            an organization of the caller's scope (the one named, else the active or only one; ORGANIZATION_DENIED), with a name
+            an organization of the caller's scope (the one named, else the active one, the scope's only one or the only one of it the caller
+            works for; ORGANIZATION_DENIED), with a name
             (NAME_REQUIRED), an optional account of the organization or shared (another organization's RECORD_UNAVAILABLE) and
             contact (a person the caller may see), an owner (the caller by default; a person who works for the organization,
             OWNER_INVALID; another than the caller a member of one of their teams unless SALES_TEAM_MANAGE) and team (a current
@@ -526,7 +528,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="Competitor" allow-remote="false">
         <description>A competitor on a deal (an organization the caller may see, not internal: COMPETITOR_INVALID), its position (a
-            SalesCompetitorPosition), strengths and weaknesses; remove takes it off. Names the deal's revision read. Needs
+            SalesCompetitorPosition), strengths and weaknesses; remove takes it off. Names the deal's revision read, which the competitor
+            rows are part of, so the change advances it. Needs
             SALES_OPPORTUNITY_EDIT on a deal the caller sees.</description>
         <in-parameters>
             <parameter name="salesOpportunityId" required="true"/>

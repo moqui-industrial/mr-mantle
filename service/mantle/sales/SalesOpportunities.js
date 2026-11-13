@@ -12,8 +12,8 @@
 // - Access (SalesAccess.js opportunityOf): a Sales reader of the organization sees the deals assigned to them or a team of theirs,
 //   a holder of SALES_TEAM_VIEW the organization's; an edit needs SALES_OPPORTUNITY_EDIT on a deal they see. Every party, account,
 //   pipeline, stage, team, source and reason given is checked, never trusted; a deal outside the scope answers RECORD_UNAVAILABLE.
-// - Every write of an existing deal names the revision it read (expectedRevision: the latest stamp of the deal and its party rows,
-//   REVISION_CHANGED naming the current one); qualification carries an operation key, so a retry answers the first result
+// - Every write of an existing deal names the revision it read (expectedRevision: the latest stamp of the deal and its party and
+//   competitor rows, REVISION_CHANGED naming the current one); qualification carries an operation key, so a retry answers the first result
 //   (PostingOperation, EntityLib.js operation); a batch runs each deal on its own and names each failure.
 // - Collaboration: files are SalesOpportunityContent rows (create#OpportunityContent); activities are Commons tasks linked by
 //   link#WorkEffortRecord, which writes SalesOpportunityWorkEffort, the opportunity's own join (get#RecordLinkInfo).
@@ -56,11 +56,16 @@ const isOpen = row => !closedStatuses.includes(row.statusId)
 const current = (row, at = nowMs()) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 
 // ===== revisions =====
-// A deal's revision: the latest stamp of the deal and its party rows, so a change of its people is a change of the deal.
-function revisionOf(opportunity, partyRows = null) {
-    const parties = partyRows || rows(OPPORTUNITY_PARTY, {salesOpportunityId: opportunity.salesOpportunityId})
+// A deal's revision: the latest stamp of the deal, its party rows and its competitor rows, so a change of its people or its
+// competitors is a change of the deal (P4 review: store#Competitor advances it).
+function revisionOf(opportunity, partyRows = null, competitorRows = null) {
+    const salesOpportunityId = opportunity.salesOpportunityId
+    const parties = partyRows || rows(OPPORTUNITY_PARTY, {salesOpportunityId})
+    const competitors = competitorRows || rows(COMPETITOR, {salesOpportunityId})
     return String(
-        parties.reduce((max, row) => Math.max(max, ms(row.lastUpdatedStamp) ?? 0), ms(opportunity.lastUpdatedStamp) ?? 0)
+        parties
+            .concat(competitors)
+            .reduce((max, row) => Math.max(max, ms(row.lastUpdatedStamp) ?? 0), ms(opportunity.lastUpdatedStamp) ?? 0)
     )
 }
 function requireRevision(opportunity, expected) {
@@ -74,13 +79,12 @@ function signedIn() {
     if (!ec.user.userId) denied("PERMISSION_DENIED", "Sign in to work with leads and opportunities")
     return salesAccess.scope()
 }
-// The organization a new deal is for: the one named, which must be in the caller's scope, else the active one, else the scope's only
-// one. Needs SALES_OPPORTUNITY_EDIT.
+// The organization a new deal is for: the one named, which must be in the caller's scope, else the default one (the active one, the
+// scope's only one, or the only one the caller works for: SalesAccess.js defaultOrganization). Needs SALES_OPPORTUNITY_EDIT.
 function organizationFor(userScope, organizationPartyId) {
     salesAccess.requireCapability(userScope, "opportunityEdit")
     salesAccess.requireCapability(userScope, "anyRead")
-    let chosen = text(organizationPartyId) || userScope.activeOrganizationPartyId
-    if (!chosen && userScope.organizationPartyIds?.length === 1) chosen = userScope.organizationPartyIds[0]
+    const chosen = text(organizationPartyId) || salesAccess.defaultOrganization(userScope)
     if (!chosen) denied("ORGANIZATION_DENIED", "Choose the organization the deal is for")
     if (!salesAccess.isInternal(chosen)) denied("ORGANIZATION_DENIED", "Organization " + chosen + " is not available")
     return salesAccess.requireOrganization(userScope, chosen)
@@ -560,7 +564,7 @@ function storeOpportunityParty(p) {
 
 // ===== store#Competitor =====
 // A competitor on the deal (an organization the caller may see, not internal), its position, strengths and weaknesses; remove
-// takes it off. At the deal's revision.
+// takes it off. At the deal's revision, which the competitor rows are part of, so the change advances it (P4 review).
 function storeCompetitor(p) {
     const userScope = signedIn()
     const opportunity = editable(userScope, p, false)
@@ -678,11 +682,17 @@ function nextActivities(ids) {
     }
     return out
 }
-// The organization the board's columns are for: the one asked, else the active one, else the scope's only one.
+// The organization the board's columns are for: the one asked, else the default one (SalesAccess.js defaultOrganization).
 function boardOrganization(userScope, organizationPartyId) {
-    if (organizationPartyId) return organizationPartyId
-    if (userScope.activeOrganizationPartyId) return userScope.activeOrganizationPartyId
-    return userScope.organizationPartyIds?.length === 1 ? userScope.organizationPartyIds[0] : null
+    return organizationPartyId || salesAccess.defaultOrganization(userScope)
+}
+// The competitor rows of deals, by deal (their stamps are part of each deal's revision).
+function competitorsOf(ids) {
+    const out = {}
+    if (!ids.length) return out
+    for (const row of find(COMPETITOR).condition("salesOpportunityId", "in", ids).list())
+        (out[row.salesOpportunityId] = out[row.salesOpportunityId] || []).push(row)
+    return out
 }
 // The ids of the deals with a current row of a role for a party.
 function idsWith(roleTypeId, partyId) {
@@ -792,6 +802,7 @@ function findOpportunities(p) {
     const pageRows = paged.rows
     const pageIds = pageRows.map(row => row.salesOpportunityId)
     const people = peopleOf(pageIds)
+    const competitorRowsOf = competitorsOf(pageIds)
     const activities = nextActivities(pageIds)
     const stageIds = Array.from(new Set(pageRows.map(row => row.opportunityStageId).filter(Boolean)))
     const stages = stageIds.length
@@ -825,7 +836,7 @@ function findOpportunities(p) {
         const entry = people[row.salesOpportunityId] || {rows: []}
         const stage = stages[row.opportunityStageId]
         const next = activities[row.salesOpportunityId]
-        const revision = revisionOf(row, entry.rows)
+        const revision = revisionOf(row, entry.rows, competitorRowsOf[row.salesOpportunityId] || [])
         const statusIdOf = row.statusId || statuses.open
         return {
             salesOpportunityId: row.salesOpportunityId,
@@ -877,8 +888,12 @@ function findOpportunities(p) {
     const boardOrganizationId = boardOrganization(userScope, organizationPartyId)
     let boardPipeline = null
     try {
+        // a pipeline asked shows its stages only when it is shared or of an organization of the scope (P4 review)
+        const asked = text(p.salesPipelineId) ? one(PIPELINE, {salesPipelineId: text(p.salesPipelineId)}) : null
         boardPipeline = text(p.salesPipelineId)
-            ? one(PIPELINE, {salesPipelineId: text(p.salesPipelineId)})
+            ? asked && (!asked.organizationPartyId || salesAccess.covers(userScope, asked.organizationPartyId))
+                ? asked
+                : null
             : boardOrganizationId
               ? settings.defaultPipeline(boardOrganizationId)
               : null
@@ -911,7 +926,8 @@ function getOpportunity(p) {
     if (!found) return {opportunityFound: false}
     const row = found.opportunity
     const partyRows = partyRowsOf(row.salesOpportunityId)
-    const revision = revisionOf(row, partyRows)
+    const competitorRows = rows(COMPETITOR, {salesOpportunityId: row.salesOpportunityId})
+    const revision = revisionOf(row, partyRows, competitorRows)
     const statusId = row.statusId || statuses.open
     const open = isOpen(row)
     const caps = userScope.capabilities
@@ -946,7 +962,6 @@ function getOpportunity(p) {
         }))
     const ownerRow = parties.find(partyRow => partyRow.current && partyRow.roleTypeId === roles.owner)
     const teamRow = parties.find(partyRow => partyRow.current && partyRow.roleTypeId === roles.team)
-    const competitorRows = rows(COMPETITOR, {salesOpportunityId: row.salesOpportunityId})
     const competitorNames = lib.partyNames(competitorRows.map(competitor => competitor.competitorPartyId))
     const positions = enumNames(competitorRows.map(competitor => competitor.positionEnumId))
     const competitors = competitorRows.map(competitor => ({
