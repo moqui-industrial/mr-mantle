@@ -49,6 +49,39 @@ function as(username, service, parameters = {}) {
         ec.artifactExecution.disableAuthz()
     }
 }
+// The job's scope is every organization's active plans, so a run with no user would make the work of the demo's plans too (BOSS's
+// filter change once inside its lead days), which the specs after this one read as not made (MaintenancePlans' Due maintenance).
+// The other organizations' active plans are drafts while the job runs, each change committed on its own so the job's transactions
+// see it, and active again after.
+function withOthersAside(run) {
+    const SCHEDULE = "mantle.work.maintenance.MaintenanceSchedule"
+    const others = []
+    ec.transaction.runRequireNew(null, "spec plans aside", () => {
+        for (const plan of ec.entity
+            .find(SCHEDULE)
+            .condition("statusId", "MschActive")
+            .condition("organizationPartyId", "not-in", [orgA, orgB])
+            .disableAuthz()
+            .list()) {
+            plan.set("statusId", "MschDraft").update()
+            others.push(plan.maintenanceScheduleId)
+        }
+    })
+    try {
+        return run()
+    } finally {
+        ec.transaction.runRequireNew(null, "spec plans back", () => {
+            for (const id of others)
+                ec.entity
+                    .find(SCHEDULE)
+                    .condition("maintenanceScheduleId", id)
+                    .disableAuthz()
+                    .one()
+                    .set("statusId", "MschActive")
+                    .update()
+        })
+    }
+}
 function organization(partyId) {
     call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyOrganization", ownerPartyId: partyId})
     call("create#mantle.party.Organization", {partyId, organizationName: partyId})
@@ -216,7 +249,7 @@ feature(
             const preview = generate(state.planner, {maintenanceScheduleId: id, preview: true})
             const afterPreview = occurrences(id).length
             // the job (no user) makes the work; the planner's generation of the same plan then finds it open
-            const job = as(null, S + "run#MaintenanceGeneration", {batchSize: 2})
+            const job = withOthersAside(() => as(null, S + "run#MaintenanceGeneration", {batchSize: 2}))
             const planner = generate(state.planner, {maintenanceScheduleId: id})
             const made = occurrences(id)
             const order = orders(id)
