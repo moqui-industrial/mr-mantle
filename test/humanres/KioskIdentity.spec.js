@@ -3,9 +3,10 @@
 // issuer prints it once, and the worker sets their own PIN in self-service (the one-time PIN asked, never kept as theirs; HR resets a
 // forgotten one), only hashes kept; a punch outside a registered device's request is refused, and at the device the worker is the
 // one badge and PIN prove, of an organization of the display account's and with clocking on; a badge whose PIN the worker has not
-// set is refused; a retry with the event key records once; a wrong PIN is refused and counted, and the fifth locks the badge; a
-// revoked badge is refused; a device with many refusals checks its next proof only after a pause, never shutting a worker out, and a
-// burst tells the employer's HR editors once; attempts older than 90 days are pruned.
+// set is refused; a retry with the event key records once; a wrong PIN is refused and counted, and the fifth locks the badge, each
+// lockout after twice as long, and the twentieth in a day stops it until HR resets its PIN, telling HR and the worker; a revoked
+// badge is refused; a device with many refusals checks its next proof only after a pause, never shutting a worker out, and a
+// burst tells the employer's HR editors and access administrators once; attempts older than 90 days are pruned.
 // Standalone: spec-local organizations, people, employments, users, a display account and its group, a route group admitting the
 // spec's own screen (KioskSpecScreen.xml) and a device registered and redeemed for it; the device's requests are screen renders with
 // its cookie. Artifact authorization is off: the rules are the services' own checks.
@@ -19,6 +20,7 @@ const BADGE = "mantle.humanres.attendance.KioskBadge"
 const ATTEMPT = "mantle.humanres.attendance.KioskAttempt"
 const PUNCH = "mantle.humanres.attendance.AttendancePunch"
 const screen = "component://mr-mantle/test/humanres/KioskSpecScreen.xml"
+const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const state = {}
 
 function run(username, service, parameters = {}) {
@@ -131,6 +133,9 @@ spec({
         state.hr = user("HR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
         state.hr2 = user("HR2", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrParty)
         state.hrB = user("HRB", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], state.hrBParty)
+        // access administrators (who revoke devices in Admin) on the staff of A and of B
+        state.access = user("ACCESS", ["ADMIN_ACCESS_MANAGE"], state.hrParty)
+        state.accessB = user("ACCESSB", ["ADMIN_ACCESS_MANAGE"], state.hrBParty)
         // the clocking device's display account: a member of A, in a registered bundle holding PEOPLE_KIOSK_PUNCH alone
         state.displayParty = person("DISPLAY")
         call("create#mantle.party.PartyRelationship", {
@@ -363,6 +368,118 @@ feature("a wrong PIN is refused and counted, and the fifth in a row locks the ba
     }
 })
 
+feature(
+    "each further lockout of a badge lasts twice as long, and the twentieth wrong PIN in a day stops it until HR resets its PIN, telling HR and the worker alone",
+    {
+        when() {
+            const badge = state.bobBadge
+            const unlock = () =>
+                ec.entity
+                    .find(BADGE)
+                    .condition("kioskBadgeId", badge.kioskBadgeId)
+                    .disableAuthz()
+                    .updateAll({lockedUntilDate: new Date(Date.now() - 1000)})
+            const wrong = pin => {
+                rest()
+                return punch(badge.number, pin)
+            }
+            const lockMinutes = () => Math.round((lib.ms(badgeRow(badge.kioskBadgeId).lockedUntilDate) - Date.now()) / 60000)
+            const out = {}
+            // the lock of the lock feature (the first, 15 minutes) passed: five more lock it for 30 minutes
+            unlock()
+            const second = [0, 1, 2, 3, 4].map(() => wrong("0000"))
+            out.second = {codes: second.map(code).join(","), message: second[4].error, minutes: lockMinutes()}
+            // passed again: four at the kiosk and one in self-service lock it for an hour
+            unlock()
+            const third = [0, 1, 2, 3].map(() => code(wrong("0000")))
+            const selfWrong = run(state.bobUser, A + "set#MyKioskPin", {
+                kioskBadgeId: badge.kioskBadgeId,
+                currentPin: "0000",
+                newPin: "7531"
+            })
+            out.third = {codes: third.join(","), self: code(selfWrong), message: selfWrong.error, minutes: lockMinutes()}
+            // passed again: four more (nineteen today) leave it unlocked, and the twentieth stops it
+            unlock()
+            out.fourth = [0, 1, 2, 3].map(() => wrong("0000").error)
+            out.twentieth = wrong("0000")
+            rest()
+            out.right = code(punch(badge.number, "1357"))
+            out.selfRight = code(
+                run(state.bobUser, A + "set#MyKioskPin", {kioskBadgeId: badge.kioskBadgeId, currentPin: "1357", newPin: "7531"})
+            )
+            out.read = run(state.hr, A + "get#KioskBadge", {partyRelationshipId: state.bobEmp})
+            out.wrongToday = attempts({kioskBadgeId: badge.kioskBadgeId, reasonCode: "PIN_WRONG"})
+            const notices = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessage")
+                    .condition({topic: "PeopleKioskBadgeDisabled", recordId: state.bobEmp})
+                    .disableAuthz()
+                    .list()
+            )
+            out.notices = notices.length
+            // and Bob alone is told his badge is stopped
+            const told = Array.from(
+                ec.entity
+                    .find("moqui.security.user.NotificationMessage")
+                    .condition({topic: "PeopleMyKioskBadgeDisabled"})
+                    .disableAuthz()
+                    .list()
+            )
+            out.workerNotices = told.length
+            out.workerMessage = told.length ? String(told[0].messageJson || "") + String(told[0].titleText || "") : ""
+            out.workerRecipients = told.length
+                ? Array.from(
+                      ec.entity
+                          .find("moqui.security.user.NotificationMessageUser")
+                          .condition("notificationMessageId", told[0].notificationMessageId)
+                          .disableAuthz()
+                          .list()
+                  ).map(row => row.userId)
+                : []
+            out.message = notices.length ? String(notices[0].messageJson || "") + String(notices[0].titleText || "") : ""
+            out.recipients = notices.length
+                ? Array.from(
+                      ec.entity
+                          .find("moqui.security.user.NotificationMessageUser")
+                          .condition("notificationMessageId", notices[0].notificationMessageId)
+                          .disableAuthz()
+                          .list()
+                  ).map(row => row.userId)
+                : []
+            // HR resets the PIN: Bob sets his again, and the wrong PINs before the reset no longer count toward the day's limit
+            out.reset = run(state.hr, A + "reset#KioskPin", {kioskBadgeId: badge.kioskBadgeId})
+            out.setAgain = run(state.bobUser, A + "set#MyKioskPin", {kioskBadgeId: badge.kioskBadgeId, newPin: "1357"})
+            out.afterReset = wrong("0000").error
+            rest()
+            out.back = punch(badge.number, "1357")
+            out.row = badgeRow(badge.kioskBadgeId)
+            return out
+        },
+        then(out) {
+            out.second.codes == "PIN_WRONG,PIN_WRONG,PIN_WRONG,PIN_WRONG,PIN_WRONG"
+            out.second.message.includes("locked for 30 minutes") && out.second.minutes >= 29 && out.second.minutes <= 30
+            out.third.codes == "PIN_WRONG,PIN_WRONG,PIN_WRONG,PIN_WRONG" && out.third.self == "PIN_WRONG"
+            out.third.message.includes("locked for 1 hour") && out.third.minutes >= 59 && out.third.minutes <= 60
+            out.fourth.every(error => error.includes("The PIN is not right") && !error.includes("locked"))
+            code(out.twentieth) == "PIN_WRONG" && out.twentieth.error.includes("stopped until HR resets its PIN")
+            out.right == "BADGE_DISABLED" && out.selfRight == "BADGE_DISABLED"
+            out.read.badge.state == "disabled" && out.read.canResetPin === true && out.wrongToday == 20
+            // to HR of A alone, once, naming Bob and never his number or PIN
+            out.notices == 1 && out.recipients.slice().sort().join(",") == [state.hr, state.hr2].sort().join(",")
+            out.message.includes("Kiosk BOB") && !out.message.includes(state.bobBadge.number.replace(/ /g, ""))
+            !out.message.includes(state.bobBadge.number) && !out.message.includes("1357")
+            out.workerNotices == 1 && out.workerRecipients.join(",") == state.bobUser
+            out.workerMessage.includes("Kiosk Spec A") && out.workerMessage.includes("ask HR to reset its PIN")
+            !out.workerMessage.includes(state.bobBadge.number.replace(/ /g, "")) && !out.workerMessage.includes("1357")
+            out.reset.error == "" && out.setAgain.error == ""
+            out.afterReset.includes("The PIN is not right") && !out.afterReset.includes("stopped")
+            out.back.error == "" && out.back.directionEnumId == "AtdIn"
+            out.row.disabledDate == null && Number(out.row.lockCount) == 0 && Number(out.row.failedCount) == 0
+            out.row.pinResetDate != null
+        }
+    }
+)
+
 feature("a revoked badge is refused, a new one works once its PIN is set, and HR resets a forgotten PIN without learning it", {
     when() {
         rest()
@@ -411,7 +528,7 @@ feature("a revoked badge is refused, a new one works once its PIN is set, and HR
 })
 
 feature(
-    "a device with many refusals checks its next proof only after a short pause, never shutting a worker out, and a burst tells the employer's HR editors once",
+    "a device with many refusals checks its next proof only after a short pause, never shutting a worker out, and a burst tells the employer's HR editors and access administrators once",
     {
         when() {
             rest()
@@ -468,8 +585,9 @@ feature(
             recorded.error == "" && recorded.directionEnumId == "AtdIn"
             unknown == "BADGE_UNKNOWN" && unknownAgain == "BADGE_UNKNOWN"
             firstNotices.length == 1 && laterNotices == 1
-            // to HR of A alone: not B's HR, not the display account; naming the device and the count, no badge or person
-            recipients.slice().sort().join(",") == [state.hr, state.hr2].sort().join(",")
+            // to HR of A and A's access administrator (follow-up 4) alone: not B's, not the display account; naming the device and
+            // the count, no badge or person
+            recipients.slice().sort().join(",") == [state.hr, state.hr2, state.access].sort().join(",")
             const message = String(firstNotices[0].messageJson || "") + String(firstNotices[0].titleText || "")
             message.includes("Kiosk spec door") && !message.includes("ANA") && !message.includes(state.ana2.number)
         }
