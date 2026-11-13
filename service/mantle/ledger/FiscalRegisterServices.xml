@@ -1075,4 +1075,129 @@ Grant of Patent License.
             ]]></script>
         </actions>
     </service>
+
+    <!-- ================================================================= -->
+    <!-- F24 & CU/770 TELEMATIC EXPORTS                                    -->
+    <!-- ================================================================= -->
+    <service verb="generate" noun="F24Export" allow-remote="true">
+        <description>Generates F24 Erario CSV summary for VAT due (6001-6012/6099) and Withholding Tax (1040/1038).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="csvText"/>
+            <parameter name="filename"/>
+        </out-parameters>
+        <actions>
+            <if condition="!fiscalYear">
+                <set field="fiscalYear" from="ec.l10n.format(fromDate || ec.user.nowTimestamp, 'yyyy')"/>
+            </if>
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#VatRegisterData"
+                    in-map="{organizationPartyId: organizationPartyId, registerType: 'summary',
+                        fiscalYear: fiscalYear, timePeriodId: timePeriodId, fromDate: fromDate, thruDate: thruDate}"
+                    out-map="vatData"/>
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#WithholdingTaxRegisterData"
+                    in-map="{organizationPartyId: organizationPartyId, fiscalYear: fiscalYear,
+                        fromDate: fromDate, thruDate: thruDate}"
+                    out-map="wtData"/>
+            <script><![CDATA[
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const org = vatData.organization || wtData.organization || {};
+                const vatId = (org.taxIdNumber || org.socialSecurityNumber || organizationPartyId).replace(/[^A-Za-z0-9]/g, '');
+                const yr = String(fiscalYear);
+                const lines = ['Sezione,CodiceTributo,RateazioneRegione,AnnoRiferimento,ImportoDebito,ImportoCredito'];
+
+                const vatBalance = toNum(vatData.vatBalance);
+                if (vatBalance > 0.005) {
+                    const monthStr = vatData.fromDate ? ec.l10n.format(vatData.fromDate, 'MM') : '12';
+                    const m = parseInt(monthStr, 10) || 12;
+                    const tribCode = vatData.fromDate && vatData.thruDate &&
+                        ec.l10n.format(vatData.fromDate, 'MM') === ec.l10n.format(vatData.thruDate, 'MM')
+                        ? ('60' + String(m).padStart(2, '0'))
+                        : '6099';
+                    lines.push('ERARIO,' + tribCode + ',0101,' + yr + ',' + vatBalance.toFixed(2) + ',0.00');
+                } else if (vatBalance < -0.005) {
+                    lines.push('ERARIO,6099,0101,' + yr + ',0.00,' + Math.abs(vatBalance).toFixed(2));
+                }
+
+                const wtByCode = {};
+                for (const b of (wtData.beneficiaries || [])) {
+                    const code = b.taxCode || '1040';
+                    wtByCode[code] = (wtByCode[code] || 0) + toNum(b.withheldAmount);
+                }
+                for (const [code, amt] of Object.entries(wtByCode)) {
+                    if (amt > 0.005) {
+                        lines.push('ERARIO,' + code + ',0101,' + yr + ',' + amt.toFixed(2) + ',0.00');
+                    }
+                }
+
+                context.csvText = lines.join('\n') + '\n';
+                context.filename = 'IT' + vatId + '_F24_' + yr + '.csv';
+            ]]></script>
+        </actions>
+    </service>
+
+    <service verb="generate" noun="Cu770Export" allow-remote="true">
+        <description>Generates structured XML export for Certificazione Unica (CU) / Modello 770.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="fiscalYear"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="xmlText"/>
+            <parameter name="filename"/>
+        </out-parameters>
+        <actions>
+            <service-call name="mantle.ledger.FiscalRegisterServices.get#WithholdingTaxRegisterData"
+                    in-map="{organizationPartyId: organizationPartyId, fiscalYear: fiscalYear,
+                        fromDate: fromDate, thruDate: thruDate}"
+                    out-map="wtData"/>
+            <script><![CDATA[
+                const toNum = (v) => (v == null ? 0 : (typeof v === 'object' && typeof v.toNumber === 'function' ? v.toNumber() : (Number(v) || 0)));
+                const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                const org = wtData.organization || {};
+                const yr = String(wtData.fiscalYear || fiscalYear || ec.l10n.format(ec.user.nowTimestamp, 'yyyy'));
+                const fiscalId = (org.socialSecurityNumber && org.socialSecurityNumber !== '—' ? org.socialSecurityNumber : org.taxIdNumber) || organizationPartyId;
+                const cleanId = String(fiscalId).replace(/[^A-Za-z0-9]/g, '');
+
+                let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                xml += '<Cu770Export xmlns="http://www.agenziaentrate.gov.it/cu770" annoImposta="' + esc(yr) + '">\n';
+                xml += '  <SostitutoImposta>\n';
+                xml += '    <Denominazione>' + esc(org.organizationName || organizationPartyId) + '</Denominazione>\n';
+                xml += '    <CodiceFiscale>' + esc(fiscalId) + '</CodiceFiscale>\n';
+                xml += '    <PartitaIVA>' + esc(org.taxIdNumber || '') + '</PartitaIVA>\n';
+                xml += '  </SostitutoImposta>\n';
+                xml += '  <Certificazioni>\n';
+                for (const b of (wtData.beneficiaries || [])) {
+                    xml += '    <Certificazione>\n';
+                    xml += '      <Percipiente>' + esc(b.beneficiaryName) + '</Percipiente>\n';
+                    xml += '      <CodiceFiscale>' + esc(b.taxCodeId || '') + '</CodiceFiscale>\n';
+                    xml += '      <Causale>' + esc(b.reason || 'A') + '</Causale>\n';
+                    xml += '      <CodiceTributo>' + esc(b.taxCode || '1040') + '</CodiceTributo>\n';
+                    xml += '      <AmmontareLordo>' + toNum(b.grossAmount).toFixed(2) + '</AmmontareLordo>\n';
+                    xml += '      <Imponibile>' + toNum(b.taxableAmount).toFixed(2) + '</Imponibile>\n';
+                    xml += '      <RitenutaAcconto>' + toNum(b.withheldAmount).toFixed(2) + '</RitenutaAcconto>\n';
+                    xml += '      <NettoCorrisposto>' + toNum(b.netAmount).toFixed(2) + '</NettoCorrisposto>\n';
+                    xml += '    </Certificazione>\n';
+                }
+                xml += '  </Certificazioni>\n';
+                xml += '  <Riepilogo>\n';
+                xml += '    <TotaleLordo>' + toNum(wtData.totalGrossAmount).toFixed(2) + '</TotaleLordo>\n';
+                xml += '    <TotaleImponibile>' + toNum(wtData.totalTaxableAmount).toFixed(2) + '</TotaleImponibile>\n';
+                xml += '    <TotaleRitenute>' + toNum(wtData.totalWithheldAmount).toFixed(2) + '</TotaleRitenute>\n';
+                xml += '    <TotaleNetto>' + toNum(wtData.totalNetAmount).toFixed(2) + '</TotaleNetto>\n';
+                xml += '  </Riepilogo>\n';
+                xml += '</Cu770Export>\n';
+
+                context.xmlText = xml;
+                context.filename = 'IT' + cleanId + '_CU770_' + yr + '.xml';
+            ]]></script>
+        </actions>
+    </service>
 </services>

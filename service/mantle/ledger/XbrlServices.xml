@@ -125,7 +125,11 @@ Grant of Patent License.
 
                 const glCache = {};
                 const balances = {};
-                for (const item of taxonomyCatalog) balances[item.tag] = 0;
+                const openingBalances = {};
+                for (const item of taxonomyCatalog) {
+                    balances[item.tag] = 0;
+                    openingBalances[item.tag] = 0;
+                }
 
                 for (const tx of txList) {
                     const txDateStr = tx.transactionDate ? ec.l10n.format(tx.transactionDate, 'yyyy-MM-dd') : '';
@@ -149,9 +153,13 @@ Grant of Patent License.
                         const amt = toNum(e.amount);
                         const isDebit = (e.debitCreditFlag === 'D');
                         if (meta.section === 'SP_ATTIVO') {
-                            balances[tag] += isDebit ? amt : -amt;
+                            const signed = isDebit ? amt : -amt;
+                            balances[tag] += signed;
+                            if (!isInPeriod) openingBalances[tag] += signed;
                         } else if (meta.section === 'SP_PASSIVO') {
-                            balances[tag] += isDebit ? -amt : amt;
+                            const signed = isDebit ? -amt : amt;
+                            balances[tag] += signed;
+                            if (!isInPeriod) openingBalances[tag] += signed;
                         } else {
                             // CE: Revenues positive (credit), Costs positive (debit) for CEE display
                             if (tag === 'RicaviVenditePrestazioni' || tag === 'AltriRicaviProventi') {
@@ -178,6 +186,30 @@ Grant of Patent License.
                 const totDebiti = balances.DebitiVersoFornitori + balances.DebitiTributari + balances.AltriDebiti;
                 const totPassivo = totPn + totDebiti;
 
+                // Cash Flow Statement (Rendiconto Finanziario - OIC 10 indirect method)
+                const deltaReceivables = (balances.CreditiVersoClienti + balances.CreditiTributari) - (openingBalances.CreditiVersoClienti + openingBalances.CreditiTributari);
+                const deltaInventory = balances.TotaleRimanenze - openingBalances.TotaleRimanenze;
+                const deltaPayables = (balances.DebitiVersoFornitori + balances.DebitiTributari + balances.AltriDebiti)
+                    - (openingBalances.DebitiVersoFornitori + openingBalances.DebitiTributari + openingBalances.AltriDebiti);
+                const cfOperating = netIncome + balances.AmmortamentiSvalutazioni - deltaReceivables - deltaInventory + deltaPayables;
+                const cfInvesting = -((balances.ImmobilizzazioniImmateriali + balances.ImmobilizzazioniMateriali)
+                    - (openingBalances.ImmobilizzazioniImmateriali + openingBalances.ImmobilizzazioniMateriali)
+                    + balances.AmmortamentiSvalutazioni);
+                const cfFinancing = (balances.CapitaleSociale + balances.AltreRiserve)
+                    - (openingBalances.CapitaleSociale + openingBalances.AltreRiserve);
+                const openingCash = openingBalances.TotaleDisponibilitaLiquide;
+                const closingCash = balances.TotaleDisponibilitaLiquide;
+                const deltaCash = closingCash - openingCash;
+
+                const cashFlowCatalog = [
+                    { tag: 'FlussoFinanziarioAttivitaOperativa', cee: 'RF.A', label: 'Cash flow from operating activities', val: cfOperating },
+                    { tag: 'FlussoFinanziarioAttivitaInvestimento', cee: 'RF.B', label: 'Cash flow from investing activities', val: cfInvesting },
+                    { tag: 'FlussoFinanziarioAttivitaFinanziamento', cee: 'RF.C', label: 'Cash flow from financing activities', val: cfFinancing },
+                    { tag: 'IncrementoDecrementoDisponibilitaLiquide', cee: 'RF.D', label: 'Net change in cash and cash equivalents', val: deltaCash },
+                    { tag: 'DisponibilitaLiquideInizioEsercizio', cee: 'RF.E', label: 'Cash and cash equivalents at beginning of year', val: openingCash },
+                    { tag: 'DisponibilitaLiquideFineEsercizio', cee: 'RF.F', label: 'Cash and cash equivalents at end of year', val: closingCash }
+                ];
+
                 const dec = Number(decimals) || 0;
                 const fmtFact = (v) => (dec === 0 ? String(Math.round(v)) : v.toFixed(dec));
 
@@ -193,6 +225,15 @@ Grant of Patent License.
                             amount: toDecimal(val).setScale(2, 'HALF_UP')
                         });
                     }
+                }
+                for (const cf of cashFlowCatalog) {
+                    rows.push({
+                        ceeCode: cf.cee,
+                        xbrlTag: 'itcc-ci:' + cf.tag,
+                        label: cf.label,
+                        section: 'RF',
+                        amount: toDecimal(cf.val).setScale(2, 'HALF_UP')
+                    });
                 }
                 context.rows = rows;
                 context.totalAssets = toDecimal(totAttivo).setScale(2, 'HALF_UP');
@@ -237,6 +278,24 @@ Grant of Patent License.
                 xml += '  <itcc-ci:ValoreProduzione contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(valProd) + '</itcc-ci:ValoreProduzione>\n';
                 xml += '  <itcc-ci:CostiProduzione contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(costProd) + '</itcc-ci:CostiProduzione>\n';
                 xml += '  <itcc-ci:UtilePerditaEsercizio contextRef="c_ce_attuale" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(netIncome) + '</itcc-ci:UtilePerditaEsercizio>\n';
+
+                // Emit Cash Flow Statement (Rendiconto Finanziario OIC 10)
+                for (const cf of cashFlowCatalog) {
+                    const cfCtx = (cf.tag === 'DisponibilitaLiquideInizioEsercizio' || cf.tag === 'DisponibilitaLiquideFineEsercizio') ? 'c_sp_attuale' : 'c_ce_attuale';
+                    xml += '  <itcc-ci:' + cf.tag + ' contextRef="' + cfCtx + '" unitRef="u_eur" decimals="' + dec + '">' + fmtFact(cf.val) + '</itcc-ci:' + cf.tag + '>\n';
+                }
+
+                // Emit Explanatory Notes (Nota Integrativa - Art. 2427 Italian Civil Code)
+                const orgName = org?.organizationName || organizationPartyId;
+                const notaIniziale = 'Bilancio d\'esercizio chiuso al ' + endDateStr + ' della società ' + orgName + ' (C.F. ' + fiscalId + '), redatto secondo gli artt. 2423 e seguenti del Codice Civile e i Principi Contabili Nazionali OIC.';
+                const criteriValutazione = 'Le immobilizzazioni sono iscritte al costo storico al netto dei fondi di ammortamento (OIC 16). I crediti e i debiti sono iscritti secondo il criterio del valore nominale / presumibile realizzo (OIC 15, OIC 19). I ricavi e i costi sono rilevati per competenza economica.';
+                const infoPn = 'Patrimonio Netto complessivo al ' + endDateStr + ': EUR ' + totPn.toFixed(2) + ' (Capitale Sociale EUR ' + balances.CapitaleSociale.toFixed(2) + ', Utile/Perdita d\'esercizio EUR ' + netIncome.toFixed(2) + ').';
+                const notaFinale = 'Il presente bilancio corrisponde alle risultanze delle scritture contabili regolarmente tenute (Totale Attivo EUR ' + totAttivo.toFixed(2) + ', Totale Passivo EUR ' + totPassivo.toFixed(2) + ').';
+
+                xml += '  <itcc-ci:NotaIntegrativaParteIniziale contextRef="c_ce_attuale">' + esc(notaIniziale) + '</itcc-ci:NotaIntegrativaParteIniziale>\n';
+                xml += '  <itcc-ci:CriteriValutazioneApplicati contextRef="c_ce_attuale">' + esc(criteriValutazione) + '</itcc-ci:CriteriValutazioneApplicati>\n';
+                xml += '  <itcc-ci:InformazioniSuPatrimonioNetto contextRef="c_ce_attuale">' + esc(infoPn) + '</itcc-ci:InformazioniSuPatrimonioNetto>\n';
+                xml += '  <itcc-ci:NotaIntegrativaParteFinale contextRef="c_ce_attuale">' + esc(notaFinale) + '</itcc-ci:NotaIntegrativaParteFinale>\n';
 
                 xml += '</xbrli:xbrl>\n';
 
