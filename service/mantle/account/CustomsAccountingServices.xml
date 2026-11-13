@@ -74,17 +74,17 @@ Grant of Patent License.
                 invoiceTypeEnumId: 'InvoiceSales',
                 invoiceDate: declarationDate,
                 currencyUomId: 'EUR',
-                referenceNumber: 'Prospetto Doganale MRN ' + mrn,
-                description: 'Importazione beni EUCDM ' + declarationTypeEnumId + ' - MRN: ' + mrn + ' (Dogana ' + (customsOfficeId || 'ADM') + ')',
+                referenceNumber: 'Customs Accounting Summary MRN ' + mrn,
+                description: 'EUCDM ' + declarationTypeEnumId + ' goods import - MRN: ' + mrn + ' (Customs office ' + (customsOfficeId || 'ADM') + ')',
                 statusId: 'InvoiceApproved'
             }"/>
             <set field="vatRegisterInvoiceId" from="invResult.invoiceId"/>
 
-            <!-- Add Import VAT Item (detraibile art. 19) -->
+            <!-- Add Import VAT Item (deductible art. 19) -->
             <service-call name="mantle.account.InvoiceServices.create#InvoiceItem" in-map="{
                 invoiceId: vatRegisterInvoiceId,
                 itemTypeEnumId: 'ItemTax',
-                description: 'IVA Importazione Doganale (Cod. 421) - Imponibile ' + customsTaxableValue + ' EUR',
+                description: 'Customs Import VAT (Code 421) - Taxable base ' + customsTaxableValue + ' EUR',
                 quantity: 1,
                 amount: importVatAmount,
                 taxableAmount: customsTaxableValue,

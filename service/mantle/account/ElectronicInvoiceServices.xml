@@ -38,6 +38,9 @@ Grant of Patent License.
                 <econdition field-name="invoiceId" from="invoiceId"/>
                 <order-by field-name="invoiceItemSeqId"/>
             </entity-find>
+            <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentSources">
+                <econdition field-name="invoiceId" from="invoiceId"/>
+            </entity-find>
 
             <!-- Supplier / From Party -->
             <entity-find-one entity-name="mantle.party.Party" value-field="fromParty">
@@ -121,6 +124,16 @@ Grant of Patent License.
                 }
                 context.tipoDocumento = td;
 
+                // Format: auto-detect FPA12 for Public Administration (6-char IPA code) vs FPR12 (B2B/B2C)
+                let format = formatoTrasmissione;
+                if (!format || format === 'FPR12') {
+                    if (toSdi && toSdi.length === 6 && toSdi !== '000000') {
+                        format = 'FPA12';
+                    } else {
+                        format = 'FPR12';
+                    }
+                }
+
                 // Dates & sequence
                 const invDate = invoice.invoiceDate ? ec.l10n.format(invoice.invoiceDate, 'yyyy-MM-dd') : ec.l10n.format(ec.user.nowTimestamp, 'yyyy-MM-dd');
                 const invNumber = invoice.referenceNumber || invoice.invoiceId;
@@ -128,8 +141,22 @@ Grant of Patent License.
                 const fileId = (fromVat || '00000000000') + '_' + progInvio.slice(-5);
                 const sdiFilename = 'IT' + fileId + '.xml';
                 context.filename = sdiFilename;
+                context.formatoTrasmissione = format;
 
                 // Process lines & VAT summary
+                const taxTypes = ['ItemSalesTax', 'ItemVatTax', 'ItemVatTaxTotal', 'ItemTax'];
+                const goodsItems = (items || []).filter(item => !taxTypes.includes(item.itemTypeEnumId));
+                const taxItems = (items || []).filter(item => taxTypes.includes(item.itemTypeEnumId));
+
+                // Predominant or default tax rate from calculated tax lines
+                let defaultTaxRate = 22.0;
+                let defaultNature = '';
+                if (taxItems.length > 0) {
+                    const firstTax = taxItems[0];
+                    defaultTaxRate = toNum(firstTax.taxPercentage) || 0;
+                    defaultNature = firstTax.vatNatureEnumId || (defaultTaxRate === 0 ? 'N4' : '');
+                }
+
                 const lines = [];
                 const vatSummary = {};
                 let totalWithholding = 0;
@@ -138,12 +165,12 @@ Grant of Patent License.
                 let withholdingReason = 'A';
                 let lineSeq = 1;
 
-                for (const item of (items || [])) {
+                for (const item of goodsItems) {
                     const qty = toNum(item.quantity) || 1;
                     const price = toNum(item.amount) || 0;
-                    const lineTotal = toNum(item.taxableAmount) || (qty * price);
-                    const rate = toNum(item.taxPercentage) || 0;
-                    const nature = item.vatNatureEnumId || (rate === 0 ? 'N4' : '');
+                    const lineTotal = toNum(item.lineTotal) || (qty * price);
+                    let rate = item.taxPercentage != null ? toNum(item.taxPercentage) : defaultTaxRate;
+                    let nature = item.vatNatureEnumId || (rate === 0 ? (defaultNature || 'N4') : '');
 
                     if (item.withholdingTaxTypeEnumId) {
                         withholdingType = item.withholdingTaxTypeEnumId;
@@ -167,17 +194,27 @@ Grant of Patent License.
                         vatSummary[key] = { rate: rate, nature: nature, taxable: 0, tax: 0 };
                     }
                     vatSummary[key].taxable += lineTotal;
+                }
+
+                // If taxItems specify actual calculated tax amount, use it for vatSummary
+                for (const k in vatSummary) {
+                    const rate = vatSummary[k].rate;
                     if (rate > 0) {
-                        vatSummary[key].tax += (lineTotal * rate / 100);
+                        const matchingTax = taxItems.find(t => Math.abs(toNum(t.taxPercentage) - rate) < 0.01);
+                        if (matchingTax && toNum(matchingTax.amount) > 0) {
+                            vatSummary[k].tax = toNum(matchingTax.amount);
+                        } else {
+                            vatSummary[k].tax = vatSummary[k].taxable * rate / 100;
+                        }
                     }
                 }
 
-                // If no items, generate a fallback line
+                // If no goods items, generate a fallback line
                 if (lines.length === 0) {
                     const fallbackAmt = toNum(invoice.invoiceTotal) || 0;
                     lines.push({
                         lineNum: 1,
-                        desc: invoice.description || 'Importo fattura ' + invNumber,
+                        desc: invoice.description || ('Invoice ' + invNumber),
                         qty: 1,
                         price: fallbackAmt,
                         lineTotal: fallbackAmt,
@@ -198,7 +235,7 @@ Grant of Patent License.
 
                 // Build XML Output
                 let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
-                xml += '<p:FatturaElettronica versione="' + formatoTrasmissione + '"\n';
+                xml += '<p:FatturaElettronica versione="' + format + '"\n';
                 xml += '    xmlns:ds="http://www.w3.org/2000/09/xmldsig#"\n';
                 xml += '    xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2"\n';
                 xml += '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n';
@@ -212,7 +249,7 @@ Grant of Patent License.
                 xml += '        <IdCodice>' + escapeXml(fromVat || fromSsn) + '</IdCodice>\n';
                 xml += '      </IdTrasmittente>\n';
                 xml += '      <ProgressivoInvio>' + escapeXml(progInvio) + '</ProgressivoInvio>\n';
-                xml += '      <FormatoTrasmissione>' + escapeXml(formatoTrasmissione) + '</FormatoTrasmissione>\n';
+                xml += '      <FormatoTrasmissione>' + escapeXml(format) + '</FormatoTrasmissione>\n';
                 xml += '      <CodiceDestinatario>' + escapeXml(toSdi || '0000000') + '</CodiceDestinatario>\n';
                 if (toPec && toSdi === '0000000') {
                     xml += '      <PECDestinatario>' + escapeXml(toPec) + '</PECDestinatario>\n';
@@ -308,6 +345,30 @@ Grant of Patent License.
 
                 xml += '        <ImportoTotaleDocumento>' + format2(docTotal) + '</ImportoTotaleDocumento>\n';
                 xml += '      </DatiGeneraliDocumento>\n';
+
+                // DatiDDT (Transport documents for shipments / deferred invoices TD24)
+                const ddtMap = {};
+                for (const s of (shipmentSources || [])) {
+                    if (s.shipmentId) {
+                        if (!ddtMap[s.shipmentId]) ddtMap[s.shipmentId] = [];
+                        if (s.invoiceItemSeqId) ddtMap[s.shipmentId].push(s.invoiceItemSeqId);
+                    }
+                }
+                for (const shipId in ddtMap) {
+                    const ship = ec.entity.find('mantle.shipment.Shipment').condition('shipmentId', shipId).one();
+                    if (ship) {
+                        const ddtDate = ship.estimatedShipDate || ship.entryDate || invoice.invoiceDate;
+                        const ddtDateStr = ec.l10n.format(ddtDate, 'yyyy-MM-dd');
+                        xml += '      <DatiDDT>\n';
+                        xml += '        <NumeroDDT>' + escapeXml(ship.trackingNumber || ship.shipmentId) + '</NumeroDDT>\n';
+                        xml += '        <DataDDT>' + ddtDateStr + '</DataDDT>\n';
+                        for (const lineSeq of ddtMap[shipId]) {
+                            xml += '        <RiferimentoNumeroLinea>' + escapeXml(lineSeq) + '</RiferimentoNumeroLinea>\n';
+                        }
+                        xml += '      </DatiDDT>\n';
+                    }
+                }
+
                 xml += '    </DatiGenerali>\n';
 
                 // Line items
