@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- People's reports (IronStone People design §12 Reports, §1.4 Shipped reports, §16.2 PeopleReportServices, PE-17; impl-people P29;
+    PeopleReports.js): one registered family of reports over the employers of the caller's People scope, each report read by the
+    capability it names (headcount and turnover, vacancies and the hiring funnel, attendance exceptions, leave balances, expense
+    claims, qualification expiry, review completion; the payroll register for a payroll reader alone). The export is the same
+    projection as text (format csv), safe from spreadsheet formulas. Restricted values (pay outside the payroll register, private
+    contact, identity numbers, case existence, review notes, leave reasons) are never read. Each service checks the caller's People
+    scope (People.js) and the People permissions itself, then reads with authorization off, and names no application group. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+
+    <service verb="get" noun="Options" allow-remote="false">
+        <description>The People reports the caller reads, each with its id, title, description, the options it takes and whether
+            it carries pay (only the payroll register, a PAYROLL_VIEW holder's), and the employers of the caller's scope. Insights'
+            catalog reads it as People's catalogue (each report's id its catalogue key). Refuses a caller who reads no People
+            report (PERMISSION_DENIED).</description>
+        <in-parameters/>
+        <out-parameters>
+            <parameter name="reports" type="List"/>
+            <parameter name="employers" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/PeopleReports.js"/>
+            <set field="found" from="ec.resource.script(module).execute('options', context)"/>
+            <set field="reports" from="found.reports"/>
+            <set field="employers" from="found.employers"/>
+        </actions>
+    </service>
+
+    <service verb="run" noun="Report" allow-remote="false">
+        <description>One People report, over the employers of the caller's scope or the one asked: its columns (name and title),
+            rows, totals, what it counts (basisText; the turnover's denominator, denominatorText), the options as words, whether
+            rows were left out past the cap (capped), and the report's own parts (sourceRows, currencyRows, vacancyCount,
+            windowText, asOfText). Amounts are in each currency apart and only in the expense claims and the payroll register.
+            With format csv, also csvText (the same rows, each cell a spreadsheet would read as a formula behind an apostrophe)
+            and fileName. Refuses an unknown report (REPORT_UNAVAILABLE), one the caller does not read (PERMISSION_DENIED: the
+            payroll register without PAYROLL_VIEW), an employer outside their scope (ORGANIZATION_DENIED) and a period whose start
+            is after its end (PERIOD_INVALID).</description>
+        <in-parameters>
+            <parameter name="reportId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="groupBy"><description>headcount: organization (by default), department or none</description></parameter>
+            <parameter name="format"><description>csv for the export</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reportId"/>
+            <parameter name="title"/>
+            <parameter name="pay" type="Boolean"/>
+            <parameter name="columns" type="List"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="basisText"/>
+            <parameter name="denominatorText"/>
+            <parameter name="optionsText"/>
+            <parameter name="generatedText"/>
+            <parameter name="capped" type="Boolean"/>
+            <parameter name="groupBy"/>
+            <parameter name="sourceRows" type="List"/>
+            <parameter name="currencyRows" type="List"/>
+            <parameter name="vacancyCount" type="Integer"/>
+            <parameter name="windowText"/>
+            <parameter name="asOfText"/>
+            <parameter name="organizationPartyIds" type="List"/>
+            <parameter name="csvText"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="module" value="component://mr-mantle/service/mantle/humanres/PeopleReports.js"/>
+            <set field="found" from="ec.resource.script(module).execute('run', context)"/>
+            <script>for (const name of ['reportId', 'title', 'pay', 'columns', 'rows', 'totals', 'basisText', 'denominatorText',
+                'optionsText', 'generatedText', 'capped', 'groupBy', 'sourceRows', 'currencyRows', 'vacancyCount', 'windowText',
+                'asOfText', 'organizationPartyIds', 'csvText', 'fileName']) context[name] = found[name] ?? null</script>
+        </actions>
+    </service>
+</services>

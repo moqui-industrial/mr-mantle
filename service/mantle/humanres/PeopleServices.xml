@@ -122,7 +122,9 @@ along with this software (see the LICENSE.md file). If not, see
             scope), returns checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the
             employer as subject and scope, and fixRoute (the key of People's settings), with the organization's id and name. The
             checks of what is built, for an organization with current employees (one with none answers no check): a department
-            set up, every employee with a manager. Later phases add theirs. Refuses a caller without PEOPLE_CONFIGURE
+            set up, every employee with a manager, payroll set up (a pay group, every employee on a pay assignment), and (P29)
+            a position, an HR fallback among the approval rules, an onboarding checklist, a working schedule, a leave policy
+            and someone to take confidential cases, each with the key of the place that sets it up. Refuses a caller without PEOPLE_CONFIGURE
             (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
         <in-parameters>
             <parameter name="providerKey"/>
@@ -1443,6 +1445,46 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="letter" type="Map"/></out-parameters>
         <actions>
             <set field="letter" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/Letters.js').execute('getMyLetter', context).letter"/>
+        </actions>
+    </service>
+    <!-- ===== P29: the employer preferences (design §12 Settings PeoplePreferences; PeopleSettings.js) ===== -->
+    <service verb="get" noun="Settings" allow-remote="false">
+        <description>The People preferences of the employers of the caller's scope (or the one asked) that they may change: the
+            clocking default (the PartySetting PeopleClocking, Y or N; an employment's own setting comes first, Attendance.js
+            isClockingOn), and, for the People administrator, the confidential case intake handlers (PeopleCaseIntake) with their
+            names and whether each may take a case now (never a case), and with one employer asked the people who could. Each
+            employer with its settings revision. Refuses a caller who is neither the People administrator (PEOPLE_CONFIGURE) nor
+            an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) (PERMISSION_DENIED) and an employer outside their scope
+            (ORGANIZATION_DENIED).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters><parameter name="employers" type="List"/></out-parameters>
+        <actions>
+            <set field="employers" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleSettings.js').execute('getSettings', context).employers"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Settings" allow-remote="false">
+        <description>Changes an employer's People preferences, each given one when it changed, audit-logged with the reason as a
+            change of the employer's settings: the clocking default (clocking Y or N; CLOCKING_INVALID otherwise), by the People
+            administrator or an HR editor of the employer; the confidential case intake handlers (intakeHandlerIds, a list or comma
+            separated party ids; empty names nobody, so a filing there is refused NO_CASE_HANDLER), by the People administrator of
+            the employer alone, each one an enabled account holding PEOPLE_CASE_HANDLE working for the employer
+            (HANDLER_NOT_ELIGIBLE). Refuses a caller without the right for a setting given (PERMISSION_DENIED), an employer outside
+            their scope (ORGANIZATION_DENIED), nothing to change (NOTHING_TO_CHANGE) and a stale expectedRevision
+            (REVISION_STALE). Answers the employer's settings as get#Settings does and the settings changed.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="clocking"/>
+            <parameter name="intakeHandlerIds" type="Object"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="settings" type="Map"/>
+            <parameter name="changed" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="settings" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PeopleSettings.js').execute('storeSettings', context)"/>
+            <set field="changed" from="settings.changed"/>
         </actions>
     </service>
 </services>

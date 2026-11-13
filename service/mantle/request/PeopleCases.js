@@ -759,5 +759,10 @@ const operations = {
     caseTaskIds,
     protectedTaskIds,
     rerouteCases,
-    ownedCases
+    ownedCases,
+    // P29: the employer's intake setting, as People's settings and readiness read it (PeopleSettings.js, People.js)
+    INTAKE,
+    listOf,
+    eligibleHandler,
+    intakeHandlers
 })
