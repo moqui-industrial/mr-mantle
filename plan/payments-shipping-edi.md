@@ -386,7 +386,7 @@ Use the framework's test seams; production services must not load specs or conta
 Run relevant regression specs with `./moq test mr-mantle --spec <spec-name>` and targeted framework tests when framework
 code changes. JavaScript specs run in Moqui, not Node. Keep individual cases well under a second; a regression spec over
 15 seconds fails the run. Provider sandbox/certification and live financial or shipping calls are acceptance tests, in
-`acceptance/`, run only when the user asks or when one is added or changed. This document revision itself requires no
+`test/acceptance/`, run only when the user asks or when one is added or changed. This document revision itself requires no
 build or application test run.
 
 Create separate plans only when scheduling these larger efforts:
