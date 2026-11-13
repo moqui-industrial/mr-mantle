@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' workspace services (IronStone Sales design §12.1 S): the authorized home, account and customer projections, the report
+    catalogue and the setup readiness. P2: get#SalesReadiness (SalesSettings.js); P3 adds the accounts, later phases the rest. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== P2: the setup readiness (design §9 Settings SalesReadiness) ===== -->
+    <service verb="get" noun="SalesReadiness" allow-remote="false" read-only="true">
+        <description>Sales' setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider
+            sales.readiness) with no adapter: called with providerKey and an organizationPartyId (or none, for each organization of
+            the caller's scope that uses Sales: a pipeline, a team, a lead source offered or an opportunity of its own), returns
+            checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the organization as
+            subject and scope, and for a check that is not ready its owner's place as a route key (fixRoute, with fixId where it
+            names a record): a default pipeline (salesStages), a pipeline in effect without stages (salesStages, the pipeline), a
+            team with a member (salesTeams) and a lead source offered (salesLeadSources). Later phases add theirs. One check that
+            fails is unavailable by name and the others go on. Changes nothing. Refuses a caller without SALES_CONFIGURE
+            (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="providerKey"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="checks" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('readiness', context).checks"/>
+        </actions>
+    </service>
+</services>

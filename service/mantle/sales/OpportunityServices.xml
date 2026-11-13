@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' opportunity services (IronStone Sales design §12.1 O, §9; impl-sales P2 onward). P2: the pipeline setup, its settings
+    verbs and reads (SalesSettings.js): pipelines and their stages, sales teams and their dated members, the lead sources and their
+    organization bindings, the lost reasons, and the options an organization offers. Each checks the SALES_* permission and the
+    organization itself (mantle/sales/SalesAccess.js), whoever calls it; refusals carry reason codes. Later phases add the lead and
+    opportunity lifecycle (P4), the lead intake (P5) and the import (P6). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== P2: the pipeline setup (design §9 Stages, Teams, LeadSources, TypesAndReasons) ===== -->
+    <service verb="store" noun="Pipeline" allow-remote="false">
+        <description>A new pipeline of an organization (organizationPartyId in the caller's scope, a name, an optional current team of
+            that organization, TEAM_UNAVAILABLE; from fromDate, now or later), or an existing pipeline's name, description, team,
+            default flag or end (end, or thruDate now or later), naming the revision read (expectedRevision, REVISION_CHANGED).
+            One default per organization: setting it clears the organization's other. The shared pipeline (no organization) is
+            changed only by a caller of every organization's scope (ORGANIZATION_DENIED); another organization's answers
+            RECORD_UNAVAILABLE. A pipeline whose stages hold open deals is not ended (PIPELINE_IN_USE). Needs SALES_CONFIGURE
+            (PERMISSION_DENIED). Nothing is deleted.</description>
+        <in-parameters>
+            <parameter name="salesPipelineId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="pipelineName"/>
+            <parameter name="description"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="defaultFlag"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesPipelineId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storePipeline', context)"/>
+            <set field="salesPipelineId" from="answer.salesPipelineId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Stage" allow-remote="false">
+        <description>A new stage of a pipeline (a name unique among its current stages, DUPLICATE_VALUE; a default probability from
+            0 to 100, PROBABILITY_INVALID; an order from 0 to 9999, SEQUENCE_INVALID, last when empty; whether the board folds it),
+            or an existing stage's name, probability, order or fold flag, a move up or down among the pipeline's current stages
+            (move), or its retirement (retire): a stage holding open deals (not Won or Lost) is retired only with reassignStageId,
+            another current stage of the same pipeline (STAGE_IN_USE without it, STAGE_INVALID for another), to which each open
+            deal moves, audit-logged; closed deals keep the retired stage. A change of an existing stage names the revision read
+            (REVISION_CHANGED); a retired one is not changed (RECORD_ENDED). The pipeline's organization in the caller's scope
+            (the shared pipeline: every organization's). Needs SALES_CONFIGURE. Never deleted.</description>
+        <in-parameters>
+            <parameter name="opportunityStageId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="description"/>
+            <parameter name="defaultProbability"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="foldFlag"/>
+            <parameter name="move"><description>up or down</description></parameter>
+            <parameter name="retire" type="Boolean"/>
+            <parameter name="reassignStageId"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="opportunityStageId"/>
+            <parameter name="moved" type="Integer"><description>The open deals moved to reassignStageId</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storeStage', context)"/>
+            <set field="opportunityStageId" from="answer.opportunityStageId"/>
+            <set field="moved" from="answer.moved"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesTeam" allow-remote="false">
+        <description>A new sales team of an organization in the caller's scope (an Organization party with the SalesTeam role,
+            owned by the organization, its PrtSalesTeamOf row from fromDate, now or later; a name unique among its current teams,
+            DUPLICATE_VALUE; managerPartyId, a person who works for the organization, MEMBER_INVALID, joins as its Manager), or a
+            team's name or end (end, or thruDate now or later; its memberships end with it), naming the revision read
+            (REVISION_CHANGED). Another organization's team answers RECORD_UNAVAILABLE. Needs SALES_CONFIGURE or
+            SALES_TEAM_MANAGE (PERMISSION_DENIED). Nothing is deleted; a team grants no permission.</description>
+        <in-parameters>
+            <parameter name="teamPartyId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamName"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="teamPartyId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storeSalesTeam', context)"/>
+            <set field="teamPartyId" from="answer.teamPartyId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesTeamMember" allow-remote="false">
+        <description>A person joins a team (partyId: a person who works for the team's organization, an agent or employee in effect,
+            MEMBER_INVALID; roleTypeId SalesRepresentative, the default, or Manager) from fromDate, now or later (DATE_INVALID),
+            until thruDate when given; a person has one membership of a team at a time (MEMBER_EXISTS). Or a membership ends
+            (partyRelationshipId, its revision, thruDate now or later; one not started ends at its start). Changes access
+            prospectively and rewrites no attribution. The team in the caller's scope (RECORD_UNAVAILABLE). Needs SALES_CONFIGURE
+            or SALES_TEAM_MANAGE. Never deleted.</description>
+        <in-parameters>
+            <parameter name="teamPartyId" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="partyRelationshipId"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="partyRelationshipId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storeSalesTeamMember', context)"/>
+            <set field="partyRelationshipId" from="answer.partyRelationshipId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="LeadSource" allow-remote="false">
+        <description>A new lead source (a moqui.basic.DataSource of a LEAD_SOURCE type, TYPE_INVALID; a name no lead source has,
+            DUPLICATE_VALUE) offered to organizationPartyId from now; an existing source's name or type, by a caller whose scope
+            covers every organization it is offered to (SOURCE_SHARED), naming its revision; or its offer to an organization of
+            the caller's added (bind, from fromDate now or later; BINDING_EXISTS) or ended (unbind, thruDate now or later). A source
+            is shared by the instance and never deleted; ending an offer leaves the records that name it. Needs SALES_CONFIGURE
+            and the organization in the caller's scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="dataSourceId"/>
+            <parameter name="description"/>
+            <parameter name="dataSourceTypeEnumId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="bind" type="Boolean"/>
+            <parameter name="unbind" type="Boolean"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="dataSourceId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storeLeadSource', context)"/>
+            <set field="dataSourceId" from="answer.dataSourceId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="LostReason" allow-remote="false">
+        <description>A new lost reason (a SalesLostReason value: a name no current reason has, DUPLICATE_VALUE; an order from 0 to
+            9999, last when empty), or a reason's name, order or end (end, or thruDate now or later), naming its revision. An ended
+            reason stays on the records that hold it and is offered for no new one; never deleted. The reasons are the instance's.
+            Needs SALES_CONFIGURE.</description>
+        <in-parameters>
+            <parameter name="enumId"/>
+            <parameter name="description"/>
+            <parameter name="sequenceNum"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="enumId"/></out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('storeLostReason', context)"/>
+            <set field="enumId" from="answer.enumId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesOptions" allow-remote="false" read-only="true">
+        <description>What an organization offers now, to any Sales reader of it (SALES_VIEW, SALES_TEAM_VIEW or SALES_REPORT_VIEW,
+            PERMISSION_DENIED; the organization in their scope, ORGANIZATION_DENIED): the opportunity types (Lead, Opportunity), the
+            outcomes, its pipelines in effect (its own and the shared one) with their current stages and its default, its current
+            teams, the lead sources offered to it, the current lost reasons and the recurring plans (enumCode: months).</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="types" type="List"/>
+            <parameter name="statuses" type="List"/>
+            <parameter name="defaultPipelineId"/>
+            <parameter name="pipelines" type="List"><description>salesPipelineId, pipelineName, organizationPartyId, shared, teamPartyId,
+                teamName, isDefault, stages [{opportunityStageId, description, defaultProbability, sequenceNum, folded}]</description></parameter>
+            <parameter name="teams" type="List"/>
+            <parameter name="sources" type="List"/>
+            <parameter name="lostReasons" type="List"/>
+            <parameter name="recurringPlans" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('salesOptions', context)"/>
+            <set field="types" from="answer.types"/>
+            <set field="statuses" from="answer.statuses"/>
+            <set field="defaultPipelineId" from="answer.defaultPipelineId"/>
+            <set field="pipelines" from="answer.pipelines"/>
+            <set field="teams" from="answer.teams"/>
+            <set field="sources" from="answer.sources"/>
+            <set field="lostReasons" from="answer.lostReasons"/>
+            <set field="recurringPlans" from="answer.recurringPlans"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesSetup" allow-remote="false" read-only="true">
+        <description>An organization's settings as its configurer or team manager reads them (SALES_CONFIGURE or SALES_TEAM_MANAGE;
+            the organization in their scope): its teams with their dated members (manager names, current count, each membership's
+            state and revision); and for SALES_CONFIGURE the pipelines it is offered with their stages and each stage's open deals,
+            the lead sources (offered there or not; the other organizations named when in the caller's scope, else "other
+            organizations"), the lost reasons and the types; ended rows with includeEnded; and whether the caller may change each
+            part (canConfigure, canManageTeams, canEditShared, a pipeline's canEdit, a source's canRename).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="includeEnded" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="defaultPipelineId"/>
+            <parameter name="pipelines" type="List"/>
+            <parameter name="teams" type="List"/>
+            <parameter name="sources" type="List"/>
+            <parameter name="sourceTypes" type="List"/>
+            <parameter name="lostReasons" type="List"/>
+            <parameter name="types" type="List"/>
+            <parameter name="recurringPlans" type="List"/>
+            <parameter name="canConfigure" type="Boolean"/>
+            <parameter name="canManageTeams" type="Boolean"/>
+            <parameter name="canEditShared" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesSettings.js').execute('salesSetup', context)"/>
+            <set field="organizationPartyId" from="answer.organizationPartyId"/>
+            <set field="organizationName" from="answer.organizationName"/>
+            <set field="defaultPipelineId" from="answer.defaultPipelineId"/>
+            <set field="pipelines" from="answer.pipelines"/>
+            <set field="teams" from="answer.teams"/>
+            <set field="sources" from="answer.sources"/>
+            <set field="sourceTypes" from="answer.sourceTypes"/>
+            <set field="lostReasons" from="answer.lostReasons"/>
+            <set field="types" from="answer.types"/>
+            <set field="recurringPlans" from="answer.recurringPlans"/>
+            <set field="canConfigure" from="answer.canConfigure"/>
+            <set field="canManageTeams" from="answer.canManageTeams"/>
+            <set field="canEditShared" from="answer.canEditShared"/>
+        </actions>
+    </service>
+</services>
