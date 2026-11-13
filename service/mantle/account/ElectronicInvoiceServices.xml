@@ -116,8 +116,10 @@ Grant of Patent License.
                 // Document type determination
                 let td = invoice.electronicInvoiceTypeEnumId;
                 if (!td) {
-                    if (invoice.invoiceTypeEnumId === 'InvoiceCreditMemo') {
+                    if (invoice.invoiceTypeEnumId === 'InvoiceCreditMemo' || invoice.invoiceTypeEnumId === 'InvoiceReturn') {
                         td = 'TD04';
+                    } else if (shipmentSources && shipmentSources.length > 0) {
+                        td = 'TD24';
                     } else {
                         td = 'TD01';
                     }
@@ -427,6 +429,7 @@ Grant of Patent License.
                 }
 
                 // VAT Summary
+                const esigibilita = invoice.taxExigibilityEnumId || (format === 'FPA12' ? 'S' : 'I');
                 for (const k in vatSummary) {
                     const row = vatSummary[k];
                     xml += '      <DatiRiepilogo>\n';
@@ -436,19 +439,29 @@ Grant of Patent License.
                     }
                     xml += '        <ImponibileImporto>' + format2(row.taxable) + '</ImponibileImporto>\n';
                     xml += '        <Imposta>' + format2(row.tax) + '</Imposta>\n';
-                    xml += '        <EsigibilitaIVA>I</EsigibilitaIVA>\n';
+                    xml += '        <EsigibilitaIVA>' + escapeXml(esigibilita) + '</EsigibilitaIVA>\n';
                     xml += '      </DatiRiepilogo>\n';
                 }
                 xml += '    </DatiBeniServizi>\n';
 
                 // Payment details
+                let mpCode = 'MP05';
+                if (invoice.paymentMethodId) {
+                    const pm = ec.entity.find('mantle.account.method.PaymentMethod').condition('paymentMethodId', invoice.paymentMethodId).one();
+                    const pmt = pm?.paymentMethodTypeEnumId || '';
+                    if (pmt === 'PmtCash') mpCode = 'MP01';
+                    else if (pmt === 'PmtCompanyCheck' || pmt === 'PmtPersonalCheck') mpCode = 'MP02';
+                    else if (pmt === 'PmtCreditCard' || pmt === 'PmtDebitCard') mpCode = 'MP08';
+                    else if (pmt === 'PmtAch') mpCode = 'MP19';
+                }
+                const payableAmt = esigibilita === 'S' ? (sumTaxable - totalWithholding) : (docTotal - totalWithholding);
                 xml += '    <DatiPagamento>\n';
                 xml += '      <CondizioniPagamento>TP02</CondizioniPagamento>\n';
                 xml += '      <DettaglioPagamento>\n';
-                xml += '        <ModalitaPagamento>MP05</ModalitaPagamento>\n';
+                xml += '        <ModalitaPagamento>' + mpCode + '</ModalitaPagamento>\n';
                 const dueDt = invoice.dueDate ? ec.l10n.format(invoice.dueDate, 'yyyy-MM-dd') : invDate;
                 xml += '        <DataScadenzaPagamento>' + dueDt + '</DataScadenzaPagamento>\n';
-                xml += '        <ImportoPagamento>' + format2(docTotal - totalWithholding) + '</ImportoPagamento>\n';
+                xml += '        <ImportoPagamento>' + format2(payableAmt) + '</ImportoPagamento>\n';
                 xml += '      </DettaglioPagamento>\n';
                 xml += '    </DatiPagamento>\n';
 
@@ -458,8 +471,8 @@ Grant of Patent License.
                 context.xmlText = xml;
             ]]></script>
 
-            <!-- Update invoice with SDI metadata -->
-            <service-call name="mantle.account.InvoiceServices.update#Invoice" in-map="{
+            <!-- Update invoice with SDI metadata (entity update so finalized invoices remain exportable) -->
+            <service-call name="update#mantle.account.invoice.Invoice" in-map="{
                 invoiceId: invoiceId,
                 sdiStatusEnumId: 'SdiGenerated',
                 sdiFilename: filename,
@@ -510,13 +523,215 @@ Grant of Patent License.
             ]]></script>
 
             <if condition="targetStatus">
-                <service-call name="mantle.account.InvoiceServices.update#Invoice" in-map="{
+                <service-call name="update#mantle.account.invoice.Invoice" in-map="{
                     invoiceId: invoiceId,
                     sdiStatusEnumId: targetStatus,
                     sdiIdent: sdiIdent || invoice?.sdiIdent,
                     sdiReceiptDate: notifDate
                 }"/>
             </if>
+        </actions>
+    </service>
+
+    <!-- ================================================================= -->
+    <!-- IMPORT SUPPLIER FATTURAPA XML (PURCHASE INVOICE)                  -->
+    <!-- ================================================================= -->
+    <service verb="import" noun="FatturaPaXml" allow-remote="true">
+        <description>
+            Parses an incoming supplier FatturaPA XML (FPR12/FPA12) and creates a Purchase Invoice
+            (or Credit Memo for TD04) with supplier matching/creation, line items, and VAT summary lines.
+        </description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="xmlText" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceId"/>
+            <parameter name="supplierPartyId"/>
+            <parameter name="itemCount" type="Integer"/>
+            <parameter name="totalAmount" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const xml = String(xmlText || '');
+                const tagVal = (block, tag) => {
+                    if (!block) return '';
+                    const re = new RegExp('<(?:[a-zA-Z0-9_-]+:)?' + tag + '[^>]*>([\\s\\S]*?)</(?:[a-zA-Z0-9_-]+:)?' + tag + '>', 'i');
+                    const m = block.match(re);
+                    return m ? m[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").trim() : '';
+                };
+                const allBlocks = (block, tag) => {
+                    if (!block) return [];
+                    const re = new RegExp('<(?:[a-zA-Z0-9_-]+:)?' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[a-zA-Z0-9_-]+:)?' + tag + '>', 'gi');
+                    const out = [];
+                    let m;
+                    while ((m = re.exec(block)) !== null) out.push(m[1]);
+                    return out;
+                };
+
+                const cedente = tagVal(xml, 'CedentePrestatore');
+                if (!cedente) {
+                    ec.message.addError("Invalid FatturaPA XML: missing CedentePrestatore.");
+                    return;
+                }
+                const supVat = tagVal(tagVal(cedente, 'IdFiscaleIVA'), 'IdCodice').replace(/^IT/i, '');
+                const supCf = tagVal(cedente, 'CodiceFiscale') || supVat;
+                const supName = tagVal(cedente, 'Denominazione')
+                    || ((tagVal(cedente, 'Nome') + ' ' + tagVal(cedente, 'Cognome')).trim())
+                    || supVat || supCf || 'Imported Supplier';
+
+                // Match existing supplier by TaxAuthorityParty or PartyIdentification
+                let supplierPartyId = null;
+                if (supVat) {
+                    const tap = ec.entity.find('mantle.other.tax.TaxAuthorityParty')
+                        .condition('partyTaxId', supVat).list() || [];
+                    if (tap.length > 0) supplierPartyId = tap[0].partyId;
+                }
+                if (!supplierPartyId && supCf) {
+                    const pi = ec.entity.find('mantle.party.PartyIdentification')
+                        .condition('idValue', supCf).list() || [];
+                    if (pi.length > 0) supplierPartyId = pi[0].partyId;
+                }
+                if (!supplierPartyId) {
+                    const supOut = ec.service.sync().name('mantle.party.PartyServices.create#Organization').parameters({
+                        organizationName: supName,
+                        roleTypeId: 'Vendor'
+                    }).call();
+                    supplierPartyId = supOut.partyId;
+                    if (supCf) {
+                        ec.service.sync().name('create#mantle.party.PartyIdentification').parameters({
+                            partyId: supplierPartyId, partyIdTypeEnumId: 'PtidSsn', idValue: supCf
+                        }).call();
+                    }
+                    if (supVat) {
+                        ec.service.sync().name('create#mantle.other.tax.TaxAuthorityParty').parameters({
+                            taxAuthorityId: 'IT_ADE', partyId: supplierPartyId,
+                            fromDate: ec.user.nowTimestamp, partyTaxId: supVat
+                        }).call();
+                    }
+                    const sede = tagVal(cedente, 'Sede');
+                    if (sede) {
+                        ec.service.sync().name('mantle.party.ContactServices.create#PostalAddress').parameters({
+                            partyId: supplierPartyId,
+                            contactMechPurposeId: 'PostalPrimary',
+                            address1: tagVal(sede, 'Indirizzo') || '-',
+                            postalCode: tagVal(sede, 'CAP') || '00000',
+                            city: tagVal(sede, 'Comune') || '-',
+                            countryGeoId: tagVal(sede, 'Nazione') === 'IT' ? 'ITA' : null
+                        }).call();
+                    }
+                }
+                context.supplierPartyId = supplierPartyId;
+
+                const docGen = tagVal(xml, 'DatiGeneraliDocumento');
+                const td = tagVal(docGen, 'TipoDocumento') || 'TD01';
+                const divisa = tagVal(docGen, 'Divisa') || 'EUR';
+                const dataStr = tagVal(docGen, 'Data');
+                const numero = tagVal(docGen, 'Numero') || 'IMP-' + Date.now();
+                const invDateTs = dataStr ? ec.l10n.parseTimestamp(dataStr + ' 00:00:00', 'yyyy-MM-dd HH:mm:ss') : ec.user.nowTimestamp;
+                const invoiceTypeEnumId = (td === 'TD04') ? 'InvoiceCreditMemo' : 'InvoiceSales';
+
+                const invOut = ec.service.sync().name('mantle.account.InvoiceServices.create#Invoice').parameters({
+                    fromPartyId: supplierPartyId,
+                    toPartyId: organizationPartyId,
+                    invoiceTypeEnumId: invoiceTypeEnumId,
+                    statusId: 'InvoiceIncoming',
+                    currencyUomId: divisa,
+                    invoiceDate: invDateTs,
+                    referenceNumber: numero,
+                    electronicInvoiceTypeEnumId: td,
+                    sdiStatusEnumId: 'SdiReceived'
+                }).call();
+                const invoiceId = invOut.invoiceId;
+                context.invoiceId = invoiceId;
+
+                let itemCount = 0;
+                const lines = allBlocks(xml, 'DettaglioLinee');
+                for (const line of lines) {
+                    const desc = tagVal(line, 'Descrizione') || 'Imported Line';
+                    const qty = parseFloat(tagVal(line, 'Quantita') || '1') || 1;
+                    const price = parseFloat(tagVal(line, 'PrezzoUnitario') || tagVal(line, 'PrezzoTotale') || '0') || 0;
+                    const vatRate = parseFloat(tagVal(line, 'AliquotaIVA') || '0') || 0;
+                    ec.service.sync().name('mantle.account.InvoiceServices.create#InvoiceItem').parameters({
+                        invoiceId: invoiceId,
+                        itemTypeEnumId: 'ItemExpense',
+                        description: desc.slice(0, 250),
+                        quantity: toDecimal(qty),
+                        amount: toDecimal(price).setScale(2, 'HALF_UP'),
+                        taxPercentage: toDecimal(vatRate)
+                    }).call();
+                    itemCount++;
+                }
+
+                const riepiloghi = allBlocks(xml, 'DatiRiepilogo');
+                let totalVat = 0;
+                for (const riep of riepiloghi) {
+                    const rate = parseFloat(tagVal(riep, 'AliquotaIVA') || '0') || 0;
+                    const imposta = parseFloat(tagVal(riep, 'Imposta') || '0') || 0;
+                    const natura = tagVal(riep, 'Natura');
+                    if (imposta !== 0 || natura) {
+                        ec.service.sync().name('mantle.account.InvoiceServices.create#InvoiceItem').parameters({
+                            invoiceId: invoiceId,
+                            itemTypeEnumId: 'ItemVatTaxTotal',
+                            taxAuthorityId: 'IT_ADE',
+                            description: 'VAT ' + rate + '%' + (natura ? ' (' + natura + ')' : ''),
+                            quantity: toDecimal(1),
+                            amount: toDecimal(imposta).setScale(2, 'HALF_UP'),
+                            taxPercentage: toDecimal(rate),
+                            vatNatureEnumId: natura || null
+                        }).call();
+                        itemCount++;
+                    }
+                    totalVat += imposta;
+                }
+
+                const invRec = ec.entity.find('mantle.account.invoice.Invoice').condition('invoiceId', invoiceId).one();
+                context.itemCount = itemCount;
+                context.totalAmount = invRec?.invoiceTotal || toDecimal(0);
+            ]]></script>
+        </actions>
+    </service>
+
+    <!-- ================================================================= -->
+    <!-- PARSE SDI NOTIFICATION XML (RC / NS / MC / DT / EC)               -->
+    <!-- ================================================================= -->
+    <service verb="parse" noun="SdiNotificationXml" allow-remote="true">
+        <description>
+            Parses an incoming SdI XML notification (RicevutaConsegna, NotificaScarto, MancataConsegna,
+            DecorrenzaTermini, EsitoCommittente) and records it on the matching Invoice.
+        </description>
+        <in-parameters>
+            <parameter name="invoiceId" required="true"/>
+            <parameter name="xmlText" required="true" allow-html="any"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sdiNotificationId"/>
+            <parameter name="notificationTypeEnumId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                const xml = String(xmlText || '');
+                const tagVal = (block, tag) => {
+                    const re = new RegExp('<(?:[a-zA-Z0-9_-]+:)?' + tag + '[^>]*>([\\s\\S]*?)</(?:[a-zA-Z0-9_-]+:)?' + tag + '>', 'i');
+                    const m = block.match(re);
+                    return m ? m[1].trim() : '';
+                };
+                let notifType = 'RC';
+                if (/NotificaScarto/i.test(xml)) notifType = 'NS';
+                else if (/NotificaMancataConsegna/i.test(xml)) notifType = 'MC';
+                else if (/NotificaDecorrenzaTermini/i.test(xml)) notifType = 'DT';
+                else if (/NotificaEsito/i.test(xml)) notifType = 'EC';
+                else if (/RicevutaConsegna/i.test(xml)) notifType = 'RC';
+
+                context.notificationTypeEnumId = notifType;
+                context.sdiIdent = tagVal(xml, 'IdentificativoSdI');
+                context.fileLocation = tagVal(xml, 'NomeFile');
+                context.description = tagVal(xml, 'Descrizione') || tagVal(xml, 'Esito') || notifType;
+            ]]></script>
+            <service-call name="mantle.account.ElectronicInvoiceServices.record#SdiNotification"
+                    in-map="{invoiceId:invoiceId, notificationTypeEnumId:notificationTypeEnumId,
+                        sdiIdent:sdiIdent, fileLocation:fileLocation, description:description}"
+                    out-map="context"/>
         </actions>
     </service>
 </services>
