@@ -14,7 +14,7 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- mantle.sales.SalesWorkspaceServices (S, design-sales §12.1): Sales' authorized projections. P2 (design §9 Settings): the
     setup readiness (get#SalesReadiness, SalesSettings.js). P3 (design §4): the accounts and contacts of the caller's sales scope
-    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (Home's
+    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; Home's
     of P6). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
     outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
@@ -153,6 +153,20 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('documentCounts', context)"/>
             <set field="counts" from="found.counts"/>
+        </actions>
+    </service>
+    <!-- ========== P5: My accounts, the projected address book (design §4 Contacts, CX-SYNC, SAL-SYNC) ========== -->
+    <service verb="get" noun="AccountContactProjection" allow-remote="false" read-only="true">
+        <implements service="mantle.party.ContactDavServices.define#ProjectionOwner"/>
+        <description>My accounts, a projected CardDAV address book (SalesIntakeData.xml's ContactProjection SalesMyAccounts;
+            mantle.party.ContactDavServices): admitted is whether the user reads Sales (SALES_VIEW, SALES_TEAM_VIEW or
+            SALES_REPORT_VIEW); without checkOnly, the current contacts of the accounts the user may see that they manage or that
+            are the account of a deal assigned now to them or a team of theirs, each a person they may see, computed per request (at
+            most 2000). Another team's accounts are absent. Read only: a device's write is refused by the projection.</description>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('accountContactProjection', context)"/>
+            <set field="admitted" from="!!found.admitted"/>
+            <set field="partyIdList" from="found.partyIdList"/>
         </actions>
     </service>
 </services>

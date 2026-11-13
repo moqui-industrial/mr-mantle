@@ -1571,6 +1571,19 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- mantle.party.contact -->
     <!-- ========================================================= -->
 
+    <entity entity-name="ContactProjection" package="mantle.party.contact" cache="never">
+        <description>A projected CardDAV address book (mantle.party.ContactDavServices; CX-SYNC, impl-sales P5, F29), the contacts
+            counterpart of mantle.work.calendar.CalendarProjection: a read-only collection, collectionId projected-{projectionId},
+            whose cards are the parties its owner's service answers (ownerServiceName, implementing
+            mantle.party.ContactDavServices.define#ProjectionOwner) as the user, computed per request; no ContactBook row is
+            copied. A device's write is refused. Seeded by the owner's component; disabled Y leaves it out.</description>
+        <field name="projectionId" type="id" is-pk="true"/>
+        <field name="title" type="text-medium"/>
+        <field name="description" type="text-medium"/>
+        <field name="ownerServiceName" type="text-medium"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="disabled" type="text-indicator"/>
+    </entity>
     <entity entity-name="ContactBook" package="mantle.party.contact" cache="never">
         <description>A named collection of parties: a user's personal book (ownerUserId, visibility CbvPersonal) or a shared
             book (visibility CbvShared, ownerPartyId the organization it belongs to, if any) that ContactBookShare rows open

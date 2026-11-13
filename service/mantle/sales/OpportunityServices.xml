@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     verbs and reads (SalesSettings.js): pipelines and their stages, sales teams and their dated members, the lead sources and their
     organization bindings, the lost reasons, and the options an organization offers. Each checks the SALES_* permission and the
     organization itself (mantle/sales/SalesAccess.js), whoever calls it; refusals carry reason codes. Later phases add the lead and
-    opportunity lifecycle (P4, below: SalesOpportunities.js), the lead intake (P5) and the import (P6). -->
+    opportunity lifecycle (P4, below: SalesOpportunities.js), the lead intake (P5, below: SalesIntake.js) and the import (P6). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== P2: the pipeline setup (design §9 Stages, Teams, LeadSources, TypesAndReasons) ===== -->
     <service verb="store" noun="Pipeline" allow-remote="false">
@@ -331,6 +331,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="competitors" type="List"/>
             <parameter name="activities" type="List"/>
             <parameter name="orders" type="List"/>
+            <parameter name="intakes" type="List"><description>P5: the lead's intakes (kindText, receivedText, the submitted name,
+                organization, email and phone, blank once purged, utmText, verified, duplicate, purged)</description></parameter>
             <parameter name="canEdit" type="Boolean"/>
             <parameter name="canClose" type="Boolean"/>
             <parameter name="canReopen" type="Boolean"/>
@@ -346,6 +348,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="competitors" from="found.competitors || []"/>
             <set field="activities" from="found.activities || []"/>
             <set field="orders" from="found.orders || []"/>
+            <set field="intakes" from="found.intakes || []"/>
             <set field="canEdit" from="!!found.canEdit"/>
             <set field="canClose" from="!!found.canClose"/>
             <set field="canReopen" from="!!found.canReopen"/>
@@ -652,6 +655,189 @@ along with this software (see the LICENSE.md file). If not, see
             </script>
             <service-call name="update#mantle.sales.opportunity.SalesOpportunityContent" disable-authz="true"
                     in-map="{salesOpportunityContentId:salesOpportunityContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+    <!-- ===== P5: lead intake (design §3 Leads, §9 LeadSources UtmSourceMap, §11 LeadIntakeForms, CX-MAIL-INTAKE; SalesIntake.js) ===== -->
+    <service verb="store" noun="LeadIntake" allow-remote="false">
+        <description>An inquiry as a lead (design §3 Leads, X16), from a validated source: a mail rule (create#LeadFromEmail), a Comms
+            action on a mail or chat message or a voicemail, a staff entry, or Marketing's lead rules (impl-marketing P13). Writes a
+            SalesLeadIntake with what the inquirer submitted (name, organization, email, phone; never on the deal, never a party: the
+            party is made at qualification), the UTM pair, campaign, tracking code and verification; sets the lead's source by the
+            organization's UTM map (source and medium over source alone; an unmapped pair keeps defaultDataSourceId, which must be
+            offered to the organization, SOURCE_INVALID), its campaign (the tracking code's when none is given; CAMPAIGN_INVALID,
+            TRACKING_INVALID) and a SalesOpportunityTracking row for the tracking code; and makes the lead, routed to the team queue
+            the caller names. The duplicate policy: an open lead of the organization that an intake with the same submitted email
+            made or joined is joined (duplicate, outcome SlioDuplicate, a review item on that lead), never merged. One source identity
+            (sourceKind and sourceId) makes one intake, and a repeated operationKey answers the first result (alreadyApplied), whoever
+            calls; another request under the key is OPERATION_KEY_CONFLICT, a source already taken by another organization
+            SOURCE_TAKEN. A user caller needs SALES_OPPORTUNITY_EDIT and the organization in their scope (PERMISSION_DENIED,
+            ORGANIZATION_DENIED) and assigns as create#Opportunity does (themselves by default; TEAM_UNAVAILABLE,
+            ASSIGNMENT_REQUIRED); a system caller (no user, or authorization disabled: the mail rule, Marketing's capture job)
+            vouches for its source and names a current team of the organization (TEAM_REQUIRED, TEAM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="sourceKind" required="true"><description>formResponse, emailMessage, communicationEvent, chatMessage,
+                voicemail or staff (or the SalesLeadIntakeSource enumId)</description></parameter>
+            <parameter name="sourceId"><description>The source's identity (a form response, a mail's Message-ID, a communication
+                event, chatRoomId:eventSeq, a voicemail); a staff entry has none and needs operationKey</description></parameter>
+            <parameter name="operationKey"/>
+            <parameter name="submittedName"/>
+            <parameter name="submittedOrganization"/>
+            <parameter name="submittedEmail"/>
+            <parameter name="submittedPhone"/>
+            <parameter name="verified" type="Boolean"><description>The inquirer verified the email (Marketing's confirmed
+                submission): such an intake is never purged</description></parameter>
+            <parameter name="utmSource"/>
+            <parameter name="utmMedium"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="trackingCodeId"/>
+            <parameter name="defaultDataSourceId"><description>The source when the UTM map has none for the pair (the publication's,
+                the rule's or the team's)</description></parameter>
+            <parameter name="teamPartyId"><description>The team whose queue the lead goes to</description></parameter>
+            <parameter name="ownerPartyId"/>
+            <parameter name="opportunityName"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesLeadIntakeId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="outcomeEnumId"/>
+            <parameter name="duplicate" type="Boolean"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('storeLeadIntake', context)"/>
+            <set field="salesLeadIntakeId" from="found.salesLeadIntakeId"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="outcomeEnumId" from="found.outcomeEnumId"/>
+            <set field="duplicate" from="!!found.duplicate"/>
+            <set field="dataSourceId" from="found.dataSourceId"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="create" noun="LeadFromEmail" authenticate="anonymous-all" allow-remote="false">
+        <description>The createLead action of the mail client's rules (EmailRuleAction ErActCreateLead, CX-MAIL-INTAKE): a received
+            message to a sales team's plus-tag address (sales+leads@..., the team's SalesIntakePlusTag), or to the team the action's
+            value names, becomes an intake of that team's organization through store#LeadIntake, in that team's queue: its sender's
+            name and address as submitted, its subject the lead's name, its text the description, the team's SalesIntakeSource as
+            the default source, and the message filed on the lead as evidence. The message's Message-ID is the source identity, so
+            the same mail delivered twice makes one lead. A team is taken only when the rule's owner works for its organization
+            (TEAM_UNAVAILABLE otherwise, the rule's failure). Mail from anyone makes an intake, never a party.</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailRuleId"/>
+            <parameter name="ruleOwnerUserId"/>
+            <parameter name="value"><description>The team (partyId), or empty for the plus tag</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="salesLeadIntakeId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('leadFromEmail', context)"/>
+            <set field="salesOpportunityId" from="found.salesOpportunityId"/>
+            <set field="salesLeadIntakeId" from="found.salesLeadIntakeId"/>
+            <set field="alreadyApplied" from="!!found.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="store" noun="LeadSourceMapping" allow-remote="false">
+        <description>An organization's UTM source map row (design §9 UtmSourceMap, X10): a new mapping of a UTM source and optionally
+            its medium (lower-cased, at most 60 characters; UTM_SOURCE_REQUIRED) to a lead source offered to the organization
+            (SOURCE_INVALID), from fromDate now or later (DATE_INVALID); a current mapping of the same pair is ended first
+            (MAPPING_EXISTS); or a mapping ended (salesLeadSourceMapId with end or thruDate now or later), naming its revision
+            (REVISION_CHANGED). Ended, never changed or deleted. Needs SALES_CONFIGURE and the organization in the caller's scope
+            (another organization's mapping answers RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="salesLeadSourceMapId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="utmSource"/>
+            <parameter name="utmMedium"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters><parameter name="salesLeadSourceMapId"/></out-parameters>
+        <actions>
+            <set field="salesLeadSourceMapId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('storeLeadSourceMapping', context).salesLeadSourceMapId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="LeadSourceMappings" allow-remote="false" read-only="true">
+        <description>An organization's UTM source map for its configurer (SALES_CONFIGURE, the organization in the scope): each
+            current row (with includeEnded the ended ones too) with its source's name, dates and revision.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="includeEnded" type="Boolean"/>
+        </in-parameters>
+        <out-parameters><parameter name="mappingList" type="List"/></out-parameters>
+        <actions>
+            <set field="mappingList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('findLeadSourceMappings', context).mappingList"/>
+        </actions>
+    </service>
+    <service verb="store" noun="TeamIntake" allow-remote="false">
+        <description>A sales team's intake address (design §3 Leads, CX-MAIL-INTAKE): its plus tag (mail to sales+tag@ the intake
+            mailbox, with a rule whose action is createLead, lands in the team's queue; letters, digits, dot, dash and underscore,
+            TAG_INVALID; one team's, TAG_TAKEN) and its default lead source (offered to the team's organization, SOURCE_INVALID), as
+            PartySettings of the team; empty clears either. Needs SALES_CONFIGURE and the team's organization in the caller's scope
+            (RECORD_UNAVAILABLE otherwise).</description>
+        <in-parameters>
+            <parameter name="teamPartyId" required="true"/>
+            <parameter name="intakePlusTag"/>
+            <parameter name="intakeDataSourceId"/>
+        </in-parameters>
+        <out-parameters><parameter name="teamPartyId"/></out-parameters>
+        <actions>
+            <set field="teamPartyId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('storeTeamIntake', context).teamPartyId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="TeamIntakes" allow-remote="false" read-only="true">
+        <description>An organization's current teams with their intake plus tag, address text and default lead source, for its
+            configurer (SALES_CONFIGURE, the organization in the scope).</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters><parameter name="teamList" type="List"/></out-parameters>
+        <actions>
+            <set field="teamList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('findTeamIntakes', context).teamList"/>
+        </actions>
+    </service>
+    <service verb="log" noun="OpportunityCall" allow-remote="false">
+        <description>A call on a deal (design §1.4 Comms hooks: "Log call on opportunity" from a call or a voicemail): a Phone
+            communication event of the caller, in from or out to one of the deal's current contacts when one is named
+            (CONTACT_UNAVAILABLE otherwise), when it was (not ahead: DATE_INVALID), how long (0 to 1440 minutes: DURATION_INVALID) and
+            what it was about (SUMMARY_REQUIRED), filed on the deal's conversation. Needs SALES_OPPORTUNITY_EDIT on a deal the caller
+            sees (RECORD_UNAVAILABLE). Changes no field of the deal, so it names no revision.</description>
+        <in-parameters>
+            <parameter name="salesOpportunityId" required="true"/>
+            <parameter name="summary"/>
+            <parameter name="direction"><description>in or out (the default)</description></parameter>
+            <parameter name="contactPartyId"/>
+            <parameter name="occurredDate" type="Timestamp"/>
+            <parameter name="durationMinutes"/>
+        </in-parameters>
+        <out-parameters><parameter name="communicationEventId"/></out-parameters>
+        <actions>
+            <set field="communicationEventId" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('logOpportunityCall', context).communicationEventId"/>
+        </actions>
+    </service>
+    <service verb="purge" noun="LeadIntakes" allow-remote="false">
+        <description>The purge of design §3 Leads (X15): the submitted name, organization, email and phone of each unverified
+            intake received more than retentionDays ago (30 until Sales' defaults set them, P9) whose lead never qualified,
+            blanked with its purgedDate; a qualified or verified one is kept. The intake row, its source identity and key stay, so
+            a retry still answers one lead. The ServiceJob purge_SalesLeadIntakes runs it nightly for every organization; a user
+            needs SALES_CONFIGURE and purges the organizations of their scope. Each intake on its own: one that fails is logged and
+            the rest go on.</description>
+        <in-parameters><parameter name="retentionDays" type="Integer"/></in-parameters>
+        <out-parameters>
+            <parameter name="purgedCount" type="Integer"/>
+            <parameter name="keptCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('purgeLeadIntakes', context)"/>
+            <set field="purgedCount" from="found.purgedCount"/>
+            <set field="keptCount" from="found.keptCount"/>
         </actions>
     </service>
 </services>
