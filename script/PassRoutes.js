@@ -298,6 +298,10 @@
     ['GET', 'sales/quote/document', 'getSalesQuoteDocument'],
     ['POST', 'sales/quote/response', 'respondSalesQuote'],
     ['GET', 'sales/quote/response', 'getSalesQuoteResponse'],
+    // IronStone Sales P17: PASS Sales' orders
+    ['GET', 'sales/orders', 'findSalesOrders'],
+    ['GET', 'sales/order', 'getSalesOrder'],
+    ['GET', 'sales/order/document', 'getSalesOrderDocument'],
     // IronStone Marketing P7: PASS Marketing's subscription (the request an anonymous write PASS's request key and the limits
     // bound; the confirmation a bearer write)
     ['GET', 'marketing/publication', 'getMarketingPublication'],

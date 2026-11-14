@@ -105,6 +105,8 @@ const DOWNLOADS = [
     'downloadArchive',
     // IronStone Sales P13: an issued quote's PDF
     'getSalesQuoteDocument',
+    // IronStone Sales P17: an order's confirmation as placed
+    'getSalesOrderDocument',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
