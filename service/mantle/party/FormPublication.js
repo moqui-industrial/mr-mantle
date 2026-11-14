@@ -397,7 +397,14 @@ function acceptSubmission(p) {
         const again = repeat()
         if (again) return again
         if (invitation.formResponseId) denied("ALREADY_ANSWERED", "This invitation has its answer")
-    } else if (access === "FpaAccount") {
+    } else {
+        // a public or an account's publication: under the publication's lock, so a concurrent post with the same key finds the
+        // first here (and answers it) rather than failing on the unique key, and an account's once policy holds under a race
+        find(PUBLICATION, {publicationId: publication.publicationId}).forUpdate(true).one()
+        const again = repeat()
+        if (again) return again
+    }
+    if (access === "FpaAccount") {
         if (blank(p.partyId)) denied("ACCOUNT_REQUIRED", "Sign in to answer this form")
         if (
             publication.repeatEnumId === "FprOnce" &&

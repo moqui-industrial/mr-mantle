@@ -565,12 +565,20 @@ function publicationOfPage(p, organizationPartyId) {
     let row = null,
         invitation = null
     if (!blank(p.token)) {
-        const checked = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").check({
-            token: p.token,
-            scope: "MarketingSurvey",
-            recordType: "FormInvitation",
-            organizationPartyId
-        })
+        // the link's check (its lookup counts against the requester's limit there); its own NotFound ("This link ...") is the
+        // page's one, so a forged token and a good one of a closed or another site's publication answer alike (P12 review R2)
+        let checked
+        try {
+            checked = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").check({
+                token: p.token,
+                scope: "MarketingSurvey",
+                recordType: "FormInvitation",
+                organizationPartyId
+            })
+        } catch (error) {
+            if (error?.moquiErrorKind !== "NotFound") throw error
+            unavailable()
+        }
         invitation = one("mantle.party.FormInvitation", {invitationId: checked.recordId})
         row = invitation ? one(PUBLICATION, {publicationId: invitation.publicationId}) : null
         if (!row || row.accessEnumId !== "FpaInvited") unavailable()

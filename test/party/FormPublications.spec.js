@@ -249,6 +249,43 @@ feature("one request key makes one submission: the same answers answer the first
     }
 })
 
+// Marketing P12 review (R1): concurrent posts of one request key to a public publication answer the first, none fails on the key
+feature("concurrent posts of one request key to a public publication make one submission and each answers it", {
+    when() {
+        const requestKey = key()
+        const ran = parallel(
+            4,
+            (thread, a) => {
+                logout()
+                ec.artifactExecution.disableAuthz()
+                ec.message.pushErrors()
+                try {
+                    const out = ec.service
+                        .sync()
+                        .name("mantle.party.FormPublicationServices.accept#Submission")
+                        .parameters({publicationId: a.publicationId, requestKey: a.requestKey, values: {liked: "no"}})
+                        .requireNewTransaction(true)
+                        .call()
+                    return ec.message.hasError() ? "error: " + ec.message.getErrorsString() : out.formSubmissionId
+                } catch (error) {
+                    return "error: " + String(error.message || error)
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+            },
+            {publicationId: state.publicationId, requestKey},
+            {transaction: false}
+        )
+        const submissionId = ran.find(id => !String(id).startsWith("error"))
+        return {ran, submissionId, kept: count("mantle.party.FormSubmission", {formSubmissionId: submissionId || "-"})}
+    },
+    then(r) {
+        r.ran.every(id => id === r.submissionId)
+        r.kept === 1
+    }
+})
+
 feature("an invitation answers once: a second answer from the same invitation is refused, and its response is kept", {
     when() {
         const formId = state.formId
