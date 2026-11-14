@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Smithy and GitHub (mr-pass plan/design-smithy.md §11 Import, §15.9, §18.2, DG8; SmithyImport.js): the import of a
+        GitHub repository's issues and pull requests into a repository of a group, and a repository's push mirrors. Each
+        operation takes PASS's input map (its fields are SmithySchema.js's, siteId among them) and answers result. What
+        the caller may not view is Not Found. run#Import, run#Imports, handle#ExternalLink and claim#GithubAccount are not
+        operations. -->
+    <service verb="start" noun="Import" authenticate="anonymous-all" allow-remote="false">
+        <description>Start an import of a GitHub repository (sourceRepository, owner/name) into a group (groupId), by the
+            group's Owner with a confirmed address or an operator: into a repository of the group (repositoryId; one with
+            issues or merge requests the import did not make is refused, numbersTaken, since numbers are kept) or a new one
+            (slug, as wide as the group). token, a GitHub token that may read the repository, is kept encrypted for the run
+            and dropped when it ends. options: issues and pullRequests (both by default). GitHub is asked for the
+            repository now: sourceRefused (Unprocessable) when it refuses the token or has no such repository. Conflict
+            (importActive) while a run of the same source or into the same repository is active. The run then goes a step
+            at a time (run#Import). Creates take operationId.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("startGitHubImport", input)</script></actions>
+    </service>
+    <service verb="get" noun="ImportRun" authenticate="anonymous-all" allow-remote="false">
+        <description>An import as its group's Owners and operators see it: its repository and source, its stage (queued,
+            labels, issues, pulls, comments, links, done, failed, cancelled), counts by type (imported, source: seen at
+            GitHub, failed), what could not be carried (reportList: sourceType, sourceId, errorText; notCarried: what is
+            never carried, and reactions the forum does not have, by kind), waitingUntil while GitHub's rate limit holds
+            it, running while a step runs, and revision.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getGitHubImport", input)</script></actions>
+    </service>
+    <service verb="find" noun="ImportRuns" authenticate="anonymous-all" allow-remote="false">
+        <description>The imports into a group (groupId), for its Owners, newest first, paged; with no group, every import
+            of the site, for an operator.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findGitHubImports", input)</script></actions>
+    </service>
+    <service verb="resume" noun="Import" authenticate="anonymous-all" allow-remote="false">
+        <description>Go on with a failed or cancelled import from where it stopped, or give a running one another token
+            (token; needed once a run ended, since its token was dropped), with expectedRevision. Conflict while a step
+            runs; notAvailable for a done import (start it again: what it has is not made twice, and what failed is tried
+            again).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("resumeGitHubImport", input)</script></actions>
+    </service>
+    <service verb="cancel" noun="Import" authenticate="anonymous-all" allow-remote="false">
+        <description>Stop an import where it is, with expectedRevision; its token is dropped. What it made stays, and it
+            can be resumed with a token.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("cancelGitHubImport", input)</script></actions>
+    </service>
+    <service verb="find" noun="Mirrors" authenticate="anonymous-all" allow-remote="false">
+        <description>A repository's push mirrors, for its Maintainers: the address, the refs, whether it deletes refs the
+            repository no longer has, enabled, hasCredential (never the credential), the last push, its result and error,
+            and the next attempt. notBuilt until the framework has push mirrors (F6).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findMirrors", input)</script></actions>
+    </service>
+    <service verb="store" noun="Mirror" authenticate="anonymous-all" allow-remote="false">
+        <description>Make a push mirror (operationId) or change one (mirrorId), by a Maintainer with a confirmed address: url
+            (https, with no credential in it), username and secret (a token; write-only), hostKeyFingerprint, refs (ref
+            patterns, comma separated), deleteRefs, enabled. Unprocessable for an address the framework's outbound rules
+            refuse. notBuilt until the framework has push mirrors (F6).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeMirror", input)</script></actions>
+    </service>
+    <service verb="delete" noun="Mirror" authenticate="anonymous-all" allow-remote="false">
+        <description>Remove a push mirror, by a Maintainer. notBuilt until the framework has push mirrors (F6).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("deleteMirror", input)</script></actions>
+    </service>
+    <service verb="push" noun="Mirror" authenticate="anonymous-all" allow-remote="false">
+        <description>Push a mirror now, by a Maintainer: queued. Conflict while a push of it runs. The framework's outbound
+            check holds the pushes of a hidden repository. notBuilt until the framework has push mirrors (F6).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("pushMirror", input)</script></actions>
+    </service>
+
+    <!-- Not operations -->
+    <service verb="run" noun="Import" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>A step of an import, as the account that started it (another account's call does nothing): at most
+            budget API requests (10) from where its cursor is, each source item written in a transaction of its own, and
+            the cursor saved. Nothing while GitHub's rate limit holds the run (waitingUntil) or while another step runs.
+            The account must still own the group, else the run fails. Answers the stage, waitingUntil, the requests made
+            and done once the run ended.</description>
+        <in-parameters>
+            <parameter name="importId" required="true"/>
+            <parameter name="budget" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="stage"/>
+            <parameter name="waitingUntil" type="Timestamp"/>
+            <parameter name="requests" type="Integer"/>
+            <parameter name="done" type="Boolean"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const out = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").runImport({importId, budget})
+            stage = out.stage || null
+            waitingUntil = out.waitingUntil || null
+            requests = out.requests || 0
+            done = !!out.done
+        ]]></script></actions>
+    </service>
+    <service verb="run" noun="Imports" authenticate="false" allow-remote="false" transaction="ignore">
+        <description>For the smithy_run_imports job: a step of each import that is due, as the account that started it
+            (logged in without a password for the step); one whose account is gone fails. Each stands alone.</description>
+        <out-parameters><parameter name="stepped" type="Integer"/></out-parameters>
+        <actions><script>stepped = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").runImports().stepped</script></actions>
+    </service>
+    <service verb="handle" noun="ExternalLink" authenticate="false" allow-remote="false">
+        <description>For the SmithyClaimGithubPlaceholder rule (entity/Smithy.eecas.xml): after the commit of the account,
+            in a transaction of its own, claim#GithubAccount. Never fails the write: a failure is logged.</description>
+        <in-parameters><parameter name="userId"/></in-parameters>
+        <actions><script><![CDATA[
+            if (!userId) return
+            ec.message.pushErrors()
+            try {
+                const name = "mantle.smithy.SmithyImportServices.claim#GithubAccount"
+                let later = false
+                try {
+                    ec.service.special().name(name).parameters({userId}).registerOnCommit()
+                    later = true
+                } catch (err) {
+                    // no transaction in place: the write is committed already
+                }
+                if (!later) ec.service.sync().name(name).parameter("userId", userId).requireNewTransaction(true).disableAuthz().call()
+            } catch (err) {
+                ec.logger.error("The GitHub placeholder of " + userId + " was not claimed: " + (err && err.message ? err.message : err))
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="claim" noun="GithubAccount" authenticate="false" allow-remote="false">
+        <description>An account whose sign-in through a GitHub provider (an OauthFlow of type OctGitHub) linked a GitHub id
+            (UserAccount.externalUserId) claims, in each site, the import's placeholder of that id: the account takes its
+            GitHub login (SmithyAccount.githubLogin and githubUserId, so the agreement counts its imported commits) and its
+            posts, issues, merge requests, assignments and reactions; the placeholder's profile ends. Safe to run twice;
+            nothing for another provider.</description>
+        <in-parameters><parameter name="userId" required="true"/></in-parameters>
+        <out-parameters><parameter name="claimed" type="Integer"/></out-parameters>
+        <actions><script>claimed = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").claimGithub(userId).claimed</script></actions>
+    </service>
+</services>

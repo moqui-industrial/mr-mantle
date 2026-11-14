@@ -851,6 +851,22 @@ function compatibilitySection(rest) {
     if (word === "releases" && more[0] === "tag" && more.length > 1) return "releases/" + more.slice(1).join("/")
     return null
 }
+/* A GitHub form after a repository's path as its section in Smithy, for that repository: GitHub numbers issues and pull
+   requests in one sequence, and an import keeps both, so an issue number that is no issue here but a merge request's is
+   the merge request (§8.4: #n is an issue first, then a merge request). */
+function githubSection(repo, rest) {
+    const section = compatibilitySection(rest)
+    const number = /^issues\/([1-9][0-9]{0,8})$/.exec(section || "")
+    if (
+        number &&
+        !one(M + "SmithyIssue", {repositoryId: repo.repositoryId, issueNumber: Number(number[1])}) &&
+        find("moqui.resource.GitMergeRequest", {repositoryId: repo.repositoryId, mergeRequestNum: Number(number[1])}).count() > 0
+    )
+        return "merge-requests/" + number[1]
+    return section
+}
+/* Whether an account of a site is a placeholder of the GitHub import (§18.2): shown with an imported mark. */
+const placeholder = (siteId, partyId) => !!partyId && one(M + "SmithyAccount", {siteId, partyId})?.placeholder === "Y"
 /* resolveSmithyPath: what the name segments of a page's path are, by the lookups of §4.4 step 4 in their order, each
    within the site. The path comes as typed: the names being tested are lowered, the rest keeps its case, and a .git
    suffix is dropped only from the segment that ends a whole repository path. What the caller may not view is Not Found,
@@ -924,7 +940,7 @@ function resolvePath(siteId, path) {
     if (lowered.length >= 3)
         for (let length = Math.min(lowered.length - 1, MAX_GROUP_DEPTH + 1); length >= 2; length--) {
             const target = viewableRepository(lowered.slice(0, length).join("/"))
-            const section = target ? compatibilitySection(given.slice(length)) : null
+            const section = target ? githubSection(target, given.slice(length)) : null
             if (section) return answer({kind: "redirect", redirectPath: target.repositoryPath + "/-/" + section})
         }
     return missing()
@@ -982,6 +998,8 @@ function resolvePath(siteId, path) {
     profileShown,
     accountShown,
     resolvePath,
+    githubSection,
+    placeholder,
     actorOfParty,
     ensureGroupCategory,
     ensureAccountCategory,

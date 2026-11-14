@@ -632,5 +632,58 @@
     importRedirects: {
         service: "mantle.smithy.SmithySiteServices.import#Redirects",
         fields: ["siteId", "csv", "source"]
+    },
+    resolveRedirect: {
+        service: "mantle.smithy.SmithySiteServices.resolve#OldPath",
+        fields: ["siteId", "host", "path"]
+    },
+    // DG8 (§15.9): GitHub
+    startGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.start#Import",
+        fields: ["siteId", "groupId", "sourceRepository", "slug", "repositoryId", "token", "options", "operationId"]
+    },
+    getGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.get#ImportRun",
+        fields: ["siteId", "importId"]
+    },
+    findGitHubImports: {
+        service: "mantle.smithy.SmithyImportServices.find#ImportRuns",
+        fields: ["siteId", "groupId", "limit", "cursor"]
+    },
+    resumeGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.resume#Import",
+        fields: ["siteId", "importId", "token", "expectedRevision"]
+    },
+    cancelGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.cancel#Import",
+        fields: ["siteId", "importId", "expectedRevision"]
+    },
+    findMirrors: {
+        service: "mantle.smithy.SmithyImportServices.find#Mirrors",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeMirror: {
+        service: "mantle.smithy.SmithyImportServices.store#Mirror",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "mirrorId",
+            "url",
+            "username",
+            "secret",
+            "hostKeyFingerprint",
+            "refs",
+            "deleteRefs",
+            "enabled",
+            "operationId"
+        ]
+    },
+    deleteMirror: {
+        service: "mantle.smithy.SmithyImportServices.delete#Mirror",
+        fields: ["siteId", "repositoryId", "mirrorId"]
+    },
+    pushMirror: {
+        service: "mantle.smithy.SmithyImportServices.push#Mirror",
+        fields: ["siteId", "repositoryId", "mirrorId"]
     }
 })

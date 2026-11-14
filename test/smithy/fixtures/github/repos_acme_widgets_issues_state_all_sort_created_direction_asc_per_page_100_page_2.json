@@ -1,0 +1,55 @@
+{
+  "status": 200,
+  "headers": {
+    "Link": "<https://api.github.com/repositories/5550001/issues?state=all&sort=created&direction=asc&per_page=100&page=1>; rel=\"prev\", <https://api.github.com/repositories/5550001/issues?state=all&sort=created&direction=asc&per_page=100&page=1>; rel=\"first\""
+  },
+  "body": [
+    {
+      "id": 8003,
+      "number": 3,
+      "title": "Support round widgets",
+      "user": {
+        "login": "carol",
+        "id": 1003,
+        "type": "User"
+      },
+      "state": "closed",
+      "state_reason": "not_planned",
+      "labels": [
+        {
+          "id": 102,
+          "name": "enhancement"
+        }
+      ],
+      "milestone": null,
+      "assignees": [],
+      "body": "Round ones, please.",
+      "created_at": "2025-01-20T09:00:00Z",
+      "updated_at": "2025-02-01T09:00:00Z",
+      "closed_at": "2025-02-01T09:00:00Z",
+      "reactions": {
+        "total_count": 0
+      }
+    },
+    {
+      "id": 8004,
+      "number": 4,
+      "title": "Try something",
+      "user": {
+        "login": "bob",
+        "id": 1002,
+        "type": "User"
+      },
+      "state": "closed",
+      "labels": [],
+      "assignees": [],
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme/widgets/pulls/4"
+      },
+      "created_at": "2025-02-05T09:00:00Z",
+      "reactions": {
+        "total_count": 0
+      }
+    }
+  ]
+}

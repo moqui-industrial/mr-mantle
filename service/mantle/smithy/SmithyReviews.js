@@ -159,7 +159,7 @@ kit => {
             repositoryPath: r.repo.repositoryPath,
             title: mr.title || "",
             state: STATES[mr.statusId] || "closed",
-            author: author ? {...author, imported: false} : null,
+            author: author ? {...author, imported: core.placeholder(siteId, row.authorPartyId)} : null,
             // a fork's path when the caller may view the fork; the target's own for a branch of it
             sourceRepositoryPath: mr.sourceRepositoryId
                 ? source && source.siteId === siteId && core.repositoryViewable(source, core.actor())
@@ -598,6 +598,8 @@ kit => {
        the gate refuses outright closes the merge request and leaves it hidden, and its author is told by the page's
        own refusal or sees nothing opened; too soon after another post, it is held. */
     function ensure(mergeRequestId) {
+        // a merge request the GitHub import is making (SmithyImport.js): its row and conversation are the import's own
+        if (mergeRequestId && ec.context.sharedMap["mantle.smithy.importingRepositoryId"]) return null
         const mr = mergeRequestId ? one(GMR, {mergeRequestId}, true) : null
         if (!mr) return null
         const had = one(SMR, {mergeRequestId})

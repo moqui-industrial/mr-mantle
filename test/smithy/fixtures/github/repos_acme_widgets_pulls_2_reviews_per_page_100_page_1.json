@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": [
+    {
+      "id": 3001,
+      "user": {
+        "login": "alice",
+        "id": 1001,
+        "type": "User"
+      },
+      "state": "APPROVED",
+      "body": "Looks good",
+      "submitted_at": "2025-01-19T09:00:00Z"
+    }
+  ]
+}

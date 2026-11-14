@@ -482,14 +482,23 @@ feature("an artifact of a held merge request's run is sent to its author through
         })
         const author = op("SPL_DEV", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
         const stranger = op("SPL_STRANGER", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
+        // a running job's log: more while the chunk limit cut the answer
+        for (const chunkSeq of [1, 2])
+            lib.make("moqui.resource.GitRunLogChunk", {jobRunId: job.jobRunId, chunkSeq, stepSeq: 1, byteOffset: (chunkSeq - 1) * 5, chunkText: "line\n"})
+        const cutLog = op("SPL_DEV", "getJobLog", {runNum: run.runNum, jobRunId: job.jobRunId, limit: 1, watch: false})
+        const wholeLog = op("SPL_DEV", "getJobLog", {runNum: run.runNum, jobRunId: job.jobRunId, limit: 5, watch: false})
         // pipelines off: a run's uploads and logs are Not Found
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {pipelinesEnabled: "N"})
         const off = op("SPL_DEV", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
         const offLog = op("SPL_DEV", "getJobLog", {runNum: run.runNum, jobRunId: job.jobRunId})
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {pipelinesEnabled: "Y"})
-        return {author, stranger, off: off.kind, offLog: offLog.kind, size: content.length}
+        return {author, stranger, off: off.kind, offLog: offLog.kind, size: content.length, cutLog, wholeLog}
     },
-    then({author, stranger, off, offLog, size}) {
+    then({author, stranger, off, offLog, size, cutLog, wholeLog}) {
+        cutLog.chunkList.length == 1
+        cutLog.more == true
+        wholeLog.chunkList.length == 2
+        wholeLog.more == false
         off == "NotFound"
         offLog == "NotFound"
         // the authority's answer: the file was sent as the response (no location to stream), its name and size

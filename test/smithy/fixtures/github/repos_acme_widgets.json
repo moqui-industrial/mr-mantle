@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": {
+    "id": 5550001,
+    "full_name": "acme/widgets",
+    "default_branch": "main",
+    "clone_url": "https://github.com/acme/widgets.git",
+    "html_url": "https://github.com/acme/widgets",
+    "has_issues": true,
+    "open_issues_count": 1
+  }
+}

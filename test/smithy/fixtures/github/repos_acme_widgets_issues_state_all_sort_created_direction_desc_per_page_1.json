@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": [
+    {
+      "id": 8004,
+      "number": 4,
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme/widgets/pulls/4"
+      }
+    }
+  ]
+}

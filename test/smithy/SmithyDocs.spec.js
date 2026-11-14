@@ -79,9 +79,19 @@ feature("a group's landing text is a repository's Markdown file, rendered and cl
             newsContactListId: ids.newsId,
             expectedRevision: revision
         })
-        return {narrower, byMaintainer, set, landing: op(null, "getGroupLanding", {groupId: ids.groupId})}
+        return {
+            narrower,
+            byMaintainer,
+            set,
+            landing: op(null, "getGroupLanding", {groupId: ids.groupId}),
+            // the landing form's news category is its Owners' to read
+            ownersNews: op(lib.OPERATOR, "getGroup", {groupId: ids.groupId}).newsContactListId,
+            maintainersNews: op("SST_MAINT", "getGroup", {groupId: ids.groupId}).newsContactListId
+        }
     },
-    then({narrower, byMaintainer, set, landing}) {
+    then({narrower, byMaintainer, set, landing, ownersNews, maintainersNews}) {
+        ownersNews == ids.newsId
+        maintainersNews == null
         narrower.kind == "Unprocessable"
         byMaintainer.reason == "accessDenied"
         set.revision > 1

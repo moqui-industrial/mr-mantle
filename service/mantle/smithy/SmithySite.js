@@ -697,11 +697,14 @@ kit => {
         const release = readRelease(r, p.tag)
         const view = releaseView(r, release)
         const archive = format => ({format, path: repoPath(r.repo, "/-/archive/" + encodePath(view.tag) + "." + format)})
+        const editable = canEdit(r)
         return {
             release: view,
+            // the notes as stored (Markdown, as the site's rules left them), for a Maintainer's edit form only
+            notes: editable ? notesOf(release.workEffortId) : null,
             archiveList: [archive("zip"), archive("tar.gz")],
             component: view.commitId ? componentAt(r.repo.repositoryId, view.commitId) : null,
-            capabilities: {canEdit: canEdit(r)}
+            capabilities: {canEdit: editable}
         }
     }
     /* A Maintainer's write on a repository that is not archived: {r, partyId}. */
@@ -803,6 +806,8 @@ kit => {
     }
     methods.storeRelease = p => {
         const {r, partyId} = maintainer(p)
+        // a release's name is plain text that a page escapes; the task service's own refusal of '<' is not the field's
+        if (given(p.name) && /[<>]/.test(text(p.name))) invalid("nameInvalid[name]: A release's name has no '<' or '>'")
         const ref = tagRef(r.repo.repositoryId, p.tag)
         const notes = given(p.notes) ? gateNotes(r, text(p.notes), p.sourceFormat) : null
         const existing = releaseOf(r.repo.repositoryId, ref.shortName)
@@ -1650,13 +1655,53 @@ kit => {
         }
         return null
     }
+    /* A target as the site's hosts are asked for it: an https address of one of the site's own hosts as its path, without
+       a query or a trailing slash; another host's address (a host the site replaces) as it is. */
+    function normalTarget(siteId, target) {
+        const whole = /^https:\/\/([^/?#\s]+)(\/[^\s]*)?$/i.exec(target)
+        if (whole && !siteHosts(siteId).includes(whole[1].toLowerCase())) return target
+        let path = (whole ? whole[2] || "/" : target).replace(/[?#].*$/, "")
+        if (path.length > 1) path = path.replace(/\/+$/, "")
+        return path || "/"
+    }
+    /* Whether a redirect of an old path (on the site's own hosts) to a target leads back to it: the target is the old path,
+       or the redirects the target is the old path of lead there within a few steps. Paths compare as resolveRedirect
+       matches them, without case. exceptId: the redirect being changed. */
+    function loops(siteId, oldPath, target, exceptId) {
+        const own = new Set(siteHosts(siteId))
+        const key = path => text(path).toLowerCase()
+        const start = key(oldPath)
+        let current = key(target)
+        for (let step = 0; step < 8; step++) {
+            if (current === start) return true
+            if (!current.startsWith("/")) return false
+            const next = Array.from(
+                find(M + "SmithyRedirect", {siteId})
+                    .condition(cf().makeCondition("oldPath", "like", current).ignoreCase())
+                    .limit(20)
+                    .list()
+            ).find(
+                row =>
+                    row.redirectId !== exceptId &&
+                    key(row.oldPath) === current &&
+                    (!row.oldHost || own.has(key(row.oldHost)))
+            )
+            if (!next) return false
+            current = key(normalTarget(siteId, next.targetPath))
+        }
+        return true
+    }
     /* Writes one redirect: a new one, or the one at the same old address (replace) or of redirectId (an edit). */
     function putRedirect(siteId, partyId, fields, existing, replace) {
         const {oldHost, oldPath} = oldAddress(fields.oldHost, fields.oldPath)
         const taken = oldPathTaken(siteId, oldHost, oldPath)
         if (taken) invalid(taken)
-        const targetPath = siteTarget(siteId, fields.targetPath)
-        if (targetPath === oldPath && !oldHost) invalid("targetInvalid[targetPath]: A redirect does not lead to its own old path")
+        const ownOld = !oldHost || siteHosts(siteId).includes(oldHost)
+        // a target on the site's own hosts is kept as its path; from a host the site replaces it keeps its host
+        const checked = siteTarget(siteId, fields.targetPath)
+        const targetPath = ownOld ? normalTarget(siteId, checked) : checked
+        if (ownOld && loops(siteId, oldPath, targetPath, existing?.redirectId || null))
+            invalid("targetInvalid[targetPath]: A redirect does not lead back to its own old path")
         const holder = redirectAt(siteId, oldHost, oldPath)
         if (holder && holder.redirectId !== existing?.redirectId) {
             if (!replace) invalid("nameTaken[oldPath]: The table has that old path")
@@ -1788,7 +1833,31 @@ kit => {
             const found = (host && rows.find(row => row.oldHost === host)) || rows.find(row => !row.oldHost)
             if (found) return {targetPath: found.targetPath, status: 301}
         }
-        return null
+        return githubRedirect(p.siteId, raw)
+    }
+    /* A GitHub address of an imported repository whose owner/name is not its path here (the import's row of source
+       github for /owner/name, whose target is the repository's page): its GitHub forms as the repository's sections. */
+    function githubRedirect(siteId, raw) {
+        const given = raw.split("/").filter(segment => segment !== "")
+        if (given.length < 3) return null
+        const oldPath = ("/" + given[0] + "/" + given[1]).toLowerCase()
+        const row = Array.from(
+            find(M + "SmithyRedirect", {siteId, oldPath, sourceEnumId: "SrsGithub"})
+                .condition("oldHost", null)
+                .limit(1)
+                .list()
+        )[0]
+        const base = mountBase(siteId)
+        const repositoryPath = row && text(row.targetPath).startsWith(base + "/") ? row.targetPath.slice(base.length + 1) : null
+        const repo = repositoryPath ? one(M + "SmithyRepository", {siteId, repositoryPath}) : null
+        const section = repo ? core.githubSection(repo, given.slice(2)) : null
+        return section ? {targetPath: base + "/" + repo.repositoryPath + "/-/" + section, status: 301} : null
+    }
+    methods.resolveRedirect = p => {
+        core.site(p.siteId)
+        if (!text(p.path).startsWith("/") || text(p.path).length > 2000) invalid("path: A path starting with /")
+        const found = resolveRedirect(p)
+        return {targetPath: found?.targetPath || null, status: found ? found.status : null}
     }
 
     // ===== a forum topic linked to a release (SmithyScope.linkCard) =====

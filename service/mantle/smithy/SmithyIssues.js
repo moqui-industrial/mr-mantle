@@ -280,7 +280,7 @@ kit => {
             state: item.state,
             stateReason: item.stateReason,
             confidential: access.confidential,
-            author: author ? {...author, imported: false} : null,
+            author: author ? {...author, imported: core.placeholder(siteId, issue.reporterPartyId)} : null,
             createdAt: issue.createdAt || null,
             updatedAt: topic?.lastActivity || issue.createdAt || null,
             closedAt: item.closedAt || null,

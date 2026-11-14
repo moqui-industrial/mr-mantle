@@ -422,6 +422,8 @@ methods.getGroup = p => {
         myRole: core.roleCode(r.rank),
         // DG6: the group's forum (its category is the scope of the forum's reads) and, for its Owners, its report address
         forum: {...kit.forumScope.forumView(r, true), issueMailRoute: kit.forumScope.mailRouteView(r)},
+        // the group's news category, for its Owners' landing form (setGroupLanding)
+        newsContactListId: confirmed && r.rank >= RANK.SmrOwner ? r.group.newsContactListId || null : null,
         capabilities: {
             canCreateRepository: confirmed && r.rank >= RANK.SmrMaintainer,
             canCreateSubgroup: confirmed && r.rank >= RANK.SmrOwner && r.chain.length < core.MAX_GROUP_DEPTH,
@@ -690,9 +692,10 @@ methods.downloadArchive = p => {
     const ref = core.splitRefPath(p.repositoryId, p.refPath)
     if (ref.path) invalid("An archive is of a branch, a tag or a commit, with no path after it")
     if (ref.empty) missing()
-    // a public repository's archive is anyone's (design-smithy §15.2: need any; the host caps anonymous archives per
-    // client), so addons.xml's current and release locations work for ./moq component-get; any other needs an account
-    if (r.visibility !== 1 || r.hidden) requireUser()
+    // a public repository's archive of a branch or a tag is anyone's (design-smithy §15.2: need any), so addons.xml's
+    // current and release locations work for ./moq component-get; any other needs an account. The host has no cap of
+    // archive builds by client, so a visitor is not given one by commit id, which would build one for every commit
+    if (r.visibility !== 1 || r.hidden || ref.kind === "commit") requireUser()
     const made = gitOrRefuse("get#GitArchive", {repositoryId: p.repositoryId, revision: ref.commitId, format: p.format})
     if (!made.archiveLocation) missing()
     return {
@@ -1175,6 +1178,8 @@ const pipelines = ec.resource.script("component://mr-mantle/service/mantle/smith
 kit.pipelines = pipelines
 // the site (§15.8): landing, Docs, releases, the component directory, search and redirects
 const siteModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySite.js")(kit)
+// GitHub (§15.9): the import, the claim of its placeholders, and push mirrors
+const importModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyImport.js")(kit)
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1243,8 +1248,11 @@ const FLAGS = [
     "watch",
     "approvalRequired",
     "published",
-    "announce"
+    "announce",
+    "deleteRefs"
 ]
+/* An import's options: a map of the two flags. */
+const OPTION_FLAGS = ["issues", "pullRequests"]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
     const fn = methods[operation]
@@ -1277,6 +1285,18 @@ function execute(operation, p) {
                         (entry == null || (["string", "number"].includes(typeof entry) && String(entry).length <= 200000))
                 )
             if (!Array.isArray(value) || value.length > 50 || !value.every(plain)) invalid("Invalid list field: " + field)
+            continue
+        }
+        if (field === "options") {
+            if (
+                kind !== "object" ||
+                Array.isArray(value) ||
+                !Object.entries(value).every(
+                    ([name, entry]) =>
+                        OPTION_FLAGS.includes(name) && (entry == null || ["boolean", "string"].includes(typeof entry))
+                )
+            )
+                invalid("Invalid field type: " + field)
             continue
         }
         if (
@@ -1360,6 +1380,11 @@ function privileged(work) {
     readComponent: p => privileged(() => core.withMemo(() => siteModule.readComponent(p || {}))),
     resolveRedirect: p => privileged(() => siteModule.resolveRedirect(p || {})),
     releaseCard: link => privileged(() => core.withMemo(() => siteModule.releaseCard(link))),
+    // DG8: a step of a GitHub import, the job that steps them, and the claim of an import's placeholders by a GitHub
+    // sign-in (SmithyImportServices.xml)
+    runImport: p => privileged(() => core.withMemo(() => importModule.runStep(p || {}))),
+    runImports: () => privileged(() => importModule.runImports()),
+    claimGithub: userId => privileged(() => core.withMemo(() => importModule.claimGithub(userId))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

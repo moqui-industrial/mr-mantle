@@ -166,11 +166,23 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("importRedirects", input)</script></actions>
     </service>
 
+    <service verb="resolve" noun="OldPath" authenticate="anonymous-all" allow-remote="false">
+        <description>Operation resolveRedirect: what resolve#Redirect answers, for a PASS frontend that resolves pages
+            remotely: the target of an old path (path, with the request's host) and status 301, or no targetPath. Anyone
+            asks; the table's rows are not listed.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("resolveRedirect", input)</script></actions>
+    </service>
+
     <!-- Not an operation: what PASS's resolver asks before it answers Not Found for a page request. -->
     <service verb="resolve" noun="Redirect" authenticate="anonymous-all" allow-remote="false">
         <description>The target of an old path of a site (SmithyRedirect): for the request's host first, then for the
-            site's own hosts (no oldHost); the path as it came, then without a trailing slash, then in lower case. No
-            targetPath out when there is none. status is 301.</description>
+            site's own hosts (no oldHost); the path as it came, then without a trailing slash, then in lower case. Then a
+            GitHub address of a repository the import brought here under another path (a row of source github for
+            /owner/name): its GitHub forms (/issues/n, /pull/n, /tree/..., /commit/...) as the repository's sections, an
+            issue number that is a merge request's as the merge request. No targetPath out when there is none. status is
+            301.</description>
         <in-parameters>
             <parameter name="siteId" required="true"/>
             <parameter name="host"/>

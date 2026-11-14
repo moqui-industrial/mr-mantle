@@ -668,9 +668,11 @@ kit => {
         let bytes = 0
         let nextChunkSeq = number(out.nextChunkSeq)
         let nextOffset = number(out.nextOffset)
+        let cut = false
         for (const chunk of all) {
             const size = utf8Bytes(chunk.text)
             if (chunks.length && bytes + size > LOG_MAX_BYTES) {
+                cut = true
                 const dropped = all.slice(chunks.length)
                 nextChunkSeq = Number(chunk.chunkSeq)
                 if (nextOffset != null) nextOffset -= dropped.reduce((sum, one) => sum + utf8Bytes(one.text), 0)
@@ -685,6 +687,12 @@ kit => {
             text: out.text ?? null,
             nextOffset,
             logBytes: number(out.logBytes),
+            // more is there to read now: the chunk limit or the byte bound cut this answer (a running job's log may
+            // still grow when it is false)
+            more:
+                cut ||
+                all.length >= limit ||
+                (out.text != null && nextOffset != null && number(out.logBytes) != null && nextOffset < number(out.logBytes)),
             finished: !!out.finished,
             state: out.statusId || job.statusId,
             notification: watch ? {topic: "GitCiJobLog", subTopic: job.jobRunId} : null,

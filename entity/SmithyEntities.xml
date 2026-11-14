@@ -300,6 +300,9 @@
         <field name="siteId" type="id" is-pk="true"/>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="githubLogin" type="text-medium"><description>Lower case; set at a sign-in through the GitHub provider, or by the import for a placeholder</description></field>
+        <field name="githubUserId" type="text-short"><description>GitHub's own id of the user (a login can be renamed, the id
+            not): set by the import for a placeholder, and moved to the account that claims it, whose sign-in through a
+            GitHub provider names the same id (UserAccount.externalUserId)</description></field>
         <field name="placeholder" type="text-indicator"><description>Y: made by the import, not yet claimed</description></field>
         <field name="claimedAt" type="date-time"/>
         <field name="bot" type="text-indicator"/>
@@ -316,6 +319,7 @@
         <relationship type="one-nofk" title="BotOperator" related="mantle.party.Party">
             <key-map field-name="botOperatorPartyId" related="partyId"/></relationship>
         <index name="SMITHY_ACCOUNT_LOGIN" unique="true"><index-field name="siteId"/><index-field name="githubLogin"/></index>
+        <index name="SMITHY_ACCOUNT_GITHUB_ID"><index-field name="githubUserId"/></index>
     </entity>
     <entity entity-name="SmithyPathRedirect" package="mantle.smithy">
         <description>The old path of a renamed group, or the old handle of an account: pages redirect from it to where
@@ -393,6 +397,59 @@
         <relationship type="one-nofk" title="SmithyRedirectSource" related="moqui.basic.Enumeration">
             <key-map field-name="sourceEnumId" related="enumId"/></relationship>
         <index name="SMITHY_REDIRECT_OLD"><index-field name="siteId"/><index-field name="oldPath"/></index>
+    </entity>
+    <entity entity-name="SmithyImportRun" package="mantle.smithy">
+        <description>An import of a GitHub repository's labels, milestones, issues and pull requests into a repository of a
+            group (design-smithy §11 Import, §18.2, DG8; SmithyImport.js): a checkpointed run that a step at a time
+            (SmithyImportServices.run#Import) moves through its stages, resumable, waiting on the API's rate limit, and
+            safe to run again (SmithyImportMap). The token is kept encrypted for the run and dropped when it ends.</description>
+        <field name="importId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="groupId" type="id"/>
+        <field name="repositoryId" type="id"><description>The hosted repository it fills</description></field>
+        <field name="sourceEnumId" type="id"><description>SmithyImportSource: SisGithub</description></field>
+        <field name="sourceRepository" type="text-medium"><description>owner/name, as typed</description></field>
+        <field name="tokenRemoteId" type="id"><description>The SystemMessageRemote whose password is the token, encrypted;
+            empty once the run ended</description></field>
+        <field name="options" type="text-long"><description>JSON: issues, pullRequests</description></field>
+        <field name="statusId" type="id"><description>Status type SmithyImport: the stage</description></field>
+        <field name="cursorJson" type="text-long"><description>Where to resume: the stage's phase and page, the source's facts</description></field>
+        <field name="countsJson" type="text-long"><description>By type: imported, source (seen at GitHub), failed</description></field>
+        <field name="reportJson" type="text-very-long"><description>What could not be carried: a list of sourceType,
+            sourceId and errorText (at most 500), and notCarried counts</description></field>
+        <field name="waitingUntil" type="date-time"><description>The API's rate limit: no step runs before this</description></field>
+        <field name="leaseUntil" type="date-time"><description>A step is running until this; another step waits</description></field>
+        <field name="startedByPartyId" type="id"><description>Steps run as this account, which must still hold the right</description></field>
+        <field name="createdAt" type="date-time"/>
+        <field name="finishedAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyGroup"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" title="SmithyImportSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SmithyImport" related="moqui.basic.StatusItem"/>
+        <index name="SMITHY_IMPORT_GROUP"><index-field name="siteId"/><index-field name="groupId"/></index>
+        <index name="SMITHY_IMPORT_REPO"><index-field name="repositoryId"/><index-field name="statusId"/></index>
+    </entity>
+    <entity entity-name="SmithyImportMap" package="mantle.smithy">
+        <description>What an import made of a source item, one row an item of a repository: a run that meets an item with a
+            row Done or Skipped makes nothing of it again. sourceType: user, label, milestone, issue, pull, comment,
+            review, reviewComment, reaction; reactionsDue (an item whose reactions are still to read: sourceId issue:n or
+            comment:id, the post as targetId, statusId empty until read).</description>
+        <field name="siteId" type="id" is-pk="true"/>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="sourceType" type="id" is-pk="true"/>
+        <field name="sourceId" type="id-long" is-pk="true"><description>GitHub's id</description></field>
+        <field name="importId" type="id"/>
+        <field name="targetType" type="id"/>
+        <field name="targetId" type="id"/>
+        <field name="checksum" type="text-short"/>
+        <field name="statusId" type="id"><description>Status type SmithyImportItem: SmmDone, SmmSkipped, SmmFailed</description></field>
+        <field name="errorText" type="text-long"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <index name="SMITHY_IMPORT_STATE"><index-field name="siteId"/><index-field name="repositoryId"/><index-field name="sourceType"/><index-field name="statusId"/></index>
     </entity>
     <entity entity-name="SmithyRunApproval" package="mantle.smithy">
         <description>A Maintainer's approval of an outside pipeline run of a merge request (design-smithy §10, DG5): the

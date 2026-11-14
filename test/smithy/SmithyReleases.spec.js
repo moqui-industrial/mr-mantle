@@ -182,10 +182,14 @@ feature("notes keep the site's rules, an artifact of another commit is not a rel
             enabled: "Y",
             priority: 1
         })
-        let censored
+        let censored, source, strangersSource
         try {
             op("SST_MAINT", "storeRelease", {tag: "v1.2.0", notes: "We frobnicate less now.", expectedRevision: revision()})
-            censored = op(null, "getRelease", {tag: "v1.2.0"}).release.notesHtml
+            const read = op(null, "getRelease", {tag: "v1.2.0"})
+            censored = read.release.notesHtml
+            strangersSource = read.notes
+            // the edit form's Markdown, as the rules left it, is a Maintainer's
+            source = op("SST_MAINT", "getRelease", {tag: "v1.2.0"}).notes
         } finally {
             lib.set("mantle.forum.ForumRule", {ruleId: "SST_CENSOR"}, {enabled: "N"})
         }
@@ -235,9 +239,15 @@ feature("notes keep the site's rules, an artifact of another commit is not a rel
             lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {visibilityEnumId: "SmvPublic"})
             lib.set("mantle.smithy.SmithyGroup", {groupId: ids.groupId}, {newsContactListId: null})
         }
-        return {censored, otherCommit, announced}
+        const marked = op("SST_MAINT", "storeRelease", {tag: "v1.2.0", name: "<b>Big</b>", expectedRevision: revision()})
+        return {censored, source, strangersSource, marked, otherCommit, announced}
     },
-    then({censored, otherCommit, announced}) {
+    then({censored, source, strangersSource, marked, otherCommit, announced}) {
+        source.includes("less now")
+        !source.includes("frobnicate")
+        strangersSource == null
+        marked.reason == "nameInvalid"
+        marked.message.startsWith("A release's name")
         censored.includes("less now")
         !censored.includes("frobnicate")
         otherCommit.kind == "Unprocessable"

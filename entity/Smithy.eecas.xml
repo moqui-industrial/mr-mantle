@@ -10,4 +10,14 @@
         <actions><service-call name="mantle.smithy.SmithyReviewServices.sync#MergeRequestHidden"
                 in-map="{communicationEventId:communicationEventId}" disable-authz="true"/></actions>
     </eeca>
+    <!-- DG8 (design-smithy §18.2): an account that a sign-in links to a provider's id (the SSO sync writes externalUserId)
+        claims the placeholder of the GitHub import with that id, when the provider is GitHub; after the commit, in a
+        transaction of its own, as the mbox importer's verified address claims its author. The service returns at once
+        for any other provider. -->
+    <eeca id="SmithyClaimGithubPlaceholder" entity="moqui.security.UserAccount" on-create="true" on-update="true"
+            get-original-value="true" run-on-error="false">
+        <condition><expression>externalUserId &amp;&amp; externalAuthFlowId &amp;&amp; (originalValue == null || originalValue.externalUserId != externalUserId || originalValue.externalAuthFlowId != externalAuthFlowId)</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#ExternalLink" in-map="{userId:userId}"
+                disable-authz="true"/></actions>
+    </eeca>
 </eecas>

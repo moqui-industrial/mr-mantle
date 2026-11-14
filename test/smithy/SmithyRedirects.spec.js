@@ -84,3 +84,24 @@ feature("a CSV of a site's move imports each line on its own; resolve finds the 
         none == null
     }
 })
+
+feature("a target is kept as the site's path and is refused when it leads back to its own old path", {
+    when() {
+        const store = (input, key) => op("SST_OWNER", "storeRedirect", {operationId: "sst-loop-" + key, ...input})
+        const first = store({oldPath: "/m/loop/a", targetPath: "https://" + lib.SITE7_HOST + "/m/loop/b/"}, "1")
+        return {
+            first,
+            stored: lib.row("mantle.smithy.SmithyRedirect", {redirectId: first.redirectId}).targetPath,
+            self: store({oldPath: "/m/loop/c", targetPath: "/M/Loop/C/"}, "2").reason,
+            cycle: store({oldPath: "/m/loop/b", targetPath: "/m/LOOP/a"}, "3").reason,
+            chain: store({oldPath: "/m/loop/b", targetPath: "/forum"}, "4").redirectId
+        }
+    },
+    then({first, stored, self, cycle, chain}) {
+        first.redirectId != null
+        stored == "/m/loop/b"
+        self == "targetInvalid"
+        cycle == "targetInvalid"
+        chain != null
+    }
+})
