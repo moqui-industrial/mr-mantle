@@ -587,10 +587,16 @@ function sharedWithdrawals(row, people, classifyOf) {
 function checkPage(campaignSendId, ids) {
     const row = one(SEND, {campaignSendId})
     const recipients = Array.from(find(RECIPIENT).condition("campaignRecipientId", "in", ids).list())
+    return checkRecipients(row, recipients, recipient => recipient.campaignRecipientId)
+}
+// The checks of checkPage over recipients of a send ({partyId, contactMechId, destinationKey}: its rows, or P11's automation step's
+// participant before a row is made), each verdict under keyOf(recipient); null when they could not be checked.
+function checkRecipients(row, recipients, keyOf) {
+    const campaignSendId = row.campaignSendId
     const topic = one(LIST, {contactListId: row.contactListId})
     const verdicts = {}
     if (!topic) {
-        for (const recipient of recipients) verdicts[recipient.campaignRecipientId] = {reasonCode: "NOT_SUBSCRIBED"}
+        for (const recipient of recipients) verdicts[keyOf(recipient)] = {reasonCode: "NOT_SUBSCRIBED"}
         return verdicts
     }
     let classified, withdrawnKeys
@@ -651,7 +657,7 @@ function checkPage(campaignSendId, ids) {
         else if (capped.has(recipient.partyId) && capped.get(recipient.partyId) >= Number(policy.frequencyCapCount))
             verdict = {reasonCode: "FREQUENCY_CAP"}
         else verdict = {eligible: true, reasonCode: null, address: person.address}
-        verdicts[recipient.campaignRecipientId] = verdict
+        verdicts[keyOf(recipient)] = verdict
     }
     return verdicts
 }
@@ -678,6 +684,11 @@ function handOff(p) {
         })
         return {skipReasonCode: text(verdict.reasonCode) || "NOT_CLASSIFIED"}
     }
+    return handOffRecipient(recipient, row, verdict)
+}
+// A recipient its checks found eligible handed to the ledger (an existing delivery for its key answered, never a second) and its list
+// row stored: handOff's, and P11's automation step's under the enrollment's lock. {deliveryId, created}.
+function handOffRecipient(recipient, row, verdict) {
     const queued = call("mantle.party.MessageServices.queue#Delivery", {
         eventKey: eventKeyOf(recipient),
         sourceEnumId: SOURCE,
@@ -1277,6 +1288,11 @@ const operations = {
     controlOf,
     limits,
     SOURCE,
+    // P11: an automation step's hand-off through the same checks
+    checkRecipients,
+    handOffRecipient,
+    unsubscribeLink,
+    eventPrefix,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown campaign dispatch operation " + op)
         return operations[op](parameters || {})

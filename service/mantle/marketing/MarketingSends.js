@@ -404,6 +404,8 @@ function findSends(p) {
     const statusId = text(p.statusId)
     if (!statusId || statusId === "open") query = query.condition("statusId", "in", openStatuses)
     else if (statusId !== "all") query = query.condition("statusId", statusId)
+    // P11: a send step's content (an automation's, CsAutomation) is the automation's, never listed among the sends
+    else query = query.condition("statusId", "not-equals", "CsAutomation")
     if (!blank(p.marketingCampaignId)) query = query.condition("marketingCampaignId", text(p.marketingCampaignId))
     if (!blank(p.channelEnumId)) query = query.condition("channelEnumId", text(p.channelEnumId))
     if (p.mine === "Y" || p.mine === true) query = query.condition("createdByUserId", ec.user.userId)
@@ -1015,6 +1017,74 @@ function copyAttachments(campaignSendId, preparedBodyLocation) {
     return copies
 }
 
+// ===== Marketing P11: a send step's content (MarketingAutomations.js) =====
+// The send of one Send email step of an automation: a CampaignSend of the automation's campaign, topic and sending profile, status
+// CsAutomation (the send services neither list, edit, prepare, approve nor release it), its content the template's published content
+// copied and checked as a preparation checks it (a subject and a body, the safe content, no private link, no required variable no
+// recipient gives) and kept as prepared (preparedRevision 1): approved with the automation, each participant who reaches the step
+// becomes one of its recipients. o: automation (its row), template ({row, content} of templateFor), stepName. The send's id.
+function stepSend(o) {
+    const automation = o.automation
+    const content = o.template.content
+    const subject = text(content.subject)
+    const body = templates.readText(content.bodyLocation)
+    const bodyText = templates.readText(content.bodyTextLocation)
+    const variables = lib.json(content.variablesJson, []) || []
+    const templateName = o.template.row.templateName || o.template.row.messageTemplateId
+    if (!subject) denied("SUBJECT_REQUIRED", "Template " + templateName + " has no subject")
+    if (!body.trim() && !bodyText.trim()) denied("BODY_REQUIRED", "Template " + templateName + " has no body")
+    templates.checkContent({subject, preheader: content.preheader || "", body, bodyText, variables})
+    checkLinks(body)
+    const unknown = unknownRequired(variables)
+    if (unknown.length)
+        denied(
+            "VARIABLE_UNKNOWN",
+            "${" + unknown.join("}, ${") + "} of template " + templateName + " is required and no recipient gives it"
+        )
+    const campaignSendId = call("create#" + SEND, {
+        marketingCampaignId: automation.marketingCampaignId,
+        organizationPartyId: automation.organizationPartyId,
+        sendName: nameOf((text(o.stepName) || templateName).slice(0, nameLimit)),
+        channelEnumId: automation.channelEnumId || "MdcEmail",
+        contactListId: automation.contactListId,
+        purposeEnumId: automation.purposeEnumId,
+        audienceJson: "{}",
+        messageTemplateId: o.template.row.messageTemplateId,
+        sendingProfileId: automation.sendingProfileId || null,
+        localeId: o.template.row.localeId || null,
+        statusId: "CsAutomation",
+        sendRevision: 1,
+        createdByUserId: ec.user.userId,
+        revisedByUserId: ec.user.userId,
+        createdDate: ec.user.nowTimestamp,
+        marketingAutomationId: automation.marketingAutomationId
+    }).campaignSendId
+    const draft = writeFiles(campaignSendId, "draft", body, bodyText)
+    const prepared = writeFiles(campaignSendId, "prepared-r1", body, bodyText)
+    const policy = approvals.policyOf(automation.organizationPartyId)
+    call("update#" + SEND, {
+        campaignSendId,
+        subject,
+        preheader: content.preheader || null,
+        bodyLocation: draft.bodyLocation,
+        bodyTextLocation: draft.bodyTextLocation,
+        variablesJson: JSON.stringify(variables),
+        preparedRevision: 1,
+        preparedDate: ec.user.nowTimestamp,
+        preparedByUserId: ec.user.userId,
+        contentDate: ec.user.nowTimestamp,
+        marketingPolicyId: policy?.marketingPolicyId || null,
+        policyFromDate: policy?.fromDate || null,
+        preparedSubject: subject,
+        preparedPreheader: content.preheader || null,
+        preparedBodyLocation: prepared.bodyLocation,
+        preparedTextLocation: prepared.bodyTextLocation,
+        preparedVariablesJson: JSON.stringify(variables),
+        preparedAttachmentsJson: "[]"
+    })
+    return campaignSendId
+}
+
 // ===== get#Send =====
 function getSend(p) {
     const userScope = readScope()
@@ -1163,6 +1233,17 @@ const operations = {
     sendKind,
     recipientFields,
     testDailyLimit,
+    // P11: what the automations (MarketingAutomations.js) share
+    forAutomation: {
+        readScope,
+        campaignFor,
+        topicFor,
+        profileFor,
+        templateFor,
+        stepSend,
+        statusText,
+        approvedCampaignStatuses
+    },
     // P9: what the dispatch (MarketingDispatch.js) shares
     forDispatch: {
         readScope,

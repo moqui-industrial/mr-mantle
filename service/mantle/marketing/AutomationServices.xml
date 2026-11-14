@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.AutomationServices (N, IronStone Marketing design §14.2; impl-marketing P11): a campaign's drip sequences, their
+    enrollment rule and dated steps, the dry run, activation, pause and end, the enrollments and their steps, and the admission and step
+    jobs (MarketingAutomations.js). The approval is CampaignServices request#MarketingApproval and decide#MarketingApproval with
+    targetKind automation (MarketingApprovals.js). Each service checks its permission and the automation's organization itself
+    (mantle/marketing/MarketingAccess.js); the jobs and the internal services run as the system (the automation's owner identity:
+    MarketingAutomations.js's head). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Automations" allow-remote="false" read-only="true">
+        <description>The automations of the caller's scope (design §6 AutomationList), filtered in the query: text (id or name, ignoring case), an organization of the scope, a campaign, a trigger, status (one, open by default: not ended, or all) and mine; paged (automationList with its page fields). Each row: name, campaign, topic, sender, trigger, status with its text and colour, the active, completed and stopped enrollments, the skipped steps, the next due time and why it is paused. For a Marketing reader who writes, approves or dispatches sends or reads audiences (PERMISSION_DENIED); an organization outside the scope ORGANIZATION_DENIED.</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="statusId"/>
+            <parameter name="mine"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="automationList" type="List"/>
+            <parameter name="automationListCount" type="Integer"/>
+            <parameter name="automationListPageIndex" type="Integer"/>
+            <parameter name="automationListPageSize" type="Integer"/>
+            <parameter name="automationListPageMaxIndex" type="Integer"/>
+            <parameter name="automationListPageRangeLow" type="Integer"/>
+            <parameter name="automationListPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('find', context)"/>
+            <script>for (const key of ['automationList', 'automationListCount', 'automationListPageIndex', 'automationListPageSize', 'automationListPageMaxIndex', 'automationListPageRangeLow', 'automationListPageRangeHigh', 'canCreate']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="create" noun="Automation" allow-remote="false">
+        <description>A new draft automation of an open campaign of the scope (RECORD_UNAVAILABLE, CAMPAIGN_CLOSED): its name (NAME_REQUIRED), topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), sending profile (the organization's, promotional or for both: PROFILE_PURPOSE), trigger (AtrSubscription by default; AtrSegment with a segment of the organization reading only party, contact and engagement facts: SOURCE_UNAVAILABLE; AtrOrderPlaced or AtrCartAbandoned with a store of the organization), description and time zone (the user's when empty). Re-entry once per person. MARKETING_SEND_EDIT.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="automationName"/>
+            <parameter name="description"/>
+            <parameter name="contactListId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="triggerSegmentId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="timeZone"/>
+        </in-parameters>
+        <out-parameters><parameter name="marketingAutomationId"/></out-parameters>
+        <actions>
+            <set field="marketingAutomationId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('create', context).marketingAutomationId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Automation" allow-remote="false" read-only="true">
+        <description>One automation of the scope (RECORD_UNAVAILABLE) for a Marketing reader who writes, approves or dispatches sends or reads audiences: its definition (campaign, topic, sender, trigger and its segment or store, goal, re-entry, zone, the definition's time), its current steps in order (a send step's subject and template, a wait's amount and unit, a condition's segment and what not meeting it does), what approval still needs, its decisions, its enrollment counts, and what the caller may do now (edit, request approval, decide, activate or resume, pause, end, enroll; an activator who wrote, asked for or approved it may not).</description>
+        <in-parameters><parameter name="marketingAutomationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="automation" type="Map"/>
+            <parameter name="steps" type="List"/>
+            <parameter name="approvalProblems" type="List"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="awaitingApproval" type="Boolean"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('get', context)"/>
+            <script>for (const key of ['automation', 'steps', 'approvalProblems', 'decisions', 'awaitingApproval', 'capabilities']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="store" noun="EnrollmentRule" allow-remote="false">
+        <description>An automation's name, description, topic, sending profile, trigger (and its segment or store), goal segment, re-entry (ArOnce, or ArPerEvent with a cooldown of 1 to 365 days) and time zone, each changed only when given, at the revision read (expectedRevision, its lastUpdatedStamp: REVISION_REQUIRED, STALE_REVISION); an ended one is refused (STATUS_INVALID). A segment it names reads only party, contact and engagement facts, its parents too (SOURCE_UNAVAILABLE: an automation runs as the system). Any change but the name and description raises its revision, ends the approval and returns it to draft (approvalEnded); the current send steps follow a new topic or sender. MARKETING_SEND_EDIT and the organization (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="automationName"/>
+            <parameter name="description"/>
+            <parameter name="contactListId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="triggerSegmentId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="goalSegmentId"/>
+            <parameter name="reentryEnumId"/>
+            <parameter name="reentryCooldownDays"/>
+            <parameter name="timeZone"/>
+        </in-parameters>
+        <out-parameters><parameter name="approvalEnded" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="approvalEnded" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('storeRule', context).approvalEnded"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Steps" allow-remote="false">
+        <description>An automation's ordered steps, the whole set, at the revision read (REVISION_REQUIRED, STALE_REVISION): each {kind: send, wait or condition, stepName; messageTemplateId (a promotional template of the organization with published content, read with a template permission: TEMPLATE_UNAVAILABLE; its subject, body and variables checked as a preparation checks them: SUBJECT_REQUIRED, BODY_REQUIRED, PRIVATE_LINK, VARIABLE_UNKNOWN); waitAmount and waitUnitEnumId (minutes, hours, days or business days, bounded: VALUE_INVALID); conditionSegmentId (a segment of the organization reading only party, contact and engagement facts: SOURCE_UNAVAILABLE) and conditionFalseEnumId (skip the next send step or end)}; at least one (STEPS_REQUIRED), at most the policy's automationMaxSteps, ten by default (TOO_MANY_STEPS). No loop or jump. The steps in effect end and the new ones start now (an enrollment admitted earlier keeps its own); each send step's content is copied from its template and prepared now as a send of the automation. Raises the revision, ends the approval and returns it to draft. MARKETING_SEND_EDIT and the organization.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="steps" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="automationStepIdList" type="List"/>
+            <parameter name="approvalEnded" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('storeSteps', context)"/>
+            <set field="automationStepIdList" from="out.automationStepIdList"/>
+            <set field="approvalEnded" from="out.approvalEnded"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="Automation" allow-remote="false" read-only="true">
+        <description>A dry run (design §6 Simulation) that sends and stores nothing: each current step in order from startDate (now when empty) with its due time in the rule's zone and its offset (a day wait keeps the local time, across a daylight-saving gap the next valid instant) and what it would do; for a sample person (partyId: an audience reader's, MARKETING_AUDIENCE_VIEW, a person the caller may see) their eligibility now, the goal, the conditions and each send's verdict as the system would find them. For a reader of the automation (RECORD_UNAVAILABLE, PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="partyId"/>
+            <parameter name="startDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="stepList" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="sampleText"/>
+            <parameter name="timeZone"/>
+            <parameter name="eligibleNow" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('preview', context)"/>
+            <script>for (const key of ['stepList', 'findings', 'sampleText', 'timeZone', 'eligibleNow']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="activate" noun="Automation" allow-remote="false">
+        <description>An approved automation activated, or a paused one resumed (design §6 AutomationControl), at the revision read (REVISION_REQUIRED, STALE_REVISION): it needs MARKETING_DISPATCH, a current approval at its revision (APPROVAL_REQUIRED), an activator who is none of its authors (its creator, the maker of its revision, the requester) nor its approver (SELF_DISPATCH: an automation is never self-approved), what approval needs (NOT_READY: an approved campaign, a ready promotional profile, a send step, the trigger's source) and an address for each message's unsubscribe link (NOT_READY). Each current send step gets its communication event and link root. A confirmed subscription counts from the first activation on. An active one answers alreadyActive; any other state STATUS_INVALID.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="resumed" type="Boolean"/>
+            <parameter name="alreadyActive" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('activate', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="resumed" from="!!out.resumed"/>
+            <set field="alreadyActive" from="!!out.alreadyActive"/>
+        </actions>
+    </service>
+    <service verb="pause" noun="Automation" allow-remote="false">
+        <description>An active automation paused (MARKETING_DISPATCH, the organization; STATUS_INVALID otherwise): no step runs and no one is admitted until it is resumed (activate#Automation); messages already with the delivery service may still go out (inFlightCount). The reason is kept as its pause note.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="inFlightCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('pause', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="inFlightCount" from="out.inFlightCount"/>
+        </actions>
+    </service>
+    <service verb="end" noun="Automation" allow-remote="false">
+        <description>An automation ended with its reason (REASON_REQUIRED): a dispatcher's, or its author's while it was never activated (PERMISSION_DENIED); its active enrollments stop (AUTOMATION_ENDED, stoppedCount) and its approval ends. An ended one answers as it is.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="stoppedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('end', context)"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="stoppedCount" from="out.stoppedCount"/>
+        </actions>
+    </service>
+    <service verb="enroll" noun="Party" allow-remote="false">
+        <description>Staff enrollment with evidence (design §6): a person the caller may see (RECORD_UNAVAILABLE) enrolled in an active automation whose trigger is staff enrollment (TRIGGER_INVALID, STATUS_INVALID), with what they asked for (EVIDENCE_REQUIRED) and an operation key (OPERATION_KEY_REQUIRED: a repeat answers the first; a key of another person OPERATION_KEY_USED); admitted now by the automation's rule (an eligible member of its topic, re-entry) or not admitted with the reason (reasonCode, reasonText). A dispatcher or an audience editor (MARKETING_DISPATCH or MARKETING_AUDIENCE_EDIT) of the organization.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="evidenceText"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="automationSourceEventId"/>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="reasonText"/>
+            <parameter name="automationEnrollmentId"/>
+            <parameter name="alreadyFiled" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('enroll', context)"/>
+            <script>for (const key of ['automationSourceEventId', 'admitted', 'reasonCode', 'reasonText', 'automationEnrollmentId', 'alreadyFiled']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="find" noun="Enrollments" allow-remote="false" read-only="true">
+        <description>An automation's enrollments (design §6 EnrollmentList), newest first, by state (one, or all), paged: the participant (name and whole address for an audience reader, MARKETING_AUDIENCE_VIEW; a masked address otherwise), when admitted and by which trigger, the state, the next step and its due time and note, why it ended. For a reader of automations or an audience reader of the organization (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId" required="true"/>
+            <parameter name="statusId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="enrollmentList" type="List"/>
+            <parameter name="enrollmentListCount" type="Integer"/>
+            <parameter name="enrollmentListPageIndex" type="Integer"/>
+            <parameter name="enrollmentListPageSize" type="Integer"/>
+            <parameter name="enrollmentListPageMaxIndex" type="Integer"/>
+            <parameter name="enrollmentListPageRangeLow" type="Integer"/>
+            <parameter name="enrollmentListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('findEnrollments', context)"/>
+            <script>for (const key of ['enrollmentList', 'enrollmentListCount', 'enrollmentListPageIndex', 'enrollmentListPageSize', 'enrollmentListPageMaxIndex', 'enrollmentListPageRangeLow', 'enrollmentListPageRangeHigh']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Enrollment" allow-remote="false" read-only="true">
+        <description>One enrollment of the scope (design §6 EnrollmentDetail; RECORD_UNAVAILABLE): the participant (masked for a reader without MARKETING_AUDIENCE_VIEW, the staff evidence for an audience reader only), its source event, the definition's effective time it follows, the goal, its state, next step and due time, why it ended, its pending steps, and its step history in order (each step's time, outcome, reason, a wait's end in the rule's zone, a send's ledger state), and whether the caller may stop it. For a reader of automations or an audience reader.</description>
+        <in-parameters><parameter name="automationEnrollmentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="enrollment" type="Map"/>
+            <parameter name="history" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('getEnrollment', context)"/>
+            <set field="enrollment" from="out.enrollment"/>
+            <set field="history" from="out.history"/>
+            <set field="capabilities" from="out.capabilities"/>
+        </actions>
+    </service>
+    <service verb="stop" noun="Enrollment" allow-remote="false">
+        <description>An active enrollment stopped with its reason (REASON_REQUIRED), at the revision read when given (STALE_REVISION): its pending steps never run, and a stopped enrollment is never made active again (STATUS_INVALID). A dispatcher or an audience editor of the organization (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="automationEnrollmentId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="statusId"/></out-parameters>
+        <actions>
+            <set field="statusId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('stopEnrollment', context).statusId"/>
+        </actions>
+    </service>
+
+    <!-- the jobs and their internal steps, as the system (design §15.3 Automation admission/steps) -->
+    <service verb="run" noun="AutomationAdmission" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.admission.run">
+        <description>The admission job (run_MarketingAutomationAdmission; operation marketing.automation.admission.run): for each active automation (or the one named), its trigger's new source events filed (an accepted subscription to its topic since its cursor, a segment's new matches after the baseline of its first scan, its store's abandoned carts when the store's recovery sender is the automation) and its filed events admitted, each in a transaction of its own; one that fails is logged and the next goes on. Runs as the system.</description>
+        <in-parameters><parameter name="marketingAutomationId"/></in-parameters>
+        <out-parameters>
+            <parameter name="automations" type="Integer"/>
+            <parameter name="filed" type="Integer"/>
+            <parameter name="admitted" type="Integer"/>
+            <parameter name="refused" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('runAdmission', context)"/>
+            <script>for (const key of ['automations', 'filed', 'admitted', 'refused', 'failed']) ec.context.put(key, out[key])</script>
+        </actions>
+    </service>
+    <service verb="collect" noun="AdmissionEvents" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal to run#AutomationAdmission, in a transaction of its own: one active automation's new source events filed under its lock, its cursor moved.</description>
+        <in-parameters><parameter name="marketingAutomationId" required="true"/></in-parameters>
+        <out-parameters><parameter name="filed" type="Integer"/></out-parameters>
+        <actions>
+            <set field="filed" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('collect', context).filed"/>
+        </actions>
+    </service>
+    <service verb="admit" noun="SourceEvent" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.admit" operation-ref="automationSourceEventId">
+        <description>Internal (run#AutomationAdmission, enroll#Party), in a transaction of its own: one filed admission event under its lock, admitted (an enrollment, one per automation, person and source) or refused with its reason (the automation ended, the person not available to an automation, already enrolled or within the re-entry cooldown, not an eligible member of the topic now); an event of a paused automation waits (NOT_ACTIVE).</description>
+        <in-parameters><parameter name="automationSourceEventId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="reasonCode"/>
+            <parameter name="automationEnrollmentId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('admit', context)"/>
+            <set field="admitted" from="out.admitted"/>
+            <set field="reasonCode" from="out.reasonCode"/>
+            <set field="automationEnrollmentId" from="out.automationEnrollmentId"/>
+        </actions>
+    </service>
+    <service verb="run" noun="AutomationSteps" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.steps.run">
+        <description>The step job (run_MarketingAutomationSteps; operation marketing.automation.steps.run): the due steps of the active automations' enrollments (or the named one's), at most 100 an automation and 200 a run, each enrollment in a transaction of its own (process#EnrollmentStep), then each new delivery's first attempt (unless attempt is false); one that fails is logged and the next goes on. Runs as the system.</description>
+        <in-parameters>
+            <parameter name="marketingAutomationId"/>
+            <parameter name="attempt" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="enrollments" type="Integer"/>
+            <parameter name="handedOff" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('runSteps', context)"/>
+            <set field="enrollments" from="out.enrollments"/>
+            <set field="handedOff" from="out.handedOff"/>
+            <set field="failed" from="out.failed"/>
+        </actions>
+    </service>
+    <service verb="process" noun="EnrollmentStep" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.step" operation-ref="automationEnrollmentId">
+        <description>Internal to run#AutomationSteps, in a transaction of its own: one due active enrollment of an active automation, under its lock, runs its steps until a wait, a postponement or its end. Before every step: the campaign (closed: stopped; no longer approved: the automation paused), the goal (met: completed), the enrollment (a topic withdrawal, an unsubscription or a suppression: stopped). A wait records its end; a condition its result (not met: the next send skipped, or completed); a send step, unless skipped, waits out the sending profile's quiet hours, a profile not ready or the frequency cap (dueNote), pauses the automation when its profile ended or turned transactional, else makes the participant a recipient of the step's send and hands it to the ledger through the dispatch's checks (or records it skipped with the reason: a channel withdrawn, a withdrawal at the address). Each step runs once per enrollment. The new deliveries (deliveryIdList).</description>
+        <in-parameters><parameter name="automationEnrollmentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="deliveryIdList" type="List"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('process', context)"/>
+            <set field="deliveryIdList" from="out.deliveryIdList"/>
+            <set field="statusId" from="out.statusId"/>
+        </actions>
+    </service>
+</services>

@@ -14,8 +14,11 @@
  * - When: idle past the delay (StoreCartAccess.lastActivityDate, never lastUpdatedStamp) and within the recovery window, not in
  *   a live or completed checkout, with something in it. One abandonment event per cart and window: the event key is the cart
  *   and its last activity (cartRecovery:{orderId}:{activity ms}), so the ledger's unique event, recipient and template keeps it
- *   to one mail; the most sends a cart gets (across its windows) is the policy's. The sender is built-in recovery, the only
- *   one until Marketing's automation exists (design §8); the other never sends.
+ *   to one mail; the most sends a cart gets (across its windows) is the policy's. The sender is one per store (design §8):
+ *   built-in recovery, or a Marketing automation (impl-marketing P11, F27: offered when an active automation of the store's
+ *   organization has the store's cart trigger), whose admission reads the same carts (automationCarts) and enrolls each cart's
+ *   visit once; a cart this store's built-in recovery already handled for the visit is never admitted, and built-in recovery
+ *   never sends for a store whose sender is the automation, so a cart never gets two recovery mails.
  * - The job (run#CartRecovery): the enabled stores' carts idle past their delay, each in its own transaction (queue#Recovery,
  *   which hands the delivery to the ledger and tries it at once); one that fails is logged and named, and the rest go on.
  * - Each attempt (build#CartRecovery, the ledger's source build) checks the cart again: closed, completed, checking out, or
@@ -62,7 +65,7 @@ const consentPolicy = {
     checkoutOptIns: {settingTypeEnumId: "PsstCheckoutOptIns", defaultValue: "", label: "Checkout opt-ins"},
     newsListId: {settingTypeEnumId: "PsstNewsList", defaultValue: "", label: "News and offers list"}
 }
-const senderTexts = {builtin: "Built-in recovery"}
+const senderTexts = {builtin: "Built-in recovery", automation: "A Marketing automation"}
 const optInTexts = {reviewRequests: "Review requests", cartReminders: "Cart reminders", news: "News and offers"}
 // The job's bounds: stores and carts a run, and the recovery link lookups a requester makes in ten minutes.
 const limits = {stores: 200, carts: 500, lookups: 120}
@@ -156,16 +159,21 @@ const sendsOf = orderId =>
         .sort((a, b) => (ms(b.createdDate) ?? 0) - (ms(a.createdDate) ?? 0))
 // Whether a cart may be sent a recovery now, and why not: {eligible, code, text, windowMs, partyId, email, consent}. A
 // delivery being built (forDelivery) is the window's own send, so neither the window nor the most sends count it.
-function eligibility(store, facts, pol, at = nowMs(), forDelivery = null) {
+// P11: forAutomation reads a cart for the Marketing automation that is the store's sender (its own content: no recovery email).
+function eligibility(store, facts, pol, at = nowMs(), forDelivery = null, forAutomation = false) {
     const no = (code, reason, extra) => Object.assign({eligible: false, code, text: reason}, extra || {})
     const {order, access, checkouts, lines} = facts
     const partyId = access?.customerPartyId || null
     const consent = partyId ? consentOf(partyId, store.productStoreId) : false
     const base = {partyId, consent}
     if (!pol.enabled) return no("RECOVERY_OFF", "Recovery is off for this store", base)
-    if (pol.sender !== "builtin") return no("OTHER_SENDER", "The store's recovery is sent by its Marketing automation", base)
-    if (!recoveryEmail(store.productStoreId))
-        return no("NO_TEMPLATE", "The store has no current cart recovery email (PsetCartRecovery)", base)
+    if (forAutomation) {
+        if (pol.sender !== "automation") return no("OTHER_SENDER", "The store's recovery is built-in recovery", base)
+    } else {
+        if (pol.sender !== "builtin") return no("OTHER_SENDER", "The store's recovery is sent by its Marketing automation", base)
+        if (!recoveryEmail(store.productStoreId))
+            return no("NO_TEMPLATE", "The store has no current cart recovery email (PsetCartRecovery)", base)
+    }
     if (!access) return no("MADE_BY_STAFF", "Made by staff: there is no shopper to remind", base)
     if (!partyId) return no("GUEST", "A guest's cart is never recovered", base)
     if (order.statusId !== "OrderOpen" || access.revokedDate) return no("CLOSED", "The cart is closed", base)
@@ -328,6 +336,63 @@ function runRecovery(p) {
     }
     return out
 }
+
+// ===== P11: the carts a Marketing automation sender reads (impl-marketing P11, F27) =====
+// A store whose recovery is on and sent by a Marketing automation: its carts idle past the delay within the window and not yet
+// handled for the visit, each eligible as built-in recovery would find it (a signed-in, verified shopper holding the store's cart
+// reminders topic, not checking out, under the most sends; a visit built-in recovery already sent for is ALREADY_SENT), newest first,
+// at most limit. [{orderId, partyId, windowMs, cartAccessId, lastActivityDate}]; a cart that fails is logged and the rest go on.
+function automationCarts(productStoreId, limit = limits.carts) {
+    const at = nowMs()
+    const store = one(STORE, {productStoreId})
+    const pol = policyOf(productStoreId, at)
+    if (!store || !pol.enabled || pol.sender !== "automation") return []
+    const found = []
+    for (const row of Array.from(
+        find(A, {productStoreId})
+            .condition("customerPartyId", "is-not-null", null)
+            .condition("revokedDate", "is-null", null)
+            .condition("lastActivityDate", "less-equals", new Date(at - pol.delayMinutes * 60000))
+            .condition("lastActivityDate", "greater-equals", new Date(at - pol.retentionDays * DAY_MS))
+            .condition("recoveryHandledDate", "is-null", null)
+            .orderBy("-lastActivityDate")
+            .limit(Math.min(limits.carts, Math.max(1, Number(limit) || limits.carts)))
+            .list()
+    )) {
+        try {
+            const order = one(ORDER, {orderId: row.orderId})
+            if (!order) continue
+            const result = eligibility(store, factsOf(order), pol, at, null, true)
+            if (result.eligible)
+                found.push({
+                    orderId: order.orderId,
+                    partyId: result.partyId,
+                    windowMs: result.windowMs,
+                    cartAccessId: row.cartAccessId,
+                    lastActivityDate: row.lastActivityDate
+                })
+            else if (handledCodes.includes(result.code)) markHandled(row)
+        } catch (error) {
+            ec.logger.error("Cart " + row.orderId + " not read for its automation: " + String(error.message).split("\n")[0])
+        }
+    }
+    return found
+}
+// The sender choices of a store (RecoveryPolicy): built-in recovery, and a Marketing automation while an active one of the store's
+// organization has the store's cart trigger (or it is the store's sender now). [{value, label}].
+function senderOptions(store) {
+    const options = [{value: "builtin", label: senderTexts.builtin}]
+    if (automationSenderOffered(store) || policyOf(store.productStoreId).sender === "automation")
+        options.push({value: "automation", label: senderTexts.automation})
+    return options
+}
+const automationSenderOffered = store =>
+    find("mantle.marketing.automation.MarketingAutomation", {
+        organizationPartyId: store.organizationPartyId,
+        productStoreId: store.productStoreId,
+        triggerEnumId: "AtrCartAbandoned",
+        statusId: "MaActive"
+    }).count() > 0
 
 // ===== build#CartRecovery (the ledger's source build, each attempt) =====
 // The message of a recovery delivery, made fresh: suppressed when the cart is closed, completed, checking out, the shopper came
@@ -533,6 +598,8 @@ function getRecoveryPolicy(p) {
         productStoreId: store.productStoreId,
         values,
         view: Object.assign(view, {
+            // P11: the senders offered (a Marketing automation while one of the organization has the store's cart trigger)
+            senderOptions: senderOptions(store),
             checkoutOptInsText: !optIns
                 ? "Review requests and cart reminders, and news once a list is set"
                 : optIns === "none"
@@ -570,6 +637,11 @@ const ops = {
     limits,
     policyOf,
     delayOf,
+    // P11: the Marketing automation sender's carts and the sender's choice
+    automationCarts,
+    automationSenderOffered,
+    senderOptions,
+    keyOf,
     execute: (op, parameters) => {
         if (!ops[op]) throw new Error("Unknown cart recovery operation " + op)
         return ops[op](parameters || {})
