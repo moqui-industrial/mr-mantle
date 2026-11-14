@@ -2041,22 +2041,7 @@ kit => {
         if (!repo) return {notified: 0}
         const mirror = message.mirrorId ? one("moqui.resource.GitRepositoryMirror", {mirrorId: text(message.mirrorId)}) : null
         if (!mirror || mirror.repositoryId !== repositoryId) return {notified: 0}
-        const parties = new Set(repo.ownerPartyId ? [repo.ownerPartyId] : [])
-        const holders = (entity, key) => {
-            for (const row of rows(entity, key, 200))
-                if ((RANK[row.roleEnumId] || 0) >= RANK.SmrMaintainer) parties.add(row.partyId)
-        }
-        holders(M + "SmithyRepositoryParty", {repositoryId})
-        for (const group of core.groupChain(repo.groupId) || []) holders(M + "SmithyGroupParty", {groupId: group.groupId})
-        const userIds = []
-        for (const partyId of Array.from(parties).slice(0, 200))
-            for (const account of rows(ACCOUNT, {partyId}, 5))
-                if (
-                    account.userId !== mirror.createdByUserId &&
-                    userIds.length < 100 &&
-                    core.rights(repositoryId, account.userId).rank >= RANK.SmrMaintainer
-                )
-                    userIds.push(account.userId)
+        const userIds = core.maintainerUserIds(repositoryId, [mirror.createdByUserId])
         if (!userIds.length) return {notified: 0}
         const url = scrub(null, message.url || mirror.url)
         ec.makeNotificationMessage()

@@ -550,11 +550,45 @@
     },
     storeCiEnvironment: {
         service: "mantle.smithy.SmithyPipelineServices.store#Environment",
-        fields: ["siteId", "repositoryId", "environmentId", "name", "allowedRefs", "approvalRequired", "operationId"]
+        fields: [
+            "siteId",
+            "repositoryId",
+            "environmentId",
+            "name",
+            "allowedRefs",
+            "approvalRequired",
+            "targetUrl",
+            "token",
+            "cloneUrl",
+            "requiredPipeline",
+            "approverGroupId",
+            "operationId"
+        ]
     },
     deleteCiEnvironment: {
         service: "mantle.smithy.SmithyPipelineServices.delete#Environment",
         fields: ["siteId", "repositoryId", "environmentId"]
+    },
+    // DG10: deployments (design-smithy "Deploy environments")
+    findDeployments: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Deployments",
+        fields: ["siteId", "repositoryId", "environment", "state", "commitId", "pageIndex", "limit"]
+    },
+    getDeployment: {
+        service: "mantle.smithy.SmithyPipelineServices.get#Deployment",
+        fields: ["siteId", "repositoryId", "deploymentId"]
+    },
+    requestDeploy: {
+        service: "mantle.smithy.SmithyPipelineServices.request#Deploy",
+        fields: ["siteId", "repositoryId", "environment", "environmentId", "refName", "commitId", "operationId"]
+    },
+    decideDeploy: {
+        service: "mantle.smithy.SmithyPipelineServices.decide#Deploy",
+        fields: ["siteId", "repositoryId", "deploymentId", "decision", "reason"]
+    },
+    cancelDeploy: {
+        service: "mantle.smithy.SmithyPipelineServices.cancel#Deploy",
+        fields: ["siteId", "repositoryId", "deploymentId"]
     },
     getPipelineSettings: {
         service: "mantle.smithy.SmithyPipelineServices.get#Settings",

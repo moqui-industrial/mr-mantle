@@ -495,6 +495,25 @@ function rights(repositoryId, userId) {
         confirmed: !!a.userId && confirmedAddress().confirmed(a.userId)
     }
 }
+/* The accounts that are a repository's Maintainers or Owners now, for a notice: the parties of an active Maintainer or
+   Owner row of the repository or its groups and its owner, each account counted as rights() counts it (not
+   suspended, the role in effect), without those in exclude; at most 100. */
+function maintainerUserIds(repositoryId, exclude = []) {
+    const repo = repositoryId ? one(M + "SmithyRepository", {repositoryId}) : null
+    if (!repo) return []
+    const parties = new Set(repo.ownerPartyId ? [repo.ownerPartyId] : [])
+    const holders = (entity, key) => {
+        for (const row of rows(entity, key, 200)) if ((RANK[row.roleEnumId] || 0) >= RANK.SmrMaintainer) parties.add(row.partyId)
+    }
+    holders(M + "SmithyRepositoryParty", {repositoryId})
+    for (const group of (repo.groupId && groupChain(repo.groupId)) || []) holders(M + "SmithyGroupParty", {groupId: group.groupId})
+    const userIds = []
+    for (const partyId of Array.from(parties).slice(0, 200))
+        for (const account of rows("moqui.security.UserAccount", {partyId}, 5))
+            if (!exclude.includes(account.userId) && userIds.length < 100 && rights(repositoryId, account.userId).rank >= RANK.SmrMaintainer)
+                userIds.push(account.userId)
+    return userIds
+}
 /* A group of a site as the caller holds it, or Not Found. */
 function group(groupId, siteId) {
     site(siteId)
@@ -993,6 +1012,7 @@ function resolvePath(siteId, path) {
     repositoryRights,
     repositoryViewable,
     rights,
+    maintainerUserIds,
     group,
     repository,
     requireRole,
