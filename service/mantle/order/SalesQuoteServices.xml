@@ -206,6 +206,22 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="orderRevision" from="deleted.orderRevision"/>
         </actions>
     </service>
+    <service verb="check" noun="QuoteAccess" allow-remote="false" read-only="true">
+        <description>Whether the caller sees a quote (SalesAccess.js quoteOf: a seller of their sales scope, and the quote assigned
+            to them or a team of theirs, or SALES_TEAM_VIEW) and may change it (SALES_QUOTE_EDIT): the record visibility of
+            get#RecordLinkInfo and RecordFiles for a quote not yet placed and its files, in every app. A call with no user sees
+            none.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('quoteAccess', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+        </actions>
+    </service>
     <service verb="explain" noun="QuoteLinePrice" allow-remote="false" read-only="true">
         <description>The safe explanation of a quote line's price for anyone who sees the quote (design §7, PriceExplain's Sales
             branch): the selected price, where it came from (a price, a customer price, a price list, the list price, an entered

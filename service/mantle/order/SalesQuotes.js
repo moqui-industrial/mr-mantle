@@ -567,12 +567,16 @@ function taxNote(quote) {
           ).taxGatewayConfigId
     const config = configId ? one("mantle.other.tax.TaxGatewayConfig", {taxGatewayConfigId: configId}) : null
     if (!config) return L("No tax: the seller has no tax gateway")
-    return (
+    const note =
         (store ? L("Tax by the store's gateway") : L("Tax by the seller's gateway")) +
         " (" +
         (config.description || configId) +
         ")"
-    )
+    // X1 taxes a storeless part at its address, else the customer's when the quote changes, and leaves it untaxed with neither; a
+    // customer address added later is taken at the next change, so a quote with no address of its own says where to set it
+    if (!store && !quote.part.postalContactMechId)
+        return note + " · " + L("the quote has no address: choose the customer's in Edit quote to tax at it")
+    return note
 }
 // OrderDetail's quote as the caller may see it (SalesAccess.js quoteOf), else quoteFound false: its facts with names, validity,
 // owner, team and opportunity (when the caller sees it), lines with their price provenance and tax, the totals by kind, the tax
@@ -756,7 +760,16 @@ function explainLine(p) {
     }
 }
 
-const operations = {findQuotes, createQuote, updateQuote, storeLine, deleteLine, getQuote, explainLine}
+// ===== check#QuoteAccess =====
+// Whether the caller sees the quote and may change it (get#RecordLinkInfo and RecordFiles for a quote not placed); a call with no
+// user sees none.
+function quoteAccess(p) {
+    if (!ec.user.userId) return {recordVisible: false, canEdit: false}
+    const found = salesAccess.quoteOf(salesAccess.scope(), text(p.orderId))
+    return {recordVisible: !!found, canEdit: !!found?.canEdit}
+}
+
+const operations = {findQuotes, createQuote, updateQuote, storeLine, deleteLine, getQuote, explainLine, quoteAccess}
 ;({
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales quote operation " + op)

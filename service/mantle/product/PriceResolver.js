@@ -487,7 +487,7 @@ function evaluate(list, c, path = []) {
             if (!source) throw new Error("Missing " + rule.basePriceTypeEnumId + " base for rule " + rule.priceRuleId)
             base = source.price
         } else if (rule.baseType === "list") {
-            const nested = policy().getList(rule.basePriceListId)
+            const nested = listOf(c, rule.basePriceListId)
             if (!listEligible(nested, c))
                 throw new Error("Base list " + rule.basePriceListId + " is not effective for this context")
             source = evaluate(nested, Object.assign({}, c, {priceUomId: nested.priceUomId}), path.concat(list.priceListId))
@@ -547,18 +547,21 @@ function evaluate(list, c, path = []) {
     }
     return null
 }
+// A price list as the context reads it: the reader's (PricePolicy getList), or, as the seller's authority, the row itself, which
+// listEligible then keeps to the selling organization's published lists (a rule's base list too).
+function listOf(c, id) {
+    if (!c.sellerAuthority) return policy().getList(id)
+    const found = one(P + "ProductPriceList", {priceListId: id})
+    if (!found) throw new Error("Price list is not available")
+    return found
+}
 function applyList(p) {
     const c = p.pricingContext || context(p)
     if (p.listModifierApplied) return {}
     // the seller's authority (get#SellerProductPrice) reads its organization's published lists, which listEligible keeps to
     // the selling organization, without the reader's own price grant
     if (!c.sellerAuthority && (!ec.user.userId || !read(c.direction))) return {listModifierApplied: true}
-    const getList = id => {
-        if (!c.sellerAuthority) return policy().getList(id)
-        const found = one(P + "ProductPriceList", {priceListId: id})
-        if (!found) throw new Error("Price list is not available")
-        return found
-    }
+    const getList = id => listOf(c, id)
     let selected
     if (c.priceListId) {
         selected = getList(c.priceListId)

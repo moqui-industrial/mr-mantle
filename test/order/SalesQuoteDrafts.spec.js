@@ -14,7 +14,7 @@ const service = "mantle.order.SalesQuoteServices."
 const users = {}
 const teams = {}
 const accounts = {}
-const products = {priced: prefix + "_PRICED", unpriced: prefix + "_UNPRICED"}
+const products = {priced: prefix + "_PRICED", unpriced: prefix + "_UNPRICED", listed: prefix + "_LISTED"}
 const quotes = {}
 
 const make = (entity, values) => call("create#" + entity, values)
@@ -132,6 +132,10 @@ function as(username, verb, parameters = {}) {
         login("john.doe")
     }
 }
+// whether the user sees a record through the record link host (Chatter and Files), with authorization on
+const linkVisible = (username, recordEntityName, recordId) =>
+    as(username, "mantle.party.CommunicationServices.get#RecordLinkInfo", {recordEntityName, recordId, checkOnly: true})
+        .recordVisible === true
 const idsOf = found => Array.from(found.quoteList || []).map(row => row.orderId)
 const revision = (username, orderId) => as(username, "get#Quote", {orderId}).quote?.orderRevision
 const lineOf = (username, orderId, orderItemSeqId) =>
@@ -150,6 +154,14 @@ spec({
                 artifactName: "mantle\\.order\\.SalesQuoteServices\\..*",
                 artifactTypeEnumId: "AT_SERVICE",
                 nameIsPattern: "Y",
+                inheritAuthz: "Y"
+            })
+            // the record link host, whose quote rule (check#QuoteAccess) is Sales' scope (P7 review)
+            make("moqui.security.ArtifactGroupMember", {
+                artifactGroupId: prefix + "_SERVICES",
+                artifactName: "mantle.party.CommunicationServices.get#RecordLinkInfo",
+                artifactTypeEnumId: "AT_SERVICE",
+                nameIsPattern: "N",
                 inheritAuthz: "Y"
             })
             make("moqui.security.ArtifactAuthz", {
@@ -226,10 +238,17 @@ feature(
                 manager: idsOf(as(users.manager, "find#Quotes")),
                 other: as(users.other, "get#Quote", {orderId: quotes.rep}),
                 repB: as(users.repB, "get#Quote", {orderId: quotes.rep}),
-                cart: as(users.manager, "get#Quote", {orderId: quotes.cart})
+                cart: as(users.manager, "get#Quote", {orderId: quotes.cart}),
+                // Chatter and Files of a quote: Sales' scope, not every agent of the seller (P7 review)
+                linked: Object.fromEntries(
+                    ["rep", "approver", "manager", "other", "repB"].map(kind => [
+                        kind,
+                        linkVisible(users[kind], "mantle.order.OrderHeader", quotes.rep)
+                    ])
+                )
             }
         },
-        then({created, part, team, rep, approver, manager, other, repB, cart}) {
+        then({created, part, team, rep, approver, manager, other, repB, cart, linked}) {
             created.orderPurposeEnumId == "OrpSalesQuote"
             created.statusId == "OrderOpen"
             created.productStoreId == null
@@ -247,6 +266,8 @@ feature(
             other.refused == "" && other.quoteFound == false
             repB.quoteFound == false
             cart.quoteFound == false
+            linked.rep && linked.approver && linked.manager
+            !linked.other && !linked.repB
         }
     }
 )
@@ -420,5 +441,62 @@ feature("another team's rep cannot change the quote; a removed line is gone", {
         reader.includes("PERMISSION_DENIED")
         removed == ""
         gone == null
+    }
+})
+
+// P7 review: the seller's authority reads a rule's base list as it reads the list itself (a rep without PRICE_VIEW was refused)
+feature("a line priced by the seller's published list whose rule is based on another of its lists", {
+    when() {
+        const S = "mantle.product.PriceServices."
+        system(() => {
+            const list = (listName, priority, rules) => {
+                const priceListId = call(S + "store#ProductPriceList", {
+                    listName,
+                    organizationPartyId: orgA,
+                    direction: "sales",
+                    priceUomId: "USD",
+                    priority,
+                    fromDate: 0,
+                    changeReason: "Spec list"
+                }).priceListId
+                call(
+                    S + "store#ProductPriceRule",
+                    Object.assign(
+                        {
+                            priceListId,
+                            sequenceNum: 10,
+                            selector: "product",
+                            productId: products.listed,
+                            fromDate: 0,
+                            percentChange: 0,
+                            amountChange: 0,
+                            changeReason: "Spec rule"
+                        },
+                        rules
+                    )
+                )
+                const preview = call(S + "get#ProductPriceListPublication", {priceListId})
+                call(S + "publish#ProductPriceList", {
+                    priceListId,
+                    publicationToken: preview.publicationToken,
+                    changeReason: "Spec publication"
+                })
+                return priceListId
+            }
+            const base = list("Quotes base", 200, {baseType: "fixed", fixedPrice: 50})
+            // the outer list first (a lower priority number)
+            list("Quotes outer", 10, {baseType: "list", basePriceListId: base, percentChange: 10})
+        })
+        const added = as(users.rep, "store#QuoteLine", {
+            orderId: quotes.rep,
+            orderRevision: revision(users.rep, quotes.rep),
+            productId: products.listed
+        })
+        return {added, line: added.orderItemSeqId ? lineOf(users.rep, quotes.rep, added.orderItemSeqId) : null}
+    },
+    then({added, line}) {
+        added.refused == ""
+        line.priceSource == "price-list"
+        toDecimal(line.unitAmount).eq(toDecimal("55"))
     }
 })
