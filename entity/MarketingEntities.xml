@@ -433,7 +433,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="addressMasked" type="text-medium"/>
         <field name="contactName" type="text-medium"/>
         <field name="exclusionCode" type="text-short"><description>Why the preview excludes it (INVALID_ADDRESS, MISSING_ADDRESS,
-            EVIDENCE_REQUIRED, EVIDENCE_DATE_INVALID, DUPLICATE_IN_FILE, EMPTY_ROW) or a note it is applied with (SUPPRESSED,
+            EVIDENCE_REQUIRED, EVIDENCE_DATE_REQUIRED, EVIDENCE_DATE_INVALID, DUPLICATE_IN_FILE, EMPTY_ROW) or a note it is applied with (SUPPRESSED,
             ALREADY_MEMBER, WITHDRAWN)</description></field>
         <field name="problemText" type="text-long"/>
         <field name="outcome" type="text-short"><description>staged, pending, accepted, existing, refused, skipped or failed</description></field>

@@ -12,12 +12,13 @@
 //   preview#Contacts and import#Contacts use), no second parser. It is staged by reference and hash (a dbresource file under
 //   mantle/marketing/audienceImport, its sha256), never shown or put in shell context, and purged after the import's expiry (30 days),
 //   the outcomes kept. The same file staged again for the same list by the same user before it is applied answers the same import.
-// - Matching: by the list channel's address alone (match#Contact given only the address, and for a phone the name too), among the
-//   parties the user may see: another user's personal contact is never matched, and a personal contact of the importer is not used
+// - Matching: by the list channel's address alone (as Commons' match#Contact matches an address, a phone with the row's name too,
+//   but never by a name alone and never stopping at a personal contact; matchOf), among the parties the user may see: another user's personal contact is never matched, and a personal contact of the importer is not used
 //   either (a list's member is the organization's); a row that matches no one makes a directory contact (import#ContactRow, which
 //   makes no personal contact here). No party is merged.
 // - Evidence: a list supplies none. A row's evidence is its evidence column's text, else the import's text; its date its date
-//   column's, else the import's (now when empty, never in the future). A row without evidence is invalid.
+//   column's, else the import's (never in the future, and never now by default: the import names its date or a date column). A row
+//   without evidence or its date is invalid.
 // - Each row once: its item is locked, applied in a transaction of its own (the contact made or matched and the request filed
 //   together) and its outcome recorded, so a restart applies only the rows not yet applied and a retry only the failed ones. The
 //   request is decided when applied: a withdrawal after the preview is refused WITHDRAWN, a suppression stays. A row that fails is
@@ -81,6 +82,7 @@ const reasonTexts = {
     MISSING_ADDRESS: "No address of the list's channel",
     EVIDENCE_REQUIRED: "No evidence for the row",
     EVIDENCE_DATE_INVALID: "The evidence date is not a date in the past",
+    EVIDENCE_DATE_REQUIRED: "No evidence date for the row",
     DUPLICATE_IN_FILE: "The address is on an earlier row",
     EMPTY_ROW: "Nothing to import",
     SUPPRESSED: "The address is suppressed and stays so",
@@ -237,7 +239,7 @@ function evidenceOf(row, terms) {
     const values = row.values || {}
     const evidenceText = (terms.evidenceColumn && text(values[terms.evidenceColumn])) || terms.evidenceText
     if (!evidenceText) return {problem: "EVIDENCE_REQUIRED"}
-    let evidenceDate = terms.evidenceDate
+    let evidenceDate = terms.evidenceDate || null
     const dateValue = terms.evidenceDateColumn ? text(values[terms.evidenceDateColumn]) : ""
     if (dateValue) {
         try {
@@ -246,6 +248,8 @@ function evidenceOf(row, terms) {
             return {problem: "EVIDENCE_DATE_INVALID"}
         }
     }
+    // never dated now by default: a date of today would be later than every earlier withdrawal (Marketing P4 review)
+    if (evidenceDate == null) return {problem: "EVIDENCE_DATE_REQUIRED"}
     return {evidenceText, evidenceDate}
 }
 // The contact a row makes or is matched by: its names and the list channel's address only.
@@ -262,16 +266,57 @@ function channelContact(row, channel, found) {
     else out.emails = [{emailAddress: found.address, contactMechPurposeId: "EmailPrimary"}]
     return out
 }
-// The party the address matches among those the user may see, when it may be a member: not a personal contact, merged or disabled.
+// The party the address matches among those the user may see, when it may be a member: a current address of the list's channel
+// (an email ignoring case; a phone by its last digits, at least seven, and the row's name when it has one, as Commons' match#Contact:
+// a shared office number is not a match), the first by party of those not a personal contact (the importer's own included), merged
+// or disabled. Commons' match#Contact is not called for it: it stops at the first visible party, so the importer's own personal
+// contact would hide a directory contact of the same address (a duplicate made), and it falls back to a name alone, which would
+// file the evidence of one number on another (Marketing P4 review).
 function matchOf(row, channel, found) {
-    const contact = channelContact(row, channel, found)
-    const match = call(CI + "match#Contact", {
-        contact: channel === "CmtTelecomNumber" ? contact : {partyTypeEnumId: contact.partyTypeEnumId, emails: contact.emails}
-    })
-    if (!match.matchedPartyId) return null
-    const party = audience.requestableParty(match.matchedPartyId)
-    if (!party || party.privateOwnerUserId) return null
-    return {partyId: match.matchedPartyId, reason: match.matchReason, name: match.matchedName}
+    const cf = ec.entity.conditionFactory
+    const now = ec.user.nowTimestamp
+    const member = partyId => {
+        const party = audience.requestableParty(partyId)
+        return party && !party.privateOwnerUserId ? party : null
+    }
+    if (channel !== "CmtTelecomNumber") {
+        const infos = ec.entity
+            .find("mantle.party.contact.PartyContactMechInfo")
+            .condition("contactMechTypeEnumId", "CmtEmailAddress")
+            .condition(cf.makeCondition("infoString", "equals", found.address, false, true))
+            .conditionDate("fromDate", "thruDate", now)
+            .orderBy("partyId")
+            .limit(50)
+            .list()
+        for (const info of Array.from(infos)) if (member(info.partyId)) return {partyId: info.partyId, reason: "email"}
+        return null
+    }
+    const contact = row.contact || {}
+    const same = (a, b) => !!a && !!b && String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+    const hasName = contact.firstName || contact.lastName || contact.organizationName
+    const digits = found.key
+    const numbers = ec.entity
+        .find("mantle.party.contact.PartyContactMechTelecomNumber")
+        .condition(cf.makeCondition("contactNumber", "like", "%" + digits.slice(-4)))
+        .conditionDate("fromDate", "thruDate", now)
+        .orderBy("partyId")
+        .limit(200)
+        .list()
+    for (const number of Array.from(numbers)) {
+        const have = normalizePhone(String(number.areaCode || "") + String(number.contactNumber || ""))
+        const length = Math.min(have.length, digits.length)
+        if (length < 7 || have.slice(-length) !== digits.slice(-length)) continue
+        if (!member(number.partyId)) continue
+        const detail = one("mantle.party.PartyDetail", {partyId: number.partyId}) || {}
+        if (
+            !hasName ||
+            same(detail.firstName, contact.firstName) ||
+            same(detail.lastName, contact.lastName) ||
+            same(detail.organizationName, contact.organizationName)
+        )
+            return {partyId: number.partyId, reason: "phone"}
+    }
+    return null
 }
 // What the preview can say of a matched party's membership and consent (the apply decides).
 function membershipNote(list, policy, partyId, evidenceDate) {
@@ -343,7 +388,9 @@ function previewAudienceImport(p) {
     if (fileText.length > maxBytes) denied("FILE_TOO_LARGE", "A file of at most 1 MiB")
     // the evidence (a list supplies none)
     const sourceEnumId = audience.sourceOf(p.sourceEnumId, "PcsImport")
-    const evidenceDate = audience.evidenceDateOf(p.evidenceDate)
+    // the evidence's original date, the import's or each row's column: never today by default, which would be later than every
+    // withdrawal the people made before (the file's evidence is of the past)
+    const evidenceDate = blank(p.evidenceDate) ? null : audience.evidenceDateOf(p.evidenceDate)
     const evidenceText = text(p.evidenceText)
     const stored = row ? lib.json(row.mappingJson, {}) : {}
     const mapping = mappingOf(p, fileText, fileName, stored)
@@ -351,6 +398,11 @@ function previewAudienceImport(p) {
         denied(
             "EVIDENCE_REQUIRED",
             "Give the evidence of the requests, or the column that gives each row's: choosing a list is not evidence"
+        )
+    if (!evidenceDate && !mapping.evidenceDateColumn)
+        denied(
+            "EVIDENCE_DATE_REQUIRED",
+            "Give the date the people gave the evidence, or the column that gives each row's: an import is never dated today by default"
         )
     const read = readRows(fileText, fileName, mapping.columnMapping)
     if (read.rowCount > maxRows) denied("TOO_MANY_ROWS", "A file of at most " + maxRows + " rows")
@@ -776,7 +828,7 @@ function getAudienceImport(p) {
                 (!accepting || !!caps.consentEdit),
             canRetry: importer && open && row.stateEnumId === "AisPartial" && counts.failed > 0 && !!row.fileLocation,
             canAccept: !!caps.consentEdit,
-            canDownloadErrors: errorCount > 0 && !!row.fileLocation
+            canDownloadErrors: importer && errorCount > 0 && !!row.fileLocation
         }
     })
 }
@@ -840,7 +892,9 @@ const cell = value => {
     return /[",\r\n]/.test(out) ? '"' + out.replace(/"/g, '""') + '"' : out
 }
 function getAudienceImportErrors(p) {
-    const userScope = audience.audienceScope()
+    // the file as staged, every column of it (those the import ignores too): its importers' alone, not every audience reader's
+    const userScope = audience.audienceScope("audienceEdit")
+    marketingAccess.requireCapability(userScope, "audienceImport")
     const row = importOfScope(userScope, p.audienceImportId)
     const fileText = stagedText(row)
     const parsed = call(CI + "read#ContactRows", {fileText, fileName: row.fileName, columnMapping: {}})
@@ -962,7 +1016,11 @@ function exportMemberTransfer(p) {
             status: statusTexts[row.statusId] || row.statusId,
             fromDate: lib.dateText(row.fromDate),
             thruDate: lib.dateText(row.thruDate),
-            address: fields.has("address") ? audience.addressText(row.preferredContactMechId) : ""
+            // the registration gives the field to an audience reader alone; checked here too, for any other caller
+            address:
+                fields.has("address") && userScope.capabilities.audienceView
+                    ? audience.addressText(row.preferredContactMechId)
+                    : ""
         }
         for (const [name, value] of Object.entries(values)) if (fields.has(name)) out[name] = value
         return out

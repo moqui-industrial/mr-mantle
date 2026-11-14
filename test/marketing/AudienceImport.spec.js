@@ -19,7 +19,7 @@ const party = {}
 const importer = ["MARKETING_AUDIENCE_VIEW", "MARKETING_AUDIENCE_EDIT", "MARKETING_AUDIENCE_IMPORT"]
 const dayMs = 24 * 60 * 60 * 1000
 const ago = days => new Date(Date.now() - days * dayMs)
-let listId, restartListId, otherListId
+let listId, restartListId, otherListId, smsListId
 const status = (contactListId, partyId) =>
     rows(CLP, {contactListId, partyId}).sort((a, b) => Number(b.fromDate) - Number(a.fromDate))[0]?.statusId ?? null
 const items = audienceImportId => Object.fromEntries(rows(ITEM, {audienceImportId}).map(item => [Number(item.rowNumber), item]))
@@ -34,7 +34,7 @@ const file = [
 ].join("\n")
 const evidence = {sourceEnumId: "PcsForm", evidenceDate: ago(3), evidenceText: "Fair sign-up sheet", evidenceColumn: "Evidence"}
 
-function person(name, privateOwnerUserId) {
+function person(name, privateOwnerUserId, address) {
     party[name] = prefix + "_" + name.toUpperCase()
     make("mantle.party.Party", {
         partyId: party[name],
@@ -45,7 +45,7 @@ function person(name, privateOwnerUserId) {
     make("mantle.party.contact.ContactMech", {
         contactMechId: party[name] + "_EM",
         contactMechTypeEnumId: "CmtEmailAddress",
-        infoString: name.toLowerCase() + ".audimp@example.com"
+        infoString: address || name.toLowerCase() + ".audimp@example.com"
     })
     make("mantle.party.contact.PartyContactMech", {
         partyId: party[name],
@@ -54,12 +54,12 @@ function person(name, privateOwnerUserId) {
         fromDate: ago(30)
     })
 }
-function list(id, organizationPartyId) {
+function list(id, organizationPartyId, channel) {
     make("mantle.marketing.contact.ContactList", {
         contactListId: id,
         contactListName: "Import spec " + id,
         contactListTypeEnumId: "NEWSLETTER",
-        contactMechTypeEnumId: "CmtEmailAddress",
+        contactMechTypeEnumId: channel || "CmtEmailAddress",
         ownerPartyId: organizationPartyId
     })
     return id
@@ -79,9 +79,14 @@ spec({
             person("Ben")
             // another user's personal contact with an address of the file
             person("Pia", users.other)
+            // the importer's own personal contact with Ana's address, before her by id: it never hides the directory contact
+            person("Aaa", users.importer, "ana.audimp@example.com")
+            // a person with no phone: a file's number with her name is never matched to her by the name alone
+            person("Sam")
             listId = list(prefix + "_LIST", orgA)
             restartListId = list(prefix + "_RESTART", orgA)
             otherListId = list(prefix + "_LIST_B", orgB)
+            smsListId = list(prefix + "_SMS", orgA, "CmtTelecomNumber")
         })
     }
 })
@@ -98,6 +103,7 @@ feature(
                     fileText: file,
                     fileName: "fair.csv"
                 }),
+                noDate: as(users.importer, L + "preview#AudienceImport", Object.assign({}, parameters, {evidenceDate: null})),
                 accept: as(users.importer, L + "preview#AudienceImport", Object.assign({accept: true}, parameters)),
                 otherOrg: as(users.importerB, L + "preview#AudienceImport", parameters),
                 ownOrg: as(
@@ -107,9 +113,11 @@ feature(
                 )
             }
         },
-        then({editor, noEvidence, accept, otherOrg, ownOrg}) {
+        then({editor, noEvidence, noDate, accept, otherOrg, ownOrg}) {
             editor.refusal.includes("PERMISSION_DENIED")
             noEvidence.refusal.includes("EVIDENCE_REQUIRED")
+            // an import's evidence is never dated today by default (later than every earlier withdrawal)
+            noDate.refusal.includes("EVIDENCE_DATE_REQUIRED")
             accept.refusal.includes("PERMISSION_DENIED")
             otherOrg.refusal.includes("RECORD_UNAVAILABLE")
             ownOrg.refusal == "" && ownOrg.rowCount == 6
@@ -154,9 +162,42 @@ feature(
                 audienceImportId: preview.audienceImportId,
                 expectedRevision: Number(current.lastUpdatedStamp)
             })
-            return {preview, previewed, membersAfterPreview, stale, applied, again, outcome: items(preview.audienceImportId)}
+            const sms = as(users.importer, L + "preview#AudienceImport", {
+                contactListId: smsListId,
+                fileText: "First Name,Last Name,Phone\nSam,Audimp,555-123-4567",
+                fileName: "sms.csv",
+                evidenceText: "Texted JOIN to the store",
+                evidenceDate: ago(2)
+            })
+            return {
+                preview,
+                previewed,
+                membersAfterPreview,
+                stale,
+                applied,
+                again,
+                outcome: items(preview.audienceImportId),
+                errors: as(users.importer, L + "get#AudienceImportErrors", {audienceImportId: preview.audienceImportId}),
+                readerErrors: as(users.reader, L + "get#AudienceImportErrors", {audienceImportId: preview.audienceImportId}),
+                readerDetail: as(users.reader, L + "get#AudienceImport", {audienceImportId: preview.audienceImportId}),
+                sms,
+                smsItems: sms.audienceImportId ? items(sms.audienceImportId) : {}
+            }
         },
-        then({preview, previewed, membersAfterPreview, stale, applied, again, outcome}) {
+        then({
+            preview,
+            previewed,
+            membersAfterPreview,
+            stale,
+            applied,
+            again,
+            outcome,
+            errors,
+            readerErrors,
+            readerDetail,
+            sms,
+            smsItems
+        }) {
             preview.refusal == ""
             preview.rowCount == 6 &&
                 preview.matchCount == 2 &&
@@ -191,6 +232,12 @@ feature(
             rows(CLP, {contactListId: listId}).length == 3
             // applying again changes nothing
             again.refusal == "" && rows(REQUEST, {contactListId: listId}).length == 4
+            // the error rows (the file's every column) for an importer, not for an audience reader
+            errors.refusal == "" && errors.rowCount == 2 && errors.fileText.includes("not-an-address")
+            readerErrors.refusal.includes("PERMISSION_DENIED")
+            readerDetail.refusal == "" && readerDetail.capabilities.canDownloadErrors == false
+            // a number is matched by the number, never by a name alone
+            sms.refusal == "" && smsItems[1].proposedAction == "add" && smsItems[1].matchedPartyId == null
         }
     }
 )
@@ -207,7 +254,8 @@ feature("a restart applies only the rows not yet applied, each once; the runs an
             contactListId: restartListId,
             fileText: text,
             fileName: "restart.csv",
-            evidenceText: "Booth sign-ups"
+            evidenceText: "Booth sign-ups",
+            evidenceDate: ago(2)
         })
         // an apply that stopped after its first row (marked applied without a request) and is started again
         system(() => {
