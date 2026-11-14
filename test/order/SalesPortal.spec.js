@@ -151,9 +151,31 @@ feature(
             as(f.users.rep, "revise#Quote", {orderId: quote.orderId, orderRevision: quote.revision, reason: "New terms"})
             const revised = page(null, "get#CustomerQuote", {token: quote.token})
             const issueRow = one("mantle.sales.quote.SalesQuoteIssue", {issueId: quote.issueId})
-            return {quote, view, document, list, receipt, changed, forged, byId, revised, issueRow, print}
+            shared.revised = quote.orderId
+            // P13 review: a quote link is made only by send#Quote, never by create#AccessCapability (even for a quote sender)
+            // (as the rep, with the service's own checks: artifact authorization off as a screen's transition would grant it)
+            login(f.users.rep)
+            ec.artifactExecution.disableAuthz()
+            ec.message.pushErrors()
+            let minted
+            try {
+                ec.service
+                    .sync()
+                    .name("mantle.party.ExternalAccessServices.create#AccessCapability")
+                    .parameters({recordType: "SalesOrder", recordId: other, scopes: "QuoteView,QuoteRespond"})
+                    .requireNewTransaction(true)
+                    .call()
+                minted = {refused: ec.message.getErrorsString()}
+            } catch (error) {
+                minted = {refused: String(error.message)}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                login("john.doe")
+            }
+            return {quote, view, document, list, receipt, changed, forged, byId, revised, issueRow, print, minted}
         },
-        then({quote, view, document, list, receipt, changed, forged, byId, revised, issueRow, print}) {
+        then({quote, view, document, list, receipt, changed, forged, byId, revised, issueRow, print, minted}) {
             print.printHtml.includes("https://spt.example.test/sales/CustomerQuote?orderId=" + quote.orderId)
             print.printHtml.includes("<svg") && !print.printHtml.includes("token=")
             quote.token != null && quote.body.includes("https://spt.example.test/sales/CustomerQuote?token=")
@@ -169,6 +191,7 @@ feature(
             forged.kind == "NotFound"
             byId.kind == "AuthenticationRequired"
             revised.kind == "NotFound"
+            minted.refused.includes("SCOPE_INVALID")
         }
     }
 )
@@ -180,6 +203,12 @@ feature(
             const quote = issued()
             const otherToken = secondLink(quote)
             const request = acceptance(quote)
+            // P13 review: an acceptance names its acceptor (the page's required field, required by the service too)
+            const nameless = page(
+                null,
+                "respond#CustomerQuote",
+                Object.assign({token: quote.token}, acceptance(quote, {acceptorName: ""}))
+            )
             const first = page(null, "respond#CustomerQuote", Object.assign({token: quote.token}, request))
             const repeat = page(null, "respond#CustomerQuote", Object.assign({token: quote.token}, request))
             const otherSameKey = page(null, "respond#CustomerQuote", Object.assign({token: otherToken}, request))
@@ -197,9 +226,21 @@ feature(
                 Array.from(ec.entity.find("mantle.sales.quote.SalesQuoteResponse").condition("orderId", quote.orderId).list())
             )
             shared.accepted = quote.orderId
-            return {quote, first, repeat, otherSameKey, otherNewKey, decline, receipt, responses, statusId: status(quote.orderId)}
+            return {
+                quote,
+                nameless,
+                first,
+                repeat,
+                otherSameKey,
+                otherNewKey,
+                decline,
+                receipt,
+                responses,
+                statusId: status(quote.orderId)
+            }
         },
-        then({quote, first, repeat, otherSameKey, otherNewKey, decline, receipt, responses, statusId}) {
+        then({quote, nameless, first, repeat, otherSameKey, otherNewKey, decline, receipt, responses, statusId}) {
+            nameless.kind == "Unprocessable" && nameless.error.includes("ACCEPTOR_REQUIRED")
             first.alreadyApplied == false && first.response.accepted == true && first.response.outcome == "placed"
             repeat.alreadyApplied == true && repeat.response.responseId == first.response.responseId
             otherSameKey.kind == "Conflict"
@@ -230,11 +271,28 @@ feature(
             const outsider = page("SPT_OUTSIDER", "find#CustomerQuotes", {})
             const otherQuote = page("SPT_BUYER", "get#CustomerQuote", {orderId: other.orderId})
             const own = page("SPT_BUYER", "get#CustomerQuote", {orderId: shared.accepted})
-            return {draft, other, list, open, outsider, otherQuote, own}
+            // P13 review: the quote revised in the first feature, changed and proposed again but not sent, shows nothing unissued
+            const revisedOrderId = shared.revised
+            as(f.users.rep, fx.quoteService + "store#QuoteLine", {
+                orderId: revisedOrderId,
+                orderRevision: revision(revisedOrderId),
+                productId: f.product,
+                quantity: 3
+            })
+            const reproposed = as(f.users.rep, fx.quoteService + "propose#Quote", {
+                orderId: revisedOrderId,
+                orderRevision: revision(revisedOrderId)
+            })
+            const unissued = page("SPT_BUYER", "get#CustomerQuote", {orderId: revisedOrderId})
+            const listAfter = page("SPT_BUYER", "find#CustomerQuotes", {})
+            return {draft, other, list, open, outsider, otherQuote, own, reproposed, unissued, listAfter, revisedOrderId}
         },
-        then({draft, other, list, open, outsider, otherQuote, own}) {
-            list.count >= 2 && list.quoteList.some(row => row.orderId == shared.accepted && row.state == "accepted")
+        then({draft, other, list, open, outsider, otherQuote, own, reproposed, unissued, listAfter, revisedOrderId}) {
+            list.count >= 1 && list.quoteList.some(row => row.orderId == shared.accepted && row.state == "accepted")
             !list.quoteList.some(row => row.orderId == draft || row.orderId == other.orderId)
+            !list.quoteList.some(row => row.orderId == revisedOrderId)
+            reproposed.refused == "" && unissued.kind == "NotFound"
+            !listAfter.quoteList.some(row => row.orderId == revisedOrderId)
             !open.quoteList.some(row => row.state != "open")
             outsider.count == 0 && outsider.quoteList.length == 0
             otherQuote.kind == "NotFound"

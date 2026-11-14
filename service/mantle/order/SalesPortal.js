@@ -145,9 +145,17 @@ function quoteFor(p, organizationPartyId, scope) {
     if (!issue) unavailable()
     const response = issues.responseOf(issue.issueId)
     if (checked.via === "token" && !response && !issues.stands(issue, order)) unavailable()
-    const signedIn = actingFor(organizationPartyId).includes(checked.partyId)
+    // P13 review: an unanswered quote whose revision moved past its latest issue (revised, or proposed again and not yet sent) shows
+    // nothing to a signed-in contact either: its lines and totals are the seller's unissued work, not an offer
+    if (!response && !issuedAsIs(issue, order)) unavailable()
+    // signed in for the customer: the account reached the quote as its contact or its own party, or a link's reader acts for it
+    const signedIn = checked.via !== "token" || actingFor(organizationPartyId).includes(checked.partyId)
     return {checked, order, part, issue, response, organizationPartyId, customerPartyId: checked.partyId, signedIn}
 }
+// Whether the order is still at its issue's revision and out of a revision's draft, so its lines and totals are the issue's.
+const issuedAsIs = (issue, order) =>
+    Number(issue.orderRevision) === Number(issues.revisionOf(order)) &&
+    !["OrderOpen", "OrderBeingChanged"].includes(order.statusId)
 // The seller's acceptance threshold for a currency (its SalesPolicy in effect), or null: unset by default.
 function thresholdOf(organizationPartyId, currencyUomId) {
     const policy = issues.policyOf(organizationPartyId)
@@ -273,6 +281,8 @@ function findCustomerQuotes(p) {
         const part = order ? salesPart(order.orderId, organizationPartyId, issue.customerPartyId) : null
         if (!part || order.orderPurposeEnumId !== "OrpSalesQuote") continue
         const q = {order, part, issue, response: issues.responseOf(issue.issueId)}
+        // P13 review: a quote revised past its latest issue and not yet sent again is not listed (its total is unissued work)
+        if (!q.response && !issuedAsIs(issue, order)) continue
         const state = stateOf(q)
         if (p.state === "open" && state !== "open") continue
         all.push({
@@ -323,7 +333,11 @@ function respondCustomerQuote(p) {
     const key = operationKey(p)
     const action = text(p.action) || "accept"
     if (!["accept", "decline"].includes(action)) fail("Unprocessable", "Accept or decline the quote")
-    const q = quoteFor(p, organizationPartyId, "QuoteRespond")
+    const found = quoteFor(p, organizationPartyId, "QuoteRespond")
+    // P13 review: the offer's checks (revision, terms, the threshold against the total) read the order under its lock, as
+    // respondTo's do, so a change committed between the read and the lock is seen (design §10: eligibility revalidated under lock)
+    const order = find(ORDER, {orderId: found.order.orderId}).forUpdate(true).one()
+    const q = Object.assign({}, found, {order, response: issues.responseOf(found.issue.issueId)})
     // a repeat of an answered quote's request answers its receipt before the offer's checks (design §10 QuoteResponse)
     if (!q.response) {
         if (action === "accept") {
@@ -331,6 +345,8 @@ function respondCustomerQuote(p) {
                 fail("Conflict", "STALE_REVISION: This quote changed since you opened it. Reload the page and try again.")
             if (!["Y", "true", true].includes(p.acknowledge))
                 fail("Unprocessable", "Confirm that you accept the quote and its terms")
+            // P13 review: the acceptor's name is the acceptance's evidence (design §10 AcceptQuote), required as the page requires it
+            if (blank(p.acceptorName)) fail("Unprocessable", "ACCEPTOR_REQUIRED: Give your name to accept the quote")
             if (signInToAccept(q))
                 fail(
                     "Unprocessable",
@@ -338,7 +354,6 @@ function respondCustomerQuote(p) {
                 )
         }
     }
-    const order = find(ORDER, {orderId: q.order.orderId}).forUpdate(true).one()
     const quote = {order, part: q.part, organizationPartyId, customerPartyId: q.customerPartyId}
     const ownParty = q.signedIn ? ec.user.userAccount?.partyId || null : null
     const result = issues.respondTo(
