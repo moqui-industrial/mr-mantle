@@ -295,9 +295,9 @@
         <field name="checkedAt" type="date-time"/>
     </entity>
     <entity entity-name="SmithyGithubLink" package="mantle.smithy">
-        <description>A GitHub id an account's sign-in proved (DG8 review): written by the sign-in that linked it
-            (UserAccount.externalUserId, in the framework's /sso/ callback) when the flow's endpoints are exactly GitHub's
-            own, so a claim made later, when a membership becomes active, claims only for an id proven so and still the
+        <description>A GitHub id an account's sign-in proved (DG8 review): written when the framework tells of a sign-in
+            that linked it (UserAccount.externalUserId; the sso-linked-service, SmithyImportServices.handle#SsoLinked) and
+            the flow's endpoints are exactly GitHub's own, so a claim made later, when a membership becomes active, claims only for an id proven so and still the
             account's.</description>
         <field name="userId" type="id" is-pk="true"/>
         <field name="githubUserId" type="text-short"/>

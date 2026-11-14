@@ -1148,53 +1148,89 @@ along with this software (see the LICENSE.md file). If not, see
             }
         ]]></script></actions>
     </service>
-    <service verb="handle" noun="GitReviewThread">
+    <service verb="handle" noun="GitReviewThread" allow-remote="false">
         <description>git-server review-thread-service (the framework's handle#GitReviewThread contract): the review threads
             of a merge request for the framework's REST, over get#ReviewThreads (find), create#ReviewComment (comment: a new
             thread on a line or a reply, parentCommEventId the threadId) and resolve#ReviewThread (resolve: the thread's
-            communicationEventId), each with its own checks of the caller (who may view the repository; a client contact
-            reads no threads). Threads come back with threadId (their first comment's communicationEventId) and each
-            comment's commentId; a comment answers threadId (the new thread's, or the one answered) and held. A threadId
-            (resolve, a reply) not anchored on this merge request is not found, and so is a hidden merge request to anyone
-            but its author. For a
-            repository Smithy keeps the REST refuses comment and resolve first (check#RestWrite: Smithy's own operations
-            write threads through its post gate), and find reads both shapes.</description>
+            communicationEventId). The caller, a signed-in user, is checked here first, as that user with authorization on
+            whatever the call's (the inner services are then called with it disabled, so their own checks are this one):
+            who may view the repository (get#GitRepositoryAccess); a client contact (PROJECT_CLIENT) reads
+            no threads and writes none; a hidden merge request is its author's alone. Each refusal of the merge request is
+            "No merge request [mergeRequestId]", which the REST says as the number of its path, so no internal id leaks.
+            Threads come back with threadId (their first comment's communicationEventId) and each comment's commentId; a
+            comment answers threadId (the new thread's, or the root of the thread answered, also when given a reply's id)
+            and held. A comment on a line given commitId is anchored on that commit's diff when it is the merge request's
+            head now, and refused plainly when the head moved since. A threadId (resolve, a reply) not anchored on this
+            merge request is not found. For a repository Smithy keeps the REST refuses comment and resolve first
+            (check#RestWrite: Smithy's own operations write threads through its post gate), and find reads both shapes.</description>
         <implements service="org.moqui.git.GitServices.handle#GitReviewThread"/>
         <actions><script><![CDATA[
-            const call = (name, parameters) => {
-                const out = ec.service.sync().name('mantle.work.GitServices.' + name).parameters(parameters).disableAuthz().call() || {}
-                return ec.message.hasError() ? null : out
-            }
             threadList = null
             held = false
-            const notFound = () => ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId}))
-            // a hidden merge request is its author's alone (its text waits for a moderator)
+            // the framework's words for a merge request the caller may not reach: the REST says them as its path's number
+            const notFound = () => ec.message.addError('No merge request ' + mergeRequestId)
+            const call = (name, parameters) => {
+                const out = ec.service.sync().name('mantle.work.GitServices.' + name).parameters(parameters).disableAuthz().call() || {}
+                if (!ec.message.hasError()) return out
+                if (String(ec.message.getErrorsString()).includes('Merge request ' + mergeRequestId + ' not found')) {
+                    ec.message.clearErrors()
+                    notFound()
+                }
+                return null
+            }
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
-            if (!mr || (mr.hiddenDate && mr.authorUserId !== ec.user.userId)) { notFound(); return }
+            if (!mr || (repositoryId && mr.repositoryId !== repositoryId)) { notFound(); return }
+            // the caller's own access, decided as that user with authorization on whatever the call's (asked of another
+            // user from the system scope: get#GitRepositoryAccess then decides as them), before the inner services run
+            // with it disabled
+            const caller = ec.user.userId
+            const access = caller ? ec.artifactExecution.runAsSystem(() => ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess')
+                    .parameters({repositoryId: mr.repositoryId, userId: caller}).call()) : null
+            if (ec.message.hasError() || !access?.canView) { ec.message.clearErrors(); notFound(); return }
+            // a hidden merge request is its author's alone (its text waits for a moderator)
+            if (mr.hiddenDate && mr.authorUserId !== ec.user.userId) { notFound(); return }
+            // a client contact (PROJECT_CLIENT) views a shared repository's diffs, never the team's review threads
+            const client = ec.user.hasPermission('PROJECT_CLIENT')
+            if (operation !== 'find' && (!ec.user.userId || client)) { notFound(); return }
             // a thread named by the path is one of this merge request's: its first comment (the one with the anchor; of a
             // post, itself or the post it answers; of a Comment event, its root) is anchored on it
+            const eventOf = (id) => id ? ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', id).disableAuthz().one() : null
+            const anchorOf = (commId) => commId ? ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor')
+                    .condition('communicationEventId', commId).disableAuthz().one() : null
             const threadOfThis = (id) => {
-                const event = id ? ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', id).disableAuthz().one() : null
+                const event = eventOf(id)
                 if (!event) return false
-                const anchorOf = (commId) => commId ? ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor')
-                        .condition('communicationEventId', commId).disableAuthz().one() : null
                 const anchor = anchorOf(event.communicationEventId) || anchorOf(event.parentCommEventId) || anchorOf(event.rootCommEventId)
                 return !!anchor && anchor.mergeRequestId === mergeRequestId
+            }
+            // the root of the thread an event is in, as resolve#ReviewThread finds it: of a post, the post with the anchor
+            // (itself or the one it answers); of a Comment event, its root
+            const threadRoot = (id) => {
+                const event = eventOf(id)
+                if (!event) return id
+                const isPost = ec.entity.find('mantle.forum.ForumPostState').condition('communicationEventId', id).disableAuthz().count() > 0
+                if (isPost) return anchorOf(id) ? id : (event.parentCommEventId || id)
+                return event.rootCommEventId || event.communicationEventId
             }
             if ((operation === 'resolve' || (operation === 'comment' && threadId)) && !threadOfThis(threadId)) {
                 ec.message.addError(ec.resource.expand('Review thread ${threadId} not found', '', {threadId})); return }
             if (operation === 'find') {
+                if (client) { threadList = []; return }
                 const out = call('get#ReviewThreads', {mergeRequestId, path: path || null})
                 if (!out) return
                 threadList = Array.from(out.threadList || []).map((thread) => ({...thread, threadId: thread.communicationEventId,
                     commentList: Array.from(thread.commentList || []).map((comment) => ({...comment, commentId: comment.communicationEventId}))}))
             } else if (operation === 'comment') {
+                // a line comment is anchored at the head: one written on an older commit's diff is refused, not moved
+                if (!threadId && path && commitId && String(commitId) !== String(mr.headCommitId || '')) {
+                    ec.message.addError('The merge request has changed since commit ' + String(commitId).substring(0, 12) +
+                        ': comment on its current changes'); return }
                 const out = call('create#ReviewComment', {mergeRequestId, body, path: threadId ? null : (path || null),
                     oldLine: threadId ? null : (oldLine ?? null), newLine: threadId ? null : (newLine ?? null),
                     lineText: threadId ? null : (lineText || null), parentCommEventId: threadId || null})
                 if (!out) return
-                // a reply belongs to the thread it answers; a new comment is its own thread
-                threadId = threadId || out.communicationEventId || null
+                // a reply belongs to the thread it answers (its root, also when given a reply); a new comment is its own thread
+                threadId = threadId ? threadRoot(threadId) : (out.communicationEventId || null)
                 held = !!out.held
             } else if (operation === 'resolve') {
                 const out = call('resolve#ReviewThread', {communicationEventId: threadId, resolved: resolved !== false})

@@ -1098,15 +1098,13 @@ function forumUrl(siteId, contactListId) {
 }
 /* work() signed in as an account (by username), then who was signed in is put back: the request's or job's user again,
    or, when there was none, nobody; so a web request's own user is never signed out. Unauthorized when the account cannot
-   sign in now (no such account, or disabled). The pattern of SitePages.js asAuthor. */
+   sign in now (no such account, or disabled). The borrowed login ends with logoutLocal, which writes nothing to the
+   account, so the person's own sessions go on (hasLoggedOut is left as it was). The pattern of SitePages.js asAuthor. */
 function asUser(username, work) {
     const account = username
         ? one('moqui.security.UserAccount', { username })
         : null
     const previous = ec.user.username
-    // a sign-out marks the account hasLoggedOut, which ends its sessions in every browser (restoreSignedIn puts back what
-    // it had, until the framework has a job's sign-out that leaves the account alone)
-    const hadLoggedOut = account?.hasLoggedOut === 'Y' ? 'Y' : 'N'
     const signedIn =
         !!account &&
         ec.user.internalLoginUser(account.username) === true &&
@@ -1122,37 +1120,9 @@ function asUser(username, work) {
             if (previous) {
                 if (previous !== ec.user.username)
                     ec.user.internalLoginUser(previous)
-            } else ec.user.logoutUser()
-            if (signedIn && account.username !== previous && hadLoggedOut === 'N')
-                restoreSignedIn(account.userId)
+            } else ec.user.logoutLocal()
         }
     }
-}
-/* Sets an account's hasLoggedOut back to N after a sign-out of work done as it, only while the row is as that sign-out
-   left it (hasLoggedOut Y and the same lastUpdatedStamp): a real sign-out or sign-in meanwhile changes the stamp, and is
-   kept. In a short transaction of its own after the one in place commits (the sign-out's write, which may hold the
-   row, is in it), or at once with none. A browser that binds between the commit and the restore is still signed out:
-   the framework's job sign-out is to end that. */
-function restoreSignedIn(userId) {
-    const row = ec.entity
-        .find('moqui.security.UserAccount')
-        .condition('userId', userId)
-        .useCache(false)
-        .disableAuthz()
-        .one()
-    if (!row || row.hasLoggedOut !== 'Y') return
-    const parameters = { userId, stamp: row.lastUpdatedStamp ?? null }
-    const name = 'mantle.forum.ForumServices.restore#SignedIn'
-    if (ec.transaction.isTransactionInPlace())
-        ec.service.special().name(name).parameters(parameters).registerOnCommit()
-    else
-        ec.service
-            .sync()
-            .name(name)
-            .parameters(parameters)
-            .requireNewTransaction(true)
-            .disableAuthz()
-            .call()
 }
 /* Takes up to wanted of a party's day's allowance of a counter (a key of TRUST_EFFECTS and of dailyCounts) at its trust
    level in the site, and counts what it took: how many it may have now (0 when the day's allowance is spent). The

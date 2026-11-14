@@ -1386,7 +1386,9 @@ function privileged(work) {
     runImports: () => privileged(() => importModule.runImports()),
     // what a push mirror's receipt is of (the input without its secret)
     mirrorReceipt: p => kit.mirrorReceipt(p || {}),
-    claimGithub: (userId, proven) => privileged(() => core.withMemo(() => importModule.claimGithub(userId, proven === true))),
+    claimGithub: userId => privileged(() => core.withMemo(() => importModule.claimGithub(userId, false))),
+    ssoLinked: p => privileged(() => core.withMemo(() => importModule.ssoLinked(p || {}))),
+    mirrorFailure: p => privileged(() => core.withMemo(() => importModule.mirrorFailure(p || {}))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

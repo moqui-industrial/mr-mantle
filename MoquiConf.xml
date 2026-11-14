@@ -33,6 +33,9 @@
         DG5), and names the run's page for its statuses -->
     <git-ci run-check-service="mantle.smithy.SmithyPipelineServices.check#Run"
             run-url-service="mantle.smithy.SmithyPipelineServices.get#RunUrl"/>
+    <!-- A real SSO sign-in that links a GitHub id claims Smithy's imported placeholders of that id (design-smithy §18.2,
+        DG8; SmithyImportServices.handle#SsoLinked checks the flow, its endpoints and the provider's host) -->
+    <user-facade><login sso-linked-service="mantle.smithy.SmithyImportServices.handle#SsoLinked"/></user-facade>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>

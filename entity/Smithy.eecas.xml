@@ -10,15 +10,12 @@
         <actions><service-call name="mantle.smithy.SmithyReviewServices.sync#MergeRequestHidden"
                 in-map="{communicationEventId:communicationEventId}" disable-authz="true"/></actions>
     </eeca>
-    <!-- DG8 (design-smithy §18.2): an account that a sign-in links to a provider's id (the SSO sync writes externalUserId)
-        claims the placeholder of the GitHub import with that id, when the provider is GitHub; after the commit, in a
-        transaction of its own, as the mbox importer's verified address claims its author. The service returns at once
-        for any other provider. -->
-    <eeca id="SmithyClaimGithubPlaceholder" entity="moqui.security.UserAccount" on-create="true" on-update="true"
-            get-original-value="true" run-on-error="false">
-        <condition><expression>externalUserId &amp;&amp; externalAuthFlowId &amp;&amp; (originalValue == null || originalValue.externalUserId != externalUserId || originalValue.externalAuthFlowId != externalAuthFlowId)</expression></condition>
-        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#ExternalLink" in-map="{userId:userId}"
-                disable-authz="true"/></actions>
+    <!-- DG8 (F6): the framework tells only the account that stored a push mirror of its failure (topic GitMirrorFailure,
+        no record); a repository Smithy keeps tells its other Maintainers and Owners too (handle#MirrorFailure's notice has the repository as its record, so this rule leaves it alone) -->
+    <eeca id="SmithyMirrorFailure" entity="moqui.security.user.NotificationMessage" on-create="true" run-on-error="false">
+        <condition><expression>topic == 'GitMirrorFailure' &amp;&amp; !recordEntityName</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#MirrorFailure"
+                in-map="{subTopic:subTopic, messageJson:messageJson}" disable-authz="true"/></actions>
     </eeca>
     <!-- DG8 review: an account that signed in with GitHub before it joined a site claims that site's placeholders of its
         proven id when its membership becomes active (handle#MembershipActive; claim#GithubAccount checks the proof) -->

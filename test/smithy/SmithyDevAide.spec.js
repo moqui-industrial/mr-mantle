@@ -292,6 +292,25 @@ feature("the framework's review threads are Mantle's: found, commented, answered
         const opened = thread("comment", {path: "plain.txt", newLine: 1, body: "Why one?"})
         const answered = thread("comment", {threadId: opened.threadId, body: "Because."})
         const resolvedOut = thread("resolve", {threadId: opened.threadId, resolved: true})
+        // a reply given a reply's id answers the thread's root
+        const replyId = thread("find", {}).threadList[0].commentList[1].commentId
+        const againOut = thread("comment", {threadId: replyId, body: "Still?"})
+        // a line comment on a commit that is not the head now is refused plainly
+        const stale = lib.service(lib.OPERATOR, "mantle.work.GitServices.handle#GitReviewThread", {
+            operation: "comment",
+            repositoryId: "sda_plain",
+            mergeRequestId,
+            path: "plain.txt",
+            newLine: 1,
+            commitId: "0000000000000000000000000000000000000000",
+            body: "Late"
+        })
+        // an account that may not view the repository, calling the service itself: the merge request is not there
+        const noView = lib.service("SDA_OTHER", "mantle.work.GitServices.handle#GitReviewThread", {
+            operation: "find",
+            repositoryId: "sda_plain",
+            mergeRequestId
+        })
         // another merge request named by the path: its threads are not this one's, to resolve or to answer
         lib.run("org.moqui.git.GitServices.commit#GitFiles", {
             repositoryId: "sda_plain",
@@ -319,22 +338,30 @@ feature("the framework's review threads are Mantle's: found, commented, answered
             repositoryId: "sda_plain",
             mergeRequestId: otherId
         })
-        return {opened, answered, resolvedOut, crossResolve, crossReply, hiddenFind, found: thread("find", {}).threadList}
+        return {opened, answered, resolvedOut, againOut, stale, noView, otherId, mergeRequestId, crossResolve, crossReply, hiddenFind,
+            found: thread("find", {}).threadList}
     },
-    then({opened, answered, resolvedOut, crossResolve, crossReply, hiddenFind, found}) {
+    then({opened, answered, resolvedOut, againOut, stale, noView, otherId, mergeRequestId, crossResolve, crossReply, hiddenFind, found}) {
         crossResolve.refused == true
         crossResolve.message.includes("not found")
         crossReply.refused == true
         hiddenFind.refused == true
+        // the framework's words, which the REST says as the path's number
+        hiddenFind.message.trim() == "No merge request " + otherId
+        noView.refused == true
+        noView.message.trim() == "No merge request " + mergeRequestId
+        stale.refused == true
+        stale.message.includes("has changed since commit 000000000000")
         opened.threadId != null
         opened.held == false
         answered.threadId == opened.threadId
+        againOut.threadId == opened.threadId
         resolvedOut.threadId == opened.threadId
         found.length == 1
         found[0].threadId == opened.threadId
         found[0].path == "plain.txt"
         found[0].resolved == true
-        found[0].commentList.map(entry => entry.body) == ["Why one?", "Because."]
+        found[0].commentList.map(entry => entry.body) == ["Why one?", "Because.", "Still?"]
         found[0].commentList[0].commentId != null
     }
 })

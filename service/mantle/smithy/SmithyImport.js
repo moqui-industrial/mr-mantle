@@ -12,7 +12,7 @@
  *   Retry-After) by waitingUntil. What could not be carried is in the run's report.
  * - People are placeholder accounts by GitHub login (a party, a public profile, a SmithyAccount with githubLogin,
  *   githubUserId and placeholder Y), made when the run meets them. An account whose sign-in through a GitHub provider
- *   names the same GitHub id claims the placeholder (claimGithub, by the SmithyClaimGithubPlaceholder rule): its posts,
+ *   names the same GitHub id claims the placeholder (claimGithub, by the framework's sso-linked-service, ssoLinked): its posts,
  *   issues, merge requests, assignments and reactions become the account's.
  * - Text goes through the site's rules as the forum's importers carry text: rendered from Markdown and cleaned, the rules
  *   applied (a censor replaces, a block leaves the text out and reports it), no hold, no daily limit, no notice.
@@ -22,8 +22,9 @@
  *   or a resource location of recorded responses (a file a request: its path and query with each run of other characters
  *   as _, .json, holding status, headers and body), which is how the specs and a replayed rehearsal run without the
  *   network.
- * - Push mirrors (Settings › Mirrors) are the framework's (F6): the operations are written against its contract and refuse
- *   (notBuilt) until it is there.
+ * - Push mirrors (Settings › Mirrors) are the framework's (F6), kept by a Maintainer after Smithy's check: the store runs as
+ *   the Maintainer with authorization on, so a mirror whose credential's giver loses the role pauses; a failure is told to
+ *   the repository's Maintainers and Owners (mirrorFailure).
  * Entity access is privileged here; every operation checks who asks first.
  */
 kit => {
@@ -136,15 +137,16 @@ kit => {
     }
     /* A service in a transaction of its own whose refusal the import gets past: {out, problem}. */
     function probe(name, parameters) {
+        // what a refusal says never carries a credential it was given (a fetch's address and password, a mirror's credential)
+        const hide = value => [parameters?.password, parameters?.credential].reduce((out, token) => scrub({token: text(token)}, out), value)
         ec.message.pushErrors()
         try {
             const out = ec.service.sync().name(name).parameters(parameters).requireNewTransaction(true).disableAuthz().call()
-            // what a refusal says never carries a credential it was given (a fetch's address, its password)
             return ec.message.hasError()
-                ? {out: out || {}, problem: scrub({token: parameters?.password}, text(ec.message.getErrorsString()).split("\n")[0])}
+                ? {out: out || {}, problem: hide(text(ec.message.getErrorsString()).split("\n")[0])}
                 : {out: out || {}, problem: null}
         } catch (error) {
-            return {out: {}, problem: scrub({token: parameters?.password}, firstLine(error))}
+            return {out: {}, problem: hide(firstLine(error))}
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
@@ -491,9 +493,11 @@ kit => {
     }
     /* Whether the run's map has a pull request item of that number that is not done (a failed one), by the report's
        row: the leftover is the import's, not a proposal of the account's own. */
-    const mapPull = (run, number) =>
-        !one(MAP, {siteId: run.siteId, repositoryId: run.repositoryId, sourceType: "pullNumber", sourceId: text(number), statusId: "SmmDone"}) &&
-        !!one(MAP, {siteId: run.siteId, repositoryId: run.repositoryId, sourceType: "pullNumber", sourceId: text(number)})
+    const mapPull = (run, number) => {
+        // the row by its key, its status read here: a find by the whole key answers the row whatever else it names
+        const row = one(MAP, {siteId: run.siteId, repositoryId: run.repositoryId, sourceType: "pullNumber", sourceId: text(number)})
+        return !!row && row.statusId !== "SmmDone"
+    }
 
     // ===== a step =====
     /* run#Import: a step of an import, as the account that started it. Takes at most budget API requests (10). Answers the
@@ -720,6 +724,7 @@ kit => {
                 )
                 if (!answer) return
                 const pulls = Array.from(answer.body || [])
+                holdPulls(ctx, pulls)
                 fetchHeads(ctx, pulls)
                 for (const pull of pulls) each(ctx, "pull", pull.id, () => importPull(ctx, pull))
                 if (hasNext(answer)) ctx.cursor.page = Number(ctx.cursor.page || 1) + 1
@@ -1194,18 +1199,49 @@ kit => {
 
     // ===== pull requests =====
     const FETCH_REFS = GIT + "fetch#GitRefs"
-    /* The heads of a page of pull requests, refs/pull/<n>/head into refs/merge-requests/<n>/head, when the framework can
-       fetch refs of a remote into a repository (fetch#GitRefs, not built yet); a head that is not fetched is in the
-       repository only when its commits are on a branch (a merged pull request's, with a merge commit). Never against
+    const plainTitle = title => text(title).replace(/[<>]/g, "").trim().slice(0, 250) || "Merge request"
+    const headRefOf = number => "refs/merge-requests/" + number + "/head"
+    /* The git host's merge request of a pull request number when it is this import's: the run's map names it (the hold
+       of openHosted, or a failed item's leftover) and Smithy has no row of it yet. */
+    function heldRow(ctx, number) {
+        const row = Array.from(find(GMR, {repositoryId: ctx.repositoryId, mergeRequestNum: number}).limit(1).list())[0]
+        if (!row) return {row: null, ours: false}
+        const mapped = mapRow(ctx, "pullNumber", number)
+        const ours =
+            !!mapped && mapped.targetId === row.mergeRequestId && !!row.importedByUserId && !one(SMR, {mergeRequestId: row.mergeRequestId})
+        return {row, ours}
+    }
+    /* The pull requests of a page that are not carried yet, each held by its number in the git host before its head is
+       fetched (openHosted), so the fetch writes the head of a merge request of this import and of no other. */
+    function holdPulls(ctx, pulls) {
+        for (const pull of pulls) {
+            const number = Number(pull.number)
+            const done = mapRow(ctx, "pull", pull.id)
+            if (!Number.isInteger(number) || number < 1 || (done && ["SmmDone", "SmmSkipped"].includes(done.statusId))) continue
+            // what it refuses is the item's, reported when the item is taken (importPull holds it again)
+            openHosted(ctx, number, text(pull.head?.sha), pull)
+        }
+    }
+    /* The heads of a page of pull requests, refs/pull/<n>/head into refs/merge-requests/<n>/head (fetch#GitRefs), for
+       the merge requests this import holds with no head whose commit is not in the repository yet; a head that is not
+       fetched is in the repository only when its commits are on a branch (a merged pull request's, with a merge commit).
+       The fetch runs with authorization disabled, as the import's other calls of the host: the import is the group
+       Owner's or an operator's (Smithy's check at its start), who holds no delete right of the framework's, and the
+       refs asked for are only those the framework would let a caller with authorization on write (the first head of
+       an imported merge request), of this import's merge requests. Its problems go to the run's report. Never against
        recorded responses. */
     function fetchHeads(ctx, pulls) {
-        if (!pulls.length || recorded(apiBase()) || !ctx.cursor.cloneUrl || !ec.service.getServiceDefinition(FETCH_REFS)) return
+        if (!pulls.length || recorded(apiBase()) || !ctx.cursor.cloneUrl) return
         const refMap = {}
-        for (const pull of pulls)
-            if (!mapRow(ctx, "pull", pull.id))
-                refMap["refs/pull/" + Number(pull.number) + "/head"] = "refs/merge-requests/" + Number(pull.number) + "/head"
+        for (const pull of pulls) {
+            const number = Number(pull.number)
+            if (!Number.isInteger(number) || number < 1 || mapRow(ctx, "pull", pull.id)?.statusId === "SmmDone") continue
+            const {row, ours} = heldRow(ctx, number)
+            if (ours && !row.headCommitId && !commitPresent(ctx.repositoryId, text(pull.head?.sha)))
+                refMap["refs/pull/" + number + "/head"] = headRefOf(number)
+        }
         if (!Object.keys(refMap).length) return
-        const {problem} = probe(FETCH_REFS, {
+        const {out, problem} = probe(FETCH_REFS, {
             repositoryId: ctx.repositoryId,
             remoteUrl: ctx.cursor.cloneUrl,
             username: "x-access-token",
@@ -1213,6 +1249,8 @@ kit => {
             refMap
         })
         if (problem) note(ctx, "pull", "heads", "headsNotFetched: " + scrub(ctx, problem))
+        for (const item of Array.from(out.problems || []).slice(0, 50))
+            note(ctx, "pull", "heads", "headNotFetched: " + scrub(ctx, firstLine(item)))
     }
     function commitPresent(repositoryId, commitId) {
         if (!HEX40.test(text(commitId))) return false
@@ -1232,121 +1270,95 @@ kit => {
             ec.message.popErrors()
         }
     }
-    const plainTitle = title => text(title).replace(/[<>]/g, "").trim().slice(0, 250) || "Merge request"
-    /* The git host's merge request of a pull request whose head is in the repository: opened as one pushed for review of
-       that commit with its number (create#MergeRequest takes both with authorization disabled), in a transaction of its
-       own, with the import's mark so that Smithy's rule leaves its conversation to the import. One a failed item left
-       (no Smithy row, the same head) is taken again. {mergeRequestId, problem}. */
+    /* The final state of a pull request on GitHub, as the git host keeps a merge request's. */
+    const pullStatus = pull =>
+        pull.merged_at ? "GmrMerged" : pull.state === "closed" ? "GmrClosed" : pull.draft ? "GmrDraft" : "GmrOpen"
+    /* A merge request's head set to a commit now in the repository (a fetched one): its ref, then its merge base and
+       mergeability, as create#MergeRequest sets an imported one's. */
+    function setHead(ctx, mr, sha) {
+        call("org.moqui.git.GitReviewServices.sync#MergeRequestHead", {mergeRequestId: mr.mergeRequestId, headCommitId: sha})
+        const open = ["GmrOpen", "GmrDraft"].includes(mr.statusId)
+        const compared = probe(GIT + "get#GitCompare", {
+            repositoryId: ctx.repositoryId,
+            base: "refs/heads/" + mr.targetRef,
+            head: headRefOf(Number(mr.mergeRequestNum)),
+            checkMergeable: open,
+            includeHidden: true
+        }).out
+        update(one(GMR, {mergeRequestId: mr.mergeRequestId}, true), {
+            headCommitId: sha,
+            baseCommitId: compared.mergeBaseId || null,
+            mergeableEnumId:
+                mr.statusId === "GmrMerged" || compared.alreadyMerged
+                    ? "GmaMerged"
+                    : !open || !compared.headCommitId
+                      ? "GmaUnchecked"
+                      : compared.mergeable
+                        ? "GmaMergeable"
+                        : "GmaConflict",
+            conflictPaths: open ? Array.from(compared.conflictPaths || []).join("\n") || null : null
+        })
+    }
+    /* The git host's merge request of a pull request: imported by create#MergeRequest (imported, its number, final state
+       and dates; no event fires) as one pushed for review, with its head when the commit is in the repository, else with
+       none until fetchHeads brings it; hidden until Smithy's row and conversation are written (importPull shows it), so
+       a leftover of a failed item is read by nobody. In a transaction of its own, with the import's mark so that
+       Smithy's rule leaves its conversation to the import, and the pull request's number on the map, so a leftover is
+       the import's (closeLeftovers). One this import holds is taken again, its head set once the commit is here.
+       {mergeRequestId, problem, taken}. */
     function openHosted(ctx, number, sha, pull) {
-        const left = Array.from(find(GMR, {repositoryId: ctx.repositoryId, mergeRequestNum: number}).limit(1).list())[0]
-        if (left)
-            return !one(SMR, {mergeRequestId: left.mergeRequestId}) && left.headCommitId === sha
-                ? {mergeRequestId: left.mergeRequestId, problem: null}
-                : {mergeRequestId: null, problem: "numberTaken: Merge request !" + number + " is there already", taken: true}
-        // the row is written here, as keptRow writes one, not by create#MergeRequest: history opens nothing, so no opened
-        // event reaches webhooks, pipelines or Smithy's own handler; the host keeps its head ref (sync#MergeRequestHead)
-        // and reads its merge base and mergeability. In a transaction of its own, with the pull request's number on the
-        // map, so a leftover of a failed item is the import's (closeLeftovers).
         const shared = ec.context.sharedMap
         shared[IMPORT_KEY] = ctx.repositoryId
         try {
             return inNew(() => {
+                const {row, ours} = heldRow(ctx, number)
+                if (row && (!ours || (row.headCommitId && row.headCommitId !== sha)))
+                    return {mergeRequestId: null, problem: "numberTaken: Merge request !" + number + " is there already", taken: true}
+                if (row) {
+                    if (!row.headCommitId && commitPresent(ctx.repositoryId, sha)) setHead(ctx, row, sha)
+                    return {mergeRequestId: row.mergeRequestId, problem: null}
+                }
                 const branches = Array.from(
                     call(GIT + "get#GitRefs", {repositoryId: ctx.repositoryId, refType: "branch"}).refList || []
                 ).map(ref => ref.shortName)
                 const asked = text(pull.base?.ref).replace(/^refs\/heads\//, "")
-                const targetRef = branches.includes(asked) ? asked : ctx.cursor.defaultBranch || "main"
-                const headRef = "refs/merge-requests/" + number + "/head"
-                const mr = ec.entity.makeValue(GMR)
-                mr.setSequencedIdPrimary()
-                for (const [name, value] of Object.entries({
+                const statusId = pullStatus(pull)
+                const created = call("org.moqui.git.GitReviewServices.create#MergeRequest", {
                     repositoryId: ctx.repositoryId,
+                    imported: true,
                     mergeRequestNum: number,
                     title: plainTitle(pull.title),
-                    sourceRef: headRef,
-                    pushedForReview: "Y",
-                    targetRef,
-                    statusId: "GmrOpen",
-                    authorUserId: ec.user.userId,
-                    createdDate: now(),
-                    lastUpdatedDate: now(),
-                    mergeableEnumId: "GmaUnchecked",
-                    deleteSourceBranch: "N",
-                    // hidden until Smithy's row and conversation are written (importPull shows it), as git-server
-                    // review-start-hidden starts a pushed one: a leftover of a failed item is read by nobody
-                    hiddenDate: now()
-                }))
-                    mr.set(name, value)
-                mr.create()
-                // a repository that has held a hidden merge request reads commits by id through its refs only
-                ec.entity
-                    .find("moqui.resource.GitRepository")
-                    .condition("repositoryId", ctx.repositoryId)
-                    .condition("reviewHiddenDate", null)
-                    .disableAuthz()
-                    .updateAll({reviewHiddenDate: now()})
-                call("org.moqui.git.GitReviewServices.sync#MergeRequestHead", {mergeRequestId: mr.mergeRequestId, headCommitId: sha})
-                const compared = probe(GIT + "get#GitCompare", {
-                    repositoryId: ctx.repositoryId,
-                    base: "refs/heads/" + targetRef,
-                    head: headRef,
-                    checkMergeable: true,
-                    includeHidden: true
-                }).out
-                update(one(GMR, {mergeRequestId: mr.mergeRequestId}, true), {
-                    headCommitId: sha,
-                    baseCommitId: compared.mergeBaseId || null,
-                    mergeableEnumId: !compared.headCommitId
-                        ? "GmaUnchecked"
-                        : compared.alreadyMerged
-                          ? "GmaMerged"
-                          : compared.mergeable
-                            ? "GmaMergeable"
-                            : "GmaConflict",
-                    conflictPaths: Array.from(compared.conflictPaths || []).join("\n") || null
+                    targetRef: branches.includes(asked) ? asked : ctx.cursor.defaultBranch || "main",
+                    pushedForReview: true,
+                    headCommitId: commitPresent(ctx.repositoryId, sha) ? sha : null,
+                    hidden: true,
+                    statusId,
+                    createdDate: stamp(when(pull.created_at)),
+                    mergedDate: pull.merged_at ? stamp(when(pull.merged_at)) : null,
+                    closedDate: statusId === "GmrMerged" || statusId === "GmrClosed" ? stamp(when(pull.closed_at || pull.merged_at)) : null
                 })
-                mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mr.mergeRequestId, statusId: null})
-                return {mergeRequestId: mr.mergeRequestId, problem: null}
+                mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: created.mergeRequestId, statusId: null})
+                return {mergeRequestId: created.mergeRequestId, problem: null}
             })
         } catch (error) {
             ec.message.clearErrors()
-            return {mergeRequestId: null, problem: scrub(ctx, firstLine(error))}
+            const problem = scrub(ctx, firstLine(error))
+            return {mergeRequestId: null, problem, taken: /^GitNumberTaken: /.test(problem)}
         } finally {
             shared[IMPORT_KEY] = null
         }
-    }
-    /* A pull request whose head is not in the repository (or that the host refused): kept as a merge request row with its
-       number, conversation and state, and no commits. */
-    function keptRow(ctx, number, pull) {
-        const mr = ec.entity.makeValue(GMR)
-        mr.setSequencedIdPrimary()
-        for (const [name, value] of Object.entries({
-            repositoryId: ctx.repositoryId,
-            mergeRequestNum: number,
-            title: plainTitle(pull.title),
-            sourceRef: text(pull.head?.ref) || "pull/" + number,
-            pushedForReview: "N",
-            targetRef: text(pull.base?.ref) || ctx.cursor.defaultBranch || "main",
-            statusId: "GmrClosed",
-            authorUserId: ec.user.userId,
-            mergeableEnumId: "GmaUnchecked",
-            deleteSourceBranch: "N"
-        }))
-            mr.set(name, value)
-        mr.create()
-        return mr.mergeRequestId
     }
     function importPull(ctx, pull) {
         const number = Number(pull.number)
         if (!Number.isInteger(number) || number < 1) throw coded("numberInvalid", "The pull request has no number")
         const sha = text(pull.head?.sha)
-        // the host first: its rules lock what this transaction must not hold yet
-        const hosted = commitPresent(ctx.repositoryId, sha) ? openHosted(ctx, number, sha, pull) : null
-        if (hosted?.taken) throw new Error(hosted.problem)
-        const kept = !hosted?.mergeRequestId
-        if (kept && find(GMR, {repositoryId: ctx.repositoryId, mergeRequestNum: number}).count() > 0)
-            throw coded("numberTaken", "Merge request !" + number + " is there already in this repository")
-        const mergeRequestId = kept ? keptRow(ctx, number, pull) : hosted.mergeRequestId
+        // the host first: its rules lock what this transaction must not hold yet (held before the fetch: holdPulls)
+        const hosted = openHosted(ctx, number, sha, pull)
+        if (hosted.taken) throw coded("numberTaken", "Merge request !" + number + " is there already in this repository")
+        if (!hosted.mergeRequestId) throw coded("notOpened", hosted.problem || "The merge request was not opened")
+        const mergeRequestId = hosted.mergeRequestId
+        // its head is not here (not on a branch, not fetched): kept without commits
+        const kept = !one(GMR, {mergeRequestId}, true).headCommitId
         const author = personOf(ctx, pull.user)
         const created = when(pull.created_at)
         const merged = !!pull.merged_at
@@ -1384,15 +1396,14 @@ kit => {
         update(one(GMR, {mergeRequestId}, true), {hiddenDate: null})
         if (["GmrOpen", "GmrDraft"].includes(statusId)) kit.agreement.compute(mergeRequestId)
         mark(ctx, "pull", pull.id, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
-        if (!kept) mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
+        mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
         const problems = [
             kept
                 ? "headNotFetched: The head " +
                   (sha || "?").slice(0, 12) +
                   " of pull request #" +
                   number +
-                  " is not in the repository; it is kept without its commits" +
-                  (hosted?.problem ? " (" + hosted.problem + ")" : "")
+                  " is not in the repository; it is kept without its commits"
                 : null,
             refusedProblem(body)
         ].filter(problem => !!problem)
@@ -1683,9 +1694,25 @@ kit => {
             : null
     }
     const LINK = M + "SmithyGithubLink"
-    /* claim#GithubAccount. proven: the caller is a sign-in that just linked the id (handle#ExternalLink in an /sso/
-       request), which records the link as proven (SmithyGithubLink) when the flow's endpoints are GitHub's own; any
-       other call (a membership that became active) claims only for a link proven so, of the account's id and flow now. */
+    /* handle#SsoLinked, the framework's sso-linked-service: a real sign-in through a GitHub flow whose endpoints are
+       GitHub's own (flowHost), whose user info came from that GitHub (providerHost: api.github.com for github.com, else
+       the Enterprise Server's host), that linked the id the account holds now: the proof is recorded and the
+       placeholders claimed. Anything else claims nothing. */
+    function ssoLinked(p) {
+        const oauth = text(p.authFlowId) ? one("moqui.security.sso.OauthFlow", {authFlowId: text(p.authFlowId)}) : null
+        if (oauth?.clientTypeEnumId !== "OctGitHub") return {claimed: 0}
+        const host = flowHost(oauth)
+        // a flow that keeps its client type's endpoints is github.com's; one with its own passes flowHost's exact rule
+        if (!host || (p.urlsOverridden !== true && host !== "github.com")) return {claimed: 0}
+        if (lower(p.providerHost).replace(/\.$/, "") !== (host === "github.com" ? "api.github.com" : host)) return {claimed: 0}
+        const account = text(p.userId) ? one(ACCOUNT, {userId: text(p.userId)}) : null
+        if (!account || text(account.externalUserId) !== text(p.externalUserId) || account.externalAuthFlowId !== text(p.authFlowId))
+            return {claimed: 0}
+        return claimGithub(account.userId, true)
+    }
+    /* claim#GithubAccount. proven: the caller is the sign-in hook (ssoLinked), which records the link as proven
+       (SmithyGithubLink) when the flow's endpoints are GitHub's own; any other call (a membership that became active)
+       claims only for a link proven so, of the account's id and flow now. */
     function claimGithub(userId, proven) {
         const account = userId ? one(ACCOUNT, {userId}) : null
         if (!account?.partyId || !account.externalUserId || !account.externalAuthFlowId) return {claimed: 0}
@@ -1818,24 +1845,52 @@ kit => {
     }
 
     // ===== push mirrors (F6) =====
-    const MIRROR = "moqui.resource.GitRepositoryMirror"
-    const mirrorsBuilt = () =>
-        ec.entity.isEntityDefined(MIRROR) && !!ec.service.getServiceDefinition(GIT + "push#GitRepositoryMirror")
-    /* A repository's mirrors as its Maintainer holds them: refused until the framework has them. */
+    /* A repository's mirrors as its Maintainer holds them. */
     function mirrored(p, write) {
         const r = core.repository(p.repositoryId, p.siteId)
         if (write) writer(p.siteId)
         core.requireRole(r, "SmrMaintainer")
-        if (!mirrorsBuilt()) invalid("notBuilt: Push mirrors are not built on this server yet")
         return r
     }
+    /* What the framework's mirror services refused, as the operation's refusal. */
+    function mirrorRefused(problem) {
+        if (/^GitMirrorBusy: /.test(problem)) fail("Conflict", "A push of this mirror is running")
+        if (/credential goes only where it was given for/.test(problem))
+            invalid(
+                "secretRequired[secret]: A new address, username or host key needs the token or password again, or remove the credential"
+            )
+        if (/^you may not /i.test(problem)) denied("Mirrors need the maintainer role and a confirmed address")
+        invalid(problem.replace(/^[A-Za-z]+: /, "").slice(0, 200))
+    }
+    /* A framework mirror service after Smithy's own check, with authorization disabled. */
     function hostCall(name, parameters) {
         const {out, problem} = probe(GIT + name, parameters)
-        if (problem != null) {
-            if (/^GitMirrorBusy: /.test(problem)) fail("Conflict", "A push of this mirror is running")
-            invalid(problem.replace(/^[A-Za-z]+: /, "").slice(0, 200))
-        }
+        if (problem != null) mirrorRefused(problem)
         return out
+    }
+    /* store#GitRepositoryMirror as the Maintainer, with authorization on: the framework keeps who gave the credential
+       (createdByUserId) and pauses the mirror, without using it, once that account no longer holds the delete right
+       (check#GitRepositoryAuthz: a Maintainer or higher with a confirmed address). One stored with authorization
+       disabled would be the application's and never paused. */
+    function storeAsMaintainer(parameters) {
+        const wasDisabled = ec.artifactExecution.authzDisabled()
+        if (wasDisabled) ec.artifactExecution.enableAuthz()
+        ec.message.pushErrors()
+        let out = null
+        let problem = null
+        try {
+            out = ec.service.sync().name(GIT + "store#GitRepositoryMirror").parameters(parameters).requireNewTransaction(true).call()
+            if (ec.message.hasError()) problem = text(ec.message.getErrorsString()).split("\n")[0]
+        } catch (error) {
+            problem = firstLine(error)
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            if (wasDisabled) ec.artifactExecution.disableAuthz()
+        }
+        // what a refusal says never carries the credential it was given
+        if (problem != null) mirrorRefused(scrub({token: text(parameters.credential)}, problem))
+        return out || {}
     }
     const mirrorsOf = repositoryId => Array.from(hostCall("find#GitRepositoryMirrors", {repositoryId}).mirrorList || [])
     /* An address with no user or password in it: the credential is apart. */
@@ -1849,7 +1904,7 @@ kit => {
                 refs: row.refPattern || null,
                 deleteRefs: row.deleteRefs === "Y" || row.deleteRefs === true,
                 enabled: row.enabled !== "N" && row.enabled !== false,
-                hasCredential: !!row.hasCredential || !!row.credential,
+                hasCredential: !!row.hasCredential,
                 lastPushDate: row.lastPushDate || null,
                 lastResult: row.lastResult || null,
                 // a push's error may carry the address it was given with a credential in it
@@ -1874,17 +1929,17 @@ kit => {
             const removeCredential = flag(p.removeCredential)
             if (removeCredential && (given(p.username) || given(p.secret)))
                 invalid("removeCredential: Remove the credential, or give a new one, not both")
-            const out = hostCall("store#GitRepositoryMirror", {
+            const out = storeAsMaintainer({
                 repositoryId: r.repo.repositoryId,
                 ...(editing ? {mirrorId: p.mirrorId} : {}),
                 ...(url ? {url} : {}),
                 ...(given(p.username) ? {username: text(p.username)} : {}),
                 ...(given(p.secret) ? {credential: text(p.secret)} : {}),
                 // the credential taken off: no username, no secret
-                ...(removeCredential ? {username: null, credential: null, clearCredential: true} : {}),
+                ...(removeCredential ? {clearCredential: true} : {}),
                 ...(given(p.hostKeyFingerprint) ? {hostKeyFingerprint: text(p.hostKeyFingerprint)} : {}),
                 // refs posted empty on an edit is all branches and tags again: the pattern is cleared
-                ...(refs ? {refPattern: refs} : editing && p.refs !== undefined && p.refs !== null ? {refPattern: null, clearRefPattern: true} : {}),
+                ...(refs ? {refPattern: refs} : editing && p.refs !== undefined && p.refs !== null ? {clearRefPattern: true} : {}),
                 ...(given(p.deleteRefs) ? {deleteRefs: flag(p.deleteRefs) ? "Y" : "N"} : {}),
                 ...(given(p.enabled) ? {enabled: flag(p.enabled) ? "Y" : "N"} : {})
             })
@@ -1905,6 +1960,55 @@ kit => {
         hostCall("push#GitRepositoryMirror", {mirrorId: p.mirrorId})
         return {queued: true}
     }
+    /* handle#MirrorFailure, for the SmithyMirrorFailure rule: the framework tells only the account that stored a mirror
+       of its first failure after a success (topic GitMirrorFailure); a repository Smithy keeps tells its other
+       Maintainers and Owners too, on the same topic, with the repository as the record (which the rule leaves alone).
+       Each holder is counted as Smithy's rights count (an active row of the repository or its groups, its owner; not
+       suspended), at most 100. How many were told. */
+    function mirrorFailure(p) {
+        const message = json(p.messageJson, {})
+        const repositoryId = text(message.repositoryId || p.subTopic)
+        const repo = repositoryId ? one(M + "SmithyRepository", {repositoryId}) : null
+        if (!repo) return {notified: 0}
+        const mirror = message.mirrorId ? one("moqui.resource.GitRepositoryMirror", {mirrorId: text(message.mirrorId)}) : null
+        if (!mirror || mirror.repositoryId !== repositoryId) return {notified: 0}
+        const parties = new Set(repo.ownerPartyId ? [repo.ownerPartyId] : [])
+        const holders = (entity, key) => {
+            for (const row of rows(entity, key, 200))
+                if ((RANK[row.roleEnumId] || 0) >= RANK.SmrMaintainer) parties.add(row.partyId)
+        }
+        holders(M + "SmithyRepositoryParty", {repositoryId})
+        for (const group of core.groupChain(repo.groupId) || []) holders(M + "SmithyGroupParty", {groupId: group.groupId})
+        const userIds = []
+        for (const partyId of Array.from(parties).slice(0, 200))
+            for (const account of rows(ACCOUNT, {partyId}, 5))
+                if (
+                    account.userId !== mirror.createdByUserId &&
+                    userIds.length < 100 &&
+                    core.rights(repositoryId, account.userId).rank >= RANK.SmrMaintainer
+                )
+                    userIds.push(account.userId)
+        if (!userIds.length) return {notified: 0}
+        const url = scrub(null, message.url || mirror.url)
+        ec.makeNotificationMessage()
+            .topic("GitMirrorFailure")
+            .subTopic(repositoryId)
+            .userIds(userIds)
+            .record(M + "SmithyRepository", repositoryId)
+            .title("The push mirror of " + (repo.repositoryPath || repositoryId) + " to " + url + " fails")
+            .message({
+                repositoryId,
+                repositoryPath: repo.repositoryPath || null,
+                mirrorId: mirror.mirrorId,
+                url,
+                error: scrub(null, message.error || "")
+            })
+            .type("warning")
+            .showAlert(true)
+            .persistOnSend(true)
+            .send()
+        return {notified: userIds.length}
+    }
 
-    return {runStep, runImports, claimGithub, IMPORT_KEY}
+    return {runStep, runImports, claimGithub, ssoLinked, mirrorFailure, IMPORT_KEY}
 }
