@@ -535,6 +535,10 @@ function requestableParty(partyId) {
     if (party.privateOwnerUserId && party.privateOwnerUserId !== ec.user.userId) return null
     return party
 }
+// P6 (the user's call, Nov 14, P4's review): a request files a directory contact only, as the audience import does: a list's
+// members are read by every audience reader of its organization, so a personal contact on a list would publish it. Another user's
+// is RECORD_UNAVAILABLE (requestableParty); the caller's own PERSONAL_CONTACT.
+const personalContact = party => !!party?.privateOwnerUserId
 // The address of the list's channel a membership sends to: the one named when it is the party's, else the primary, else the first.
 function destinationOf(partyId, channel, contactMechId) {
     const infos = Array.from(
@@ -587,6 +591,7 @@ function salesContacts(kind, recordId) {
 function fileOne(list, policy, request, partyId) {
     const party = requestableParty(partyId)
     if (!party) return {partyId, outcome: "refused", reasonCode: "RECORD_UNAVAILABLE"}
+    if (personalContact(party)) return {partyId, outcome: "refused", reasonCode: "PERSONAL_CONTACT"}
     const channel = list.contactMechTypeEnumId || "CmtEmailAddress"
     const purposeEnumId = purposeOf(list, policy)
     const base = {
