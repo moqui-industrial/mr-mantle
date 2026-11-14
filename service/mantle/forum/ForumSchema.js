@@ -116,7 +116,7 @@
     },
     findCategories: {
         service: 'mantle.forum.ForumServices.find#Categories',
-        fields: ['siteId', 'limit', 'cursor'],
+        fields: ['siteId', 'limit', 'cursor', 'scopeContactListId'],
     },
     getCategory: {
         service: 'mantle.forum.ForumServices.get#Category',
@@ -167,11 +167,12 @@
             'tag',
             'solved',
             'period',
+            'scopeContactListId',
         ],
     },
     getTopic: {
         service: 'mantle.forum.ForumServices.get#Topic',
-        fields: ['siteId', 'rootCommEventId'],
+        fields: ['siteId', 'rootCommEventId', 'scopeContactListId'],
     },
     getPosts: {
         service: 'mantle.forum.ForumServices.get#Posts',
@@ -194,6 +195,7 @@
             'limit',
             'cursor',
             'scope',
+            'scopeContactListId',
         ],
     },
     storeDraft: {
@@ -212,6 +214,7 @@
             'postRevision',
             'tags',
             'poll',
+            'sourceFormat',
         ],
     },
     findDrafts: {
@@ -224,7 +227,7 @@
     },
     previewPost: {
         service: 'mantle.forum.ForumServices.preview#Post',
-        fields: ['siteId', 'body'],
+        fields: ['siteId', 'body', 'sourceFormat'],
     },
     publishPost: {
         service: 'mantle.forum.ForumServices.publish#Post',
@@ -240,6 +243,8 @@
             'draftId',
             'tags',
             'poll',
+            'sourceFormat',
+            'ownersOnly',
         ],
     },
     updatePost: {
@@ -252,6 +257,7 @@
             'reason',
             'draftId',
             'attachmentIds',
+            'sourceFormat',
         ],
     },
     markRead: {
@@ -272,7 +278,13 @@
     },
     findReviews: {
         service: 'mantle.forum.ModerationServices.find#Reviews',
-        fields: ['siteId', 'contactListId', 'limit', 'cursor'],
+        fields: [
+            'siteId',
+            'contactListId',
+            'limit',
+            'cursor',
+            'scopeContactListId',
+        ],
     },
     getReview: {
         service: 'mantle.forum.ModerationServices.get#Review',
@@ -315,7 +327,13 @@
     },
     findActions: {
         service: 'mantle.forum.ModerationServices.find#Actions',
-        fields: ['siteId', 'contactListId', 'limit', 'cursor'],
+        fields: [
+            'siteId',
+            'contactListId',
+            'limit',
+            'cursor',
+            'scopeContactListId',
+        ],
     },
     setSanction: {
         service: 'mantle.forum.ModerationServices.set#Sanction',
@@ -386,6 +404,7 @@
             'altText',
             'purpose',
             'rootCommEventId',
+            'repositoryId',
         ],
     },
     removeStagedAttachment: {
@@ -466,7 +485,7 @@
     },
     getFeed: {
         service: 'mantle.forum.ForumServices.get#Feed',
-        fields: ['siteId', 'format'],
+        fields: ['siteId', 'format', 'scopeContactListId'],
     },
     getPostLocation: {
         service: 'mantle.forum.ForumServices.get#PostLocation',
@@ -511,7 +530,7 @@
     },
     findTags: {
         service: 'mantle.forum.ForumServices.find#Tags',
-        fields: ['siteId', 'query', 'limit', 'cursor'],
+        fields: ['siteId', 'query', 'limit', 'cursor', 'scopeContactListId'],
     },
     storeTag: {
         service: 'mantle.forum.ForumServices.store#Tag',
@@ -1630,5 +1649,62 @@
     getShopFeed: {
         service: 'mantle.product.StoreChannelServices.get#ShopFeed',
         fields: ['siteId', 'feedKey', 'extension'],
+    },
+    // IronStone Sales P13 (impl-sales P13; design-sales §10): PASS Sales' customer quotes (mantle.order.SalesPortalServices)
+    findSalesQuotes: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerQuotes',
+        fields: ['siteId', 'state', 'cursor', 'limit'],
+    },
+    getSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerQuote',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesQuoteDocument: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    respondSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.respond#CustomerQuote',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'action',
+            'expectedRevision',
+            'acknowledge',
+            'purchaseOrder',
+            'acceptorName',
+            'acceptorTitle',
+            'reason',
+            'operationId',
+        ],
+    },
+    getSalesQuoteResponse: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteResponse',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    // Dogfood DG6 (plans/Dogfood.md §6.3): mailing lists. An mbox archive imported into a category, the invitations of
+    // a list's members, and a held message claimed by its sender
+    importMbox: {
+        service: 'mantle.forum.ImportServices.import#Mbox',
+        fields: [
+            'siteId',
+            'contactListId',
+            'archiveName',
+            'checksum',
+            'sourceName',
+        ],
+    },
+    getMboxImport: {
+        service: 'mantle.forum.ImportServices.get#MboxImport',
+        fields: ['siteId', 'importId'],
+    },
+    inviteListMembers: {
+        service: 'mantle.forum.DeliveryServices.invite#ListMembers',
+        fields: ['siteId', 'contactListId', 'addresses', 'operationId'],
+    },
+    claimHeldMail: {
+        service: 'mantle.forum.DeliveryServices.claim#HeldMail',
+        fields: ['siteId', 'token', 'operationId'],
     },
 })

@@ -9,7 +9,8 @@
     <field name="slug" type="text-medium"/>
     <field name="publicationState" type="id"/>
     <field name="visibility" type="id"/>
-    <field name="mode" type="id"/>
+    <field name="mode" type="id"><description>discussion, qa, or list: a mailing list, whose mail carries the category's
+      own List-Id, List-Post and List-Archive, by its address (a ForumMailRoute of the category)</description></field>
     <field name="rules" type="text-long"/>
     <field name="joinApprovalRequired" type="text-indicator"/>
     <field name="qualifyingSources" type="text-medium"><description>Comma-separated grant sources that give category access: manual, subscription. Empty means manual.</description></field>
@@ -28,7 +29,10 @@
   <entity entity-name="ForumTopic" package="mantle.forum">
     <field name="rootCommEventId" type="id" is-pk="true"/>
     <field name="siteId" type="id"/>
-    <field name="kind" type="id"/>
+    <field name="kind" type="id"><description>category (a topic of a category), private (a conversation of named participants)
+      or record (the conversation of a record of another app: an issue). A record topic's contactListId is its scope
+      category and its posts' events have none; its access is its app's (ForumCore.js recordAccess), and it is in no
+      topic list, search, feed or digest.</description></field>
     <field name="revision" type="number-integer"/>
     <field name="nextOrdinal" type="number-integer"/>
     <field name="acceptedAnswerId" type="id"/>
@@ -74,6 +78,9 @@
     <field name="wiki" type="text-indicator"/>
     <field name="reactionCount" type="number-integer"/>
     <field name="reactionCounts" type="text-medium"/>
+    <field name="postKind" type="id"><description>Empty for a post; event for a state-change line of a record's conversation
+      (an issue closed or reopened), which has no text to edit, react to or moderate. visibility also takes staff: a post
+      of a record that only the record's Owners read, checked for each reader.</description></field>
     <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
     <index name="FORUM_POST_ORDINAL" unique="true">
       <index-field name="rootCommEventId"/>
@@ -277,6 +284,8 @@
     <field name="dayKey" type="id"/>
     <field name="dailyTopics" type="number-integer"/>
     <field name="dailyReplies" type="number-integer"/>
+    <field name="dailyCounts" type="text-medium"><description>The day's counts of the other kinds the post gate limits (issue,
+      mergeRequest), as JSON by kind; reset with dayKey.</description></field>
     <field name="topicsEntered" type="number-integer"/>
     <field name="postsRead" type="number-integer"/>
     <field name="readingSeconds" type="number-integer"/>
@@ -431,9 +440,55 @@
     <field name="enabled" type="text-indicator"/>
     <field name="revision" type="number-integer"/>
     <field name="createdAt" type="date-time"/>
+    <field name="targetType" type="id"><description>Empty or category: mail to the address is a topic of contactListId (a
+      mailing list's address when that category's mode is list). issue: a report address, whose mail files a confidential
+      issue in the repository targetId; contactListId is then the category of the group the address belongs to.</description></field>
+    <field name="targetId" type="id"/>
     <relationship type="one" related="mantle.public.PublicSite"/>
     <index name="FORUM_ROUTE_ADDRESS" unique="true">
       <index-field name="address"/>
+    </index>
+    <index name="FORUM_ROUTE_TARGET">
+      <index-field name="siteId"/>
+      <index-field name="targetType"/>
+      <index-field name="contactListId"/>
+    </index>
+  </entity>
+  <entity entity-name="ForumHeldMail" package="mantle.forum">
+    <description>A message that came by mail from an address that is no account's (Dogfood D17): never posted as it is.
+      It waits, with a ForumReviewItem of the family mail-held (target type mail) in the queue of the scope's moderators,
+      until the sender confirms the address with an account and claims it (the token of the one reply the sender got),
+      or until expiresAt, when its text is removed. The sender's address is never shown to anyone but those who read
+      the review item.</description>
+    <field name="heldId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="routeId" type="id"/>
+    <field name="contactListId" type="id"><description>The scope whose moderators see it</description></field>
+    <field name="targetType" type="id"><description>category (a list's message) or issue (a report)</description></field>
+    <field name="targetId" type="id"><description>The category, or the repository of the report</description></field>
+    <field name="senderAddress" type="text-medium"><description>Lower case</description></field>
+    <field name="senderName" type="text-medium"/>
+    <field name="subject" type="text-medium"/>
+    <field name="body" type="text-very-long"><description>The message's new text as cleaned HTML; removed when dropped</description></field>
+    <field name="messageId" type="text-medium"/>
+    <field name="tokenHash" type="text-medium"/>
+    <field name="reviewId" type="id"/>
+    <field name="state" type="id"><description>held, claimed (posted or filed as resultId) or dropped</description></field>
+    <field name="noticeSentAt" type="date-time"><description>When the sender was answered: one reply an address a day</description></field>
+    <field name="resultId" type="id"><description>The post, or the issue's topic</description></field>
+    <field name="createdAt" type="date-time"/>
+    <field name="expiresAt" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="FORUM_HELD_TOKEN" unique="true">
+      <index-field name="tokenHash"/>
+    </index>
+    <index name="FORUM_HELD_SENDER">
+      <index-field name="senderAddress"/>
+      <index-field name="state"/>
+    </index>
+    <index name="FORUM_HELD_EXPIRY">
+      <index-field name="state"/>
+      <index-field name="expiresAt"/>
     </index>
   </entity>
   <entity entity-name="ForumReplyToken" package="mantle.forum">
@@ -441,6 +496,8 @@
     <field name="siteId" type="id"/>
     <field name="routeId" type="id"/>
     <field name="rootCommEventId" type="id"/>
+    <field name="communicationEventId" type="id"><description>The post the mail was about, when known: a reply by mail to a
+      staff post of a record is posted as a staff post, or not at all.</description></field>
     <field name="partyId" type="id"/>
     <field name="expiresAt" type="date-time"/>
     <field name="revokedAt" type="date-time"/>

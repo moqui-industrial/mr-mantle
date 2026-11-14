@@ -28,6 +28,12 @@ spec({
         lib.account(SITE, "SCP_SILENCED", {handle: "scpsilenced"})
         lib.sanction(SITE, "SCP_SUSPENDED", "suspend")
         lib.sanction(SITE, "SCP_SILENCED", "silence")
+        // the two that make several groups and repositories here are past a new account's day's limit of one (the limit
+        // is SmithyLimits' rule)
+        for (const partyId of ["SCP_ASKER", "SCP_OTHER"]) {
+            lib.settled(SITE, partyId)
+            lib.set("mantle.forum.ForumMemberState", {siteId: SITE, partyId}, {trustLevel: "member"})
+        }
     }
 })
 

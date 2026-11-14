@@ -380,7 +380,8 @@ function requireQuote(userScope, orderId, edit = false) {
 // recurring base or an open cart. Inside the organization a Sales reader sees the orders assigned to them or a team of theirs (the
 // part's SalesRepresentative and SalesTeam rows) and a holder of SALES_TEAM_VIEW the organization's every one; a holder of
 // SALES_ORDER_APPROVE or ORDER_APPROVE sees the organization's orders awaiting approval or on hold, to decide them, not to change them (design
-// §1.1 "an assigned approval grants its authorized approver the source projection"). One outside the scope answers as missing.
+// §1.1 "an assigned approval grants its authorized approver the source projection"), and (P12) read only an order they decided once it
+// is approved. One outside the scope answers as missing.
 const orderPurposes = {direct: "OrpSalesOrder", quote: quotePurpose}
 const orderExcludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
 const approvalStatuses = ["OrderPlaced", "OrderHold"]
@@ -420,7 +421,10 @@ function orderOf(userScope, orderId) {
                 .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
                 .count() > 0
         if (!assigned) {
-            if (!orderApprover(userScope) || !approvalStatuses.includes(order.statusId)) return null
+            if (!orderApprover(userScope)) return null
+            // P12 (the user's call of Nov 14, P11's review): an approver keeps read-only sight of an order they decided (an
+            // OrderDecision of theirs) once it is approved; the organization's other approved orders stay out of sight
+            if (!approvalStatuses.includes(order.statusId) && !decidedBy(orderId)) return null
             approverOnly = true
         }
     }
@@ -518,6 +522,83 @@ function requireQuoteRequest(userScope, requestId, edit = false) {
     return found
 }
 
+// ===== P12: quote templates and the approver's decided orders (impl-sales P12; design-sales §5 QuoteTemplates) =====
+// A quote template is a native order of purpose SalesQuoteTemplate (OrderHeader.orderPurposeEnumId OrpSalesQuoteTemplate), never
+// placed and never leaving Open, whose one part names its selling organization (the vendor, an internal organization) and no
+// customer; its published interval is the part's validity: a draft has none, a published one a start (current from it, scheduled
+// before it) and an end once replaced by its successor or ended (impl-sales §4, Nov 11). Inside an organization of the scope a Sales
+// reader sees its current templates (to start a quote from one); a template manager (SALES_QUOTE_EDIT with SALES_TEAM_MANAGE or
+// SALES_CONFIGURE: a Sales manager or administrator, design §2's M and S) sees and maintains every one of the organization, and
+// changes only a draft. One outside the scope, or not shown to the caller, answers as missing (RECORD_UNAVAILABLE).
+const templatePurpose = "OrpSalesQuoteTemplate"
+// Whether the caller maintains quote templates (a Sales manager or administrator who edits quotes).
+function templateManager(userScope) {
+    const caps = userScope.capabilities
+    return !!caps.quoteEdit && !!(caps.teamManage || caps.configure)
+}
+// A template's state from its part's validity at a time (now when not given): draft, scheduled, current or ended.
+function templateState(part, at = ec.user.nowTimestamp) {
+    const from = lib.ms(part.validFromDate)
+    const thru = lib.ms(part.validThruDate)
+    const now = lib.ms(at)
+    if (from == null) return "draft"
+    if (thru != null && thru <= now) return "ended"
+    return from > now ? "scheduled" : "current"
+}
+// The template as the caller may see it, or null: {order, part, organizationPartyId, state, canManage, canEdit}.
+function templateOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order || order.orderPurposeEnumId !== templatePurpose) return null
+    const part = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
+    if (!part || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    const state = templateState(part)
+    const canManage = templateManager(userScope)
+    if (!canManage && state !== "current") return null
+    return {order, part, organizationPartyId: part.vendorPartyId, state, canManage, canEdit: canManage && state === "draft"}
+}
+// The template or a refusal: RECORD_UNAVAILABLE when the caller does not see it; for a change, PERMISSION_DENIED for a caller who
+// does not maintain templates and TEMPLATE_PUBLISHED for one no longer a draft (a published template is changed by its successor).
+function requireTemplate(userScope, orderId, edit = false) {
+    const found = templateOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Quote template " + (orderId || "") + " is not available")
+    if (edit && !found.canManage)
+        denied("PERMISSION_DENIED", "Quote templates are maintained by a Sales manager or administrator")
+    if (edit && !found.canEdit)
+        denied("TEMPLATE_PUBLISHED", "Quote template " + orderId + " is published; start its successor to change it")
+    return found
+}
+// Whether the caller recorded a decision on the order (an approval or refusal of theirs, OrderDecision; a request is the asker's).
+const decidedResults = ["SdrApproved", "SdrRefused"]
+function decidedBy(orderId) {
+    return (
+        !!ec.user.userId &&
+        lib
+            .find("mantle.order.OrderDecision")
+            .condition("orderId", orderId)
+            .condition("decisionByUserId", ec.user.userId)
+            .condition("decisionResultEnumId", "in", decidedResults)
+            .count() > 0
+    )
+}
+// The ids of the orders the caller recorded a decision on (find#SalesOrders' approver reach beside the orders awaiting approval).
+function decidedOrderIds() {
+    if (!ec.user.userId) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.order.OrderDecision")
+                    .condition("decisionByUserId", ec.user.userId)
+                    .condition("decisionResultEnumId", "in", decidedResults)
+                    .selectField("orderId")
+                    .list()
+            ).map(row => row.orderId)
+        )
+    )
+}
+// ===== end of P12 =====
+
 ;({
     permissions,
     reads,
@@ -567,5 +648,12 @@ function requireQuoteRequest(userScope, requestId, edit = false) {
     assignedOrderIds,
     orderApprover,
     orderOf,
-    requireOrder
+    requireOrder,
+    // P12: quote templates; the orders an approver decided
+    templatePurpose,
+    templateManager,
+    templateState,
+    templateOf,
+    requireTemplate,
+    decidedOrderIds
 })

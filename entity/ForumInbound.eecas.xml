@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- The forum's mail in beside its email rule (service/ForumInbound.emecas.xml; plans/Dogfood.md §6.3, §6.4):
+    - Email rules run for Inbox mail only, and the mail listener puts what the gateway marked as spam in Junk. A received
+      message stored in a Junk folder is given to the forum with that verdict (handle#StoredEmail returns at once for any
+      other folder), so spam to a forum address is held for review, not posted and not lost.
+    - An account that verifies an address gets what waited for that address: the posts of list archives whose author had
+      it, and the list messages held for it (claim#VerifiedAddress).
+    Each runs after the commit of the write, in a transaction of its own, and never fails it. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="ForumJunkInbound" entity="moqui.basic.email.EmailMessage" on-create="true" run-on-error="false">
+        <condition><expression>statusId == 'ES_RECEIVED' &amp;&amp; emailFolderId != null &amp;&amp; emailFolderId != ''</expression></condition>
+        <actions><service-call name="mantle.forum.DeliveryServices.handle#StoredEmail"
+                in-map="{emailMessageId:emailMessageId, emailFolderId:emailFolderId}"/></actions>
+    </eeca>
+    <eeca id="ForumVerifiedAddress" entity="moqui.security.public.VerifiedAddress" on-create="true" on-update="true" run-on-error="false">
+        <condition><expression>verifiedAt != null &amp;&amp; userId</expression></condition>
+        <actions><service-call name="mantle.forum.ImportServices.handle#VerifiedAddress" in-map="{userId:userId}"/></actions>
+    </eeca>
+</eecas>

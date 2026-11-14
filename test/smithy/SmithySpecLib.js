@@ -141,6 +141,22 @@ const createRepository = (username, parameters) =>
 /* A commit of files on the default branch of a repository, as the operator. */
 const commit = (repositoryId, message, fileMap) =>
     run("org.moqui.git.GitServices.commit#GitFiles", {repositoryId, message, fileMap}).commitId
+/* The rules of a change (the gitECA post events: a commit's links, its keywords) run on the git pool after it commits:
+   waits until the repository's updates are done, running here any that are left pending. */
+function settle(repositoryId) {
+    const started = Date.now()
+    while (Date.now() - started < 20000) {
+        const busy = ec.entity
+            .find("moqui.resource.GitUpdate")
+            .condition("repositoryId", repositoryId)
+            .condition("ecaStatus", "in", ["recording", "pending", "running"])
+            .disableAuthz()
+            .count()
+        if (busy == 0) return
+        run("org.moqui.git.GitServices.process#PendingGitUpdates", {})
+    }
+    throw new Error("the git updates did not settle")
+}
 /* What the one check answers a user (an empty userId: no credentials) for an action on a repository. */
 const authz = (userId, repositoryId, action) =>
     run("mantle.work.GitServices.check#GitRepositoryAuthz", {
@@ -177,7 +193,57 @@ function gate(name, parameters) {
     ec.message.clearErrors()
     return problems
 }
+/* An account as one whose first posts are past: its forum state in the site with approved contributions and no post
+   just made, so the gate neither holds its post as a first one nor asks it to wait between two. */
+function settled(siteId, partyId) {
+    const key = {siteId, partyId}
+    const fields = {trustLevel: "basic", approvedContributions: 5, lastPostedAt: null, dayKey: null, dailyCounts: null}
+    if (row("mantle.forum.ForumMemberState", key)) set("mantle.forum.ForumMemberState", key, fields)
+    else make("mantle.forum.ForumMemberState", {...key, ...fields, dailyTopics: 0, dailyReplies: 0, revision: 1})
+}
+/* A tracker for the issue specs: a public group with a public db repository whose issues are on, made by the operator,
+   and accounts named <prefix>_OWNER (Owner of the group), _MAINT (Maintainer), _REPORTER (Reporter), _AUTHOR and
+   _STRANGER (no role), each with a confirmed address, a handle (the id in lower case, without the underscore) and
+   settled. Gives {groupId, repositoryId, projectId}. */
+function tracker(siteId, prefix, path) {
+    const who = name => prefix + "_" + name
+    for (const name of ["OWNER", "MAINT", "REPORTER", "AUTHOR", "STRANGER"]) {
+        account(siteId, who(name), {handle: who(name).toLowerCase().replace("_", "")})
+        settled(siteId, who(name))
+    }
+    const groupId = createGroup(OPERATOR, {siteId, pathSegment: path, visibility: "public"}).groupId
+    const repositoryId = createRepository(OPERATOR, {siteId, groupId, slug: "code", visibility: "public"}).repositoryId
+    role(siteId, {groupId}, who("OWNER"), "SmrOwner")
+    role(siteId, {groupId}, who("MAINT"), "SmrMaintainer")
+    role(siteId, {groupId}, who("REPORTER"), "SmrReporter")
+    return {groupId, repositoryId, projectId: issuesOn(siteId, repositoryId)}
+}
+/* Turns a repository's issues on, as the operator; gives its project. */
+function issuesOn(siteId, repositoryId) {
+    const revision = op(OPERATOR, siteId, "getRepository", {repositoryId}).repository.revision
+    const out = op(OPERATOR, siteId, "updateRepository", {repositoryId, issuesEnabled: true, expectedRevision: revision})
+    if (out.kind) throw new Error("Issues not turned on: " + out.message)
+    return row("mantle.smithy.SmithyRepository", {repositoryId}).workEffortId
+}
+/* Files an issue as a user: createIssue's result, or its refusal. */
+const file = (username, siteId, repositoryId, title, more = {}) =>
+    op(username, siteId, "createIssue", {
+        repositoryId,
+        title,
+        body: "The text of " + title,
+        operationId: "file-" + ec.user.randomString(12),
+        ...more
+    })
+/* A comment on an issue as a user, through the forum's publishPost: its result, or its refusal. */
+const comment = (username, siteId, rootCommEventId, body, more = {}) =>
+    op(username, siteId, "publishPost", {rootCommEventId, body, operationId: "note-" + ec.user.randomString(12), ...more})
 ;({
+    settled,
+    settle,
+    tracker,
+    issuesOn,
+    file,
+    comment,
     OPERATOR,
     run,
     make,

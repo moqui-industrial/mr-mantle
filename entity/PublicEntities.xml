@@ -173,7 +173,8 @@
     </index>
   </entity>
   <entity entity-name="PublicDiscussionLink" package="mantle.public">
-    <description>A forum topic linked to a source record: a product, an article or a support case. A narrowing gate makes
+    <description>A forum topic linked to a source record: a product, an article, a support case or an issue (sourceType
+      issue, sourceId the issue's task: the discussion an issue names; mr-pass design-smithy §8.2). A narrowing gate makes
       the topic readable only while its source is. Product and article sources have at most one active discussion.</description>
     <field name="linkId" type="id" is-pk="true"/>
     <field name="siteId" type="id"/>

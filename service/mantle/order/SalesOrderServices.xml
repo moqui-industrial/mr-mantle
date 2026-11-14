@@ -128,7 +128,8 @@ along with this software (see the LICENSE.md file). If not, see
             awaiting approval for SALES_ORDER_APPROVE), at the revision read: SALES_ORDER_APPROVE where the seller's approval setting
             is on, else ORDER_APPROVE (PERMISSION_DENIED); each order rule it meets (SalesApprovalPolicy of purpose SapOrder) decided
             by the caller, an OrderDecision bound to the revision (SELF_APPROVAL for its owner, who entered or placed it, unless the
-            rule allows it; APPROVER_INVALID outside the rule's group); then approve#Order, whose credit check may hold it instead
+            rule allows it; APPROVER_INVALID outside the rule's group), or with no rule left to decide one approval decision of
+            purpose SapOrder with no rule (P12 review: the approver keeps read-only sight of the order); then approve#Order, whose credit check may hold it instead
             (outcome held, creditHeld). Pre-approval warnings are shown, never refusing. Refuses one not placed (ORDER_NOT_PLACED) and
             a stale revision (REVISION_CHANGED). The same operation key answers the first result.</description>
         <in-parameters>

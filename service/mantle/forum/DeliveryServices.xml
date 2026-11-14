@@ -162,6 +162,10 @@
     <in-parameters>
       <parameter name="emailAccountId"/>
       <parameter name="emailMessageId"/>
+      <parameter name="spamVerdict" type="Map"><description>The mail gateway's verdict of the message, {spam, reason}, when the
+        caller has it (process#JunkInbound gives it for mail the listener put in Junk); without it the verdict fields on the
+        message (X-Spam-Flag, X-Spam-Status, X-Spam) say. Spam from an account is held for review (the gate's mail-verdict),
+        never posted, and its sender is not answered.</description></parameter>
     </in-parameters>
     <out-parameters>
       <parameter name="result" type="Map"/>
@@ -169,8 +173,104 @@
     <actions>
       <script><![CDATA[
         const was=ec.artifactExecution.disableAuthz()
-        try{result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').processInbound({emailAccountId,emailMessageId,headers,fields,bodyPartList,message})}finally{if(!was)ec.artifactExecution.enableAuthz()}
+        try{result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').processInbound({emailAccountId,emailMessageId,headers,fields,bodyPartList,message,spamVerdict})}finally{if(!was)ec.artifactExecution.enableAuthz()}
       ]]></script>
+    </actions>
+  </service>
+  <service verb="handle" noun="StoredEmail" authenticate="false" allow-remote="false">
+    <description>For the EmailMessage rule (entity/ForumInbound.eecas.xml): a received message stored in a Junk folder (the
+      mail listener puts the gateway's spam there, and no email rule runs for it) is given to process#JunkInbound after the
+      commit of the store, in a transaction of its own. Any other message is left alone. Never fails the store: a failure
+      is logged.</description>
+    <in-parameters>
+      <parameter name="emailMessageId"/>
+      <parameter name="emailFolderId"/>
+    </in-parameters>
+    <out-parameters><parameter name="junk" type="Boolean"/></out-parameters>
+    <actions>
+      <script><![CDATA[
+        junk = false
+        if (!emailMessageId || !emailFolderId) return
+        ec.message.pushErrors()
+        try {
+          const folder = ec.entity.find('moqui.basic.email.EmailFolder').condition('emailFolderId', emailFolderId).disableAuthz().one()
+          if (folder?.folderKindEnumId !== 'EfkJunk') return
+          junk = true
+          const name = 'mantle.forum.DeliveryServices.process#JunkInbound'
+          let later = false
+          try {
+            ec.service.special().name(name).parameters({emailMessageId}).registerOnCommit()
+            later = true
+          } catch (err) {
+            // no transaction in place: the store is committed already
+          }
+          if (!later) ec.service.sync().name(name).parameter('emailMessageId', emailMessageId).requireNewTransaction(true).disableAuthz().call()
+        } catch (err) {
+          ec.logger.error('Email message ' + emailMessageId + ' in Junk was not given to the forum: ' + (err && err.message ? err.message : err))
+        } finally {
+          ec.message.clearErrors()
+          ec.message.popErrors()
+        }
+      ]]></script>
+    </actions>
+  </service>
+  <service verb="process" noun="JunkInbound" authenticate="false" allow-remote="false">
+    <description>A message the mail listener stored in a Junk folder, when it is to a forum address: processed as
+      process#Inbound does with the spam verdict, from the stored message (its header fields and text; its files are not
+      read). So a reply, a message to a list and a report by mail that the gateway marked as spam is held for review, not
+      posted and not lost. Not forum mail, and a message in another folder, is left alone.</description>
+    <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
+    <out-parameters><parameter name="result" type="Map"/></out-parameters>
+    <actions>
+      <script><![CDATA[
+        const was=ec.artifactExecution.disableAuthz()
+        try{result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').processJunk(emailMessageId)}finally{if(!was)ec.artifactExecution.enableAuthz()}
+      ]]></script>
+    </actions>
+  </service>
+  <service verb="claim" noun="HeldMail" authenticate="anonymous-all" allow-remote="false">
+    <description>Operation claimHeldMail: a message to a mailing list that was held because its sender's address was no
+      account's is posted as the signed-in account whose verified address sent it, by the token of the link the sender was
+      mailed, through the forum's own gate. Not Found for an unknown, claimed or expired token; Unauthorized for another
+      address. The same operationId answers the first result.</description>
+    <in-parameters><parameter name="input" type="Map"/></in-parameters>
+    <out-parameters><parameter name="result" type="Map"/></out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('claimHeldMail',input || {})</script>
+    </actions>
+  </service>
+  <service verb="release" noun="HeldMail" authenticate="anonymous-all" allow-remote="false">
+    <description>Worker step of claim#VerifiedAddress, in a transaction of its own: one held list message posted as the
+      signed-in account, when its verified address is the sender's.</description>
+    <in-parameters><parameter name="heldId" required="true"/></in-parameters>
+    <out-parameters><parameter name="postId"/></out-parameters>
+    <actions>
+      <script><![CDATA[
+        const was=ec.artifactExecution.disableAuthz()
+        try{postId=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').lists.releaseOne(heldId).postId||null}finally{if(!was)ec.artifactExecution.enableAuthz()}
+      ]]></script>
+    </actions>
+  </service>
+  <service verb="expire" noun="HeldMail" authenticate="false" allow-remote="false">
+    <description>A job: held messages nobody claimed in 30 days are dropped, their text and their review items with them.</description>
+    <out-parameters><parameter name="dropped" type="Integer"/></out-parameters>
+    <actions>
+      <script><![CDATA[
+        const was=ec.artifactExecution.disableAuthz()
+        try{dropped=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').lists.expireHeld().dropped}finally{if(!was)ec.artifactExecution.enableAuthz()}
+      ]]></script>
+    </actions>
+  </service>
+  <service verb="invite" noun="ListMembers" authenticate="anonymous-all" allow-remote="false">
+    <description>Operation inviteListMembers: each address (at most 500 a call) is mailed an invitation to a mailing list (a
+      category in list mode), by the list's owners. Redeeming it (redeem#Invitation, by the account with that address
+      verified) makes the account a member of the list with every post by mail; nobody is subscribed without it. Answers
+      counts (invited, alreadyInvited, invalidCount, unsent), never whose address has an account. Needs the site's mail
+      settings.</description>
+    <in-parameters><parameter name="input" type="Map"/></in-parameters>
+    <out-parameters><parameter name="result" type="Map"/></out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('inviteListMembers',input || {})</script>
     </actions>
   </service>
   <service verb="post" noun="Inbound" authenticate="false" allow-remote="false">

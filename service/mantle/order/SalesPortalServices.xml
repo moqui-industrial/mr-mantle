@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.order.SalesPortalServices (P, IronStone Sales design §12.1; design §10 CustomerQuotes, CustomerQuote and QuoteResponse;
+    impl-sales P13): a customer's quotes on PASS Sales, over service/mantle/order/SalesPortal.js. Each takes PASS's input map
+    (the PASS operations findSalesQuotes, getSalesQuote, getSalesQuoteDocument, respondSalesQuote and getSalesQuoteResponse in
+    mr-pass Schema.js and Routes.js and Mantle's copies, served remotely by PassApi), finds the organization from the site's
+    sales mount and the customer from the bearer link's capability or the signed-in account's contact or self relationship, and
+    answers an allow-listed projection; refusals are PASS error kinds that say nothing of a record the asker may not reach. The
+    response is the staff path's lifecycle (SalesQuoteIssueServices respond#Quote). None is remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="CustomerQuotes" authenticate="anonymous-all" allow-remote="false">
+        <description>findSalesQuotes: a signed-in account's issued quotes of the customers it acts for at the site's Sales
+            organization (each quote's latest issue, newest first; state open or all; limit and cursor), never a bearer link's.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('findCustomerQuotes', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CustomerQuote" authenticate="anonymous-all" allow-remote="false">
+        <description>getSalesQuote: the offer a bearer link (token: its one issue, while it stands or once answered) or a signed-in
+            contact (orderId: its latest issue) reaches: the lines and totals as text, validity, terms, the PDF's name, the response
+            and what the page may do (accept, decline, sign in to accept above the seller's threshold).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('getCustomerQuote', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteDocument" authenticate="anonymous-all" allow-remote="false">
+        <description>getSalesQuoteDocument: the issue's stored PDF for the facade's download, with the same checks; its location
+            stays with the transport.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('getQuoteDocument', input)"/>
+        </actions>
+    </service>
+    <service verb="respond" noun="CustomerQuote" authenticate="anonymous-all" allow-remote="false">
+        <description>respondSalesQuote (a bearer link's write, TOKEN_WRITES): the customer's acceptance (expectedRevision, acknowledge,
+            purchaseOrder when the seller asks it, acceptorName and acceptorTitle) or decline (reason) of the issue it reaches, through
+            respond#Quote's lifecycle (place#Order once; a decline cancels the quote), with an operation key (operationId) bound to the
+            capability or the signed-in customer, the organization, the issue and the payload; above the seller's acceptance threshold
+            a bearer link alone is refused (ACCEPTANCE_SIGN_IN_REQUIRED). A repeat answers the first receipt. Limited per requester.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('respondCustomerQuote', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteResponse" authenticate="anonymous-all" allow-remote="false">
+        <description>getSalesQuoteResponse: the receipt of the issue's response (accepted or declined, when, the PO, the order and
+            what happens next); not available before a response.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('getQuoteResponse', input)"/>
+        </actions>
+    </service>
+    <service verb="check" noun="SalesAppReadiness" authenticate="anonymous-all" allow-remote="false">
+        <description>The Sales app's readiness checks for a site (PublicApps.js): its target an internal organization with Sales
+            defaults and the commercial revision on, and the site's canonical host.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('appReadiness', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="AccountCard" authenticate="anonymous-all" allow-remote="false">
+        <description>The PASS Account hub's Quotes and orders card: the open quotes of the customers the signed-in account acts for
+            (orders join in Sales P17); none for an account acting for no customer of the site's organization.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesPortal.js').execute('accountCard', input)"/>
+        </actions>
+    </service>
+</services>

@@ -440,12 +440,15 @@ function findOrders(p) {
         }
     }
     if (ids != null) {
-        if (approverReach)
+        if (approverReach) {
+            // P12 (the user's call of Nov 14): and the orders the approver decided, read only, once approved (SalesAccess.js orderOf)
+            const decided = salesAccess.decidedOrderIds()
             or(
                 factory.makeCondition("orderId", "in", ids.length ? ids : ["_NONE_"]),
-                factory.makeCondition("statusId", "in", ["OrderPlaced", "OrderHold"])
+                factory.makeCondition("statusId", "in", ["OrderPlaced", "OrderHold"]),
+                factory.makeCondition("orderId", "in", decided.length ? decided : ["_NONE_"])
             )
-        else if (!ids.length) none = true
+        } else if (!ids.length) none = true
         else add("orderId", "in", ids)
     }
     if (text(p.customerPartyId)) add("customerPartyId", "equals", text(p.customerPartyId))

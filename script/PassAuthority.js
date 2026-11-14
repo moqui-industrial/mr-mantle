@@ -72,6 +72,8 @@ const TOKEN_WRITES = [
     'requestOrderCancel',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
+    // IronStone Sales P13: a quote link's acceptance or decline (input.token)
+    'respondSalesQuote',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
@@ -97,6 +99,8 @@ const DOWNLOADS = [
     'getShopThemeAsset',
     // Smithy (mr-pass plan/design-smithy.md §15.2): a tree as a zip or tar.gz, a file the framework wrote
     'downloadArchive',
+    // IronStone Sales P13: an issued quote's PDF
+    'getSalesQuoteDocument',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
@@ -190,6 +194,9 @@ const REASONS = [
     'notBuilt',
     // Smithy DG2: a credential change by an account with no password to give again needs a fresh sign-in
     'recentSignInRequired',
+    // IronStone Sales P13: a quote above the seller's threshold is accepted signed in; a quote answered already
+    'acceptanceSignInRequired',
+    'responseRecorded',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or

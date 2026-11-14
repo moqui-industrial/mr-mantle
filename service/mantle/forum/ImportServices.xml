@@ -122,4 +122,70 @@
       <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('resolvePermalink',input || {})</script>
     </actions>
   </service>
+  <service verb="import" noun="Mbox" authenticate="anonymous-all" allow-remote="false">
+    <description>Operation importMbox: a mailing list's archive, an mbox file the operator put in the import directory
+      (archiveName, with its SHA-256 as checksum), is imported into a category by the list's owners (the site's owners and
+      operators, the category's staff, an Owner of the group or repository it is bound to) as a checkpointed run: messages
+      become topics and posts with their dates, threaded by Message-ID, In-Reply-To and References, and by subject for a
+      "Re:" with no parent in the archive. text/plain is taken before text/html (cleaned), format=flowed and encoded words
+      are read, files are left out and counted. An author is a profile with no account, by the hash of the address (the
+      address is not stored); an account that verifies the address gets the posts (claim#VerifiedAddress). The same
+      archive into the same category again adds nothing. Sends no mail.</description>
+    <in-parameters><parameter name="input" type="Map"/></in-parameters>
+    <out-parameters><parameter name="result" type="Map"/></out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('importMbox',input || {})</script>
+    </actions>
+  </service>
+  <service verb="get" noun="MboxImport" authenticate="anonymous-all" allow-remote="false">
+    <description>Operation getMboxImport: an mbox import's stage (importing, imported, failed), its run and its report: what
+      was made (messages, topics, replies) and what was not carried (duplicates, attachments, unknownCharset, tooLong,
+      empty, unreadable, failed).</description>
+    <in-parameters><parameter name="input" type="Map"/></in-parameters>
+    <out-parameters><parameter name="result" type="Map"/></out-parameters>
+    <actions>
+      <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('getMboxImport',input || {})</script>
+    </actions>
+  </service>
+  <service verb="handle" noun="VerifiedAddress" authenticate="false" allow-remote="false">
+    <description>For the VerifiedAddress rule (entity/ForumInbound.eecas.xml): after the commit of the row, in a transaction
+      of its own, claim#VerifiedAddress. Never fails the write: a failure is logged.</description>
+    <in-parameters><parameter name="userId"/></in-parameters>
+    <actions>
+      <script><![CDATA[
+        if (!userId) return
+        ec.message.pushErrors()
+        try {
+          const name = 'mantle.forum.ImportServices.claim#VerifiedAddress'
+          let later = false
+          try {
+            ec.service.special().name(name).parameters({userId}).registerOnCommit()
+            later = true
+          } catch (err) {
+            // no transaction in place: the write is committed already
+          }
+          if (!later) ec.service.sync().name(name).parameter('userId', userId).requireNewTransaction(true).disableAuthz().call()
+        } catch (err) {
+          ec.logger.error('The verified address of ' + userId + ' was not given to the forum: ' + (err && err.message ? err.message : err))
+        } finally {
+          ec.message.clearErrors()
+          ec.message.popErrors()
+        }
+      ]]></script>
+    </actions>
+  </service>
+  <service verb="claim" noun="VerifiedAddress" authenticate="false" allow-remote="false">
+    <description>An account verified its address: the posts of list archives whose author had that address become the
+      account's (in every site; the profile with no account ends), and the list messages held for that address are
+      posted as the account, each through the forum's gate. A held report is filed by its sender (Smithy's
+      claimHeldReport), not here.</description>
+    <in-parameters><parameter name="userId" required="true"/></in-parameters>
+    <out-parameters><parameter name="claimed" type="Integer"/><parameter name="posted" type="Integer"/></out-parameters>
+    <actions>
+      <script><![CDATA[
+        const was=ec.artifactExecution.disableAuthz()
+        try{ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').lists.claimVerified(userId))}finally{if(!was)ec.artifactExecution.enableAuthz()}
+      ]]></script>
+    </actions>
+  </service>
 </services>
