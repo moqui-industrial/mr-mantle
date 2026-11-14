@@ -24,6 +24,23 @@ function placedOrder(organizationPartyId, customerPartyId, quantity = 1) {
     if (placed.refused) throw new Error(placed.refused)
     return orderId
 }
+// Follow-up 3 (F210): the placement's confirmation (OrderPlacedSalesConfirmation, a tx-commit rule on a service worker) stores the
+// confirmation as an OrderContent, which counts a revision where the seller counts every change (B, C); read before it lands (a
+// busy worker pool beside other specs), a revision goes stale and the batch refused the order REVISION_CHANGED. Before reading the
+// revision of such an order, wait for this order's own row, not for the shared pool to empty, which other specs keep busy.
+function confirmed(orderId) {
+    const stored = () =>
+        system(() =>
+            ec.entity
+                .find("mantle.order.OrderContent")
+                .condition({orderId, orderContentTypeEnumId: "OctOrderConfirmation"})
+                .count()
+        )
+    const end = Date.now() + 10000
+    while (!stored() && Date.now() < end) ec.factory.waitWorkerPoolEmpty(1)
+    if (!stored()) throw new Error("Order " + orderId + "'s confirmation was not stored in 10 seconds")
+    return orderId
+}
 // an order of the store (or storeless) with an authorized payment of its total, placed, then autoApprove#Order as the payment's
 // authorization calls it
 function paidOrder(organizationPartyId, customerPartyId, productStoreId) {
@@ -361,8 +378,8 @@ feature(
     "a batch approval credit-holds the order over its limit and approves the rest; another organization's hold is not released",
     {
         when() {
-            const within = placedOrder(f.orgB, f.accounts.b)
-            const over = placedOrder(f.orgB, f.accounts.b2, 3)
+            const within = confirmed(placedOrder(f.orgB, f.accounts.b))
+            const over = confirmed(placedOrder(f.orgB, f.accounts.b2, 3))
             system(() =>
                 call("mantle.account.CreditServices.store#Policy", {
                     organizationPartyId: f.orgB,
