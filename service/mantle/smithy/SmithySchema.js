@@ -561,6 +561,7 @@
             "token",
             "cloneUrl",
             "requiredPipeline",
+            "dataTypes",
             "operationId"
         ]
     },

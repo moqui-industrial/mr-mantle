@@ -13,7 +13,7 @@ const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.
 const SITE = "SDP_SITE"
 const HOST = "sdp.smithy.test"
 const CI = "org.moqui.git.GitCiServices."
-const TOKEN = "sdp-target-token-0123456789"
+const TOKEN = "sdp-target-token-0123456789abcdefghij"
 const ids = {}
 /* An operation in a transaction of its own, as each request is: the engine moves a deployment by a conditional
    statement, which a transaction held across operations (the feature's) would not read back. */
@@ -118,6 +118,7 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             targetUrl: "https://deploy.sdp.example.com",
             token: TOKEN,
             requiredPipeline: "deploy",
+            dataTypes: "seed, seed-initial",
             approvalRequired: "Y",
             allowedRefs: "main",
             operationId: "sdp-env-1"
@@ -143,7 +144,17 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             action: "smithy.storeCiEnvironment"
         })
         const listed = op("SDP_DEV", "findCiEnvironments")
+        // a token under 32 characters, and an environment without approval: only unprotected branches wait
+        const shortToken = op("SDP_MAINT", "storeCiEnvironment", {
+            environmentId: stored.environmentId,
+            token: "short-token-0123456789"
+        })
+        const unapproved = op("SDP_MAINT", "storeCiEnvironment", {name: "preview", allowedRefs: "main", operationId: "sdp-env-2"})
+        const byMaintainer = op("SDP_MAINT", "findCiEnvironments").environmentList
+        op("SDP_MAINT", "deleteCiEnvironment", {environmentId: unapproved.environmentId})
         return {
+            shortToken,
+            byMaintainer,
             developer,
             stored,
             withUser,
@@ -156,7 +167,28 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             reporter: op("SDP_REPORTER", "findCiEnvironments")
         }
     },
-    then({developer, stored, withUser, targetWithUser, groupRefused, receiptText, receiptFound, listed, listedText, reporter}) {
+    then({
+        developer,
+        stored,
+        withUser,
+        targetWithUser,
+        groupRefused,
+        receiptText,
+        receiptFound,
+        listed,
+        listedText,
+        reporter,
+        shortToken,
+        byMaintainer
+    }) {
+        shortToken.kind == "Unprocessable"
+        shortToken.message.includes("32 characters")
+        // the target's address is the engine's to give: a Maintainer's, not a Developer's
+        listed.environmentList[0].targetUrl == null
+        byMaintainer.find(env => env.name == "demo").targetUrl == "https://deploy.sdp.example.com"
+        listed.environmentList[0].dataTypes == ["seed", "seed-initial"]
+        listed.environmentList[0].approvalFor == "every"
+        byMaintainer.find(env => env.name == "preview").approvalFor == "unprotected"
         developer.reason == "accessDenied"
         typeof stored.environmentId == "string"
         withUser.kind == "Unprocessable"
@@ -236,6 +268,7 @@ feature("a Developer asks for a deployment and a Reporter is refused; a Maintain
         out.waiting.commitId == ids.head
         out.byDeveloper.reason == "accessDenied"
         out.developerView.deployment.state == "waiting-approval"
+        out.developerView.deployment.approvalRequired == true
         out.developerView.deployment.requestedBy == "sdpdev"
         out.developerView.capabilities.canDecide == false
         out.maintainerView.capabilities.canDecide == true

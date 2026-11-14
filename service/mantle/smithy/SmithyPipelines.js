@@ -983,6 +983,10 @@ kit => {
                 cloneUrl: env.cloneUrl || null,
                 requiredPipeline: env.requiredPipeline || null,
                 approvalRequired: flag(env.approvalRequired),
+                // who waits for an approval: every deployment, or (the engine's rule) one of a branch no rule protects,
+                // which allowedRefs alone lets deploy
+                approvalFor: flag(env.approvalRequired) ? "every" : "unprotected",
+                dataTypes: env.dataTypes ? String(env.dataTypes).split(",").filter(name => name) : [],
                 allowedRefs: env.allowedRefs || null,
                 hasToken: flag(env.hasToken),
                 lastCommitId: env.lastCommitId || null,
@@ -1026,6 +1030,16 @@ kit => {
         const cleared = value => (value === "" ? null : text(value).trim())
         const deployFields = {approverGroupId: null}
         for (const field of ["targetUrl", "cloneUrl", "requiredPipeline"]) if (given(p[field])) deployFields[field] = cleared(p[field])
+        // the data types the target loads of the component's data files, signed in each attestation: names separated
+        // by commas or spaces; empty for the target's defaults
+        if (given(p.dataTypes)) {
+            const names = text(p.dataTypes)
+                .split(/[\s,]+/)
+                .filter(name => name)
+            if (names.length > 20 || !names.every(name => /^[A-Za-z0-9_-]{1,60}$/.test(name)))
+                invalid("dataTypes must be data type names separated by commas")
+            deployFields.dataTypes = names.length ? names.join(",") : null
+        }
         if (deployFields.requiredPipeline && !PIPELINE_NAME.test(deployFields.requiredPipeline))
             invalid("requiredPipeline names no pipeline")
         if (deployFields.targetUrl && withUserInfo(deployFields.targetUrl))
@@ -1033,6 +1047,7 @@ kit => {
         if (deployFields.cloneUrl && withUserInfo(deployFields.cloneUrl))
             invalid("cloneUrl: An address with no user or password in it")
         const token = given(p.token) && p.token !== "" ? String(p.token) : null
+        if (token != null && token.length < 32) invalid("token: The target's token is at least 32 characters")
         const store = () => {
             const out = asCallerMove("store#CiEnvironment", {
                 repositoryId,
@@ -1082,6 +1097,8 @@ kit => {
             refName: d.refName || null,
             componentName: d.componentName || null,
             state: d.statusId,
+            // it waits for an approver once its pipeline passes (its environment's rule, or a branch no rule protects)
+            approvalRequired: flag(d.approvalRequired),
             runNum,
             runPath: runNum ? runPath(r.repo, runNum, null) : null,
             requestedBy: handleOfUser(r, d.requestedByUserId),
