@@ -131,7 +131,9 @@ function classifyPeople(o) {
     const mechType = channel === "MdcSms" ? "CmtTelecomNumber" : "CmtEmailAddress"
     const purposeEnumId = o.purposeEnumId || purposeOf(topic)
     const partyIds = Array.from(new Set(Array.from(o.partyIds || []))).sort(idOrder)
-    const available = segments.inScopeParties(partyIds)
+    // P9: the dispatch's recheck runs with no user and gives its own (disabled or merged only: who the preparer could see was settled
+    // at preparation)
+    const available = o.availableOf ? o.availableOf(partyIds) : segments.inScopeParties(partyIds)
     // the topic's membership in effect at the time, the latest row of each party
     const memberships = new Map()
     for (const row of rowsIn(CLP, "partyId", partyIds, {contactListId: topic.contactListId}, query =>
@@ -629,6 +631,7 @@ const operations = {previewAudience, classifyRecipients}
     buckets,
     reasonTexts,
     classify,
+    classifyPeople,
     evaluateSend,
     purposeOf,
     channelOfList,

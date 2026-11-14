@@ -27,6 +27,12 @@
             <parameter name="consentContactListId"><description>A topic's list (Commerce P9 follow-up: a store's review
                 requests): the purpose is then the recipient's latest consent of it on this list, not their consent as a
                 whole</description></parameter>
+            <!-- Marketing P9 -->
+            <parameter name="consentOrganizationPartyId"><description>With consentContactListId (impl-marketing P9: a Marketing send's
+                recipient): the topic's consent within this organization, Marketing's evidenced rule (the purpose's global or
+                organization row withdrawn, the list row withdrawn or the address's solicitation refused blocks; a granted list or
+                purpose row admits) at each attempt</description></parameter>
+            <parameter name="consentContactMechId"><description>The address the topic's consent is read for (P9)</description></parameter>
             <parameter name="bodyParameters" type="Map"><description>For a source with no build service: the template's
                 parameters, kept with the delivery (never a secret)</description></parameter>
             <parameter name="sendNow" type="Boolean" default="false"/>
@@ -115,7 +121,10 @@
     </service>
     <service verb="resolve" noun="Delivery" allow-remote="false">
         <description>A reviewer's decision on an uncertain delivery: sent (the provider shows it went out), failed, or retry.
-            Needs ADMIN-held MESSAGE_DELIVERY_REVIEW.</description>
+            Needs MESSAGE_DELIVERY_REVIEW (ADMIN's, and Marketing's dispatchers' through BossSetupMarketingData, impl-marketing P9) and,
+            but for a system administrator, a delivery of an organization the reviewer works for (the delivery's own, else its
+            store's; another's, or one of no organization, RECORD_UNAVAILABLE). Keeps who resolved it, when and the note
+            (resolvedByUserId, resolvedDate, resolutionNote).</description>
         <in-parameters>
             <parameter name="deliveryId" required="true"/>
             <parameter name="outcome" required="true"/>
@@ -534,7 +543,7 @@
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('handleBounced', context))</script></actions>
     </service>
     <service verb="find" noun="DeliveryReceipts" allow-remote="false" read-only="true">
-        <description>A delivery's receipt facts (delivered, soft bounce, hard bounce, complaint, each once, with its date and detail) and the reports read for it, beside its hand-off state, for MESSAGE_DELIVERY_REVIEW (every delivery), MESSAGE_SUPPRESSION_REVIEW or a contact administrator (the deliveries of the organizations they work for, every internal one with MARKETING_ALL_ORGANIZATIONS; another's RECORD_UNAVAILABLE); no address (one in a diagnostic shows as [address]).</description>
+        <description>A delivery's receipt facts (delivered, soft bounce, hard bounce, complaint, each once, with its date and detail) and the reports read for it, beside its hand-off state, for MESSAGE_DELIVERY_REVIEW, MESSAGE_SUPPRESSION_REVIEW or a contact administrator (every delivery for a system administrator; else the deliveries of the organizations they work for, every internal one with MARKETING_ALL_ORGANIZATIONS; another's RECORD_UNAVAILABLE); no address (one in a diagnostic shows as [address]).</description>
         <in-parameters>
             <parameter name="deliveryId" required="true"/>
         </in-parameters>

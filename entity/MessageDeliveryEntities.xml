@@ -342,4 +342,14 @@
     </seed-data>
   </entity>
   <!-- ===== end of Marketing P6 ===== -->
+
+  <!-- ===== Marketing P9: the reviewer's resolution of an uncertain delivery (impl-marketing P9; design-marketing §5 RecipientDetail
+    ResolveDelivery): who decided it, when, and the evidence and reason given (resolve#Delivery). ===== -->
+  <extend-entity entity-name="MessageDelivery" package="mantle.party">
+    <field name="resolvedByUserId" type="id"/>
+    <field name="resolvedDate" type="date-time"/>
+    <field name="resolutionNote" type="text-long"><description>The reviewer's evidence and reason for the outcome recorded on an
+      uncertain delivery</description></field>
+  </extend-entity>
+  <!-- ===== end of Marketing P9 ===== -->
 </entities>

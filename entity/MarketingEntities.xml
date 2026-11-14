@@ -690,6 +690,51 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P8 ===== -->
 
+    <!-- ===== Marketing P9: dispatch and delivery (impl-marketing P9; design-marketing §5 SendDetail's control, CampaignDelivery,
+        RecipientDetail, §15.2, §15.3) ===== -->
+    <!-- A send's release and dispatch (mantle.marketing.CampaignSendServices release#Send, run#DueSends, pause#Send, cancel#Send;
+        MarketingDispatch.js): who released it at which approval, whether it was released by an author or approver under the
+        one-person-team flag (selfDispatch, the recipients counted at the release under 500), the communication event the list's
+        rows refer to, the root of the server's own unsubscribe page when the sending profile names no site, and the attachments
+        copied at preparation (P8 review F200: a campaign's file changed after approval never reaches a message). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="preparedAttachmentsJson" type="text-long"><description>The attachments as prepared: [{location, fileName,
+            contentType}], copies of the files made at preparation that no later change touches</description></field>
+        <field name="releasedDate" type="date-time" enable-audit-log="update"/>
+        <field name="releasedByUserId" type="id"/>
+        <field name="releaseDecisionId" type="id"><description>The approval (MarketingDecision) the release went out under</description></field>
+        <field name="selfDispatch" type="text-indicator"><description>Y: released by its author or approver under the one-person-team
+            flag, with fewer than 500 recipients counted at the release</description></field>
+        <field name="releasedCount" type="number-integer"><description>The recipients counted at the release</description></field>
+        <field name="communicationEventId" type="id"><description>The send's CommunicationEvent (the approved subject and body), which
+            each recipient's ContactListCommStatus and unsubscribe token name</description></field>
+        <field name="unsubscribeBaseUrl" type="text-medium"><description>The server's root at the release, for the /u/ page of a sending
+            profile that names no site</description></field>
+        <field name="pausedDate" type="date-time"/>
+        <field name="cancelledDate" type="date-time"/>
+        <field name="cancelReason" type="text-medium" enable-audit-log="update"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="lastDispatchDate" type="date-time"/>
+        <field name="dispatchNote" type="text-medium"><description>Why the last dispatch run handed off nothing (a campaign no longer
+            approved, a sending profile not ready), for the dispatcher</description></field>
+        <relationship type="one" title="Release" related="mantle.marketing.campaign.MarketingDecision">
+            <key-map field-name="releaseDecisionId" related="marketingDecisionId"/></relationship>
+        <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
+    </extend-entity>
+    <!-- A recipient's dispatch: the claim of the worker that holds it (claimKey, until leaseUntilDate: a page claimed again after the
+        lease ends hands off each recipient once, the ledger answering the delivery it holds for the recipient's key), when it was
+        handed off to the ledger (messageDeliveryId), or why it was skipped at dispatch (a withdrawal, a suppression, a changed address,
+        the frequency cap: skipReasonCode, MarketingEligibility.js's reasons). -->
+    <extend-entity entity-name="CampaignRecipient" package="mantle.marketing.campaign">
+        <field name="claimKey" type="text-short"/>
+        <field name="leaseUntilDate" type="date-time"/>
+        <field name="handedOffDate" type="date-time"/>
+        <field name="skipReasonCode" type="text-short"/>
+        <field name="skipDate" type="date-time"/>
+        <index name="CMP_RCPT_DELIVERY"><index-field name="messageDeliveryId"/></index>
+    </extend-entity>
+    <!-- ===== end of Marketing P9 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

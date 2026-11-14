@@ -321,3 +321,65 @@ feature("a source's own subject, body and text go out as given; a promotional de
         promo.length == 0
     }
 })
+
+// Marketing P9: a topic's delivery within an organization (a Marketing send's recipient) reads Marketing's evidenced rule: the purpose
+// granted in the organization admits it without a list row, a global withdrawal refuses it; the same topic delivery queued without an
+// organization keeps the list's own rule (no list row, no consent). The delivery carries its organization.
+feature("a topic's delivery within an organization reads the organization's consent; one without keeps the list's rule", {
+    when() {
+        call("create#mantle.party.Party", {partyId: "MDL_ORG9", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.marketing.contact.ContactList", {
+            contactListId: "MDL_TOPIC",
+            contactListName: "Ledger topic",
+            contactListTypeEnumId: "NEWSLETTER",
+            ownerPartyId: "MDL_ORG9"
+        })
+        for (const [partyId, statusId, organizationPartyId] of [
+            ["MDL_GRANTED", "PconGranted", "MDL_ORG9"],
+            ["MDL_WITHDRAWN", "PconGranted", "MDL_ORG9"]
+        ]) {
+            call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
+            call("create#mantle.party.PartyConsent", {
+                partyId,
+                purposeEnumId: "PcpMarketingEmail",
+                organizationPartyId,
+                statusId,
+                consentDate: new Date(Date.now() - 86400000),
+                sourceEnumId: "PcsForm"
+            })
+        }
+        // a later global withdrawal, which an organization's grant never undoes
+        call("create#mantle.party.PartyConsent", {
+            partyId: "MDL_WITHDRAWN",
+            purposeEnumId: "PcpMarketingEmail",
+            statusId: "PconWithdrawn",
+            consentDate: new Date(Date.now() - 3600000),
+            sourceEnumId: "PcsForm"
+        })
+        const topicDelivery = (eventKey, partyId, organization) =>
+            queue({
+                eventKey,
+                recipientPartyId: partyId,
+                toAddress: partyId.toLowerCase() + "@ledger.example.test",
+                transactional: false,
+                marketingPurposeEnumId: "PcpMarketingEmail",
+                consentContactListId: "MDL_TOPIC",
+                organizationPartyId: "MDL_ORG9",
+                ...(organization ? {consentOrganizationPartyId: "MDL_ORG9"} : {}),
+                sendNow: true
+            })
+        const granted = topicDelivery("spec:topic-org-1", "MDL_GRANTED", true)
+        const withdrawn = topicDelivery("spec:topic-org-2", "MDL_WITHDRAWN", true)
+        const legacy = topicDelivery("spec:topic-list-1", "MDL_GRANTED", false)
+        const row = one("mantle.party.MessageDelivery", {deliveryId: granted.deliveryId})
+        return {granted, withdrawn, legacy, row, consent: JSON.parse(row.consentJson || "{}")}
+    },
+    then({granted, withdrawn, legacy, row, consent}) {
+        granted.stateEnumId == "MdsSent"
+        row.organizationPartyId == "MDL_ORG9"
+        consent.organizationPartyId == "MDL_ORG9"
+        consent.granted == true
+        withdrawn.stateEnumId == "MdsSuppressed"
+        legacy.stateEnumId == "MdsSuppressed"
+    }
+})

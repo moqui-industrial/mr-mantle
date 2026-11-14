@@ -110,4 +110,29 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND_TEST" description="Campaign send test message"
             emailServerId="SYSTEM" subject=""/>
     <!-- ===== end of Marketing P8 ===== -->
+
+    <!-- ===== Marketing P9: dispatch and delivery (impl-marketing P9; design-marketing §5 SendDetail's control, CampaignDelivery, §15.2,
+        §15.3) ===== -->
+    <!-- A recipient's dispatch states beside P8's Selected and Replaced: handed off to the ledger (its delivery holds every attempt and
+        receipt), skipped at dispatch with its reason (a withdrawal, a suppression, a changed address, the frequency cap), or not sent
+        because the send was cancelled first. -->
+    <moqui.basic.StatusItem statusId="CrsHandedOff" statusTypeId="CampaignRecipient" sequenceNum="2" description="Handed off"/>
+    <moqui.basic.StatusItem statusId="CrsSkipped" statusTypeId="CampaignRecipient" sequenceNum="3" description="Skipped at dispatch"/>
+    <moqui.basic.StatusItem statusId="CrsCancelled" statusTypeId="CampaignRecipient" sequenceNum="4" description="Not sent: the send was cancelled"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsHandedOff" transitionName="Hand off"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsSkipped" transitionName="Skip at dispatch"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsReplaced" transitionName="Replace"/>
+    <!-- a send completed with failures sends again when the dispatcher retries its known retryable failures (retry#Recipients) -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsCompletedFailures" toStatusId="CsSending" transitionName="Retry failures"/>
+    <!-- The ledger's source of a send's messages (mantle.marketing.CampaignSendServices build#CampaignDelivery): each recipient's prepared
+        content with their own values, the List-Unsubscribe headers and link of a token made at each attempt for the sending profile's
+        site, the attachments copied at preparation and the send's reply-to; the EmailTemplate it goes out under, whose subject, body
+        and sender each call gives (the sending profile's). A promotional delivery of the send's organization and topic: the ledger
+        checks the recipient's consent within the organization and every suppression at each attempt. -->
+    <moqui.basic.Enumeration enumId="MdsrcCampaignSend" description="Campaign send" sequenceNum="40"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.CampaignSendServices.build#CampaignDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND" description="Campaign send message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- ===== end of Marketing P9 ===== -->
 </entity-facade-xml>
