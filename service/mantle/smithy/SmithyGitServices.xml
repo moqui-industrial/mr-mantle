@@ -66,6 +66,48 @@
             ]]></script>
         </actions>
     </service>
+    <!-- What the framework's hosting REST asks (mr-moqui docs/interfaces/Git-Hosting.md, REST; plans/design-dev-aide.md §21;
+        MoquiConf.xml git-server): who keeps a repository and whether a write may go through the framework's REST, what
+        the server offers a client, and whether an author signed a repository's agreement (SmithyHosting.js). -->
+    <service verb="check" noun="RestWrite" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server rest-write-check-service (the framework's check#GitRestWrite contract): for a repository
+            Smithy has, application smithy and restUrl Smithy's PASS REST of its site
+            (/rest/s1/pass/v1/sites/[siteId]/smithy, on the site's canonical host when it has one); every write
+            through the framework's REST is refused (allowed false, a message naming Smithy's REST), since Smithy's own
+            operations keep its roles, confirmed address, gate and conversation; a read is allowed. Any other repository
+            is allowed, with no application.</description>
+        <implements service="org.moqui.git.GitServices.check#GitRestWrite"/>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").restWrite({repositoryId, operation}))
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="add" noun="HostingOffer" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server offer-service (the framework's add#GitHostingOffer contract): the framework's offer with
+            Smithy's REST for the site a client reaches (application: name smithy, restBase the site's
+            /rest/s1/pass/v1/sites/[siteId]/smithy, siteId, pageUrl), forks true, for the site of the host the request
+            came to, else of the server's own address, else the one published site that mounts Smithy; and Mantle's task
+            source (tasks: kind moqui-rest, path /rest/s1/mantle/my/tasks) when the offer has none. Asked for callers with
+            no credentials too: it names no account.</description>
+        <implements service="org.moqui.git.GitServices.add#GitHostingOffer"/>
+        <actions>
+            <script>offer = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").hostingOffer({offer, userId})</script>
+        </actions>
+    </service>
+    <service verb="check" noun="AuthorSigned" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server agreement-check-service (the framework's check#GitAuthorSigned contract), over
+            SmithyAgreementServices.get#AuthorSigned: for a repository Smithy has, whether the author (authorUserId or
+            authorEmail) has signed its agreement file at the default branch, whether the repository requires it, what is
+            missing, and signUrl, the file's edit page on the default branch. known is false for any other
+            repository.</description>
+        <implements service="org.moqui.git.GitServices.check#GitAuthorSigned"/>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").authorSignedCheck({repositoryId, authorUserId, authorEmail}))
+            ]]></script>
+        </actions>
+    </service>
     <service verb="read" noun="Component" authenticate="anonymous-all" allow-remote="false">
         <description>After a repository's default branch moved (the ref-update gitECA rule SmithyComponent): reads the
             component.xml at the root of its new commit and keeps the component's name, version and depends-on names on

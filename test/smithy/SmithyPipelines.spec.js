@@ -455,7 +455,7 @@ feature("each new head of an outside merge request waits for a Maintainer; an ap
     }
 })
 
-feature("an artifact of a held merge request's run is sent to its author through send#RunArtifact and Not Found to a stranger", {
+feature("an artifact of a held merge request's run is its author's to download (by its ci-artifact:// location with no response to write) and Not Found to a stranger", {
     when() {
         const mr = lib.row("moqui.resource.GitMergeRequest", {repositoryId: ids.repositoryId, sourceRef: "feature"})
         const run = Array.from(
@@ -481,6 +481,15 @@ feature("an artifact of a held merge request's run is sent to its author through
             createdDate: ec.user.nowTimestamp
         })
         const author = op("SPL_DEV", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
+        // the authority's whole answer, as the PASS gRPC transport gets it: the file to stream by its location
+        const download = lib.as("SPL_DEV", () =>
+            ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                siteId: SITE,
+                operation: "downloadArtifact",
+                input: {repositoryId: ids.repositoryId, artifactId: "SPL_ARTIFACT"},
+                sessionChecked: true
+            })
+        ).download
         const stranger = op("SPL_STRANGER", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
         // a running job's log: more while the chunk limit cut the answer
         for (const chunkSeq of [1, 2])
@@ -492,17 +501,21 @@ feature("an artifact of a held merge request's run is sent to its author through
         const off = op("SPL_DEV", "downloadArtifact", {artifactId: "SPL_ARTIFACT"})
         const offLog = op("SPL_DEV", "getJobLog", {runNum: run.runNum, jobRunId: job.jobRunId})
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {pipelinesEnabled: "Y"})
-        return {author, stranger, off: off.kind, offLog: offLog.kind, size: content.length, cutLog, wholeLog}
+        return {author, download, stranger, off: off.kind, offLog: offLog.kind, size: content.length, cutLog, wholeLog}
     },
-    then({author, stranger, off, offLog, size, cutLog, wholeLog}) {
+    then({author, download, stranger, off, offLog, size, cutLog, wholeLog}) {
         cutLog.chunkList.length == 1
         cutLog.more == true
         wholeLog.chunkList.length == 2
         wholeLog.more == false
         off == "NotFound"
         offLog == "NotFound"
-        // the authority's answer: the file was sent as the response (no location to stream), its name and size
+        // the authority's answer with no response to write (the PASS gRPC path): the artifact's ci-artifact:// location
+        // for the transport to stream, an attachment, with its name and size; the location stays out of the result
         author.location == null
+        download.location == "ci-artifact://SPL_ARTIFACT/dist.tar.gz"
+        download.disposition == "attachment"
+        download.filename == "dist.tar.gz"
         author.file.filename == "dist.tar.gz"
         author.file.size == size
         stranger.kind == "NotFound"

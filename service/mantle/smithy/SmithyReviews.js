@@ -70,7 +70,7 @@ kit => {
     /* An account by its profile, when the caller is shown that profile. */
     function profileView(siteId, partyId) {
         const profile = partyId ? one(S + "PublicSiteProfile", {siteId, partyId}) : null
-        return profile && core.profileShown(profile, core.actor())
+        return profile && core.authorShown(profile, core.actor())
             ? {handle: profile.handle, displayName: profile.displayName || "", avatarUrl: null}
             : null
     }
@@ -374,16 +374,23 @@ kit => {
                 )
         }
         const mergeRequestList = []
+        const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
         for (const mr of shown) {
             const r = byRepository.get(mr.repositoryId)
             const held = heldRequest(r, mr, a)
-            if (held)
-                mergeRequestList.push(
-                    requestView(r, held, {
-                        approvalCount: OPEN.includes(mr.statusId) ? approvalsOf(mr.mergeRequestId) : null,
-                        checkState: (states.get(mr.repositoryId) || {})[mr.headCommitId] || null
-                    })
-                )
+            if (!held) continue
+            const view = requestView(r, held, {
+                approvalCount: OPEN.includes(mr.statusId) ? approvalsOf(mr.mergeRequestId) : null,
+                checkState: (states.get(mr.repositoryId) || {})[mr.headCommitId] || null
+            })
+            // the stable shape a client such as the Dev AIDE reads (design-dev-aide §21.4): number, title, state,
+            // authorHandle and url, the page on the site's canonical host (null with none)
+            mergeRequestList.push({
+                ...view,
+                number: view.mergeRequestNum,
+                authorHandle: view.author?.handle || null,
+                url: apps.pageUrl(r.repo.siteId, "smithy", "/" + r.repo.repositoryPath + "/-/merge-requests/" + view.mergeRequestNum)
+            })
         }
         return {mergeRequestList, counts, nextCursor: found.length > pg.limit ? pg.next(pg.offset + pg.limit) : null}
     }
@@ -1222,7 +1229,10 @@ kit => {
             })
             forum.gateCommit(gated)
             forum.audit(p.siteId, null, "repository", made.repositoryId, "forkRepository", r.repo.repositoryPath, null, 1)
-            return made
+            // where the fork clones (the framework's addresses, as get#GitCloneUrls gives them), so a client adds it as a
+            // remote (design-dev-aide §21.4)
+            const urls = hosted(GIT + "get#GitCloneUrls", {repositoryId: made.repositoryId}).out || {}
+            return {...made, cloneUrls: {httpsUrl: urls.httpsUrl || null, sshUrl: urls.sshUrl || null}}
         })
     }
     methods.findForks = p => {

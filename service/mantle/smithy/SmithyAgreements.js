@@ -252,9 +252,26 @@ kit => {
             addresses.set(address, partyId)
             return partyId
         }
+        /* The account a github.com noreply address is of, in an imported history: by the id before the + (a login can be
+           renamed and taken by another user, the id not), else by the login only for a row with no id known (an
+           id-less address names nobody whose id is known); github.com's rows only. An account that is no member of the
+           site (or suspended, or disabled) names nobody, as addressParty's rule is; an unclaimed placeholder of the
+           import, which is no member, is its GitHub user's. */
         function loginParty(email) {
-            const github = /^(?:[0-9]+\+)?([^@+]+)@users\.noreply\.github\.com$/.exec(text(email).trim().toLowerCase())
-            return github ? one(M + "SmithyAccount", {siteId, githubLogin: github[1]})?.partyId || null : null
+            const github = /^(?:([0-9]+)\+)?([^@+]+)@users\.noreply\.github\.com$/.exec(text(email).trim().toLowerCase())
+            if (!github) return null
+            const ofGithub = row => !!row && (row.githubHost || "github.com") === "github.com"
+            let row = github[1]
+                ? rows(M + "SmithyAccount", {siteId, githubUserId: github[1]}, 20).find(ofGithub) || null
+                : null
+            if (!row) {
+                const byLogin = one(M + "SmithyAccount", {siteId, githubLogin: github[2]})
+                row = ofGithub(byLogin) && !byLogin.githubUserId ? byLogin : null
+            }
+            if (!row?.partyId) return null
+            if (row.placeholder === "Y") return row.partyId
+            const account = rows("moqui.security.UserAccount", {partyId: row.partyId}, 5).find(user => user.disabled !== "Y")
+            return account && inSite(row.partyId) ? row.partyId : null
         }
         const brought = new Map()
         function pushersOf(commitId) {

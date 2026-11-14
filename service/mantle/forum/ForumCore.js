@@ -1104,6 +1104,10 @@ function asUser(username, work) {
         ? one('moqui.security.UserAccount', { username })
         : null
     const previous = ec.user.username
+    // a sign-out marks the account hasLoggedOut, which ends its sessions in every browser: what the account had is put
+    // back with it, in one transaction (the one in place, which may hold the account's row), so work done as the account
+    // (a job's step each minute) signs nobody out
+    const hadLoggedOut = account?.hasLoggedOut === 'Y' ? 'Y' : 'N'
     const signedIn =
         !!account &&
         ec.user.internalLoginUser(account.username) === true &&
@@ -1116,10 +1120,18 @@ function asUser(username, work) {
         return work()
     } finally {
         if (signedIn || ec.user.username !== previous) {
-            if (previous) {
-                if (previous !== ec.user.username)
-                    ec.user.internalLoginUser(previous)
-            } else ec.user.logoutUser()
+            ec.transaction.runUseOrBegin(null, 'Signing out of ' + username + ' failed', () => {
+                if (previous) {
+                    if (previous !== ec.user.username)
+                        ec.user.internalLoginUser(previous)
+                } else ec.user.logoutUser()
+                if (signedIn && account.username !== previous)
+                    ec.entity
+                        .find('moqui.security.UserAccount')
+                        .condition('userId', account.userId)
+                        .disableAuthz()
+                        .updateAll({ hasLoggedOut: hadLoggedOut })
+            })
         }
     }
 }

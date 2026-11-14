@@ -826,6 +826,12 @@ function profileShown(profile, a) {
     const access = siteAccess(profile.siteId, a)
     return profile.discoverability === "public" || (profile.discoverability === "members" && access.joined)
 }
+/* Whether a profile is shown as the author of a record the caller reads: as profileShown, and a placeholder of the
+   GitHub import (§18.2), which is no member and not discoverable (no handle page, list or search names it) but is shown
+   with what it wrote. */
+function authorShown(profile, a) {
+    return profileShown(profile, a) || (!!profile && placeholder(profile.siteId, profile.partyId))
+}
 /* Whether a handle's page is there for the caller: by its profile, or by a repository of its namespace that the caller
    may view. */
 function accountShown(profile, a) {
@@ -996,6 +1002,7 @@ function resolvePath(siteId, path) {
     splitRefPath,
     refOf,
     profileShown,
+    authorShown,
     accountShown,
     resolvePath,
     githubSection,

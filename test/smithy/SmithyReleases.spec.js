@@ -136,6 +136,15 @@ feature("an asset downloads for who views the release, and is Not Found to a str
             operationId: "sst-asset-2"
         })
         const open = op(null, "downloadReleaseAsset", {assetId: asset.assetId})
+        // as the PASS gRPC transport gets it: the run's artifact by its ci-artifact:// location
+        const download = lib.as(null, () =>
+            ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                siteId: lib.SITE7,
+                operation: "downloadReleaseAsset",
+                input: {repositoryId: ids.repositoryId, assetId: asset.assetId},
+                sessionChecked: true
+            })
+        ).download
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {visibilityEnumId: "SmvPrivate"})
         let closed, maintainer
         try {
@@ -149,12 +158,13 @@ feature("an asset downloads for who views the release, and is Not Found to a str
             image,
             taken,
             open,
+            download,
             closed,
             maintainer,
             artifact: lib.row("moqui.resource.GitRunArtifact", {artifactId: "SST_ARTIFACT"})
         }
     },
-    then({asset, image, taken, open, closed, maintainer, artifact}) {
+    then({asset, image, taken, open, download, closed, maintainer, artifact}) {
         // the asset names the run's artifact, not a copy, and the artifact is kept past its expiry while it does
         asset.contentLocation == null
         asset.artifactId == "SST_ARTIFACT"
@@ -165,6 +175,8 @@ feature("an asset downloads for who views the release, and is Not Found to a str
         taken.reason == "nameTaken"
         open.file.filename == "dist.tar.gz"
         open.sha256 == ids.sha256
+        download.location == "ci-artifact://SST_ARTIFACT/dist.tar.gz"
+        download.disposition == "attachment"
         closed.kind == "NotFound"
         maintainer.file.filename == "dist.tar.gz"
     }

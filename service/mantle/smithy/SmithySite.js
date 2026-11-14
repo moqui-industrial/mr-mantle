@@ -1130,11 +1130,18 @@ kit => {
             size: Number(asset.sizeBytes || 0),
             inline: false
         }
-        // a run's artifact: sent from the engine's content as this request's response (send#RunArtifact)
+        // a run's artifact: sent from the engine's content as this request's response (send#RunArtifact) under the REST
+        // servlet; over the PASS gRPC path (no response here) its read-only ci-artifact:// location, which the transport
+        // opens as the authority. Never inline.
         if (!asset.contentLocation && asset.artifactId) {
-            const sent = engine("send#RunArtifact", {artifactId: asset.artifactId, inline: false, includeHidden: true})
-            if (!sent) missing()
-            return {sent: true, file, sha256: asset.sha256 || null}
+            if (ec.web?.response) {
+                const sent = engine("send#RunArtifact", {artifactId: asset.artifactId, inline: false, includeHidden: true})
+                if (!sent) missing()
+                return {sent: true, file, sha256: asset.sha256 || null}
+            }
+            const location = kit.artifactLocation(asset.artifactId, engine)
+            if (!location) missing()
+            return {file, sha256: asset.sha256 || null, location}
         }
         if (!asset.contentLocation) missing()
         return {
@@ -1729,6 +1736,8 @@ kit => {
         })
         return {redirectId, created: true}
     }
+    // the GitHub import's old path (SmithyImport.js finish) is written by the same rules
+    kit.putRedirect = putRedirect
     methods.storeRedirect = p => {
         siteOwner(p.siteId, true)
         const partyId = me()
@@ -1850,7 +1859,9 @@ kit => {
         const base = mountBase(siteId)
         const repositoryPath = row && text(row.targetPath).startsWith(base + "/") ? row.targetPath.slice(base.length + 1) : null
         const repo = repositoryPath ? one(M + "SmithyRepository", {siteId, repositoryPath}) : null
-        const section = repo ? core.githubSection(repo, given.slice(2)) : null
+        // a repository the caller may not view is not there: no issue or merge request number of it is told
+        if (!repo || !core.repositoryViewable(repo, core.actor())) return null
+        const section = core.githubSection(repo, given.slice(2))
         return section ? {targetPath: base + "/" + repo.repositoryPath + "/-/" + section, status: 301} : null
     }
     methods.resolveRedirect = p => {

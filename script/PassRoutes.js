@@ -160,7 +160,7 @@
     ['POST', 'imports/{importId}/reconcile', 'reconcileImport'],
     ['POST', 'imports/{importId}/approval', 'approveImport'],
     ['POST', 'imports/{importId}/activate', 'activateImport'],
-    ['POST', 'imports/{importId}/cancel', 'cancelGitHubImport'],
+    ['POST', 'imports/{importId}/cancel', 'cancelImport'],
     ['GET', 'permalinks', 'resolvePermalink'],
     ['GET', 'billing/invoices', 'findInvoices'],
     ['GET', 'billing/invoice', 'getInvoice'],

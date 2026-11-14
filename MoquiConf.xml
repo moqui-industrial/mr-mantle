@@ -17,8 +17,14 @@
         public URL) -->
     <!-- A hidden repository (or one of a site without Smithy) sends no webhook and pushes to no mirror
         (SmithyGitServices.check#Outbound) -->
+    <!-- A repository Smithy keeps is written through Smithy's REST, not the framework's, and the hosting offer and the
+        agreement check name Smithy's REST to a client such as the Dev AIDE (mr-moqui plans/design-dev-aide.md §21;
+        SmithyGitServices check#RestWrite, add#HostingOffer, check#AuthorSigned) -->
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
             outbound-check-service="mantle.smithy.SmithyGitServices.check#Outbound"
+            rest-write-check-service="mantle.smithy.SmithyGitServices.check#RestWrite"
+            offer-service="mantle.smithy.SmithyGitServices.add#HostingOffer"
+            agreement-check-service="mantle.smithy.SmithyGitServices.check#AuthorSigned"
             reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
             merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
     <!-- Smithy decides whether a pipeline run may start, waits or is refused, its trust, owner and pool (design-smithy §10,

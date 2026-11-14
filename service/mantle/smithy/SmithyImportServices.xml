@@ -11,10 +11,12 @@
             group's Owner with a confirmed address or an operator: into a repository of the group (repositoryId; one with
             issues or merge requests the import did not make is refused, numbersTaken, since numbers are kept) or a new one
             (slug, as wide as the group). token, a GitHub token that may read the repository, is kept encrypted for the run
-            and dropped when it ends. options: issues and pullRequests (both by default). GitHub is asked for the
-            repository now: sourceRefused (Unprocessable) when it refuses the token or has no such repository. Conflict
-            (importActive) while a run of the same source or into the same repository is active. The run then goes a step
-            at a time (run#Import). Creates take operationId.</description>
+            and dropped when it ends; the receipt keeps no trace of it. options: issues and pullRequests (both by default),
+            and publishPrivate, without which a repository that is private on GitHub is refused (policyRefused) into a
+            target wider than private. GitHub is asked for the repository first, before anything is locked or written:
+            sourceRefused (Unprocessable) when it refuses the token or has no such repository. Conflict (importActive)
+            while a run of the same source or into the same repository is active; limitReached past 2 active imports of
+            the account or 5 of the site. The run then goes a step at a time (run#Import). Creates take operationId.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("startGitHubImport", input)</script></actions>
@@ -47,7 +49,8 @@
     </service>
     <service verb="cancel" noun="Import" authenticate="anonymous-all" allow-remote="false">
         <description>Stop an import where it is, with expectedRevision; its token is dropped. What it made stays, and it
-            can be resumed with a token.</description>
+            can be resumed with a token; a merge request of the git host a failed item left open (no conversation) is
+            closed.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("cancelGitHubImport", input)</script></actions>
@@ -109,17 +112,32 @@
         ]]></script></actions>
     </service>
     <service verb="run" noun="Imports" authenticate="false" allow-remote="false" transaction="ignore">
-        <description>For the smithy_run_imports job: a step of each import that is due, as the account that started it
-            (logged in without a password for the step); one whose account is gone fails. Each stands alone.</description>
+        <description>For the smithy_run_imports job: a step of each import that is due (its waitingUntil and leaseUntil
+            past, read by the query), at most one of an account and two of a site in a pass, as the account that started it
+            (ForumCore.asUser: signed in without a password for the step and out again without ending its own sessions);
+            one whose account is gone or cannot sign in fails (accessLost) and its token is dropped. Each stands
+            alone.</description>
         <out-parameters><parameter name="stepped" type="Integer"/></out-parameters>
         <actions><script>stepped = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").runImports().stepped</script></actions>
     </service>
     <service verb="handle" noun="ExternalLink" authenticate="false" allow-remote="false">
         <description>For the SmithyClaimGithubPlaceholder rule (entity/Smithy.eecas.xml): after the commit of the account,
-            in a transaction of its own, claim#GithubAccount. Never fails the write: a failure is logged.</description>
+            in a transaction of its own, claim#GithubAccount, only when the write is a sign-in's (the request is the
+            framework's /sso/ callback, where the provider's id was just proven): an administrator's edit of
+            externalUserId, a data load or any other write claims nothing. Until the framework calls a service after a
+            sign-in that links an external identity, this rule is the trigger. Never fails the write: a failure is
+            logged.</description>
         <in-parameters><parameter name="userId"/></in-parameters>
         <actions><script><![CDATA[
             if (!userId) return
+            // the path of the request that wrote the account: a sign-in's callback is under /sso/
+            let path = ""
+            try {
+                path = String(ec.web?.request?.requestURI || ec.web?.requestUrl || "").replace(/^https?:\/\/[^/]+/i, "")
+            } catch (err) {
+                path = ""
+            }
+            if (!/^\/sso\//.test(path)) return
             ec.message.pushErrors()
             try {
                 const name = "mantle.smithy.SmithyImportServices.claim#GithubAccount"
@@ -143,8 +161,11 @@
         <description>An account whose sign-in through a GitHub provider (an OauthFlow of type OctGitHub) linked a GitHub id
             (UserAccount.externalUserId) claims, in each site, the import's placeholder of that id: the account takes its
             GitHub login (SmithyAccount.githubLogin and githubUserId, so the agreement counts its imported commits) and its
-            posts, issues, merge requests, assignments and reactions; the placeholder's profile ends. Safe to run twice;
-            nothing for another provider.</description>
+            posts, issues, merge requests, assignments and reactions; the placeholder's profile ends. Only a placeholder of
+            the GitHub the flow signs in with (its addresses all github.com's defaults, or all on the placeholder's
+            githubHost), and only in a site where the account is an active member and not suspended; each site in a
+            transaction of its own, one that fails logged and left. Safe to run twice; nothing for another
+            provider.</description>
         <in-parameters><parameter name="userId" required="true"/></in-parameters>
         <out-parameters><parameter name="claimed" type="Integer"/></out-parameters>
         <actions><script>claimed = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").claimGithub(userId).claimed</script></actions>

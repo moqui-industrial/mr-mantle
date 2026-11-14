@@ -73,6 +73,24 @@ const TOKEN_WRITES = [
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
 ]
+/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4, §21.5, §21.8: the Dev
+   AIDE connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review
+   threads (getMergeRequestChanges answers them) and pipeline reads. A request whose user came by any other login key (an
+   access token, a session's key) calls no PASS operation (mr-pass plan/design-smithy.md §5.5); the key's account has
+   its normal rights, and a write is idempotent by its operationId as a page's is. */
+const APP_KEY_OPERATIONS = [
+    'findMergeRequests',
+    'getMergeRequest',
+    'createMergeRequest',
+    'forkRepository',
+    'getAgreement',
+    'getMergeRequestChanges',
+    'createReviewComment',
+    'resolveReviewThread',
+    'getPipelineRun',
+    'getJobRun',
+    'getJobLog',
+]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
 const CLIENT_READS = [
@@ -244,6 +262,25 @@ function asSystem(work) {
         if (!was) ec.artifactExecution.enableAuthz()
     }
 }
+/* The kind of the current user's unexpired login key `key`: device (an installed app's: a UserLoginKey with a deviceName,
+   as /sso/appToken and a REST login with deviceName make it), token (an access token: a description), session (any other,
+   getLoginKey's), or null when it is no such key of the current user. A key is found by its stored form, the SHA-256 of
+   the conf's default login-key hash; under another hash type no key is found, so the request is refused. */
+function keyKind(key) {
+    const userId = ec.user.userId
+    if (!key || !userId) return null
+    const row = asSystem(() =>
+        ec.entity
+            .find('moqui.security.UserLoginKey')
+            .condition({ loginKey: ec.resource.digestText(String(key), 'sha256') })
+            .one(),
+    )
+    if (!row || row.userId !== userId) return null
+    if (row.thruDate && ec.user.timestampMillis(row.thruDate) <= Date.now()) return null
+    if (row.deviceName) return 'device'
+    if (row.description) return 'token'
+    return 'session'
+}
 const callService = (name, input) =>
     ec.service.sync().throwOnError(true).name(name).parameters({ input }).call()
         .result
@@ -282,7 +319,9 @@ function envelope(error) {
 }
 /* One operation. p: {operation, siteId, input, delegation (the bearer credential), clientId, clientSecret,
    clientVerified (the transport authenticated the client: the gRPC listener's secret or the edge link), visitorAddress
-   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token)}.
+   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token, or the
+   request came with a login key), headerKey (the login key of the request's api_key or login_key header), headerLogin
+   (the session's user came by such a header)}.
    Answers {result} (with download: {location, contentType, filename, disposition} for a file, or sent: true when the
    operation sent the file as the response itself) or {error}. */
 function handle(p) {
@@ -305,6 +344,16 @@ function run(p) {
         clientId = String(p.clientId || ''),
         input = { ...(p.input || {}) }
     if (!siteId) fail('NotFound', 'Resource not found')
+    // A user who came by a login key calls only the installed app's operations, and only with a device's key: an access
+    // token is for git and the framework's REST (design-smithy §5.5), and a session a key made carries no more
+    if (
+        (p.headerKey || p.headerLogin) &&
+        (keyKind(p.headerKey) !== 'device' || !APP_KEY_OPERATIONS.includes(operation))
+    )
+        fail(
+            'Unauthorized',
+            "accessDenied: A login key calls only an installed app's operations, and an access token none; sign in to the site",
+        )
     const registered =
         !!clientId &&
         account().clientRegistered(
@@ -477,6 +526,9 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     SSO_ACTIONS,
     // Shop P4: the list PassApi.js and PASS's Transport.js keep equal
     TOKEN_WRITES,
+    // the Dev AIDE's operations by an installed app's key, and the kind of a key
+    APP_KEY_OPERATIONS,
+    keyKind,
     // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
     downloadCache,
 })

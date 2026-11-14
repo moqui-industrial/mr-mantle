@@ -702,8 +702,9 @@ kit => {
     /* An artifact or a report as a download, sent as this request's response by the engine (send#RunArtifact: streamed
        from its content with Range, ETag and If-Range, nothing copied). Who may read it is decided first from the rows
        alone: the upload's run must be of this repository, its job of that run, and the run one the caller reads; a
-       cache, another repository's upload and a repository whose pipelines are off are Not Found. Answers {sent, file,
-       sha256}: the response is written, so the transport writes nothing more. */
+       cache, another repository's upload and a repository whose pipelines are off are Not Found. Under the REST servlet
+       answers {sent, file, sha256}: the response is written, so the transport writes nothing more; with no response (the
+       PASS gRPC path) {file, sha256, location}, the artifact's ci-artifact:// location the transport streams. */
     methods.downloadArtifact = p => {
         const r = viewed(p)
         pipelinesShown(r)
@@ -718,19 +719,39 @@ kit => {
         if (!visible(r, owning, a)) missing()
         const report = artifact.artifactKind === "report"
         const fileName = text(artifact.name) + (report ? "" : ".tar.gz")
-        const {problem} = engine("send#RunArtifact", {artifactId: artifact.artifactId, inline: false, includeHidden: true})
-        if (problem != null) missing()
-        return {
-            sent: true,
-            file: {
-                filename: fileName.replace(/[^A-Za-z0-9._-]/g, "_") || "artifact",
-                mimeType: report ? "application/xml" : "application/gzip",
-                size: number(artifact.sizeBytes),
-                inline: false
-            },
-            sha256: artifact.sha256 || null
+        const file = {
+            filename: fileName.replace(/[^A-Za-z0-9._-]/g, "_") || "artifact",
+            mimeType: report ? "application/xml" : "application/gzip",
+            size: number(artifact.sizeBytes),
+            // never inline: a job's output is whatever its commit wrote (a report is XML, an active type)
+            inline: false
         }
+        // the REST servlet's request: the engine sends it as this response, with Range, ETag and If-Range
+        if (ec.web?.response) {
+            const {problem} = engine("send#RunArtifact", {artifactId: artifact.artifactId, inline: false, includeHidden: true})
+            if (problem != null) missing()
+            return {sent: true, file, sha256: artifact.sha256 || null}
+        }
+        // over the PASS gRPC path (and any caller with no response): the artifact's read-only ci-artifact:// location,
+        // which the transport opens as the authority (Pipelines.md, An artifact's location)
+        const location = artifactLocation(artifact.artifactId, engine)
+        if (!location) missing()
+        return {file, sha256: artifact.sha256 || null, location}
     }
+    /* An artifact's ci-artifact:// location, as get#RunArtifact's map has it (the engine's own check, a hidden run's with
+       authorization off); null when the engine does not find it. read: the module's engine call ({out, problem}, or
+       out alone). */
+    function artifactLocation(artifactId, read) {
+        const answer = read("get#RunArtifact", {artifactId, maxBytes: 1, includeHidden: true})
+        const out = answer && "problem" in answer ? (answer.problem == null ? answer.out : null) : answer
+        const found = out?.artifact
+        if (!found) return null
+        if (found.location) return text(found.location)
+        // the location's form (Pipelines.md): the id, and the name it is sent under with no path separator in it
+        const fileName = text(found.fileName) || text(found.name) + (found.artifactKind === "report" ? "" : ".tar.gz")
+        return "ci-artifact://" + artifactId + (fileName ? "/" + fileName.replace(/[/\\]/g, "_") : "")
+    }
+    kit.artifactLocation = artifactLocation
 
     // ===== moves =====
     /* A writer with a role on a repository whose pipelines are on: {r, partyId}. */

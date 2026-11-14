@@ -98,12 +98,20 @@ kit => {
         [360, "red"]
     ]
     const SOURCE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/
+    const sourceValid = source => SOURCE.test(source) && source.split("/").every(segment => segment !== "." && segment !== "..")
     const HEX40 = /^[0-9a-f]{40}$/
     const PAGE = 100
     const BUDGET = 10
     const LEASE_MS = 10 * 60000
     const REPORT_LIMIT = 500
     const MAX_ERRORS = 5
+    /* The active imports an account, and a site, may have at once; the placeholders one run may make; and the runs the
+       job steps of one account, and of one site, in a pass. */
+    const ACTIVE_PER_ACCOUNT = 2
+    const ACTIVE_PER_SITE = 5
+    const PLACEHOLDERS_PER_RUN = 5000
+    const STEPPED_PER_ACCOUNT = 1
+    const STEPPED_PER_SITE = 2
     const NOT_CARRIED_TEXT = "(This text was not carried: a rule of this site refused it.)"
     const given = value => value !== undefined && value !== null && value !== ""
     const lower = value => text(value).trim().toLowerCase()
@@ -193,6 +201,24 @@ kit => {
         if (until != null) until = Math.max(until, millis(now()) + 1000)
         return {limited, until}
     }
+    /* A GitHub host as placeholders record it: lower case, without its api. (api.github.com is github.com). */
+    const normalHost = host => lower(host).replace(/\.$/, "").replace(/^api\./, "")
+    const hostOf = url => {
+        const found = /^https?:\/\/([^/:?#@]+)(?::\d+)?(?:[/?#]|$)/i.exec(text(url).trim())
+        return found ? normalHost(found[1]) : null
+    }
+    /* The GitHub the API reads from: github.com for api.github.com and for recorded responses, else the Enterprise
+       Server's host. */
+    const apiHost = () => (recorded(apiBase()) ? "github.com" : hostOf(apiBase()) || "github.com")
+    /* A login as SmithyAccount keeps it: github.com's as it is, another host's as login@host. */
+    const loginKey = (login, host) => (host === "github.com" ? login : login + "@" + host)
+    const hostMatches = (row, host) => (row?.githubHost || "github.com") === host
+    /* A token never shows in what is reported or logged. */
+    const scrub = (ctx, value) => {
+        let out = text(value)
+        if (ctx?.token && ctx.token.length >= 4) out = out.split(ctx.token).join("[token]")
+        return out.replace(/(https?:\/\/)[^/@\s]*@/gi, "$1[credential]@")
+    }
     const hasNext = response => /rel="next"/.test(response.headers.link || "")
     const repoApi = run => {
         const [owner, name] = text(run.sourceRepository).split("/")
@@ -235,14 +261,16 @@ kit => {
     }
     function optionsOf(value) {
         if (value == null) return {issues: true, pullRequests: true}
-        if (typeof value !== "object" || Array.isArray(value)) invalid("options names issues and pullRequests")
-        for (const name of Object.keys(value))
-            if (!["issues", "pullRequests"].includes(name)) invalid("options names issues and pullRequests")
+        const NAMES = "options names issues, pullRequests and publishPrivate"
+        if (typeof value !== "object" || Array.isArray(value)) invalid(NAMES)
+        for (const name of Object.keys(value)) if (!["issues", "pullRequests", "publishPrivate"].includes(name)) invalid(NAMES)
         const out = {
             issues: value.issues == null ? true : flag(value.issues),
             pullRequests: value.pullRequests == null ? true : flag(value.pullRequests)
         }
         if (!out.issues && !out.pullRequests) invalid("options: Import issues, pull requests or both")
+        // the Owner's word that a private GitHub repository's issues may be shown wider than to its own members
+        if (flag(value.publishPrivate)) out.publishPrivate = true
         return out
     }
 
@@ -251,20 +279,49 @@ kit => {
         const g = ownerOf(p.siteId, p.groupId)
         const {partyId, access} = writer(p.siteId)
         const source = text(p.sourceRepository).trim()
-        if (!SOURCE.test(source)) invalid("nameInvalid[sourceRepository]: Name a GitHub repository as owner/name")
+        if (!sourceValid(source)) invalid("nameInvalid[sourceRepository]: Name a GitHub repository as owner/name")
         const token = text(p.token).trim()
         if (!token || token.length > 1000) invalid("token: A GitHub token that may read the repository is required")
         const options = optionsOf(p.options)
-        return receipt(p, "startGitHubImport", () => {
+        // GitHub is asked before anything is locked or written: a slow answer holds no lock of the site's
+        const answer = request(repoApi({sourceRepository: source}), token)
+        const limit = limitOf(answer)
+        if (answer.status === 401) invalid("sourceRefused: GitHub refused the token")
+        if (answer.status !== 200 && !limit.limited)
+            invalid("sourceRefused: GitHub has no repository " + source + " that the token may read")
+        const facts = answer.status === 200 && answer.body ? answer.body : {}
+        const sourcePrivate = facts.private === true || (!!facts.visibility && facts.visibility !== "public")
+        // the receipt keeps no trace of the token, not even its hash
+        return receipt({...p, token: undefined}, "startGitHubImport", () => {
+            // what one account, and one site, has running at once
+            const running = Array.from(find(RUN, {siteId: p.siteId}).condition("statusId", "in", ACTIVE).limit(200).list())
+            if (running.filter(run => run.startedByPartyId === partyId).length >= ACTIVE_PER_ACCOUNT)
+                invalid("limitReached: You have as many imports running as one account may; wait for one to end")
+            if (running.length >= ACTIVE_PER_SITE)
+                invalid("limitReached: This site has as many imports running as it allows; try again later")
             let repositoryId
+            let createdByImport = false
             if (given(p.repositoryId)) {
                 const r = core.repository(p.repositoryId, p.siteId)
                 if (!r.chain.some(group => group.groupId === g.group.groupId))
                     invalid("repositoryId: The repository is not in this group")
                 core.requireRole(r, "SmrOwner")
                 if (r.git.archivedDate) fail("Conflict", "repositoryArchived: This repository is archived")
+                if (sourcePrivate && r.visibility < 3 && !options.publishPrivate)
+                    invalid(
+                        "policyRefused: " +
+                            source +
+                            " is private on GitHub and this repository is wider; import into a private one, or say publishPrivate"
+                    )
                 repositoryId = r.repo.repositoryId
             } else {
+                if (sourcePrivate && g.visibility < 3 && !options.publishPrivate)
+                    invalid(
+                        "policyRefused: " +
+                            source +
+                            " is private on GitHub and this group is wider; import into a private group, or say publishPrivate"
+                    )
+                createdByImport = true
                 lockNames(p.siteId)
                 repositoryId = makeRepository({
                     siteId: p.siteId,
@@ -291,12 +348,6 @@ kit => {
                     "Conflict",
                     "numbersTaken: The repository has issues or merge requests of its own; import into one that has none"
                 )
-            const answer = request(repoApi({sourceRepository: source}), token)
-            const limit = limitOf(answer)
-            if (answer.status === 401) invalid("sourceRefused: GitHub refused the token")
-            if (answer.status !== 200 && !limit.limited)
-                invalid("sourceRefused: GitHub has no repository " + source + " that the token may read")
-            const facts = answer.status === 200 && answer.body ? answer.body : {}
             const importId = ec.entity.sequencedIdPrimary(RUN, 0, 50)
             create(RUN, {
                 importId,
@@ -311,7 +362,9 @@ kit => {
                 cursorJson: JSON.stringify({
                     fullName: text(facts.full_name) || source,
                     cloneUrl: text(facts.clone_url) || null,
-                    defaultBranch: text(facts.default_branch) || null
+                    defaultBranch: text(facts.default_branch) || null,
+                    // importedHistory is set only on a repository the import made
+                    createdByImport
                 }),
                 countsJson: "{}",
                 reportJson: JSON.stringify({items: [], notCarried: {}}),
@@ -406,9 +459,32 @@ kit => {
                 finishedAt: now(),
                 revision: Number(run.revision || 1) + 1
             })
+            closeLeftovers(run)
         }
         return {stage: STAGE_CODES[run.statusId], revision: Number(run.revision || 1)}
     }
+    /* The git host's merge requests a failed item left open (made with the head, the item rolled back before Smithy's row
+       and conversation were written): closed, so none stays mergeable with no conversation. A resumed run opens its own
+       again (openHosted takes a closed leftover of the same head back). */
+    function closeLeftovers(run) {
+        const starter = rows(ACCOUNT, {partyId: run.startedByPartyId}, 20).map(row => row.userId)
+        if (!starter.length) return
+        for (const mr of Array.from(
+            find(GMR, {repositoryId: run.repositoryId})
+                .condition("statusId", "in", ["GmrOpen", "GmrDraft"])
+                .condition("authorUserId", "in", starter)
+                .condition("pushedForReview", "Y")
+                .limit(1000)
+                .list()
+        ))
+            if (!one(SMR, {mergeRequestId: mr.mergeRequestId}) && mapPull(run, mr.mergeRequestNum))
+                update(one(GMR, {mergeRequestId: mr.mergeRequestId}, true), {statusId: "GmrClosed", closedDate: now()})
+    }
+    /* Whether the run's map has a pull request item of that number that is not done (a failed one), by the report's
+       row: the leftover is the import's, not a proposal of the account's own. */
+    const mapPull = (run, number) =>
+        !one(MAP, {siteId: run.siteId, repositoryId: run.repositoryId, sourceType: "pullNumber", sourceId: text(number), statusId: "SmmDone"}) &&
+        !!one(MAP, {siteId: run.siteId, repositoryId: run.repositoryId, sourceType: "pullNumber", sourceId: text(number)})
 
     // ===== a step =====
     /* run#Import: a step of an import, as the account that started it. Takes at most budget API requests (10). Answers the
@@ -423,9 +499,10 @@ kit => {
             advance(ctx)
         } catch (error) {
             ec.message.clearErrors()
-            ec.logger.error("Smithy import " + importId + " step failed: " + firstLine(error))
+            const problem = scrub(ctx, firstLine(error))
+            ec.logger.error("Smithy import " + importId + " step failed: " + problem)
             ctx.cursor.errors = Number(ctx.cursor.errors || 0) + 1
-            if (ctx.cursor.errors >= MAX_ERRORS) end(ctx, "SmiFailed", "run", importId, "The import failed: " + firstLine(error))
+            if (ctx.cursor.errors >= MAX_ERRORS) end(ctx, "SmiFailed", "run", importId, "The import failed: " + problem)
         } finally {
             inNew(() => save(ctx))
         }
@@ -460,13 +537,29 @@ kit => {
             counts: json(run.countsJson, {}),
             report: json(run.reportJson, {items: [], notCarried: {}}),
             waitingUntil: null,
-            requests: 0
+            requests: 0,
+            host: apiHost()
         }
-        // the account that started it must still own the group (an operator owns every group)
+        const stop = errorText => end(ctx, "SmiFailed", "run", importId, errorText)
+        // what the run writes into must still be there and open to it, and the account that started it must still own
+        // the group (an operator owns every group) with a confirmed address; else the run fails (a resume goes on)
         const g = one(M + "SmithyGroup", {groupId: run.groupId})
-        if (!g || core.groupRights(g, core.actor()).rank < RANK.SmrOwner)
-            end(ctx, "SmiFailed", "run", importId, "accessLost: The account that started the import no longer owns the group")
-        else if (!ctx.token) end(ctx, "SmiFailed", "run", importId, "sourceRefused: The run has no token")
+        const repo = one(M + "SmithyRepository", {repositoryId: run.repositoryId})
+        const git = repo ? one("moqui.resource.GitRepository", {repositoryId: run.repositoryId}) : null
+        const groupRights = g ? core.groupRights(g, core.actor()) : null
+        const repoRights = repo ? core.repositoryRights(repo, core.actor()) : null
+        if (!repo || !git || repo.siteId !== run.siteId) stop("repositoryGone: The repository the import fills is gone")
+        else if (!core.mounted(run.siteId)) stop("accessLost: This site no longer runs Smithy")
+        else if (!g || groupRights.rank < RANK.SmrOwner)
+            stop("accessLost: The account that started the import no longer owns the group")
+        else if (groupRights.hidden || repoRights.hidden)
+            stop("repositoryHidden: The repository or its group is hidden by a moderator")
+        else if (git.archivedDate) stop("repositoryArchived: The repository is archived")
+        else if (
+            !ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js").confirmed(ec.user.userId)
+        )
+            stop("addressUnconfirmed: The account that started the import has no confirmed address")
+        else if (!ctx.token) stop("sourceRefused: The run has no token")
         return {ctx}
     }
     function save(ctx) {
@@ -497,7 +590,7 @@ kit => {
     function note(ctx, sourceType, sourceId, errorText) {
         const items = (ctx.report.items = ctx.report.items || [])
         if (items.length < REPORT_LIMIT)
-            items.push({sourceType, sourceId: text(sourceId), errorText: text(errorText).slice(0, 500)})
+            items.push({sourceType, sourceId: text(sourceId), errorText: scrub(ctx, errorText).slice(0, 500)})
         else ctx.report.more = Number(ctx.report.more || 0) + 1
     }
     function count(ctx, type, field, by = 1) {
@@ -517,6 +610,7 @@ kit => {
         fullName: cursor.fullName,
         cloneUrl: cursor.cloneUrl,
         defaultBranch: cursor.defaultBranch,
+        createdByImport: cursor.createdByImport === true,
         projectId: cursor.projectId,
         scopeId: cursor.scopeId,
         errors: 0
@@ -690,11 +784,13 @@ kit => {
             out = inNew(work) || {}
         } catch (error) {
             ec.message.clearErrors()
-            const problem = firstLine(error)
+            const problem = scrub(ctx, firstLine(error))
             ec.logger.warn("Smithy import " + ctx.importId + ": " + sourceType + " " + sourceId + " was not carried: " + problem)
             inNew(() => mark(ctx, sourceType, sourceId, {statusId: "SmmFailed", errorText: problem}))
             count(ctx, sourceType, "failed")
             note(ctx, sourceType, sourceId, problem)
+            // a cap of the run (its placeholders) ends it: every item after would fail the same way
+            if (/^limitReached: /.test(problem)) end(ctx, "SmiFailed", "run", ctx.importId, problem)
             return
         }
         if (out.skipped) return
@@ -703,42 +799,73 @@ kit => {
     }
 
     // ===== people =====
-    /* The party of a GitHub user in the site: the account with that GitHub id (a placeholder, or the account that claimed
-       it), else with that login, else a new placeholder. */
+    /* The party of a GitHub user in the site, of the GitHub the API reads (githubHost): the account with that GitHub id (a
+       placeholder, or the account that claimed it), whose login is brought up to date (a login can be renamed and then
+       taken by another user; the id is not); else the account with that login and no id known; else a new placeholder,
+       the login taken from a row of another id that still had it. A placeholder is no member of the site and its profile
+       is not discoverable: it is shown only as the author of what it wrote (SmithyCore.authorShown). */
     function personOf(ctx, user) {
+        const host = ctx.host || apiHost()
         const login = lower(user?.login) || "ghost"
+        const key = loginKey(login, host)
         const githubUserId = user?.id != null ? text(user.id) : null
         const siteId = ctx.siteId
-        const known = () =>
-            (githubUserId
-                ? Array.from(
-                      find(M + "SmithyAccount", {siteId, githubUserId})
-                          .limit(1)
-                          .list()
-                  )[0]
-                : null) || one(M + "SmithyAccount", {siteId, githubLogin: login})
+        const byId = () =>
+            githubUserId
+                ? Array.from(find(M + "SmithyAccount", {siteId, githubUserId}).limit(20).list()).find(row => hostMatches(row, host))
+                : null
+        const byLogin = () => {
+            const row = one(M + "SmithyAccount", {siteId, githubLogin: key})
+            return row && !row.githubUserId ? row : null
+        }
+        const known = () => {
+            const found = byId()
+            if (found) {
+                if (found.githubLogin !== key) relogin(siteId, found, key)
+                return found
+            }
+            return byLogin()
+        }
         let account = known()
         if (account) return account.partyId
         lockNames(siteId)
         account = known()
         if (account) return account.partyId
+        if (Number(ctx.counts.user?.imported || 0) >= PLACEHOLDERS_PER_RUN)
+            throw coded("limitReached", "The run has made as many placeholder accounts as one run may (" + PLACEHOLDERS_PER_RUN + ")")
         const partyId = call("mantle.party.PartyServices.create#Person", {
             firstName: login.slice(0, 60),
             lastName: "(imported)"
         }).partyId
-        create(S + "PublicSiteParty", {siteId, partyId, state: "active", role: "member", joinedAt: now(), revision: 1})
         create(S + "PublicSiteProfile", {
             siteId,
             partyId,
             handle: handleFor(siteId, login),
             displayName: text(user?.login) || login,
-            discoverability: "public",
+            discoverability: "hidden",
             revision: 1
         })
-        create(M + "SmithyAccount", {siteId, partyId, githubLogin: login, githubUserId, placeholder: "Y", revision: 1})
-        mark(ctx, "user", githubUserId || login, {targetType: "party", targetId: partyId, statusId: "SmmDone"})
+        // the login is this id's now: a row of another id that had it loses it
+        const holder = one(M + "SmithyAccount", {siteId, githubLogin: key}, true)
+        if (holder) update(holder, {githubLogin: null})
+        create(M + "SmithyAccount", {
+            siteId,
+            partyId,
+            githubLogin: key,
+            githubUserId,
+            githubHost: host,
+            placeholder: "Y",
+            revision: 1
+        })
+        mark(ctx, "user", githubUserId || key, {targetType: "party", targetId: partyId, statusId: "SmmDone"})
         count(ctx, "user", "imported")
         return partyId
+    }
+    /* A known id's login as GitHub names it now, taken from any other row of the site that had it. */
+    function relogin(siteId, account, key) {
+        const holder = one(M + "SmithyAccount", {siteId, githubLogin: key}, true)
+        if (holder && holder.partyId !== account.partyId) update(holder, {githubLogin: null})
+        update(one(M + "SmithyAccount", {siteId, partyId: account.partyId}, true), {githubLogin: key})
     }
     /* A placeholder's handle (§18.2): the login when it is a valid, free handle, else gh-<login> cut to 32 characters,
        with a digit suffix when that is taken. The caller has locked the site's names. */
@@ -1074,7 +1201,7 @@ kit => {
             password: ctx.token,
             refMap
         })
-        if (problem) note(ctx, "pull", "heads", "headsNotFetched: " + problem)
+        if (problem) note(ctx, "pull", "heads", "headsNotFetched: " + scrub(ctx, problem))
     }
     function commitPresent(repositoryId, commitId) {
         if (!HEX40.test(text(commitId))) return false
@@ -1105,18 +1232,64 @@ kit => {
             return !one(SMR, {mergeRequestId: left.mergeRequestId}) && left.headCommitId === sha
                 ? {mergeRequestId: left.mergeRequestId, problem: null}
                 : {mergeRequestId: null, problem: "numberTaken: Merge request !" + number + " is there already", taken: true}
+        // the row is written here, as keptRow writes one, not by create#MergeRequest: history opens nothing, so no opened
+        // event reaches webhooks, pipelines or Smithy's own handler; the host keeps its head ref (sync#MergeRequestHead)
+        // and reads its merge base and mergeability. In a transaction of its own, with the pull request's number on the
+        // map, so a leftover of a failed item is the import's (closeLeftovers).
         const shared = ec.context.sharedMap
         shared[IMPORT_KEY] = ctx.repositoryId
         try {
-            const {out, problem} = probe("org.moqui.git.GitReviewServices.create#MergeRequest", {
-                repositoryId: ctx.repositoryId,
-                targetRef: text(pull.base?.ref) || null,
-                title: plainTitle(pull.title),
-                mergeRequestNum: number,
-                pushedForReview: true,
-                headCommitId: sha
+            return inNew(() => {
+                const branches = Array.from(
+                    call(GIT + "get#GitRefs", {repositoryId: ctx.repositoryId, refType: "branch"}).refList || []
+                ).map(ref => ref.shortName)
+                const asked = text(pull.base?.ref).replace(/^refs\/heads\//, "")
+                const targetRef = branches.includes(asked) ? asked : ctx.cursor.defaultBranch || "main"
+                const headRef = "refs/merge-requests/" + number + "/head"
+                const mr = ec.entity.makeValue(GMR)
+                mr.setSequencedIdPrimary()
+                for (const [name, value] of Object.entries({
+                    repositoryId: ctx.repositoryId,
+                    mergeRequestNum: number,
+                    title: plainTitle(pull.title),
+                    sourceRef: headRef,
+                    pushedForReview: "Y",
+                    targetRef,
+                    statusId: "GmrOpen",
+                    authorUserId: ec.user.userId,
+                    createdDate: now(),
+                    lastUpdatedDate: now(),
+                    mergeableEnumId: "GmaUnchecked",
+                    deleteSourceBranch: "N"
+                }))
+                    mr.set(name, value)
+                mr.create()
+                call("org.moqui.git.GitReviewServices.sync#MergeRequestHead", {mergeRequestId: mr.mergeRequestId, headCommitId: sha})
+                const compared = probe(GIT + "get#GitCompare", {
+                    repositoryId: ctx.repositoryId,
+                    base: "refs/heads/" + targetRef,
+                    head: headRef,
+                    checkMergeable: true,
+                    includeHidden: true
+                }).out
+                update(one(GMR, {mergeRequestId: mr.mergeRequestId}, true), {
+                    headCommitId: sha,
+                    baseCommitId: compared.mergeBaseId || null,
+                    mergeableEnumId: !compared.headCommitId
+                        ? "GmaUnchecked"
+                        : compared.alreadyMerged
+                          ? "GmaMerged"
+                          : compared.mergeable
+                            ? "GmaMergeable"
+                            : "GmaConflict",
+                    conflictPaths: Array.from(compared.conflictPaths || []).join("\n") || null
+                })
+                mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mr.mergeRequestId, statusId: null})
+                return {mergeRequestId: mr.mergeRequestId, problem: null}
             })
-            return {mergeRequestId: problem ? null : out.mergeRequestId, problem}
+        } catch (error) {
+            ec.message.clearErrors()
+            return {mergeRequestId: null, problem: scrub(ctx, firstLine(error))}
         } finally {
             shared[IMPORT_KEY] = null
         }
@@ -1179,14 +1352,17 @@ kit => {
             repositoryId: ctx.repositoryId,
             rootCommEventId: postId,
             authorPartyId: author,
-            // an imported merge request is in its final state: its agreement is not computed (§18.2)
+            // a merged or closed one is history and its agreement is not computed (§18.2); an open or draft one is
+            // computed below, as any open merge request's is
             agreementStateEnumId: "SmasOff",
             createdAt: stamp(created),
             revision: 1
         })
         if (merged) addPost(postId, {line: "merged", date: when(pull.merged_at)})
         else if (closed) addPost(postId, {line: "closed", date: when(pull.closed_at)})
+        if (["GmrOpen", "GmrDraft"].includes(statusId)) kit.agreement.compute(mergeRequestId)
         mark(ctx, "pull", pull.id, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
+        if (!kept) mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
         const problems = [
             kept
                 ? "headNotFetched: The head " +
@@ -1331,79 +1507,119 @@ kit => {
         )
         update(repo, {
             nextIssueNumber: next,
-            importedHistory: "Y",
+            // the agreement takes imported commits by their authors' GitHub logins only in a repository the import made:
+            // one that had history of its own keeps its commits judged by who pushed them
+            ...(ctx.cursor.createdByImport ? {importedHistory: "Y"} : {}),
             ...(ctx.options.issues ? {issuesEnabled: "Y"} : {}),
             revision: Number(repo.revision || 1) + 1
         })
+        // the GitHub address as an old path, for a public repository only (a private one's name is told to nobody), by
+        // the redirects' own rules (SmithySite.js putRedirect): never over a live name, the server's paths or a row there
         const oldPath = "/" + lower(ctx.sourceRepository)
+        if (lower(ctx.sourceRepository) === lower(repo.repositoryPath)) return
+        const anyone = core.repositoryRights(repo, core.actor(null))
+        if (!anyone.canView || anyone.visibility !== 1 || anyone.hidden) return
         const mount = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
         const targetPath = (mount.mount(ctx.siteId, "smithy")?.base ?? "") + "/" + repo.repositoryPath
-        if (
-            lower(ctx.sourceRepository) !== repo.repositoryPath &&
-            !mount.pagePathReserved(oldPath) &&
-            !Array.from(
-                find(M + "SmithyRedirect", {siteId: ctx.siteId, oldPath})
-                    .limit(1)
-                    .list()
-            ).length
-        )
-            create(M + "SmithyRedirect", {
-                redirectId: ec.entity.sequencedIdPrimary(M + "SmithyRedirect", 0, 50),
-                siteId: ctx.siteId,
-                oldHost: null,
-                oldPath,
-                targetPath,
-                sourceEnumId: "SrsGithub",
-                note: "GitHub " + ctx.sourceRepository,
-                createdByPartyId: me(),
-                createdAt: now()
-            })
+        ec.message.pushErrors()
+        try {
+            kit.putRedirect(
+                ctx.siteId,
+                me(),
+                {oldPath, targetPath, note: "GitHub " + ctx.sourceRepository, sourceEnumId: "SrsGithub"},
+                null,
+                false
+            )
+        } catch (error) {
+            note(ctx, "run", ctx.importId, "redirectNotMade: " + firstLine(error))
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
     }
 
     // ===== the job =====
     /* run#Imports: a step of each import that is due (not waiting, not running), as the account that started it; an
        import whose account is gone fails. Each stands alone. */
+    /* Ends a run the job cannot step as its account: failed with the reason in its report, its token dropped. */
+    function lose(importId, errorText) {
+        inNew(() => {
+            const locked = one(RUN, {importId}, true)
+            if (!locked || !ACTIVE.includes(locked.statusId)) return
+            const report = json(locked.reportJson, {items: []})
+            report.items = [...(report.items || []), {sourceType: "run", sourceId: importId, errorText}]
+            const cursor = json(locked.cursorJson, {})
+            dropToken(locked)
+            update(locked, {
+                statusId: "SmiFailed",
+                finishedAt: now(),
+                cursorJson: JSON.stringify({...cursor, stage: locked.statusId}),
+                reportJson: JSON.stringify(report),
+                tokenRemoteId: null,
+                leaseUntil: null
+            })
+        })
+    }
     function runImports() {
+        const at = now()
         const due = Array.from(
-            find(RUN).condition("statusId", "in", ACTIVE).orderBy("createdAt,importId").limit(50).list()
-        ).filter(run => !(run.waitingUntil && millis(run.waitingUntil) > millis(now())) && !leased(run))
+            find(RUN)
+                .condition("statusId", "in", ACTIVE)
+                .condition(ec.entity.conditionFactory.makeCondition(
+                    [
+                        ec.entity.conditionFactory.makeCondition("waitingUntil", "equals", null),
+                        ec.entity.conditionFactory.makeCondition("waitingUntil", "less-equals", at)
+                    ],
+                    "or"
+                ))
+                .condition(ec.entity.conditionFactory.makeCondition(
+                    [
+                        ec.entity.conditionFactory.makeCondition("leaseUntil", "equals", null),
+                        ec.entity.conditionFactory.makeCondition("leaseUntil", "less-equals", at)
+                    ],
+                    "or"
+                ))
+                .orderBy("createdAt,importId")
+                .limit(200)
+                .list()
+        )
+        // a pass steps a few runs of one account and of one site, so one does not take every pass
+        const byAccount = new Map()
+        const bySite = new Map()
         let stepped = 0
-        for (const run of due.slice(0, 20)) {
+        for (const run of due) {
+            if (stepped >= 20) break
+            if ((byAccount.get(run.startedByPartyId) || 0) >= STEPPED_PER_ACCOUNT) continue
+            if ((bySite.get(run.siteId) || 0) >= STEPPED_PER_SITE) continue
+            byAccount.set(run.startedByPartyId, (byAccount.get(run.startedByPartyId) || 0) + 1)
+            bySite.set(run.siteId, (bySite.get(run.siteId) || 0) + 1)
             try {
                 const account = rows(ACCOUNT, {partyId: run.startedByPartyId}, 20).find(row => row.disabled !== "Y")
                 if (!account) {
-                    inNew(() => {
-                        const locked = one(RUN, {importId: run.importId}, true)
-                        const report = json(locked.reportJson, {items: []})
-                        report.items = [
-                            ...(report.items || []),
-                            {
-                                sourceType: "run",
-                                sourceId: run.importId,
-                                errorText: "accessLost: The account that started the import is gone"
-                            }
-                        ]
-                        dropToken(locked)
-                        update(locked, {
-                            statusId: "SmiFailed",
-                            finishedAt: now(),
-                            reportJson: JSON.stringify(report),
-                            tokenRemoteId: null
-                        })
-                    })
+                    lose(run.importId, "accessLost: The account that started the import is gone")
                     continue
                 }
-                ec.user.internalLoginUser(account.username)
+                // as the account that started it, signed in for the step without its own sessions ending (ForumCore.asUser)
+                let entered = false
                 try {
-                    ec.service
-                        .sync()
-                        .name("mantle.smithy.SmithyImportServices.run#Import")
-                        .parameters({importId: run.importId})
-                        .call()
+                    forum.asUser(account.username, () => {
+                        entered = true
+                        try {
+                            ec.service
+                                .sync()
+                                .name("mantle.smithy.SmithyImportServices.run#Import")
+                                .parameters({importId: run.importId})
+                                .call()
+                        } finally {
+                            ec.message.clearErrors()
+                        }
+                    })
                     stepped++
-                } finally {
+                } catch (error) {
                     ec.message.clearErrors()
-                    ec.user.logoutUser()
+                    if (entered) throw error
+                    // the account cannot sign in now (disabled, ended, locked): the run ends
+                    lose(run.importId, "accessLost: The account that started the import cannot sign in")
                 }
             } catch (error) {
                 ec.message.clearErrors()
@@ -1417,24 +1633,53 @@ kit => {
     /* claim#GithubAccount: an account whose sign-in through a GitHub provider (an OauthFlow of type OctGitHub) linked a
        GitHub id takes, in each site, the placeholder of that id: its login, and its posts, issues, merge requests,
        assignments and reactions. Safe to run twice. */
+    /* The GitHub a flow signs in with: github.com when none of its addresses is overridden, else the one host all of its
+       addresses are on (an Enterprise Server's); null when they are on several hosts (a delegate's or a proxy's), or
+       some are overridden to another host than github.com, whose defaults the others take. */
+    function flowHost(oauth) {
+        const urls = [oauth.authorizeUrl, oauth.tokenUrl, oauth.userInfoUrl].map(text).filter(url => !!url.trim())
+        if (!urls.length) return "github.com"
+        const hosts = new Set(urls.map(hostOf))
+        if (hosts.has(null) || hosts.size !== 1) return null
+        const host = Array.from(hosts)[0]
+        return urls.length < 3 && host !== "github.com" ? null : host
+    }
     function claimGithub(userId) {
         const account = userId ? one(ACCOUNT, {userId}) : null
         if (!account?.partyId || !account.externalUserId || !account.externalAuthFlowId) return {claimed: 0}
         const oauth = one("moqui.security.sso.OauthFlow", {authFlowId: account.externalAuthFlowId})
         if (oauth?.clientTypeEnumId !== "OctGitHub") return {claimed: 0}
+        // the id is of the GitHub the flow's user info comes from; a placeholder is of the GitHub the import read
+        const host = flowHost(oauth)
+        if (!host) return {claimed: 0}
         let claimed = 0
         for (const found of Array.from(
             find(M + "SmithyAccount", {githubUserId: text(account.externalUserId)})
                 .limit(50)
                 .list()
         )) {
-            const placeholder = one(M + "SmithyAccount", {siteId: found.siteId, partyId: found.partyId}, true)
-            if (!placeholder || placeholder.placeholder !== "Y" || placeholder.partyId === account.partyId) continue
-            claimOne(placeholder, account)
-            claimed++
+            if (found.placeholder !== "Y" || found.partyId === account.partyId || !hostMatches(found, host)) continue
+            // only in a site the account is an active member of, not suspended there: elsewhere the records wait
+            if (!core.siteAccess(found.siteId, core.actorOfParty(account.partyId)).joined) continue
+            // each site stands alone: one that fails is logged, the others are claimed
+            try {
+                inNew(() => {
+                    const placeholder = one(M + "SmithyAccount", {siteId: found.siteId, partyId: found.partyId}, true)
+                    if (!placeholder || placeholder.placeholder !== "Y") return
+                    claimOne(placeholder, account)
+                    claimed++
+                })
+            } catch (error) {
+                ec.message.clearErrors()
+                ec.logger.error(
+                    "The GitHub placeholder " + found.partyId + " of site " + found.siteId + " was not claimed by " + userId + ": " + firstLine(error)
+                )
+            }
         }
         return {claimed}
     }
+    /* Moves the rows of entity whose field is from to to (or by each), 500 at a time; false when rows are left after the
+       last batch, so the caller keeps what refers to them. */
     function moveAll(entity, field, from, to, each) {
         for (let batch = 0; batch < 400; batch++) {
             const list = Array.from(
@@ -1443,19 +1688,33 @@ kit => {
                     .list()
             )
             for (const row of list) each ? each(row) : update(row, {[field]: to})
-            if (list.length < 500) return
+            if (list.length < 500) return true
         }
+        return !find(entity, {[field]: from}).count()
     }
     /* A row whose key has the party: made again with the account's party, unless the account has it, and the old one
-       removed. */
-    function moveKeyed(entity, from, to, key) {
-        moveAll(entity, "partyId", from, to, row => {
+       removed (dropped: what the account had already, with what it counts). */
+    function moveKeyed(entity, from, to, key, dropped) {
+        return moveAll(entity, "partyId", from, to, row => {
             const fields = {...row.getMap(), partyId: to}
             const same = {}
             for (const name of key) same[name] = fields[name]
             if (!one(entity, same)) create(entity, fields)
+            else if (dropped) dropped(row)
             row.delete()
         })
+    }
+    /* A reaction the account had already given is one reaction: the post's and the topic's counts lose the
+       placeholder's. */
+    function reactionDropped(row) {
+        const state = one(F + "ForumPostState", {communicationEventId: row.communicationEventId}, true)
+        if (state) {
+            const counts = json(state.reactionCounts, {})
+            if (counts[row.reactionKey]) counts[row.reactionKey] = Math.max(0, Number(counts[row.reactionKey]) - 1)
+            update(state, {reactionCounts: JSON.stringify(counts), reactionCount: Math.max(0, Number(state.reactionCount || 0) - 1)})
+        }
+        const topic = row.rootCommEventId ? one(F + "ForumTopic", {rootCommEventId: row.rootCommEventId}, true) : null
+        if (topic) update(topic, {reactionCount: Math.max(0, Number(topic.reactionCount || 0) - 1)})
     }
     function claimOne(placeholder, account) {
         const siteId = placeholder.siteId
@@ -1472,20 +1731,24 @@ kit => {
             ))
                 if (other.partyId !== to) update(other, {githubLogin: null})
         const own = one(M + "SmithyAccount", {siteId, partyId: to}, true)
-        const identity = {githubLogin: login, githubUserId, claimedAt: now()}
+        const identity = {githubLogin: login, githubUserId, githubHost: placeholder.githubHost || null, claimedAt: now()}
         if (own) update(own, {...identity, revision: Number(own.revision || 1) + 1})
         else create(M + "SmithyAccount", {siteId, partyId: to, ...identity, revision: 1})
-        moveAll(E + "CommunicationEvent", "fromPartyId", from, to)
-        moveAll(F + "ForumPostRevision", "editorPartyId", from, to)
-        moveAll(M + "SmithyIssue", "reporterPartyId", from, to)
-        moveAll(WORK + "WorkEffort", "ownerPartyId", from, to)
-        moveAll(SMR, "authorPartyId", from, to, row => {
-            update(row, {authorPartyId: to})
-            const mr = one(GMR, {mergeRequestId: row.mergeRequestId}, true)
-            if (mr && account.userId) update(mr, {authorUserId: account.userId})
-        })
-        moveKeyed(WORK + "WorkEffortParty", from, to, ["workEffortId", "partyId", "roleTypeId", "fromDate"])
-        moveKeyed(F + "ForumReaction", from, to, ["communicationEventId", "partyId", "reactionKey"])
+        const moved = [
+            moveAll(E + "CommunicationEvent", "fromPartyId", from, to),
+            moveAll(F + "ForumPostRevision", "editorPartyId", from, to),
+            moveAll(M + "SmithyIssue", "reporterPartyId", from, to),
+            moveAll(WORK + "WorkEffort", "ownerPartyId", from, to),
+            moveAll(SMR, "authorPartyId", from, to, row => {
+                update(row, {authorPartyId: to})
+                const mr = one(GMR, {mergeRequestId: row.mergeRequestId}, true)
+                if (mr && account.userId) update(mr, {authorUserId: account.userId})
+            }),
+            moveKeyed(WORK + "WorkEffortParty", from, to, ["workEffortId", "partyId", "roleTypeId", "fromDate"]),
+            moveKeyed(F + "ForumReaction", from, to, ["communicationEventId", "partyId", "reactionKey"], reactionDropped)
+        ]
+        // the placeholder stays while anything still names it: the claim of this site is rolled back, and runs again
+        if (moved.includes(false)) throw coded("claimIncomplete", "The placeholder has more records than one claim moves")
         moveAll(MAP, "targetId", from, to, row => (row.sourceType === "user" ? update(row, {targetId: to}) : null))
         for (const entity of [S + "PublicSiteProfile", S + "PublicSiteParty"]) {
             const row = one(entity, {siteId, partyId: from})
