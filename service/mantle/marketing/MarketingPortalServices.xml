@@ -35,8 +35,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>requestSubscription: emailAddress, displayName (optional), contactListIds (each offered on this site, at most
             ten), consent (the box ticked) and operationId (PASS's request key). The address's directory party or a new person is
             filed pending on each list through the audience's evidenced path (one public request, an expiring confirmation) and a
-            rate-limited verification message is queued on the ledger from a ready sending profile of the organization with the
-            confirmation template the list's policy names. Answers the same receipt whatever happened (a new or a matched party, a
+            rate-limited verification message is queued on the ledger from a ready transactional sending profile of the organization
+            with the confirmation template the list's policy names, and attempted once the request commits (never inside it). Answers the same receipt whatever happened (a new or a matched party, a
             member already, a refusal, a repeat of the key, a limit reached). Refuses VALUE_INVALID (the address, the name, no topic,
             the box) and NotFound (a list not offered).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
@@ -68,13 +68,21 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
         <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
-            offered there, a ready sending profile of the organization, a published confirmation template on each offered list, and
+            offered there, a ready transactional sending profile of the organization (a promotional one never sends a verification), a
+            published confirmation template on each offered list, and
             the site's canonical host.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('appReadiness', input)"/>
         </actions>
+    </service>
+    <service verb="attempt" noun="VerificationDelivery" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (P7 review): one attempt of a verification delivery (source MdsrcSubscriptionVerify, any other is left
+            alone), registered by request#Subscription to run on a service worker once the request commits, so the request's answer
+            never waits on the mail; a later attempt is the ledger's run#Deliveries.</description>
+        <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
+        <actions><script>ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('attemptVerification', context)</script></actions>
     </service>
     <service verb="build" noun="VerificationDelivery" allow-remote="false">
         <description>The ledger's source MdsrcSubscriptionVerify, before each attempt: the confirmation template's published content

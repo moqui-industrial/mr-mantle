@@ -11,8 +11,8 @@
 //   person with that address; which one is never said. Each topic is filed through the audience's one evidenced path
 //   (MarketingAudiences.js fileOne: pending, never clearing a withdrawal or a suppression) as one public request
 //   (SubscriptionRequest rows sharing requestGroupId), and a verification message is queued on Comms' ledger as a transactional
-//   delivery from a ready sending profile of the organization, with the published confirmation template the list's policy
-//   names. The answer is the same neutral receipt whatever happened: a new party or a matched one, a member already, a refusal,
+//   delivery from a ready transactional sending profile of the organization, with the published confirmation template the list's
+//   policy names, attempted once the request commits (its answer never waits on the mail). The answer is the same neutral receipt whatever happened: a new party or a matched one, a member already, a refusal,
 //   a limit reached. Limits: requests per client, per site and per address (over: the receipt, nothing recorded) and
 //   verification messages per address (over: the request kept, no message).
 // - The confirmation link: each attempt of the verification message makes its own token (SubscriptionRequestToken keeps its
@@ -198,12 +198,20 @@ function subscriberOf(address, displayName) {
 }
 
 // ===== the verification message =====
-// The organization's sending profile for a verification: a ready email profile, a transactional (or either purpose) one first.
+// The organization's sending profile for a verification: a ready email profile for transactional mail (purpose transactional, or
+// none set). A verification is transactional: a promotional profile never sends it (P7 review), so with none the request is kept,
+// nothing is sent, and the app's readiness names the missing profile.
 function profileFor(organizationPartyId) {
-    const ready = Array.from(find("mantle.party.MessageSendingProfile", {organizationPartyId, channelEnumId: "MdcEmail"}).list())
-        .filter(row => lib.active(row) && profiles().readinessOf(row).ready)
-        .sort((a, b) => String(a.sendingProfileId).localeCompare(String(b.sendingProfileId)))
-    return ready.find(row => !row.purposeEnumId || row.purposeEnumId === "MtpTransactional") || ready[0] || null
+    return (
+        Array.from(find("mantle.party.MessageSendingProfile", {organizationPartyId, channelEnumId: "MdcEmail"}).list())
+            .filter(
+                row =>
+                    (!row.purposeEnumId || row.purposeEnumId === "MtpTransactional") &&
+                    lib.active(row) &&
+                    profiles().readinessOf(row).ready
+            )
+            .sort((a, b) => String(a.sendingProfileId).localeCompare(String(b.sendingProfileId)))[0] || null
+    )
 }
 // The published confirmation template a policy names: its EmailTemplate's Comms template of the organization, in use, with a
 // published content. {template, content} or null.
@@ -216,8 +224,10 @@ function confirmationOf(policy, organizationPartyId) {
     const content = templates().currentOf(templates().contentsOf(template.messageTemplateId))
     return content ? {template, content} : null
 }
-// Queue a public request's verification message (a transactional delivery of the ledger, sent now in its own transaction):
-// the deliveryId, or null when the organization has no ready profile or the topics' policies no published confirmation.
+// Queue a public request's verification message (a transactional delivery of the ledger): the deliveryId, or null when the
+// organization has no ready transactional profile or the topics' policies no published confirmation. Its attempt runs on a
+// service worker once the request commits (attempt#VerificationDelivery), never inside the request (P7 review): a request that
+// sends and one that does not (a member already, a refusal, the mail limit) take the same time to answer.
 function queueVerification(group, rowsOfGroup, organizationPartyId, address) {
     const profile = profileFor(organizationPartyId)
     const confirmation = rowsOfGroup
@@ -230,7 +240,7 @@ function queueVerification(group, rowsOfGroup, organizationPartyId, address) {
                 ": no verification sent, the organization " +
                 organizationPartyId +
                 " has " +
-                (!profile ? "no ready sending profile" : "no published confirmation template on the topics")
+                (!profile ? "no ready transactional sending profile" : "no published confirmation template on the topics")
         )
         return null
     }
@@ -244,10 +254,37 @@ function queueVerification(group, rowsOfGroup, organizationPartyId, address) {
         siteId: rowsOfGroup[0].siteId || null,
         organizationPartyId,
         sendingProfileId: profile.sendingProfileId,
-        transactional: true,
-        sendNow: true
+        transactional: true
     })
+    if (queued.deliveryId && queued.created)
+        ec.service
+            .special()
+            .name("mantle.marketing.MarketingPortalServices.attempt#VerificationDelivery")
+            .parameters({deliveryId: queued.deliveryId})
+            .registerOnCommit()
     return queued.deliveryId || null
+}
+// attempt#VerificationDelivery (after a request commits, on a service worker): one attempt of a verification delivery; a later
+// one is the ledger's job (run#Deliveries). Any other delivery is left alone.
+function attemptVerification(p) {
+    const delivery = one("mantle.party.MessageDelivery", {deliveryId: text(p.deliveryId)})
+    if (!delivery || delivery.sourceEnumId !== SOURCE) return {}
+    ec.message.pushErrors()
+    try {
+        ec.service
+            .sync()
+            .name("mantle.party.MessageServices.attempt#Delivery")
+            .parameters({deliveryId: delivery.deliveryId})
+            .disableAuthz()
+            .requireNewTransaction(true)
+            .call()
+        if (ec.message.hasError())
+            ec.logger.error("Verification delivery " + delivery.deliveryId + " attempt failed: " + ec.message.getErrorsString())
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+    return {}
 }
 // build#VerificationDelivery (the ledger's source, before each attempt): the confirmation template's content (its declared
 // variables' fallbacks and the topics' names; nothing the visitor typed), with the confirmation link this attempt makes; a
@@ -501,7 +538,7 @@ function verifySubscription(p) {
 
 // ===== check#MarketingAppReadiness =====
 // The Marketing app's checks of a site (PublicApps.js): its target an internal organization, a list offered there (a mount with
-// no published record is named), a ready sending profile, a published confirmation template on each offered list, and the
+// no published record is named), a ready transactional sending profile, a published confirmation template on each offered list, and the
 // site's canonical host, from which every link is made.
 function appReadiness(p) {
     const organization = !!p.targetId && !!one("mantle.party.PartyRole", {partyId: p.targetId, roleTypeId: "OrgInternal"})
@@ -510,7 +547,7 @@ function appReadiness(p) {
         checks: [
             {name: "organization", ready: organization},
             {name: "published list", ready: offers.length > 0},
-            {name: "sending profile", ready: organization && !!profileFor(p.targetId)},
+            {name: "transactional sending profile", ready: organization && !!profileFor(p.targetId)},
             {
                 name: "confirmation template",
                 ready: offers.length > 0 && offers.every(offer => !!confirmationOf(offer.policy, p.targetId))
@@ -639,9 +676,10 @@ const operations = {
     verifySubscription,
     appReadiness,
     buildVerification,
+    attemptVerification,
     fileCheckout
 }
-const internalOperations = new Set(["appReadiness", "buildVerification", "fileCheckout"])
+const internalOperations = new Set(["appReadiness", "buildVerification", "attemptVerification", "fileCheckout"])
 ;({
     served,
     offersOf,

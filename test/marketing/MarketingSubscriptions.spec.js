@@ -48,8 +48,14 @@ function page(verb, input, siteId = site) {
 const key = () => "mkp" + ec.user.randomString(16).replace(/[^A-Za-z0-9]/g, "")
 const requestOf = (emailAddress, contactListIds) =>
     page("request#Subscription", {emailAddress, contactListIds, consent: "Y", operationId: key()})
+// the verification is attempted on a service worker once the request commits (P7 review): wait for it
+const settle = () => ec.factory.waitWorkerPoolEmpty(50)
+const mailsTo = address => (
+    settle(), Array.from(capture.getMessages()).filter(m => Array.from(m.toList || []).includes(address)).length
+)
 // the link of the newest captured message to an address
 function tokenTo(address) {
+    settle()
     const message = Array.from(capture.getMessages())
         .reverse()
         .find(m => Array.from(m.toList || []).includes(address))
@@ -216,6 +222,7 @@ feature("the same receipt for a known and a new address; a GET changes nothing; 
         const afterGet = {status: statusOf(list.garden, maya.partyId), grants: grants(list.garden, maya.partyId).length}
         const confirmed = page("verify#Subscription", {token, operationId: key()})
         const grant = grants(list.garden, maya.partyId)[0] || {}
+        settle()
         return {
             known,
             unknown,
@@ -341,7 +348,40 @@ feature("a forged, expired or another site's token, a site without the mount and
             closed: requestOf(fresh("closed"), [list.closed]),
             closedRead: page("get#Publication", {contactListId: list.closed}),
             otherOrgList: page("get#Publication", {contactListId: list.garden}, siteB),
-            noBox: page("request#Subscription", {emailAddress: fresh("nobox"), contactListIds: [list.garden], operationId: key()})
+            noBox: page("request#Subscription", {
+                emailAddress: fresh("nobox"),
+                contactListIds: [list.garden],
+                operationId: key()
+            }),
+            // P7 review: a verification is transactional; with only a promotional profile ready the request is kept, nothing is
+            // sent and the readiness names the missing profile
+            promotional: (() => {
+                const profile = purposeEnumId =>
+                    system(() =>
+                        lib.run("update#mantle.party.MessageSendingProfile", {
+                            sendingProfileId: prefix + "_PROFILE",
+                            purposeEnumId
+                        })
+                    )
+                profile("MtpPromotional")
+                try {
+                    const address = fresh("promotional")
+                    const receipt = requestOf(address, [list.garden])
+                    const readiness = system(
+                        () =>
+                            lib.run(P + "check#MarketingAppReadiness", {input: {siteId: site, targetId: orgA, app: "marketing"}})
+                                .result
+                    )
+                    return {
+                        receipt,
+                        mails: mailsTo(address),
+                        requests: rows("mantle.marketing.contact.SubscriptionRequest", {partyId: partyOf(address)}),
+                        profileReady: readiness.checks.find(c => c.name === "transactional sending profile")?.ready
+                    }
+                } finally {
+                    profile("MtpTransactional")
+                }
+            })()
         }
     },
     then(r) {
@@ -359,6 +399,11 @@ feature("a forged, expired or another site's token, a site without the mount and
         r.otherOrgList.kind === "NotFound"
         r.noBox.kind === "Unprocessable"
         r.forged.error.split("\n")[0] === r.expired.error.split("\n")[0]
+        r.promotional.receipt.receipt.message.length > 20
+        r.promotional.mails === 0
+        r.promotional.requests.length === 1
+        r.promotional.requests[0].statusEnumId === "SrsPending" && r.promotional.requests[0].verificationDeliveryId == null
+        r.promotional.profileReady === false
     }
 })
 
