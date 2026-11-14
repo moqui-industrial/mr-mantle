@@ -601,4 +601,11 @@
             <script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").countPipelineRun({repositoryId, userId}))</script>
         </actions>
     </service>
+    <service verb="check" noun="PipelineRun" authenticate="anonymous-all" allow-remote="false">
+        <implements service="org.moqui.git.GitCiServices.check#PipelineRun"/>
+        <description>Smithy's run check, for the conf's git-ci run-check-service: a run of a repository that is hidden (by itself, a group above it, or the repository it was forked from; design-smithy §12.3) is refused, so its pipelines stop while it is hidden. No decision for any other run, so the engine's own rule holds. Not an operation.</description>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkPipelineRun({repositoryId}))</script>
+        </actions>
+    </service>
 </services>

@@ -2,11 +2,14 @@
 // plans/Dogfood.md §5.9, §6.4; SmithyForum.js reportSmithyTarget and hideSmithyTarget, SmithyScope.js targetModerator and
 // decideTarget, SmithyCore.js mayHide and viewable, ForumCore.js gate): a report on a repository or a group by an account
 // with a confirmed address files one review item (target type repository or group) in the queue of the scope above it,
-// each account's report kept; who decides it and who hides is the site's staff and an Owner of a group above, never a
-// role on the target itself; a hidden repository or group is Not Found to all but its Owners and the site's staff, on the
-// pages and in git; what the site's staff hid, an Owner does not show again; and a new account makes one repository,
-// two forks and five pipeline runs a day. Spec-local site, group, db repositories and accounts. Regression suite: these
-// are rules. Run: ./moq test mr-mantle --spec SmithyModerationTargets
+// each account's report kept; a report is decided by the site's staff (whatever its scope, a private group's too) and by a
+// moderator of the scope above who is no Owner of the target, never by its owners (an Owner of a group above is one), and
+// who reported it is told to the site's staff only; the site's staff and an Owner of a group above hide, staff what they
+// may not view too; a hidden repository or group is Not Found to all but its Owners and the site's staff, on the pages
+// and in git, and so is a fork of a hidden repository, which is not forked and whose pipelines do not run; what the site's
+// staff hid, an Owner does not show again; and a new account makes one repository, two forks and five pipeline runs a
+// day. Spec-local site, group, db repositories and accounts. Regression suite: these are rules.
+// Run: ./moq test mr-mantle --spec SmithyModerationTargets
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
 const SITE = "SMT_SITE"
 const ids = {}
@@ -55,6 +58,11 @@ spec({
         lib.role(SITE, {repositoryId: ids.repositoryId}, "SMT_REPO_OWNER", "SmrOwner")
         lib.account(SITE, "SMT_NEW", {handle: "smtnew"})
         lib.settings(SITE, {repositoryCreateEnumId: "ScpVerified", forkCreateEnumId: "ScpVerified", defaultMaxRepositories: 10})
+        // a moderator of the group's category who holds no role on what is in it
+        lib.account(SITE, "SMT_LISTMOD", {handle: "smtlistmod"})
+        // a private top-level group, its one Guest the stranger
+        ids.secretGroup = lib.createGroup(lib.OPERATOR, {siteId: SITE, pathSegment: "smtsecret", visibility: "private"}).groupId
+        lib.role(SITE, {groupId: ids.secretGroup}, "SMT_STRANGER", "SmrGuest")
     }
 })
 
@@ -65,7 +73,46 @@ feature("a report files one item in the queue of the scope above its target, and
         const again = report("SMT_AUTHOR", "repository", "smt-report-3")
         const ofGroup = report("SMT_STRANGER", "group", "smt-report-4")
         const item = items("repository")[0]
+        lib.make("mantle.marketing.contact.ContactListParty", {
+            contactListId: group().contactListId,
+            partyId: "SMT_LISTMOD",
+            roleTypeId: "ListModerator",
+            statusId: "CLPT_ACCEPTED",
+            fromDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 1000
+        })
+        // a report on a private top-level group, which the site's moderator may not view, is theirs to decide and hide
+        lib.settled(SITE, "SMT_STRANGER")
+        const ofSecret = op("SMT_STRANGER", "reportSmithyTarget", {
+            targetType: "group",
+            targetId: ids.secretGroup,
+            reason: "Spam",
+            operationId: "smt-report-6"
+        })
+        const secretItem = lib.row("mantle.forum.ForumReviewItem", {siteId: SITE, targetType: "group", targetId: ids.secretGroup})
+        const secretView = op("SMT_MOD", "getReview", {reviewId: secretItem.reviewId})
+        const secretHide = (username, hidden) =>
+            op(username, "hideSmithyTarget", {
+                targetType: "group",
+                targetId: ids.secretGroup,
+                hidden,
+                reason: "Spam",
+                expectedRevision: Number(lib.row("mantle.smithy.SmithyGroup", {groupId: ids.secretGroup}).revision || 1)
+            })
+        const listModView = op("SMT_LISTMOD", "getReview", {reviewId: item.reviewId})
         return {
+            listMod: queue("SMT_LISTMOD", {scopeContactListId: group().contactListId}),
+            listModReports: (listModView.reports || []).map(row => [row.reporterPartyId, row.reason]),
+            staffReporters: (op("SMT_MOD", "getReview", {reviewId: item.reviewId}).reports || [])
+                .map(row => row.reporterPartyId)
+                .sort(),
+            secret: [
+                kind(ofSecret),
+                kind(op("SMT_MOD", "getGroup", {groupId: ids.secretGroup})),
+                secretView.target?.path,
+                kind(secretHide("SMT_OWNER", true)),
+                secretHide("SMT_MOD", true).hidden,
+                secretHide("SMT_MOD", false).hidden
+            ],
             first,
             second,
             again,
@@ -78,9 +125,9 @@ feature("a report files one item in the queue of the scope above its target, and
             count: items("repository").length,
             scope: item.contactListId === group().contactListId,
             reports: ec.entity.find("mantle.forum.ForumReviewReport").condition("reviewId", item.reviewId).disableAuthz().count(),
-            // the group's Owner decides a report on a repository of the group; an Owner of the repository alone does not
+            // the group's Owner is an Owner of the repository: neither they nor an Owner of the repository alone decide it
             owner: queue("SMT_OWNER", {scopeContactListId: group().contactListId}),
-            ownerView: op("SMT_OWNER", "getReview", {reviewId: item.reviewId}),
+            ownerView: kind(op("SMT_OWNER", "getReview", {reviewId: item.reviewId})),
             repositoryOwner: kind(op("SMT_REPO_OWNER", "getReview", {reviewId: item.reviewId})),
             // a report on a top-level group is the site's staff's: its own Owner neither reads nor decides it
             ofGroup,
@@ -90,6 +137,10 @@ feature("a report files one item in the queue of the scope above its target, and
         }
     },
     then({
+        listMod,
+        listModReports,
+        staffReporters,
+        secret,
         first,
         second,
         again,
@@ -112,14 +163,19 @@ feature("a report files one item in the queue of the scope above its target, and
         count == 1
         scope == true
         reports == 2
-        owner == ["repository"]
-        ownerView.target.path == "smtgroup/code"
-        ownerView.reports.length == 2
+        owner == []
+        ownerView == "Unauthorized"
         repositoryOwner == "Unauthorized"
+        // a moderator of the scope above decides it, and is not told who reported it; the site's staff are
+        listMod == ["repository"]
+        listModReports == [[null, "Spam"], [null, "Spam"]]
+        staffReporters == ["SMT_AUTHOR", "SMT_STRANGER"]
+        // an account with no role on it does not find it to hide
+        secret == [null, "NotFound", "smtsecret", "NotFound", true, false]
         ofGroup.reported == true
         groupScope == null
         ownGroup == "Unauthorized"
-        staff == ["group", "repository"]
+        staff == ["group", "group", "repository"]
     }
 })
 
@@ -272,3 +328,32 @@ feature(
         }
     }
 )
+
+feature("a fork of a hidden repository is hidden with it, a hidden repository is not forked, and neither runs its pipelines", {
+    when() {
+        const fork = lib.row("mantle.smithy.SmithyRepository", {siteId: SITE, repositoryPath: "smtnew/f1"})
+        const check = repositoryId =>
+            lib.run("mantle.smithy.SmithyServices.check#PipelineRun", {repositoryId, event: "push"}).decision || null
+        const before = check(ids.repositoryId)
+        hide("SMT_MOD", "repository", true)
+        lib.settled(SITE, "SMT_AUTHOR")
+        const out = {
+            before,
+            stranger: kind(op("SMT_STRANGER", "getRepository", {repositoryId: fork.repositoryId})),
+            forkOwner: kind(op("SMT_NEW", "getRepository", {repositoryId: fork.repositoryId})),
+            // its group's Owner still sees it, and does not fork it
+            fork: op("SMT_OWNER", "forkRepository", {repositoryId: ids.repositoryId, slug: "again", operationId: "smt-fork-hidden"}),
+            runs: [check(ids.repositoryId), check(fork.repositoryId)]
+        }
+        hide("SMT_MOD", "repository", false, "Reviewed")
+        return out
+    },
+    then({before, stranger, forkOwner, fork, runs}) {
+        before == null
+        stranger == "NotFound"
+        forkOwner == null
+        fork.kind == "Conflict"
+        fork.reason == "repositoryHidden"
+        runs == ["refuse", "refuse"]
+    }
+})

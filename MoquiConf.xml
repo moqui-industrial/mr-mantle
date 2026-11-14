@@ -18,6 +18,8 @@
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
             reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
             merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
+    <!-- Smithy decides whether a pipeline run may start: a hidden repository runs none -->
+    <git-ci run-check-service="mantle.smithy.SmithyServices.check#PipelineRun"/>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>

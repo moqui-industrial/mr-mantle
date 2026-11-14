@@ -447,8 +447,9 @@ kit => {
                 kit.forumScope.narrow(row.contactListId, rank)
                 narrowedCount++
             }
-            // the group's forum category is no wider than the group, in this transaction (§12.5)
-            kit.forumScope.narrow(group.contactListId, rank)
+            // the group's forum category is as wide as the group, in this transaction (§12.5): narrower when it narrows,
+            // and wider when it widens (its subgroups and repositories keep their own)
+            kit.forumScope.follow(group.contactListId, Math.max(rank, ...above.map(g => core.visibilityRank(g.visibilityEnumId))))
         }
         if (given(p.issueRepositoryPath)) {
             const path = text(p.issueRepositoryPath).toLowerCase()
@@ -809,7 +810,7 @@ kit => {
         const forkCeiling = core.forkCeiling(repo.repositoryId)
         if (rank < forkCeiling) invalid("policyRefused[visibility]: A fork is no wider than the repository it was forked from")
         update(repo, {visibilityEnumId, revision: before + 1})
-        kit.forumScope.narrow(repo.contactListId, Math.max(rank, ceiling, forkCeiling))
+        kit.forumScope.follow(repo.contactListId, Math.max(rank, ceiling, forkCeiling))
         audit(
             p.siteId,
             null,

@@ -343,10 +343,45 @@
                 { reviewId: r.reviewId },
                 30,
             ).map((v) => pick(v, 'noteId staffPartyId noteText createdAt')),
-            reports: rows(F + 'ForumReviewReport', {
-                reviewId: r.reviewId,
-            }).map((v) => pick(v, 'reporterPartyId reason evidence createdAt')),
+            reports: reportsShown(p.siteId, r),
         }
+    }
+    /* The reports of a review item as its reader may see them. A report on a repository or a group is decided by more
+       than the site's staff (a moderator of the scope above, who is no Owner of the target), and they are not told who
+       reported it: no reporter, and the reporter's handle and name taken out of the evidence. */
+    function reportsShown(siteId, r) {
+        const list = rows(F + 'ForumReviewReport', { reviewId: r.reviewId })
+        const siteStaff = (() => {
+            try {
+                staff(siteId, null)
+                return true
+            } catch (e) {
+                ec.message.clearErrors()
+                return false
+            }
+        })()
+        if (!core.TARGET_TYPES.includes(r.targetType) || siteStaff)
+            return list.map((v) =>
+                pick(v, 'reporterPartyId reason evidence createdAt'),
+            )
+        return list.map((v) => {
+            const profile = one(S + 'PublicSiteProfile', {
+                siteId,
+                partyId: v.reporterPartyId,
+            })
+            let evidence = String(v.evidence || '')
+            for (const name of [profile?.displayName, profile?.handle])
+                if (name && String(name).length >= 2)
+                    evidence = evidence
+                        .split(new RegExp(core.escapeRegex(String(name)), 'gi'))
+                        .join('[reporter]')
+            return {
+                reporterPartyId: null,
+                reason: v.reason,
+                evidence,
+                createdAt: v.createdAt,
+            }
+        })
     }
     methods.addReviewNote = (p) =>
         receipt(p, 'addReviewNote', () => {
@@ -960,7 +995,50 @@
         return { revision: next }
     }
     methods.getMember = (p) => {
-        staff(p.siteId, p.contactListId)
+        const a = staff(p.siteId, p.contactListId)
+        // An Owner of a group or repository moderates its category and nothing of the site: they see the member's
+        // sanctions and actions in that scope and their posts there, never the member's activity across the site.
+        if (a?.scopeOwnerOnly) {
+            const scope = [...core.categorySubtree(p.siteId, p.contactListId)]
+            return {
+                membership: null,
+                memberState: null,
+                sanctionList: Array.from(
+                    find(F + 'ForumSanction', {
+                        siteId: p.siteId,
+                        partyId: p.targetPartyId,
+                    })
+                        .condition('contactListId', 'in', scope)
+                        .limit(100)
+                        .list(),
+                ).map((s) =>
+                    pick(
+                        s,
+                        'sanctionId revision contactListId kind fromDate thruDate reason',
+                    ),
+                ),
+                scopeActivity: {
+                    postCount: find(E + 'CommunicationEvent', {
+                        fromPartyId: p.targetPartyId,
+                    })
+                        .condition('contactListId', 'in', scope)
+                        .count(),
+                    actionList: Array.from(
+                        find(F + 'ForumModerationAction', {
+                            siteId: p.siteId,
+                            targetType: 'member',
+                            targetId: p.targetPartyId,
+                        })
+                            .condition('contactListId', 'in', scope)
+                            .orderBy('-createdAt')
+                            .limit(20)
+                            .list(),
+                    ).map((v) =>
+                        pick(v, 'actionId contactListId action reason createdAt'),
+                    ),
+                },
+            }
+        }
         return {
             membership: pick(
                 member(p.siteId, p.targetPartyId),

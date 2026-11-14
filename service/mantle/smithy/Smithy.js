@@ -1328,6 +1328,7 @@ function privileged(work) {
     // DG6: a report by mail filed as its confirmed sender, and the day's limit of pipeline runs
     fileMailReport: p => privileged(() => core.withMemo(() => forumScope.fileMailReport(p || {}))),
     countPipelineRun: p => privileged(() => core.withMemo(() => forumScope.countPipelineRun(p || {}))),
+    checkPipelineRun: p => privileged(() => core.withMemo(() => forumScope.checkPipelineRun(p || {}))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

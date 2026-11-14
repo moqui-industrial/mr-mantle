@@ -26,6 +26,8 @@ spec({
     requires: ["git"],
     setupSpec() {
         login(lib.OPERATOR)
+        // the mail gateway whose Authentication-Results are trusted
+        setProperty("smtp_authserv_id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SMC", "smctrack"))
         lib.account(SITE, "SMC_MOD", {member: true, siteRole: "moderator"})

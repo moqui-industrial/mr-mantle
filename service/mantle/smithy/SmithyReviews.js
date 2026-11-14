@@ -1156,6 +1156,8 @@ kit => {
         return receipt(p, "forkRepository", () => {
             const s = core.settings(p.siteId)
             if (r.git.archivedDate) archived()
+            // hidden code is not copied again: its Owners and the site's staff still see it, and nobody forks it
+            if (r.hidden) fail("Conflict", "repositoryHidden: This repository is hidden by a moderator and is not forked")
             if (r.git.repositoryKind === "remote") invalid("policyRefused: A mirror of another server is not forked")
             // a repository that is not public is forked by who works in it: a copy of its code is theirs to keep in step
             if (r.visibility !== 1) core.requireRole(r, "SmrDeveloper")

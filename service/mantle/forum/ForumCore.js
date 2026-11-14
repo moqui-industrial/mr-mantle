@@ -233,10 +233,10 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         ['ListOwner', 'ListModerator'].includes(lm.roleTypeId) &&
         !sanctioned(c.siteId, actor, contactListId, 'suspend')
     // An Owner of the group or repository a category is bound to moderates the scope they own (the app's scope module).
+    const staffModerate =
+        staff || categoryStaff || (actor === me() && isOperator())
     let moderate =
-        staff ||
-        categoryStaff ||
-        (actor === me() && isOperator()) ||
+        staffModerate ||
         (!!actor &&
             !sanctioned(c.siteId, actor, contactListId, 'suspend') &&
             scopeOwner(contactListId, actor))
@@ -321,6 +321,9 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         canReact: !!post,
         canVote: !!post,
         canModerate: moderate,
+        // moderates only as an Owner of the scope the category is bound to: not the site's or the category's staff,
+        // so what is the site's (a member's activity across it) is not theirs to read
+        scopeOwnerOnly: moderate && !staffModerate,
         canInvite: owner || categoryStaff,
     }
 }
@@ -1048,6 +1051,105 @@ function scopeView(contactListId, actor) {
     }
     return null
 }
+/* Who reads a category, as a fact of the category and the categories above it, not of one party: {anonymous (a visitor
+   who is signed out), members (any active member of the site with no role, list membership or grant of its own)}. A
+   category bound to a group or a repository is read by no more than view that scope (scopeView with no user for the
+   anonymous; its visibility for the members). Linking a category to a scope and making a topic an issue compare these. */
+function audience(contactListId, seen = new Set()) {
+    const none = { anonymous: false, members: false }
+    const c = contactListId ? one(F + 'ForumCategory', { contactListId }) : null
+    if (!c || seen.has(contactListId)) return none
+    seen.add(contactListId)
+    const s = one(S + 'PublicSite', { siteId: c.siteId })
+    const published =
+        s?.state === 'published' && c.publicationState === 'published'
+    let anonymous = published && c.visibility === 'public'
+    let members = published && ['public', 'members'].includes(c.visibility)
+    const bound = scopeView(contactListId, null)
+    if (bound) {
+        anonymous = anonymous && bound.canView
+        members = members && Number(bound.visibility || 3) <= 2 && !bound.hidden
+    }
+    if (c.parentContactListId) {
+        const up = audience(c.parentContactListId, seen)
+        anonymous = anonymous && up.anonymous
+        members = members && up.members
+    }
+    return { anonymous, members }
+}
+/* The path of the forum pages a category is read on, from the site's host: the forum of the nearest group or repository
+   above it (or itself) that an app binds it to, else the site's forum mount; null for neither. So a list of a group on a
+   site with no forum mount still has its archive, its posts' links and its held-mail page. */
+function forumPath(siteId, contactListId) {
+    if (contactListId)
+        for (const id of categoryChain(contactListId)) {
+            const base = scopeAnswer('forumBase', id)
+            if (base != null) return base
+        }
+    return publicApps().mount(siteId, 'forum')?.base ?? null
+}
+/* forumPath as an absolute address on the site's canonical host; null without one (a preview host is never one). */
+function forumUrl(siteId, contactListId) {
+    const host = one(S + 'PublicSiteHost', { siteId, canonical: 'Y' })
+    const path = forumPath(siteId, contactListId)
+    return !host || host.hostKindEnumId === 'PshkPreview' || path == null
+        ? null
+        : 'https://' + host.hostname + path
+}
+/* work() signed in as an account (by username), then who was signed in is put back: the request's or job's user again,
+   or, when there was none, nobody; so a web request's own user is never signed out. Unauthorized when the account cannot
+   sign in now (no such account, or disabled). The pattern of SitePages.js asAuthor. */
+function asUser(username, work) {
+    const account = username
+        ? one('moqui.security.UserAccount', { username })
+        : null
+    const previous = ec.user.username
+    const signedIn =
+        !!account &&
+        ec.user.internalLoginUser(account.username) === true &&
+        ec.user.userId === account.userId
+    try {
+        if (!signedIn) {
+            ec.message.clearErrors()
+            fail('Unauthorized', 'accessDenied: That account cannot sign in now')
+        }
+        return work()
+    } finally {
+        if (signedIn || ec.user.username !== previous) {
+            if (previous) {
+                if (previous !== ec.user.username)
+                    ec.user.internalLoginUser(previous)
+            } else ec.user.logoutUser()
+        }
+    }
+}
+/* Takes up to wanted of a party's day's allowance of a counter (a key of TRUST_EFFECTS and of dailyCounts) at its trust
+   level in the site, and counts what it took: how many it may have now (0 when the day's allowance is spent). The
+   member's row is locked. */
+function takeDaily(siteId, partyId, counter, wanted) {
+    const m = memberStateFor(siteId, partyId)
+    const effects = TRUST_EFFECTS[m.trustLevel] || TRUST_EFFECTS.new
+    const day = dayKey(),
+        same = m.dayKey === day,
+        counts = same ? json(m.dailyCounts, {}) : {}
+    const taken = Math.max(
+        0,
+        Math.min(
+            Number(wanted) || 0,
+            Number(effects[counter] || 0) - Number(counts[counter] || 0),
+        ),
+    )
+    if (!taken) return 0
+    counts[counter] = Number(counts[counter] || 0) + taken
+    update(m, {
+        dayKey: day,
+        dailyTopics: same ? Number(m.dailyTopics || 0) : 0,
+        dailyReplies: same ? Number(m.dailyReplies || 0) : 0,
+        dailyCounts: JSON.stringify(counts),
+        revision: Number(m.revision) + 1,
+    })
+    return taken
+}
 /* What the apps that keep records answer for a review item that is theirs: a target of their own type (a repository, a
    group) or a held message. Each asks every scope module and takes the first answer that is not null. */
 const TARGET_TYPES = ['repository', 'group']
@@ -1178,6 +1280,8 @@ const TRUST_EFFECTS = {
         fork: 2,
         repository: 1,
         pipelineRun: 5,
+        invitation: 20,
+        listInvitation: 50,
     },
     basic: {
         topics: 10,
@@ -1190,6 +1294,8 @@ const TRUST_EFFECTS = {
         fork: 5,
         repository: 3,
         pipelineRun: 20,
+        invitation: 100,
+        listInvitation: 200,
     },
     member: {
         topics: 20,
@@ -1202,6 +1308,8 @@ const TRUST_EFFECTS = {
         fork: 20,
         repository: 10,
         pipelineRun: 50,
+        invitation: 300,
+        listInvitation: 500,
     },
     regular: {
         topics: 20,
@@ -1214,6 +1322,8 @@ const TRUST_EFFECTS = {
         fork: 20,
         repository: 10,
         pipelineRun: 50,
+        invitation: 500,
+        listInvitation: 1000,
     },
 }
 /* The day's counter of a kind. A name kind (a fork, a repository, a group, a pipeline run) is counted only when the
@@ -1621,6 +1731,11 @@ function privateTopic(t) {
     categorySubtree,
     routeAddress,
     scopeView,
+    audience,
+    forumPath,
+    forumUrl,
+    asUser,
+    takeDaily,
     scopeChanged,
     scopeAnswer,
     heldMail,

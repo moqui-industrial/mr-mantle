@@ -360,14 +360,21 @@ function boundTo(contactListId) {
 }
 /* categoryView: how a party (null: no user) views the group or repository a category is bound to, which is the
    category's ceiling: {canView, restricted (a private scope: its readers and posters are those with a role in it),
-   member (a Guest role or higher)}; null for a category bound to none. */
+   member (a Guest role or higher), visibility (the effective one's order: 1 public, 2 members, 3 private), hidden};
+   null for a category bound to none. */
 function categoryView(contactListId, actorPartyId) {
     return privileged(() => {
         const bound = boundTo(contactListId)
         if (!bound) return null
         const a = core.actorOfParty(actorPartyId)
         const r = bound.kind === "group" ? core.groupRights(bound.row, a) : core.repositoryRights(bound.row, a)
-        return {canView: r.canView, restricted: r.visibility === 3, member: r.canView && r.rank >= RANK.SmrGuest}
+        return {
+            canView: r.canView,
+            restricted: r.visibility === 3,
+            member: r.canView && r.rank >= RANK.SmrGuest,
+            visibility: r.visibility,
+            hidden: r.hidden
+        }
     })
 }
 /* forumBase: the path of the forum's pages of the group or repository a category is bound to, under the site's Smithy
@@ -380,22 +387,25 @@ function forumBase(contactListId) {
         return mount + "/" + (bound.kind === "group" ? bound.row.groupPath : bound.row.repositoryPath) + "/-/forum"
     })
 }
-/* targetModerator: whether a party decides a report on a repository or a group: the site's staff who may view it, and an
-   Owner of a group above it; null for a target type that is not Smithy's. */
+/* targetModerator: whether a party reads and decides a report on a repository or a group (SmithyCore.decidesReport):
+   the site's staff, whatever its scope and whether or not they may view it, and a moderator of the scope above who is no
+   Owner of it; null for a target type that is not Smithy's. */
 function targetModerator(targetType, targetId, actorPartyId) {
     if (!["repository", "group"].includes(targetType)) return null
     return privileged(() => {
         const a = core.actorOfParty(actorPartyId)
         const held = core.targetRights(null, targetType, targetId, a)
-        return !!held && core.mounted(held.row.siteId) && core.mayHide(targetType, held.r, a)
+        return !!held && core.mounted(held.row.siteId) && core.decidesReport(targetType, held.row, held.r, a)
     })
 }
-/* targetInfo: what a review item's page shows of a reported repository or group. */
+/* targetInfo: what a review item's page shows of a reported repository or group: to one who views it, and to one who
+   decides the report on it (the site's staff), who are shown what it is and not what it holds. */
 function targetInfo(targetType, targetId) {
     if (!["repository", "group"].includes(targetType)) return null
     return privileged(() => {
-        const held = core.targetRights(null, targetType, targetId, core.actorOfParty(me()))
-        if (!held || !held.r.canView) return null
+        const a = core.actorOfParty(me())
+        const held = core.targetRights(null, targetType, targetId, a)
+        if (!held || !(held.r.canView || core.decidesReport(targetType, held.row, held.r, a))) return null
         const row = held.row
         return {
             targetType,
@@ -418,7 +428,7 @@ function decideTarget(targetType, targetId, decision, reason) {
         const row = one(M + entity, {[targetType + "Id"]: targetId}, true)
         if (!row) return true
         const r = targetType === "group" ? core.groupRights(row, a) : core.repositoryRights(row, a)
-        if (!core.mayHide(targetType, r, a)) forum.fail("Unauthorized", "accessDenied: Hiding this is not yours to do")
+        if (!core.decidesReport(targetType, row, r, a)) forum.fail("Unauthorized", "accessDenied: Deciding this is not yours to do")
         if (decision === "rejected" && !row.hiddenAt) core.setHidden(targetType, row, true, a, r.access.staff, reason)
         return true
     })

@@ -190,6 +190,8 @@ const REASONS = [
     'notBuilt',
     // Smithy DG2: a credential change by an account with no password to give again needs a fresh sign-in
     'recentSignInRequired',
+    // Smithy DG6: a repository a moderator hid is not forked (design-smithy §12.3)
+    'repositoryHidden',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or

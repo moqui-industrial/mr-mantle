@@ -5016,9 +5016,160 @@ const textHtml = (text) =>
                 '</p>',
         )
         .join('')
+/* The tokens of an Authentication-Results field (RFC 8601 section 2.2) in its parts between semicolons: comments
+   (nested, with quoted pairs) are dropped, a quoted string is one token {quoted}, '=' is a token, and anything else up
+   to white space, '=', ';' or a quote is a word ("header.from", "dkim"; a property's "header . d" is joined). */
+function authResultParts(text) {
+    const parts = [[]]
+    const source = String(text || '')
+    let word = ''
+    const end = () => {
+        if (word) parts[parts.length - 1].push(word)
+        word = ''
+    }
+    for (let i = 0; i < source.length; i++) {
+        const ch = source[i]
+        if (ch === '(') {
+            end()
+            let depth = 1
+            for (i++; i < source.length && depth; i++) {
+                if (source[i] === '\\') i++
+                else if (source[i] === '(') depth++
+                else if (source[i] === ')') depth--
+            }
+            i--
+        } else if (ch === '"') {
+            end()
+            let quoted = ''
+            for (i++; i < source.length && source[i] !== '"'; i++)
+                quoted += source[i] === '\\' ? source[++i] || '' : source[i]
+            parts[parts.length - 1].push({ quoted })
+        } else if (ch === ';') {
+            end()
+            parts.push([])
+        } else if (ch === '=') {
+            end()
+            parts[parts.length - 1].push('=')
+        } else if (/\s/.test(ch)) end()
+        else word += ch
+    }
+    end()
+    // a property's name may have white space around its dot
+    return parts.map((tokens) => {
+        const out = []
+        for (const token of tokens) {
+            const last = out[out.length - 1]
+            if (
+                typeof token === 'string' &&
+                typeof last === 'string' &&
+                token !== '=' &&
+                last !== '=' &&
+                (token.startsWith('.') || last.endsWith('.'))
+            )
+                out[out.length - 1] = last + token
+            else out.push(token)
+        }
+        return out
+    })
+}
+const tokenText = (token) =>
+    token == null ? '' : typeof token === 'string' ? token : token.quoted
+/* An Authentication-Results field read (RFC 8601): {authservId, results: method -> {result, props}}, the first result
+   of each method only (a later one of the same method, which a sender can add, counts for nothing); null for no field. */
+function readAuthResults(text) {
+    const parts = authResultParts(text)
+    const authservId = tokenText(parts[0][0]).toLowerCase()
+    if (!authservId) return null
+    const results = {}
+    for (const tokens of parts.slice(1)) {
+        if (tokens[1] !== '=' || typeof tokens[0] !== 'string') continue
+        const method = tokens[0].toLowerCase().split('/')[0]
+        if (!method || method === 'none' || results[method]) continue
+        const props = {}
+        for (let k = 3; k + 2 < tokens.length; k++) {
+            if (tokens[k + 1] !== '=' || typeof tokens[k] !== 'string') continue
+            const name = tokens[k].toLowerCase()
+            if (!(name in props)) props[name] = tokenText(tokens[k + 2])
+            k += 2
+        }
+        results[method] = {
+            result: tokenText(tokens[2]).toLowerCase(),
+            props,
+        }
+    }
+    return { authservId, results }
+}
+/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp_authserv_id, comma separated, in
+   lower case): with none configured nothing counts as authenticated. */
+const trustedAuthservIds = () =>
+    String(System.getProperty('smtp_authserv_id') || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+/* Whether the mail gateway authenticated a sender's domain: in an Authentication-Results field of a trusted authserv-id,
+   DMARC passed for the From domain, or a DKIM signature passed for that domain or a parent of it (relaxed alignment).
+   Another domain's pass, another server's field and a later result of a method count for nothing. Every path that trusts
+   "authenticated by the gateway" asks this: a post by mail, a held message's sender, a report filed as an account. */
+function gatewayAuthenticated(values, sender) {
+    const trusted = trustedAuthservIds()
+    const domain = String(sender || '')
+        .split('@')
+        .pop()
+        .toLowerCase()
+    if (!trusted.length || !domain || !String(sender || '').includes('@'))
+        return false
+    const aligned = (d) => {
+        const signer = String(d || '')
+            .replace(/^.*@/, '')
+            .toLowerCase()
+        return !!signer && (domain === signer || domain.endsWith('.' + signer))
+    }
+    return values.some((value) => {
+        const read = readAuthResults(value)
+        if (!read || !trusted.includes(read.authservId)) return false
+        const dmarc = read.results.dmarc
+        if (
+            dmarc?.result === 'pass' &&
+            String(dmarc.props['header.from'] || '').toLowerCase() === domain
+        )
+            return true
+        const dkim = read.results.dkim
+        return (
+            dkim?.result === 'pass' &&
+            aligned(dkim.props['header.d'] || dkim.props['header.i'])
+        )
+    })
+}
+/* Whether a mail account is one of the forum's own inbound accounts for a route: hosted or shared, fed by the mail
+   listener (its server has no store host, so the gateway wrote its trace and authentication fields, not a mailbox's
+   owner), and holding the route's address as its own or as an identity. A user's synced mailbox, whose header fields
+   its owner controls, never is. */
+function forumAccount(emailAccountId, route) {
+    const account = emailAccountId
+        ? one('moqui.basic.email.EmailAccount', { emailAccountId })
+        : null
+    if (!account || !['EakHosted', 'EakShared'].includes(account.accountKindEnumId))
+        return false
+    const server = account.emailServerId
+        ? one('moqui.basic.email.EmailServer', {
+              emailServerId: account.emailServerId,
+          })
+        : null
+    if (String(server?.storeHost || '').trim()) return false
+    const address = String(route.address || '').toLowerCase()
+    return (
+        String(account.emailAddress || '').toLowerCase() === address ||
+        rows('moqui.basic.email.EmailIdentity', { emailAccountId }, 50).some(
+            (identity) =>
+                String(identity.emailAddress || '').toLowerCase() === address,
+        )
+    )
+}
 /* The handler for one stored inbound email (an email ECA). It never creates accounts, trusts only the gateway's kept
    Authentication-Results, posts through the same publish gate as the web as the verified sender, and records one
-   receipt per message identity so alias copies and replays do not post twice. Not forum mail is left alone. */
+   receipt per message identity so alias copies and replays do not post twice. Not forum mail is left alone, and so is
+   mail stored in an account that is not the forum's own for the route (forumAccount); a caller with neither an account
+   nor a stored message (server code, never a rule) names the route by the message alone. */
 function processInbound(ctx) {
     const headers = ctx.headers || {},
         fields = ctx.fields || {}
@@ -5049,6 +5200,18 @@ function processInbound(ctx) {
         }
     }
     if (!route) return { handled: false }
+    // a rule's message is stored in an account: only the forum's own inbound account for the route is read
+    const stored = ctx.emailMessageId
+        ? one('moqui.basic.email.EmailMessage', {
+              emailMessageId: ctx.emailMessageId,
+          })
+        : null
+    const accountId = ctx.emailAccountId || stored?.emailAccountId || null
+    if (
+        (ctx.emailAccountId || ctx.emailMessageId || ctx.stored) &&
+        !forumAccount(accountId, route)
+    )
+        return { handled: false }
     const siteId = route.siteId,
         sender = bareAddress(fields.from).toLowerCase(),
         messageId =
@@ -5144,40 +5307,15 @@ function processInbound(ctx) {
         sender === String(settings.senderAddress || '').toLowerCase()
     )
         return record('ignored', 'Message from this forum')
-    const domain = sender.split('@')[1]
-    // Each method result is read with its own properties: DMARC must pass for this From domain, or one DKIM
-    // signature must pass for this domain or a parent of it (relaxed alignment). Another domain's pass counts for nothing.
-    const aligned = (d) => {
-        const signer = String(d || '')
-            .replace(/^@/, '')
-            .toLowerCase()
-        return !!signer && (domain === signer || domain.endsWith('.' + signer))
-    }
-    const authenticated = headerValues(headers, 'authentication-results').some(
-        (value) =>
-            String(value)
-                .split(';')
-                .slice(1)
-                .some((result) => {
-                    const r = result.trim()
-                    const prop = (name) =>
-                        new RegExp('\\b' + name + '=([^\\s;]+)', 'i').exec(
-                            r,
-                        )?.[1]
-                    if (/^dmarc=pass\b/i.test(r))
-                        return (
-                            String(
-                                prop('header\\.from') || '',
-                            ).toLowerCase() === domain
-                        )
-                    if (/^dkim=pass\b/i.test(r))
-                        return aligned(
-                            prop('header\\.d') ||
-                                prop('header\\.i')?.split('@').pop(),
-                        )
-                    return false
-                }),
+    // DMARC or an aligned DKIM signature passed in a field of the trusted gateway (gatewayAuthenticated)
+    const authenticated = gatewayAuthenticated(
+        headerValues(headers, 'authentication-results'),
+        sender,
     )
+    // A report address (a security address) files through its app whatever the message names: a reply address's tag
+    // and the threads it answers are not read, so a report never becomes a reply in a public conversation.
+    const reportRoute = !!route.targetType && route.targetType !== 'category'
+    if (reportRoute) tag = null
     // The sender must be a verified account address, and the trusted gateway must have authenticated the domain.
     const account = Array.from(
         find('moqui.security.UserAccount', {})
@@ -5237,7 +5375,7 @@ function processInbound(ctx) {
             )
         root = t.rootCommEventId
         answered = t.communicationEventId || null
-    } else {
+    } else if (!reportRoute) {
         for (const ref of [
             ...messageIds(headerValues(headers, 'in-reply-to').join(' ')),
             ...messageIds(
@@ -5285,7 +5423,7 @@ function processInbound(ctx) {
         'Message by email'
     // A report address (a security address): the message is filed by its app as the confirmed sender, never posted in
     // a category. The app names the service; it runs in a transaction of its own, as a post does.
-    if (!root && route.targetType && route.targetType !== 'category') {
+    if (reportRoute) {
         const serviceName = core.scopeAnswer('mailReportService', route)
         if (!serviceName)
             return record('rejected', 'This address takes no reports now')
@@ -5418,9 +5556,7 @@ function processInbound(ctx) {
 }
 /* Worker step: post one inbound email as its verified sender through the web's own gate, staging its files first. */
 function postInbound(p) {
-    const previous = ec.user.username
-    ec.user.internalLoginUser(p.username)
-    try {
+    return core.asUser(p.username, () => {
         const scope = p.rootCommEventId
             ? { rootCommEventId: p.rootCommEventId }
             : { contactListId: p.contactListId }
@@ -5456,10 +5592,7 @@ function postInbound(p) {
             operationId: p.operationId,
         })
         return { postId: out.postId, state: out.state, held }
-    } finally {
-        ec.user.logoutUser()
-        if (previous) ec.user.internalLoginUser(previous)
-    }
+    })
 }
 /* A safe outcome notice to a verified member: what happened, never another thread's content. */
 function feedback(siteId, ua, text) {
@@ -5565,6 +5698,7 @@ function storedContext(email) {
         headers['in-reply-to'] = email.inReplyTo
     return {
         emailMessageId: email.emailMessageId,
+        emailAccountId: email.emailAccountId || null,
         headers,
         fields: {
             from: email.fromAddress,
@@ -5598,8 +5732,10 @@ function processJunk(emailMessageId) {
     const verdict = ['x-spam-status', 'x-spam-flag', 'x-spam']
         .flatMap((name) => headerValues(ctx.headers, name))
         .find(Boolean)
+    // a stored message: read only in the forum's own inbound account for its route (forumAccount)
     return processInbound({
         ...ctx,
+        stored: true,
         spamVerdict: {
             spam: true,
             reason: String(verdict || 'Marked as spam by the mail gateway'),
@@ -5831,6 +5967,7 @@ function execute(operation, p) {
     // the word rules, for Smithy's names and descriptions (mr-pass plan/design-smithy.md §11)
     applyRules,
     processInbound,
+    gatewayAuthenticated,
     processJunk,
     postInbound,
     replyAddress,

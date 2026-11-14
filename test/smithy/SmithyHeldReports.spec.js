@@ -3,7 +3,9 @@
 // Owner names the address and the site's staff turn it on; mail to it from a confirmed address files a confidential issue
 // as that account, held for review when the gateway marked it as spam; from an address that is no account's it is not
 // posted: it waits as a held item its Owners read and nobody else, its sender is answered once, and the account that
-// confirms that address files it with the link's token; an unclaimed one is dropped after its time. Spec-local site, group,
+// confirms that address files it with the link's token; an unclaimed one is dropped after its time, and a claimed or
+// dropped one loses its sender's address after its time. A message to it that names a reply address's tag or a thread is
+// still filed as a report, never a reply. Spec-local site, group,
 // db repository and accounts. Regression suite: these are rules. Run: ./moq test mr-mantle --spec SmithyHeldReports
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
 const SITE = "SHR_SITE"
@@ -42,6 +44,7 @@ spec({
     setupSpec() {
         login(lib.OPERATOR)
         setProperty("pass_route_domains", "reports.shr.test")
+        setProperty("smtp_authserv_id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SHR", "shrgroup"))
         lib.account(SITE, "SHR_MOD", {member: true, siteRole: "moderator"})
@@ -98,9 +101,33 @@ feature("mail from a confirmed address files a confidential issue as that accoun
         const spam = mail("shr_author@smithy.test", "Cheap things", "SHR-SPAM", {spamVerdict: {spam: true, reason: "score 12"}})
         const rows = issues()
         const number = Number(rows[0].issueNumber)
+        // a reply address's tag (a token of the sender's for the first issue's conversation) and the thread it answers
+        // are not read at a report address: it is filed as a new report
+        lib.make("mantle.forum.ForumReplyToken", {
+            tokenHash: ec.user.singleUseCodeHash("shr-reply-token"),
+            siteId: SITE,
+            routeId: lib.row("mantle.forum.ForumMailRoute", {address: ADDRESS}).routeId,
+            rootCommEventId: rows[0].rootCommEventId,
+            partyId: "SHR_AUTHOR",
+            expiresAt: ec.user.timestampMillis(ec.user.nowTimestamp) + 3600000
+        })
+        const repliesBefore = lib.row("mantle.forum.ForumTopic", {rootCommEventId: rows[0].rootCommEventId}).visiblePostCount
+        lib.settled(SITE, "SHR_AUTHOR")
+        const tagged = mail("shr_author@smithy.test", "Re: A hole in the wall", "SHR-TAGGED", {
+            headers: {
+                "delivered-to": "security+shr-reply-token@reports.shr.test",
+                "message-id": "<shr-tagged@shr.test>",
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+            }
+        })
         return {
             filed,
             spam,
+            tagged: [
+                tagged.result,
+                issues().length,
+                lib.row("mantle.forum.ForumTopic", {rootCommEventId: rows[0].rootCommEventId}).visiblePostCount === repliesBefore
+            ],
             rows: rows.map(row => [row.confidential, row.reporterPartyId, row.workEffortName, row.rootVisibility].join(" ")),
             reporter: op("SHR_AUTHOR", "getIssue", {repositoryId: ids.repositoryId, issueNumber: number}).issue?.confidential,
             owner: kind(op("SHR_OWNER", "getIssue", {repositoryId: ids.repositoryId, issueNumber: number})),
@@ -110,9 +137,10 @@ feature("mail from a confirmed address files a confidential issue as that accoun
                 ?.reasonFamily
         }
     },
-    then({filed, spam, rows, reporter, owner, stranger, moderator, family}) {
+    then({filed, spam, tagged, rows, reporter, owner, stranger, moderator, family}) {
         filed.result == "posted"
         spam.result == "pending"
+        tagged == ["posted", 3, true]
         rows == ["Y SHR_AUTHOR A hole in the wall approved", "Y SHR_AUTHOR Cheap things pending"]
         reporter == true
         owner == null
@@ -178,6 +206,10 @@ feature(
                     return row.state + " " + (row.body == null)
                 }),
                 expired: expired.dropped >= 1,
+                // past its time a dropped message keeps nothing of its sender; a claimed one in its time keeps them
+                senders: [first.heldId, second.heldId].map(
+                    heldId => lib.row("mantle.forum.ForumHeldMail", {heldId}).senderAddress || null
+                ),
                 after: queue("SHR_OWNER", {scopeContactListId: scope}).length
             }
         },
@@ -196,13 +228,14 @@ feature(
             last,
             held,
             expired,
+            senders,
             after
         }) {
             first.result == "held"
             first.notice == true
             second.notice == false
             // nothing is filed for an address that is no account's
-            before == 2
+            before == 3
             ownerQueue == 2
             item.review.reasonFamily == "mail-held"
             item.review.detail.includes("SHR-HELD the way in") == true
@@ -211,13 +244,14 @@ feature(
             staff == {queue: 0, item: "Unauthorized", maintainer: "Unauthorized"}
             unconfirmed.reason == "addressUnconfirmed"
             claimed.repositoryPath == "shrgroup/code"
-            claimed.issueNumber == 3
+            claimed.issueNumber == 4
             wrong.kind == "NotFound"
             unknown.kind == "NotFound"
             again.kind == "NotFound"
             last == "Y SHR_FINDER A way in"
             held == ["claimed true", "dropped true"]
             expired == true
+            senders == ["finder@world.test", null]
             after == 0
         }
     }

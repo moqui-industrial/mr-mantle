@@ -520,6 +520,12 @@ function deliver(p) {
             event.parentCommEventId !== st.rootCommEventId
                 ? sentId(event.parentCommEventId)
                 : null
+    // A category's post is linked in the forum it is read in: its group's or repository's forum when an app binds it to
+    // one (so a list of a group on a site with no forum mount still has its links and its list headers), else the site's.
+    const categoryBase =
+        allowed.record || allowed.private || !event.contactListId
+            ? null
+            : core().forumPath(v.siteId, event.contactListId)
     return mail(v, allowed.scope, (urls) => ({
         // A scoped reply address, when the site routes mail: replying posts as this member in this thread.
         replyTo: policy().replyAddress(
@@ -533,12 +539,12 @@ function deliver(p) {
         listId: allowed.record?.listId || null,
         // a mailing list's own headers, by the category's address (a topic of a category in list mode)
         listHeaders:
-            allowed.record || allowed.private || urls.forumBase == null
+            allowed.record || allowed.private || categoryBase == null
                 ? null
                 : policy().listHeaders(
                       v.siteId,
                       event.contactListId,
-                      urls.origin + urls.forumBase,
+                      urls.origin + categoryBase,
                   ),
         inReplyTo: parentRef || rootRef,
         references: [rootRef, parentRef].filter(Boolean).join(' '),
@@ -548,7 +554,7 @@ function deliver(p) {
             postUrl: allowed.record
                 ? urls.origin + allowed.record.path
                 : urls.origin +
-                  urls.forumBase +
+                  (categoryBase ?? urls.forumBase) +
                   '/p/' +
                   encodeURIComponent(st.communicationEventId),
             // Private conversation mail is a minimal notice: no subject or text leaves the site. A record's title is
@@ -567,7 +573,7 @@ function deliver(p) {
             rootCommEventId: st.rootCommEventId,
             postId: st.communicationEventId,
         },
-    }), !allowed.record)
+    }), !allowed.record && categoryBase == null)
 }
 /* One email to the member of delivery v through the site's registered settings and verified address, with an opt-out
    token for scope. build(urls) supplies the template parameters and thread references. The provider outcome is kept:

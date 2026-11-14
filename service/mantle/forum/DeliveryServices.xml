@@ -252,20 +252,25 @@
     </actions>
   </service>
   <service verb="expire" noun="HeldMail" authenticate="false" allow-remote="false">
-    <description>A job: held messages nobody claimed in 30 days are dropped, their text and their review items with them.</description>
-    <out-parameters><parameter name="dropped" type="Integer"/></out-parameters>
+    <description>A job: held messages nobody claimed in 30 days are dropped, their text and their review items with them;
+      claimed and dropped messages lose their sender's address, name and subject once their 30 days are over (cleared). The
+      backlog is taken in batches until none is left or a minute has passed.</description>
+    <out-parameters><parameter name="dropped" type="Integer"/><parameter name="cleared" type="Integer"/></out-parameters>
     <actions>
       <script><![CDATA[
         const was=ec.artifactExecution.disableAuthz()
-        try{dropped=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').lists.expireHeld().dropped}finally{if(!was)ec.artifactExecution.enableAuthz()}
+        try{const out=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').lists.expireHeld();dropped=out.dropped;cleared=out.cleared}finally{if(!was)ec.artifactExecution.enableAuthz()}
       ]]></script>
     </actions>
   </service>
   <service verb="invite" noun="ListMembers" authenticate="anonymous-all" allow-remote="false">
     <description>Operation inviteListMembers: each address (at most 500 a call) is mailed an invitation to a mailing list (a
       category in list mode), by the list's owners. Redeeming it (redeem#Invitation, by the account with that address
-      verified) makes the account a member of the list with every post by mail; nobody is subscribed without it. Answers
-      counts (invited, alreadyInvited, invalidCount, unsent), never whose address has an account. Needs the site's mail
+      verified) makes the account a member of the list with every post by mail; nobody is subscribed without it. The mail's
+      subject is fixed (the site's name and a neutral text), the list's name is only in its body. But for the site's owners
+      and operators, invitations are limited a day by the inviter's trust level, for the inviter (invitation) and for the
+      list (listInvitation); the addresses over the limit are not invited (limitedCount). Answers counts (invited,
+      alreadyInvited, invalidCount, unsent, limitedCount), never whose address has an account. Needs the site's mail
       settings.</description>
     <in-parameters><parameter name="input" type="Map"/></in-parameters>
     <out-parameters><parameter name="result" type="Map"/></out-parameters>

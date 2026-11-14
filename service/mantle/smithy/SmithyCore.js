@@ -61,7 +61,8 @@ const MAX_GROUP_DEPTH = 4
    what a rename, a narrowing and a quota read walk. */
 const GROUP_REPOSITORY_LIMIT = 1000
 /* Smithy's own first segments and the default base of each PASS app (mr-pass service/pass/Apps.js, which the
-   authority cannot read), which no group path or handle takes, so a mount made later shadows none. */
+   authority cannot read), which no group path or handle takes, so a mount made later shadows none. The framework's own
+   segments (git, the sign-in and asset paths...) are not copied here: PublicApps.reservedPaths reads the framework's list. */
 const reservedNames = [
     "forum",
     "account",
@@ -76,7 +77,6 @@ const reservedNames = [
     "search",
     "new",
     "import",
-    "git",
     "admin",
     "api",
     "help",
@@ -86,7 +86,6 @@ const reservedNames = [
     "releases",
     "security",
     "settings",
-    "login",
     "logout",
     "register",
     "robots.txt",
@@ -407,7 +406,8 @@ function repositoryRights(repo, a, depth = 0) {
               forkCeiling(repo.repositoryId)
           )
         : 3
-    const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt))
+    // a fork of a hidden repository is hidden with it (to all but the fork's own Owners and the site's staff)
+    const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt)) || forkHidden(repo.repositoryId)
     return {
         repo,
         chain: whole || [],
@@ -447,9 +447,27 @@ function forkCeiling(repositoryId, depth = 0) {
         )
     })
 }
+/* Whether a repository a hosted repository was forked from (its parent, the parent's parent...) is hidden, it or a group
+   above it: a fork shares the hidden code, so it is hidden too. False for one that is no fork, or whose parent Smithy
+   does not keep. */
+function forkHidden(repositoryId, depth = 0) {
+    return remember("forkHidden|" + repositoryId, () => {
+        const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+        const parent = parentId && depth < 8 ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+        if (!parent) return false
+        if (parent.hiddenAt || (parent.groupId && (groupChain(parent.groupId) || []).some(g => !!g.hiddenAt))) return true
+        return forkHidden(parentId, depth + 1)
+    })
+}
 /* Whether an actor may view a repository of a list, without reading its role rows when it is public in effect. */
 function repositoryViewable(repo, a) {
-    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1 && forkCeiling(repo.repositoryId) === 1) {
+    if (
+        repo.groupId &&
+        !repo.hiddenAt &&
+        visibilityRank(repo.visibilityEnumId) === 1 &&
+        forkCeiling(repo.repositoryId) === 1 &&
+        !forkHidden(repo.repositoryId)
+    ) {
         const group = one(M + "SmithyGroup", {groupId: repo.groupId})
         const rights = group && group.siteId === repo.siteId ? groupRights(group, a) : null
         if (rights && rights.canView && rights.visibility === 1 && !rights.hidden) return true
@@ -565,14 +583,25 @@ const scopeAbove = (kind, row) => {
     const groupId = kind === "group" ? row.parentGroupId : row.groupId
     return groupId ? ensureGroupCategory(groupId) : null
 }
-/* Who may hide a repository or a group they view, and decides a report on it: the site's staff (owners, moderators, and
-   an operator on a page), and an Owner of a group above it. Never by a role on the target itself. r: its rights for a. */
+/* Who may hide a repository or a group (design §12.3): the site's staff (owners, moderators, and an operator on a page)
+   anything, whether or not they may view it (what it holds stays governed by the view rule); and an Owner of a group
+   above it who views it. Never by a role on the target itself. r: its rights for a. */
 function mayHide(kind, r, a) {
-    if (!r.canView) return false
     if (r.access.staff) return true
-    if (!a.partyId || r.access.suspended) return false
+    if (!r.canView || !a.partyId || r.access.suspended) return false
     const above = kind === "group" ? r.chain.slice(1) : r.chain
     return above.length > 0 && groupRank(above, a.partyId)[0] >= RANK.SmrOwner
+}
+/* Who decides a report on a repository or a group: the site's staff, every report whatever its scope; and a moderator of
+   the scope above it (the category of the group above) who views it and holds no Owner rank on it. An Owner of a group
+   above is an Owner of the target too, so a target's owners never decide a report on what they own. Its decision may
+   hide the target. row: the target's row; r: its rights for a. */
+function decidesReport(kind, row, r, a) {
+    if (r.access.staff) return true
+    if (!r.canView || !a.partyId || r.access.suspended || r.rank >= RANK.SmrOwner) return false
+    const groupId = kind === "group" ? row.parentGroupId : row.groupId
+    const scope = groupId ? one(M + "SmithyGroup", {groupId})?.contactListId : null
+    return !!scope && !!forum.categoryAccess(scope, a.partyId)?.canModerate
 }
 /* The rights an actor holds on a repository or a group by its id and kind, with its row; null for none of the site. */
 function targetRights(siteId, kind, targetId, a) {
@@ -956,6 +985,8 @@ function resolvePath(siteId, path) {
     scopeCategory,
     scopeAbove,
     mayHide,
+    decidesReport,
+    forkHidden,
     targetRights,
     setHidden,
     hiddenByStaff,

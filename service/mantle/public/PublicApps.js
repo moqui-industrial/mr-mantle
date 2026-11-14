@@ -48,40 +48,24 @@ const apps = {
         scopeEntities: ['mantle.smithy.SmithyGroup', 'mantle.smithy.SmithyRepository'],
     },
 }
-/* The first path segments no app mount, site page route or redirect may take: the BOSS apps, REST and RPC, the framework's
- * routes (public_site.rs FRAMEWORK_ROUTES, so a root app never shadows them; Shop P1, F2) and its sign-in, token and
- * asset paths. Forum.js storeMounts checks mounts against it, SitePages.js redirects and navigation paths. */
-const reservedPaths = [
-    'apps',
-    'qapps',
-    'rest',
-    'rpc',
-    'status',
-    'error',
-    'health',
-    'metrics',
-    'fop',
-    'js',
-    'css',
-    'libs',
-    'images',
-    // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
-    'static',
-    'assets',
-    'Login',
-    'SecondFactor',
-    'PasswordReset',
-    'sso',
-    'notws',
-    'termws',
-    'PublicShell',
-    's',
-    'u',
-    'cal',
-    'r',
-    'sw.js',
-    'manifest.webmanifest',
-    'WebPush',
+/* The framework's reserved first path segments (ec.web.reservedPaths: the host's own routes, the framework's screens and
+ * its sign-in, token and asset paths), the one list of them. INTERIM_FRAMEWORK_PATHS stands in only while the running
+ * binary is older than that list, and goes with it. */
+const INTERIM_FRAMEWORK_PATHS = [
+    'health', 'metrics', 'notws', 'termws', 'callws', 'git', 'ci', 'dav', '.well-known', 'assist', 'a2a', 'mcp', 'llm',
+    'v1', 'channels', 'xmpp-websocket', 'xmpp-upload', 'apps', 'qapps', 'rest', 'rpc', 'status', 'error', 'fop', 'Login',
+    'SecondFactor', 'PasswordReset', 'ChangePassword', 'ReAuth', 'Device', 'ChatKeys', 'emailOAuth', 'sso', 'rum',
+    'PublicShell', 's', 'u', 'cal', 'r', 'sw.js', 'manifest.webmanifest', 'WebPush', 'js', 'css', 'libs', 'images',
+    'static', 'assets',
+]
+function frameworkPaths() {
+    const paths = ec.web?.reservedPaths
+    return paths && paths.length ? Array.from(paths, String) : INTERIM_FRAMEWORK_PATHS
+}
+/* The first path segments no app mount, site page route or redirect may take: the framework's (frameworkPaths), and the
+ * apps' own words below. Forum.js storeMounts checks mounts against it, SitePages.js redirects and navigation paths,
+ * SmithyCore.js the site's one name set. */
+const APP_PATHS = [
     // Commerce P14: the Shop mount's feed path (feeds/{feedKey}.{extension}, mr-pass resolve#Route), so a Shop at '/' keeps
     // it from another app's mount, a page route or a redirect
     'feeds',
@@ -162,4 +146,15 @@ function sitesFor(app, targetId) {
                 ).some((host) => !isPreviewHost(host)),
         )
 }
-;({ apps, targets, mount, pageUrl, sitesFor, reservedPaths, isPreviewHost })
+;({
+    apps,
+    targets,
+    mount,
+    pageUrl,
+    sitesFor,
+    get reservedPaths() {
+        return frameworkPaths().concat(APP_PATHS)
+    },
+    frameworkPaths,
+    isPreviewHost,
+})
