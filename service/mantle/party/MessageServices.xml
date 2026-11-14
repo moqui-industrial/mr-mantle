@@ -20,6 +20,8 @@
             <parameter name="productStoreId"/>
             <parameter name="organizationPartyId"><description>The organization the delivery is from, whose suppressions it
                 meets (empty: its store's, when it names one)</description></parameter>
+            <parameter name="sendingProfileId"><description>The sending profile it goes out from (impl-marketing P6): its relay, sender,
+                reply-to and VERP bounce address, within its throttle and quiet hours; of the organization given (its own when none is)</description></parameter>
             <parameter name="transactional" type="Boolean" default="true"/>
             <parameter name="marketingPurposeEnumId"/>
             <parameter name="consentContactListId"><description>A topic's list (Commerce P9 follow-up: a store's review
@@ -261,4 +263,289 @@
             <set field="reasons" from="found.reasons"/>
         </actions>
     </service>
+    <!-- ===== Marketing P6: Comms' templates, sending profiles and the bounce intake (impl-marketing P6, F13, F14, F17, F18, F76, F78;
+        design-marketing §5, §12, §15.1; Comms' owner contract, design-drawers-commons' Mailboxes row) ===== -->
+    <!-- the template library (MessageTemplates.js): MESSAGE_TEMPLATE_VIEW reads, MESSAGE_TEMPLATE_EDIT writes, by the organizations
+        the caller works for -->
+    <service verb="find" noun="Templates" allow-remote="false" read-only="true">
+        <description>The templates the caller reads (MESSAGE_TEMPLATE_VIEW or MESSAGE_TEMPLATE_EDIT; the organizations they work for, every internal one for a system administrator or a holder of MARKETING_ALL_ORGANIZATIONS), by name, filtered in the query by organization, channel, purpose, locale, text and state (active, the default; ended; all), a page at a time. Each row: name, organization, channel, purpose, locale, state (draft, scheduled, published, ended) with the date in effect and the subject, whether it has a draft, its revision and whether the caller may edit it. Refuses PERMISSION_DENIED and ORGANIZATION_DENIED.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="localeId"/>
+            <parameter name="text"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="templateList" type="List"/>
+            <parameter name="templateListCount" type="Integer"/>
+            <parameter name="templateListPageIndex" type="Integer"/>
+            <parameter name="templateListPageSize" type="Integer"/>
+            <parameter name="templateListPageMaxIndex" type="Integer"/>
+            <parameter name="templateListPageRangeLow" type="Integer"/>
+            <parameter name="templateListPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('find', context))</script></actions>
+    </service>
+    <service verb="get" noun="Template" allow-remote="false" read-only="true">
+        <description>One template the caller reads: its header, its draft and the content in effect (each with its subject, preheader, body, text, declared variables and revision), and its published contents newest first (dates, reason, who published). Another organization's answers RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="template" type="Map"/>
+            <parameter name="draft" type="Map"/>
+            <parameter name="current" type="Map"/>
+            <parameter name="contentList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('get', context))</script></actions>
+    </service>
+    <service verb="create" noun="Template" allow-remote="false">
+        <description>A template of an organization the caller works for (MESSAGE_TEMPLATE_EDIT): a name, the channel (email), the purpose (MessageTemplatePurpose: promotional or transactional) and a locale, with its EmailTemplate (MT_ and its id, sent through SYSTEM unless a sending profile names its relay and sender). Copied from another template the caller reads (copyFromTemplateId), it starts with that one's content as an unpublished draft. Refuses PERMISSION_DENIED, ORGANIZATION_DENIED, NAME_REQUIRED, CHANNEL_INVALID, VALUE_INVALID and RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="templateName"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="localeId"/>
+            <parameter name="copyFromTemplateId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messageTemplateId"/>
+            <parameter name="emailTemplateId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('create', context))</script></actions>
+    </service>
+    <service verb="store" noun="Template" allow-remote="false">
+        <description>A template's header (name, purpose, locale) at the revision read (expectedRevision: its lastUpdatedStamp in millis; STALE_RECORD naming the current one). MESSAGE_TEMPLATE_EDIT; refuses TEMPLATE_ENDED.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="templateName"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="localeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messageTemplateId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('store', context))</script></actions>
+    </service>
+    <service verb="store" noun="TemplateContent" allow-remote="false">
+        <description>The template's draft, written at the revision read (the draft's, else the template's for a first draft or one made from the content in effect); a published content is never changed (F78). The subject (one line), preheader, body (HTML) and text alternative may name only the variables the content declares, as ${name} (variables: a list of {name, label, fallback, required}); refused when stored: an undeclared name (UNDECLARED_VARIABLE), an expression or an unclosed ${ (VARIABLE_EXPRESSION), a template tag (TEMPLATE_DIRECTIVE), a variable inside a link's address (VARIABLE_IN_LINK), a script, frame, form, embedded object, event handler or script link (UNSAFE_HTML), a reserved or repeated name (VARIABLE_INVALID). Each store writes the body as a dbresource:// .html.fancy-locked file (the text a .fancy-locked one) of its own. MESSAGE_TEMPLATE_EDIT; refuses TEMPLATE_ENDED, REVISION_REQUIRED, STALE_RECORD.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="subject" allow-html="any"/>
+            <parameter name="preheader" allow-html="any"/>
+            <parameter name="body" allow-html="any"/>
+            <parameter name="bodyText" allow-html="any"/>
+            <parameter name="variables" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messageTemplateId"/>
+            <parameter name="contentSeqId"/>
+            <parameter name="revision" type="Long"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('storeContent', context))</script></actions>
+    </service>
+    <service verb="preview" noun="Template" allow-remote="false" read-only="true">
+        <description>A content (the draft, else the one in effect, or contentSeqId) rendered with sample values (sampleValues: synthetic, never a recipient's data), each declared variable its value or else its fallback, through the locked renderer: the subject, preheader, body and text; the required variables with neither (missingVariables) and the findings (an empty or long subject, no body, no text alternative). Reads only (MESSAGE_TEMPLATE_VIEW); refuses NO_CONTENT.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+            <parameter name="contentSeqId"/>
+            <parameter name="sampleValues" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contentSeqId"/>
+            <parameter name="renderedSubject"/>
+            <parameter name="renderedPreheader"/>
+            <parameter name="renderedBody"/>
+            <parameter name="safeBody"><description>The rendered body cleaned as an allow-html="safe" parameter is, for a screen</description></parameter>
+            <parameter name="renderedText"/>
+            <parameter name="missingVariables" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="variables" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('preview', context))</script></actions>
+    </service>
+    <service verb="publish" noun="Template" allow-remote="false">
+        <description>The draft takes effect at fromDate (now when empty; never in the past), with a reason, at the draft's revision: its texts are checked again (a subject and a body required), and the content in effect at that date ends there; a content already scheduled on or after it refuses SCHEDULE_CONFLICT. Publication authorizes no send and changes no prepared message. MESSAGE_TEMPLATE_EDIT; refuses NO_DRAFT, REASON_REQUIRED, DATE_INVALID, SUBJECT_REQUIRED, BODY_REQUIRED, STALE_RECORD.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messageTemplateId"/>
+            <parameter name="contentSeqId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('publish', context))</script></actions>
+    </service>
+    <service verb="end" noun="Template" allow-remote="false">
+        <description>The template is no longer offered from now, with a reason, at its revision; its content in effect ends and its contents stay. MESSAGE_TEMPLATE_EDIT; refuses TEMPLATE_ENDED, REASON_REQUIRED, STALE_RECORD.</description>
+        <in-parameters>
+            <parameter name="messageTemplateId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="messageTemplateId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('end', context))</script></actions>
+    </service>
+    <service verb="build" noun="TemplateDelivery" allow-remote="false">
+        <description>The ledger's template source (MdsrcMessageTemplate): a delivery of a template's EmailTemplate rendered from the content in effect at the attempt with the delivery's queued values (bodyParameters at queue#Delivery) for its declared variables only; suppress when the template ended, has no content in effect, or a required variable has no value or fallback. Internal.</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="subject"/>
+            <parameter name="body"/>
+            <parameter name="bodyText"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageTemplates.js').execute('buildDelivery', context))</script></actions>
+    </service>
+    <!-- the sending profiles (MessageSendingProfiles.js): MESSAGE_SENDING_CONFIGURE writes; it and Marketing's configurer, authors
+        and dispatchers read -->
+    <service verb="find" noun="SendingProfiles" allow-remote="false" read-only="true">
+        <description>The sending profiles the caller reads (MESSAGE_SENDING_CONFIGURE, MARKETING_CONFIGURE, MARKETING_SEND_EDIT or MARKETING_DISPATCH; the organizations they work for), by name, filtered by organization, channel and state (active, the default; all), each with its relay's id, sender, purpose, limits, tracking and its readiness now; never a host or credential. Refuses PERMISSION_DENIED and ORGANIZATION_DENIED.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="state"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="profileList" type="List"/>
+            <parameter name="profileListCount" type="Integer"/>
+            <parameter name="profileListPageIndex" type="Integer"/>
+            <parameter name="profileListPageSize" type="Integer"/>
+            <parameter name="profileListPageMaxIndex" type="Integer"/>
+            <parameter name="profileListPageRangeLow" type="Integer"/>
+            <parameter name="profileListPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+            <parameter name="relayOptions" type="List"><description>For a configurer: the relays Admin approved, by id</description></parameter>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('find', context))</script></actions>
+    </service>
+    <service verb="get" noun="SendingProfile" allow-remote="false" read-only="true">
+        <description>One sending profile the caller reads with its readiness checks, and for a configurer the relays Admin approved to choose from (EmailServers no mail account owns, by id). Another organization's answers RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="sendingProfileId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="profile" type="Map"/>
+            <parameter name="ready" type="Boolean"/>
+            <parameter name="checkList" type="List"/>
+            <parameter name="relayOptions" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('get', context))</script></actions>
+    </service>
+    <service verb="store" noun="SendingProfile" allow-remote="false">
+        <description>A new sending profile of an organization the caller works for, or one changed at the revision read (expectedRevision): a name; the relay, one Admin approved (an EmailServer no mail account owns: RELAY_INVALID); the sender and reply-to (ADDRESS_INVALID); the purpose; a throttle of messages an hour; quiet hours (HH:mm, both or neither) and their time zone; the tracking policy; the bounce domain (DOMAIN_INVALID); the PASS site of its unsubscribes; dates. MESSAGE_SENDING_CONFIGURE; refuses PERMISSION_DENIED, ORGANIZATION_DENIED, NAME_REQUIRED, VALUE_INVALID, DATE_INVALID, STALE_RECORD.</description>
+        <in-parameters>
+            <parameter name="sendingProfileId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="profileName"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="emailServerId"/>
+            <parameter name="fromAddress"/>
+            <parameter name="fromName"/>
+            <parameter name="replyToAddress"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="throttlePerHour"/>
+            <parameter name="quietFrom"/>
+            <parameter name="quietThru"/>
+            <parameter name="timeZone"/>
+            <parameter name="trackingPolicyEnumId"/>
+            <parameter name="bounceDomain"/>
+            <parameter name="siteId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sendingProfileId"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('store', context))</script></actions>
+    </service>
+    <service verb="check" noun="SendingProfile" allow-remote="false">
+        <description>The readiness of one sending profile now (design §12 SenderReadiness): in effect; the transport (the relay there, not a mail account's, not disabled, with a host, its last Admin test not failed); the sender and its domain (one this server signs, or a relay that passed its test); the bounce account (a hosted or shared mail account bounces@ the bounce domain, which receives bounces+(delivery)@ it); the unsubscribe page (the site's Account Email preferences, else the server's own). Each check: checkKey, title, state (ready, warning, blocked), message and the place that fixes it (fixRoute: marketingSendingProfiles, adminMailRelay, mailAccount); ready when none is blocked, with the reasons. With refresh, a configurer's check is kept as the profile's last. No host or credential is told.</description>
+        <in-parameters>
+            <parameter name="sendingProfileId" required="true"/>
+            <parameter name="refresh" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sendingProfileId"/>
+            <parameter name="ready" type="Boolean"/>
+            <parameter name="checkList" type="List"/>
+            <parameter name="reasons" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('check', context))</script></actions>
+    </service>
+    <!-- the bounce intake (MessageDeliveryReports.js): the email ECA DeliveryReportIntake (MantleConsent.emecas.xml) and the
+        EmailMessage ECA DeliveryReportEdgeBounce call it; the poll job run_DeliveryReports reads what they did not -->
+    <service verb="process" noun="DeliveryReport" authenticate="anonymous-all" allow-remote="false" operation="message.report.process" operation-ref="emailMessageId">
+        <description>One message read as a delivery report and applied once (design §15.1): a DSN or an abuse report (ARF) a bounce account received, read with the framework's read#DeliveryReport, its delivery found by the VERP key bounces+(deliveryId)@ (the address it came to, an ARF's Original-Mail-From) or the returned message's Message-ID; or a template's sent message the edge relay marked ES_BOUNCED, by the attempt that sent it (F76). A permanent failure or the edge's bounce is a hard bounce, a transient failure or a delay a soft bounce, a delivery a delivered fact, an abuse report a complaint: each a receipt fact of the delivery once (MessageDeliveryReceipt), the delivery's strongest fact never moved back. A hard bounce adds one suppression of the address for every organization, a complaint one for the delivery's organization, never doubled; a soft bounce suppresses nothing. Each message once (MessageDeliveryReport): read again it changes nothing (duplicate). An unknown key or an unreadable report is recorded, logged and left in its mailbox. Internal.</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reportId"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="deliveryId"/>
+            <parameter name="receiptEnumId"/>
+            <parameter name="duplicate" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('process', context))</script></actions>
+    </service>
+    <service verb="run" noun="DeliveryReports" authenticate="anonymous-all" allow-remote="false" operation="message.report.run">
+        <description>The run_DeliveryReports job: the messages of the bounce accounts (bounces@ a sending profile's bounce domain) and the template messages the edge marked bounced in the last 30 days that were not read, or failed with tries left (five), each in its own transaction; a failure is logged and the rest go on.</description>
+        <in-parameters>
+            <parameter name="limit" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="read" type="Integer"/>
+            <parameter name="applied" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('run', context))</script></actions>
+    </service>
+    <service verb="handle" noun="BouncedMessage" authenticate="false" allow-remote="false">
+        <description>The EmailMessage ECA DeliveryReportEdgeBounce: a template's sent message turning ES_BOUNCED (the edge relay's bounce) is read by process#DeliveryReport after the write commits, in a transaction of its own; never fails the write.</description>
+        <in-parameters>
+            <parameter name="emailMessageId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="afterCommit" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('handleBounced', context))</script></actions>
+    </service>
+    <service verb="find" noun="DeliveryReceipts" allow-remote="false" read-only="true">
+        <description>A delivery's receipt facts (delivered, soft bounce, hard bounce, complaint, each once, with its date and detail) and the reports read for it, beside its hand-off state, for MESSAGE_DELIVERY_REVIEW, MESSAGE_SUPPRESSION_REVIEW or a contact administrator; no address.</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="receiptEnumId"/>
+            <parameter name="receiptText"/>
+            <parameter name="receiptList" type="List"/>
+            <parameter name="reportList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('receipts', context))</script></actions>
+    </service>
+    <!-- ===== end of Marketing P6 ===== -->
 </services>
