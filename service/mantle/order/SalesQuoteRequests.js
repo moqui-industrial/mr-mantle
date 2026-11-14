@@ -644,7 +644,9 @@ function createQuoteFromRequest(p) {
         currencyUomId: text(p.currencyUomId),
         // a repair's quote names nothing of the claim; an RFQ's carries its name
         orderName: source.repair ? L("Repair estimate") : source.request.requestName || null,
-        validThruDate: p.validThruDate || null
+        validThruDate: p.validThruDate || null,
+        // Sales P10 (P8's review): an RFQ's quote is its team's, so the RFQ's team sees it; the maker stays its owner
+        requestTeamPartyId: source.repair ? null : source.teamPartyId || null
     })
     let orderRevision = created.orderRevision
     for (const line of lines) {

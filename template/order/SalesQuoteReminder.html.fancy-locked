@@ -1,0 +1,19 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- Mantle's default reminder of an issued quote (locked, F70): the organization's own text takes this one's place by
+     SalesPolicy.reminderTextLocation. It sees only its map: quoteId, quoteName, customerName, contactName, sellerName, repName,
+     issuedText, validThruText, totalText, linkUrl. -->
+<p>${localize('Dear')} ${contactName || customerName},</p>
+<p>${localize('A reminder of our quote')} ${quoteId}<#if quoteName> (${quoteName})</#if> ${localize('of')} ${issuedText}, ${localize('valid through')} ${validThruText}. ${localize('It is attached again for you.')}</p>
+<#if linkUrl><p>${localize('You can open it here')}: ${linkUrl}</p></#if>
+<p>${localize('Kind regards')},<br>${repName || sellerName}<br>${sellerName}</p>

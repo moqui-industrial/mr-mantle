@@ -406,7 +406,8 @@ feature("a rep's request becomes a quote from two of its three lines, linked lin
             requestItemSeqIdList: ["03"]
         })
         const shown = detail(users.rep, made.requestId)
-        // the manager's quote of the third line is no quote of the rep's (no team): the rep sees that a quote exists, not its title
+        // the manager's quote of the third line is the request's team's (Sales P10, P8's review): the manager its owner, East its team,
+        // so the rep of East opens it
         const managerQuote = as(users.manager, "create#QuoteFromRequest", {
             requestId: made.requestId,
             requestRevision: revision(),
@@ -417,7 +418,9 @@ feature("a rep's request becomes a quote from two of its three lines, linked lin
         const listed = Array.from(as(users.rep, "find#QuoteRequests", {state: "all"}).quoteRequestList || []).find(
             row => row.requestId === made.requestId
         )
+        const managerParties = rowsOf("mantle.order.OrderPartParty", {orderId: managerQuote.orderId})
         return {
+            managerParties,
             managerQuote,
             shownAfter,
             listed,
@@ -465,13 +468,13 @@ feature("a rep's request becomes a quote from two of its three lines, linked lin
         r.statusId == "ReqInProgress"
         r.shown.quotes.length == 2
         r.shown.items.find(item => item.requestItemSeqId === "01").statusText == "Quoted"
-        // a quote the rep cannot open gives no title, total or count
+        // the manager's quote is the request's team's (Sales P10): the rep of that team opens it, the manager stays its owner
         r.managerQuote.refused == ""
-        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).canOpen == false
-        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).orderName != "Store refit"
-        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).totalText == ""
-        !r.shownAfter.items.find(item => item.requestItemSeqId === "03").quotedText.includes(r.managerQuote.orderId)
-        r.listed.quoteCount == 2
+        r.managerParties.find(row => row.roleTypeId === "SalesTeam").partyId == teams.east
+        r.managerParties.find(row => row.roleTypeId === "SalesRepresentative").partyId == users.manager
+        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).canOpen == true
+        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).orderName == "Store refit"
+        r.listed.quoteCount == 3
     }
 })
 

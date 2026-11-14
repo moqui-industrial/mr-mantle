@@ -198,7 +198,11 @@ function attemptStep(p) {
                     emailTemplateId: delivery.templateKey,
                     toAddresses: toAddress,
                     bodyParameters: built.bodyParameters || {},
-                    ...(built.extraHeaders ? {extraHeaders: built.extraHeaders} : {})
+                    ...(built.extraHeaders ? {extraHeaders: built.extraHeaders} : {}),
+                    // a source that makes its own body and attachments (Sales' quote and reminder, impl-sales P10: the issued PDF)
+                    ...(built.body ? {body: built.body} : {}),
+                    ...(built.bodyText ? {bodyText: built.bodyText} : {}),
+                    ...(built.attachments ? {attachments: built.attachments} : {})
                 })
                 .call() || {}
         if (ec.message.hasError()) {
@@ -301,6 +305,19 @@ function resolveDelivery(p) {
     })
     return {stateEnumId}
 }
+// requeue#Delivery (a source's retry of what it sent, impl-sales P10: a quote send to a recipient that failed): a failed or
+// waiting delivery queued again from now, in a transaction of its own so the next attempt (each its own) sees it. A sent,
+// suppressed or uncertain one is left as it is: an uncertain send is reviewed, never repeated blindly.
+function requeue(p) {
+    return createApart("mantle.party.MessageServices.requeue#DeliveryStep", {deliveryId: p.deliveryId})
+}
+function requeueStep(p) {
+    const delivery = find(D, {deliveryId: p.deliveryId}).forUpdate(true).one()
+    if (!delivery || !["MdsFailed", "MdsRetry"].includes(delivery.stateEnumId))
+        return {stateEnumId: delivery?.stateEnumId || null, requeued: false}
+    call("update#" + D, {deliveryId: delivery.deliveryId, stateEnumId: "MdsQueued", nextAttemptDate: ec.user.nowTimestamp})
+    return {stateEnumId: "MdsQueued", requeued: true}
+}
 // The deliveries of an event (a source's own view of what went out), newest first.
 const ofEvent = eventKey => rows(D, {eventKey}).sort((a, b) => (ms(b.createdDate) ?? 0) - (ms(a.createdDate) ?? 0))
 
@@ -369,7 +386,17 @@ function recoverMailOutcome(p) {
     return {applied: true, ownerStateText: stateTexts[resolved.stateEnumId] || ""}
 }
 
-const operations = {queue, attempt: attemptStep, receipt, runDeliveries, resolveDelivery, mailOutcomeOwners, recoverMailOutcome}
+const operations = {
+    queue,
+    attempt: attemptStep,
+    receipt,
+    runDeliveries,
+    resolveDelivery,
+    mailOutcomeOwners,
+    recoverMailOutcome,
+    requeue,
+    requeueStep
+}
 ;({
     limits,
     ofEvent,

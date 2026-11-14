@@ -1,0 +1,26 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- Mantle's default cover and terms of a quote (locked, F70): the organization's own text takes this one's place by
+     SalesPolicy.quoteTextLocation. part is "cover" (the mail and the print's opening) or "terms" (the print's closing). It sees only
+     its map: part, quoteId, quoteName, customerName, contactName, sellerName, repName, issuedText, validThruText, totalText,
+     linkUrl. -->
+<#if part == 'terms'>
+<p><strong>${localize('Terms')}</strong></p>
+<p>${localize('This quote is valid through')} ${validThruText}. ${localize('Prices are in the currency shown; taxes are as stated and may change with the delivery address.')}
+${localize('An order is placed only when you accept this quote while it is valid.')}</p>
+<#else>
+<p>${localize('Dear')} ${contactName || customerName},</p>
+<p>${localize('Please find our quote')} ${quoteId}<#if quoteName> (${quoteName})</#if> ${localize('attached, valid through')} ${validThruText}${localize(', for a total of')} ${totalText}.</p>
+<#if linkUrl><p>${localize('You can open it here')}: ${linkUrl}</p></#if>
+<p>${localize('Kind regards')},<br>${repName || sellerName}<br>${sellerName}</p>
+</#if>

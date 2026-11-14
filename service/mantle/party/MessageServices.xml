@@ -62,6 +62,35 @@
             <set field="stateEnumId" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('receipt', context).stateEnumId"/>
         </actions>
     </service>
+    <service verb="requeue" noun="Delivery" allow-remote="false">
+        <description>A source's retry of a delivery it sent (impl-sales P10: a quote send to a recipient that failed): a failed or
+            waiting delivery queued again from now, in a transaction of its own; a sent, suppressed or uncertain one is left as it
+            is (an uncertain send is reviewed, never repeated blindly). The caller attempts it once its own transaction
+            commits.</description>
+        <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="stateEnumId"/>
+            <parameter name="requeued" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('requeue', context)"/>
+            <set field="stateEnumId" from="out.stateEnumId"/>
+            <set field="requeued" from="!!out.requeued"/>
+        </actions>
+    </service>
+    <service verb="requeue" noun="DeliveryStep" allow-remote="false">
+        <description>requeue#Delivery's step, under the delivery's lock in the transaction requeue#Delivery starts.</description>
+        <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="stateEnumId"/>
+            <parameter name="requeued" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('requeueStep', context)"/>
+            <set field="stateEnumId" from="out.stateEnumId"/>
+            <set field="requeued" from="!!out.requeued"/>
+        </actions>
+    </service>
     <service verb="run" noun="Deliveries" allow-remote="false" operation="message.delivery.run">
         <description>The run_MessageDeliveries job: the queued and retrying deliveries that are due, oldest first, each in its
             own transaction; an uncertain one is never tried again here.</description>

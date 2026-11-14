@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.order.SalesQuoteIssueServices (Q, IronStone Sales design §12.1; design §5 OrderDetail's quote context and QuoteBatch,
+    §13.2, §16; impl-sales P10): a quote's issue, its sends and reminders, the customer's response recorded by staff, withdraw,
+    revise and clone, over service/mantle/order/SalesQuoteIssues.js and the records of entity/SalesQuoteIssueEntities.xml. Each
+    checks SALES_QUOTE_EDIT on a quote the caller sees (SalesAccess.js requireQuote) and send also SALES_QUOTE_SEND; every write
+    names the revision read and a send, response and batch carry an operation key. propose#Quote (with P10's issue checks) stays in
+    SalesQuoteServices. None is remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="QuoteIssues" allow-remote="false" read-only="true">
+        <description>OrderDetail's Issues and responses (design §5): a quote's issues, each with its revision, state (current,
+            accepted, declined, withdrawn, ended, superseded, expired), PDF, recipients and their delivery state, and its response;
+            what the caller may do now (propose, send, record a response, withdraw, revise, clone), the recipients a send may name
+            (the customer and its current contacts, each with its email), the quote's files a response may name as evidence and
+            whether the seller counts commercial changes only.
+            A quote the caller does not see answers quoteFound false.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="quoteFound" type="Boolean"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="issues" type="List"/>
+            <parameter name="standingIssueId"/>
+            <parameter name="commercialRevisionOn" type="Boolean"/>
+            <parameter name="canPropose" type="Boolean"/>
+            <parameter name="canSend" type="Boolean"/>
+            <parameter name="canRespond" type="Boolean"/>
+            <parameter name="canWithdraw" type="Boolean"/>
+            <parameter name="canRevise" type="Boolean"/>
+            <parameter name="canClone" type="Boolean"/>
+            <parameter name="poRequired" type="Boolean"/>
+            <parameter name="evidenceOptions" type="List"/>
+            <parameter name="recipientOptions" type="List"/>
+            <parameter name="defaultRecipientPartyIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('getIssues', context)"/>
+            <set field="quoteFound" from="!!found.quoteFound"/>
+            <set field="orderRevision" from="found.orderRevision ?? null"/>
+            <set field="statusId" from="found.statusId || null"/>
+            <set field="issues" from="found.issues || []"/>
+            <set field="standingIssueId" from="found.standingIssueId || null"/>
+            <set field="commercialRevisionOn" from="!!found.commercialRevisionOn"/>
+            <set field="canPropose" from="!!found.canPropose"/>
+            <set field="canSend" from="!!found.canSend"/>
+            <set field="canRespond" from="!!found.canRespond"/>
+            <set field="canWithdraw" from="!!found.canWithdraw"/>
+            <set field="canRevise" from="!!found.canRevise"/>
+            <set field="canClone" from="!!found.canClone"/>
+            <set field="poRequired" from="!!found.poRequired"/>
+            <set field="evidenceOptions" from="found.evidenceOptions || []"/>
+            <set field="recipientOptions" from="found.recipientOptions || []"/>
+            <set field="defaultRecipientPartyIds" from="found.defaultRecipientPartyIds || []"/>
+        </actions>
+    </service>
+    <service verb="send" noun="Quote" allow-remote="false">
+        <description>Issue and send a proposed quote (design §5 QuoteSend): only where the seller's salesCommercialRevisionOnly is
+            on (COMMERCIAL_REVISION_OFF, F9), at the revision named (REVISION_REQUIRED, REVISION_CHANGED), with a validity in the
+            future (VALIDITY_REQUIRED, QUOTE_EXPIRED). The issue standing at the revision is reused, else the PDF is rendered and
+            stored as an OrderContent at the revision and a SalesQuoteIssue made with its validity. Each recipient (recipientPartyIds:
+            the customer or a current contact of it, RECIPIENT_INVALID; empty for the quote's contact, else the customer) gets it from
+            the quote owner's own mail account (sendMode own: a draft with the PDF, sent through send#EmailDraft and filed on the
+            order; SEND_ACCOUNT_REQUIRED for anyone else or without an account) or from the organization through the delivery ledger
+            (organization: send#EmailTemplate, one delivery per issue and recipient, attempted once this call commits). A recipient
+            already sent to is skipped and a failed one tried again, so a second send retries only what failed and keeps the one
+            issue. previewOnly Y answers the recipients, mode, template, subject and file name and writes nothing. Needs
+            SALES_QUOTE_EDIT and SALES_QUOTE_SEND on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED); refuses a quote
+            not proposed (QUOTE_NOT_PROPOSED). The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+            <parameter name="recipientPartyIds" type="List"/>
+            <parameter name="sendMode"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="subject"/>
+            <parameter name="note"/>
+            <parameter name="previewOnly"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="issueId"/>
+            <parameter name="newIssue" type="Boolean"/>
+            <parameter name="sendMode"/>
+            <parameter name="ownAllowed" type="Boolean"/>
+            <parameter name="accountText"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="templateName"/>
+            <parameter name="subject"/>
+            <parameter name="fileName"/>
+            <parameter name="recipients" type="List"/>
+            <parameter name="recipientOptions" type="List"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('sendQuote', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderRevision" from="out.orderRevision ?? null"/>
+            <set field="issueId" from="out.issueId || null"/>
+            <set field="newIssue" from="!!out.newIssue"/>
+            <set field="sendMode" from="out.sendMode || null"/>
+            <set field="ownAllowed" from="!!out.ownAllowed"/>
+            <set field="accountText" from="out.accountText || null"/>
+            <set field="emailTemplateId" from="out.emailTemplateId || null"/>
+            <set field="templateName" from="out.templateName || null"/>
+            <set field="subject" from="out.subject || null"/>
+            <set field="fileName" from="out.fileName || null"/>
+            <set field="recipients" from="out.recipients || []"/>
+            <set field="recipientOptions" from="out.recipientOptions || []"/>
+            <set field="failedCount" from="out.failedCount ?? 0"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="attempt" noun="QuoteDeliveries" allow-remote="false">
+        <description>The queued deliveries of an issue's send and reminder, each attempted in its own transaction (send#Quote
+            registers it to run when its transaction commits, so the ledger's build sees the issue and its PDF); one that fails is
+            logged by its id and the rest go on.</description>
+        <in-parameters><parameter name="issueId" required="true"/></in-parameters>
+        <out-parameters><parameter name="attempted" type="Integer"/></out-parameters>
+        <actions>
+            <set field="attempted" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('attemptDeliveries', context).attempted"/>
+        </actions>
+    </service>
+    <service verb="build" noun="QuoteMessage" allow-remote="false">
+        <description>The delivery ledger's build of a quote send (MdsrcSalesQuote; each attempt): suppressed once the issue no
+            longer stands (revised, withdrawn, answered, expired); else the recipient's current email (none fails the delivery),
+            the subject, the organization as sender, the body with the organization's stored text rendered locked (F70) and the
+            issued PDF attached.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppress"/>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="body"/>
+            <parameter name="attachments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="built" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('buildQuoteMessage', context)"/>
+            <set field="suppress" from="built.suppress || null"/>
+            <set field="toAddress" from="built.toAddress || null"/>
+            <set field="bodyParameters" from="built.bodyParameters || null"/>
+            <set field="body" from="built.body || null"/>
+            <set field="attachments" from="built.attachments || null"/>
+        </actions>
+    </service>
+    <service verb="build" noun="QuoteReminderMessage" allow-remote="false">
+        <description>The delivery ledger's build of a quote reminder (MdsrcSalesQuoteReminder), as build#QuoteMessage with the
+            organization's reminder text.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppress"/>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="body"/>
+            <parameter name="attachments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="built" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('buildReminderMessage', context)"/>
+            <set field="suppress" from="built.suppress || null"/>
+            <set field="toAddress" from="built.toAddress || null"/>
+            <set field="bodyParameters" from="built.bodyParameters || null"/>
+            <set field="body" from="built.body || null"/>
+            <set field="attachments" from="built.attachments || null"/>
+        </actions>
+    </service>
+    <service verb="send" noun="QuoteReminders" allow-remote="false" operation="sales.quote.reminders">
+        <description>The send_SalesQuoteReminders job (daily; off by default, design §13.2 "reminder policy is off initially", as no
+            organization sets reminder days): for each
+            issue standing past its organization's reminder days (SalesPolicy.reminderDays; none set, no reminder) and not
+            answered, one reminder to each recipient it was sent to, through the delivery ledger (one per issue and recipient).
+            A failing issue is logged by its id and the rest go on.</description>
+        <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
+        <out-parameters><parameter name="queuedCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="queuedCount" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('sendReminders', context).queuedCount"/>
+        </actions>
+    </service>
+    <service verb="respond" noun="Quote" allow-remote="false">
+        <description>The customer's acceptance or decline of an issue, recorded by staff (design §5 Record acceptance, Record
+            decline; responseType accept or decline): under the order's lock, the issue (issueId, else the latest) current: not
+            ended (ISSUE_ENDED, a withdrawal among them), the order Proposed (QUOTE_NOT_PROPOSED) at its revision (ISSUE_SUPERSEDED)
+            and the response (respondedDate, now when empty; DATE_INVALID) within its validity (ISSUE_EXPIRED). One response an
+            issue: a second acceptance answers the first, any other is refused (RESPONSE_EXISTS). An acceptance records the
+            customer's purchase order (otherPartyOrderId; PO_REQUIRED where the organization asks it) on the part and places the
+            order once through place#Order, its outcome placed, approved or held by the native rules; a failure before placement
+            leaves no response. A decline needs its reason (REASON_REQUIRED) and cancels the quote through Cancel Quote. The contact
+            is the customer or one of its contacts (CONTACT_INVALID); the evidence a mail or a file of the quote
+            (EVIDENCE_INVALID). Needs SALES_QUOTE_EDIT on a quote the caller sees and an operation key; the same key answers the
+            first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="issueId"/>
+            <parameter name="responseType"/>
+            <parameter name="respondedDate" type="Timestamp"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="evidenceEmailMessageId"/>
+            <parameter name="evidenceOrderContentId"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="issueId"/>
+            <parameter name="responseId"/>
+            <parameter name="statusId"/>
+            <parameter name="outcome"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('respondQuote', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="issueId" from="out.issueId"/>
+            <set field="responseId" from="out.responseId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="outcome" from="out.outcome"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="withdraw" noun="Quote" allow-remote="false">
+        <description>The seller withdraws a proposed quote (design §5, X3): cancelled through Cancel Quote and its issue ended with
+            the reason (REASON_REQUIRED). Needs SALES_QUOTE_EDIT on a quote the caller sees; refuses one not proposed
+            (QUOTE_NOT_PROPOSED) and a stale revision (REVISION_REQUIRED, REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="endedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('withdrawQuote', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="endedCount" from="out.endedCount"/>
+        </actions>
+    </service>
+    <service verb="revise" noun="Quote" allow-remote="false">
+        <description>A deliberate revision of a proposed quote (design §5): Proposed to Being changed (Begin Changes) with a
+            commercial revision counted, so its approvals and its issue end and it is proposed and sent again; the issued PDF stays
+            among its files. Needs SALES_QUOTE_EDIT on a quote the caller sees; refuses one not proposed (QUOTE_NOT_PROPOSED: an
+            accepted quote is an order) and a stale revision.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('reviseQuote', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="clone" noun="Quote" allow-remote="false">
+        <description>A separate draft from a quote (design §5 Clone, clone#Order without its files, notes or payments): the caller
+            its owner, the team, contact and opportunity kept, valid from now for the organization's days, retaxed by the native
+            rules. Needs SALES_QUOTE_EDIT on a quote the caller sees.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('cloneQuote', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="QuoteBatch" allow-remote="false" operation="sales.quote.batch">
+        <description>Quotes' QuoteBatch (design §5): send (the organization's mail to each quote's contact, else its customer) or
+            withdraw (with the reason) the quotes chosen (quoteKeys "orderId@revision"), each on its own through send#Quote or
+            withdraw#Quote in its own transaction with an operation key of its own (from the batch's); previewOnly Y answers each
+            one's eligibility. A refused or failed quote is named with its reason and the rest go on. Needs SALES_QUOTE_EDIT.</description>
+        <in-parameters>
+            <parameter name="operation" required="true"/>
+            <parameter name="quoteKeys" type="List"/>
+            <parameter name="reason"/>
+            <parameter name="note"/>
+            <parameter name="previewOnly"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="successCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('applyBatch', context)"/>
+            <set field="results" from="out.results"/>
+            <set field="successCount" from="out.successCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuotePrint" allow-remote="false" read-only="true">
+        <description>The quote's print as it is now (design §16; html-print and PDF): its lines and totals, the organization's
+            cover and terms, marked a draft unless an issue stands. An issued PDF is get#QuoteIssueDocument's. Refuses a quote the
+            caller does not see (RECORD_UNAVAILABLE). No cost or margin.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('quotePrint', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="printHtml" from="out.printHtml"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteIssueDocument" allow-remote="false" read-only="true">
+        <description>An issue's stored PDF (its location and file name), for one who sees the quote (RECORD_UNAVAILABLE
+            otherwise).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="issueId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contentLocation"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('issueDocument', context)"/>
+            <set field="contentLocation" from="out.contentLocation"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+</services>
