@@ -736,6 +736,87 @@ along with this software (see the LICENSE.md file). If not, see
     </extend-entity>
     <!-- ===== end of Marketing P9 ===== -->
 
+    <!-- ===== Marketing P10: experiments (impl-marketing P10; design-marketing §5 ExperimentDetail, §14.1 CampaignExperiment) ===== -->
+    <!-- A send's A/B experiment (design §5 ExperimentDetail): two variants of its content compared on equal samples, the entered
+        percentage the total sample, the rest of the prepared audience (the remainder) held until a person chooses the winner with a
+        reason after the observation period and a dispatcher releases it to them, once (mantle.marketing.CampaignSendServices
+        store#Experiment, choose#ExperimentWinner, release#ExperimentWinner; MarketingExperiments.js). One live experiment a send
+        (endedDate empty); a removed one stays. Its setup is part of the send's approved content: a change of the sample or a variant
+        raises the send's revision and ends its approval. The counts at preparation and the winner's release are kept here. -->
+    <entity entity-name="CampaignExperiment" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignExperimentId" type="id" is-pk="true"/>
+        <field name="campaignSendId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The send's organization</description></field>
+        <field name="samplePercent" type="number-integer" enable-audit-log="update"><description>The total sample across the variants,
+            percent of the prepared audience (1 to 90), split equally</description></field>
+        <field name="measureEnumId" type="id" enable-audit-log="update"><description>The decision measure shown (CampaignExperimentMeasure;
+            unique click rate by default); it never chooses the winner itself</description></field>
+        <field name="observationHours" type="number-integer" enable-audit-log="update"><description>How long the sample is observed
+            from its sending before a winner may be chosen</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="endedDate" type="date-time"><description>When it was removed from its draft send</description></field>
+        <field name="endedByUserId" type="id"/>
+        <field name="sampleCount" type="number-integer"><description>The sample recipients at the preparation (both variants)</description></field>
+        <field name="remainderCount" type="number-integer"><description>The recipients held for the winner at the preparation</description></field>
+        <field name="winnerVariantId" type="id" enable-audit-log="true"><description>The variant a person chose</description></field>
+        <field name="winnerReason" type="text-medium" enable-audit-log="update"/>
+        <field name="winnerChosenByUserId" type="id"/>
+        <field name="winnerChosenDate" type="date-time"/>
+        <field name="winnerReleasedDate" type="date-time" enable-audit-log="update"><description>When the winner was released to the
+            remainder: the release's identity (a second release answers this one, whatever its key)</description></field>
+        <field name="winnerReleasedByUserId" type="id"/>
+        <field name="winnerReleaseCount" type="number-integer"><description>The remainder recipients the winner was released to</description></field>
+        <field name="winnerDroppedCount" type="number-integer"><description>The remainder recipients left out at the release (no longer
+            in the send's audience, or sent already)</description></field>
+        <field name="winnerSelfDispatch" type="text-indicator"><description>Y: released by an author or the approver under the
+            one-person-team flag (the send's recipients under 500)</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignSend"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party"><key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="CampaignExperimentMeasure" related="moqui.basic.Enumeration"><key-map field-name="measureEnumId"/></relationship>
+        <relationship type="one" title="Winner" related="mantle.marketing.campaign.CampaignExperimentVariant">
+            <key-map field-name="winnerVariantId" related="campaignExperimentVariantId"/></relationship>
+        <index name="CMP_EXPT_SEND"><index-field name="campaignSendId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Campaign Experiment Measure" enumTypeId="CampaignExperimentMeasure"/>
+            <moqui.basic.Enumeration description="Unique click rate" enumId="MxmUniqueClickRate" enumTypeId="CampaignExperimentMeasure" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Conversion rate" enumId="MxmConversionRate" enumTypeId="CampaignExperimentMeasure" sequenceNum="2"/>
+        </seed-data>
+    </entity>
+    <!-- One variant of an experiment (design §14.1 CampaignExperimentVariant): its label and name, and the parts of the send's content
+        it changes (an empty part is the send's own: a subject test changes the subject alone), checked as the send's content is; the
+        variant's content prepared with the send (prepared*, at preparedRevision: what its sample and a winner's remainder receive,
+        whatever changes after); its sample counted at the preparation. -->
+    <entity entity-name="CampaignExperimentVariant" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignExperimentVariantId" type="id" is-pk="true"/>
+        <field name="campaignExperimentId" type="id"/>
+        <field name="variantLabel" type="text-short"><description>A or B</description></field>
+        <field name="variantName" type="text-medium" enable-audit-log="update"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="subject" type="text-medium" enable-audit-log="update"><description>The variant's subject (empty: the send's)</description></field>
+        <field name="preheader" type="text-medium" enable-audit-log="update"/>
+        <field name="bodyLocation" type="text-medium" enable-audit-log="update"><description>The variant's body, a .html.fancy-locked
+            file of its own per change (empty: the send's)</description></field>
+        <field name="bodyTextLocation" type="text-medium" enable-audit-log="update"/>
+        <field name="preparedRevision" type="number-integer"/>
+        <field name="preparedSubject" type="text-medium"/>
+        <field name="preparedPreheader" type="text-medium"/>
+        <field name="preparedBodyLocation" type="text-medium"/>
+        <field name="preparedTextLocation" type="text-medium"/>
+        <field name="sampleCount" type="number-integer"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignExperiment"/>
+        <index name="CMP_EXPT_VARIANT"><index-field name="campaignExperimentId"/></index>
+    </entity>
+    <!-- A recipient's place in its send's experiment: the variant it is sent (a sample's, assigned at preparation and never again; a
+        remainder recipient's, the winner's once released) and whether it is of the remainder (held, CrsHeld, until the winner's
+        release). -->
+    <extend-entity entity-name="CampaignRecipient" package="mantle.marketing.campaign">
+        <field name="campaignExperimentVariantId" type="id"/>
+        <field name="experimentRemainder" type="text-indicator"><description>Y: of the remainder, held for the winner</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignExperimentVariant"/>
+    </extend-entity>
+    <!-- ===== end of Marketing P10 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

@@ -39,6 +39,8 @@ const suppressions = ec.resource.script("component://mr-mantle/service/mantle/pa
 const {find, one, rows, denied, call, ms} = lib
 // P9: the release and dispatch (loaded when a send is read, so it may load this module)
 const dispatch = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingDispatch.js")
+// P10: a send's experiment (loaded when a send is prepared, read or tested, so it may load this module)
+const experiments = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingExperiments.js")
 
 const SEND = "mantle.marketing.campaign.CampaignSend"
 const RECIPIENT = "mantle.marketing.campaign.CampaignRecipient"
@@ -65,11 +67,12 @@ const statusColors = {
     CsScheduled: "primary",
     CsSending: "primary",
     CsPaused: "warning",
+    CsSampleSent: "info",
     CsCompleted: "positive",
     CsCompletedFailures: "negative",
     CsCancelled: "grey-7"
 }
-const openStatuses = ["CsDraft", "CsAwaitingApproval", "CsApproved", "CsScheduled", "CsSending", "CsPaused"]
+const openStatuses = ["CsDraft", "CsAwaitingApproval", "CsApproved", "CsScheduled", "CsSending", "CsPaused", "CsSampleSent"]
 // a link or source that reaches a staff page or a stored file, never a message's (a private staff URL is never made public)
 const privateLink =
     /(href|src|background)\s*=\s*["']?\s*(\/(qapps|apps|vapps|rest|tools|system|m)\/|[a-z]+:\/\/[^"'\s>]*\/(qapps|apps|vapps|rest)\/|(dbresource|component|file|content):)/i
@@ -315,7 +318,8 @@ function sendProblems(row) {
     else if (profile.purposeEnumId === "MtpTransactional") problems.push("its sending profile is for transactional messages")
     else if (!profiles.readinessOf(profile).ready) problems.push("its sending profile is not ready")
     if (blank(row.subject)) problems.push("it needs a subject")
-    return problems
+    // P10: an experiment's variants differ and were prepared with the send
+    return problems.concat(experiments().problemsOf(row))
 }
 // MarketingApprovals.js targetKinds.send delegates to this (loaded when a send is decided)
 const sendKind = {
@@ -714,7 +718,13 @@ function previewSend(p) {
     const userScope = readScope()
     const row = sendOf(userScope, p.campaignSendId)
     const usePrepared = (p.prepared === true || p.prepared === "true" || p.prepared === "Y") && row.preparedBodyLocation
-    const content = usePrepared ? preparedContent(row) : draftContent(row)
+    // P10: a variant of the send's experiment previewed as it is (its own parts over the send's)
+    const variant = blank(p.campaignExperimentVariantId) ? null : experiments().variantOf(row, p.campaignExperimentVariantId)
+    const content = variant
+        ? experiments().variantContent(row, variant, !!usePrepared)
+        : usePrepared
+          ? preparedContent(row)
+          : draftContent(row)
     let values = syntheticValues
     let sampleText = "Sample values"
     if (!blank(p.samplePartyId)) {
@@ -775,7 +785,14 @@ function testSend(p) {
         denied("TEST_ADDRESS_NOT_ALLOWED", "A test goes only to an address of the organization's test list (Campaign defaults)")
     if (!row.sendingProfileId) denied("PROFILE_REQUIRED", "Choose the send's sending profile first")
     profileFor(row.sendingProfileId, row.organizationPartyId)
-    const content = contentOf(row)
+    // P10: a variant of the send's experiment tested as it is now (a test enters no result)
+    const variant = blank(p.campaignExperimentVariantId) ? null : experiments().variantOf(row, p.campaignExperimentVariantId)
+    const draft = variant ? experiments().variantContent(row, variant, false) : draftContent(row)
+    const content = {
+        subject: draft.subject || "",
+        body: templates.readText(draft.bodyLocation),
+        bodyText: templates.readText(draft.bodyTextLocation)
+    }
     if (!content.subject || (!content.body.trim() && !content.bodyText.trim()))
         denied("CONTENT_REQUIRED", "Write the subject and the body first")
     const recipientPartyId = ec.user.userAccount?.partyId
@@ -803,7 +820,12 @@ function testSend(p) {
         organizationPartyId: row.organizationPartyId,
         sendingProfileId: row.sendingProfileId,
         transactional: false,
-        bodyParameters: {campaignSendId: row.campaignSendId, sendRevision: Number(row.sendRevision || 1), note},
+        bodyParameters: {
+            campaignSendId: row.campaignSendId,
+            sendRevision: Number(row.sendRevision || 1),
+            note,
+            campaignExperimentVariantId: variant?.campaignExperimentVariantId || null
+        },
         sendNow: true
     })
     return {deliveryId: queued.deliveryId, stateEnumId: queued.stateEnumId, stateText: statusOfDelivery(queued.stateEnumId)}
@@ -828,7 +850,14 @@ function buildTest(p) {
     // the address still on the organization's test list at each attempt (P8 review): a test source never reaches anyone else
     if (!testAddressesOf(row.organizationPartyId).includes(suppressions.normalize("MdcEmail", delivery.toAddress)))
         return {suppress: "The address is no longer on the organization's test list"}
-    const rendered = render(draftContent(row), syntheticValues)
+    // P10: a variant's test renders the variant as it is now; one no longer of the send's live experiment is not sent
+    let draft = draftContent(row)
+    if (parameters.campaignExperimentVariantId) {
+        const variant = experiments().liveVariant(row, parameters.campaignExperimentVariantId)
+        if (!variant) return {suppress: "The variant is no longer the send's"}
+        draft = experiments().variantContent(row, variant, false)
+    }
+    const rendered = render(draft, syntheticValues)
     const note = text(parameters.note)
     const banner =
         '<p style="padding:8px;border:2px solid #b00;color:#b00;font-weight:bold">TEST: not sent to the audience' +
@@ -881,22 +910,8 @@ function prepareSend(p) {
         )
     const topic = topicFor(row.contactListId, org)
     const audience = audienceOf(row)
-    const lists = audience.listIds.map(id => listFor(id, org))
-    const segmentRows = audience.segmentIds.map(id => segmentFor(userScope, id, org))
-    const excludeLists = audience.excludeListIds.map(id => listFor(id, org))
-    const excludeSegments = audience.excludeSegmentIds.map(id => segmentFor(userScope, id, org))
     const asOf = ec.user.nowTimestamp
-    const evaluated = eligibility.evaluateSend({
-        userScope,
-        topic,
-        purposeEnumId: row.purposeEnumId,
-        lists,
-        segments: segmentRows,
-        excludeLists,
-        excludeSegments,
-        asOf,
-        pageSize: p.pageSize
-    })
+    const evaluated = evaluateAudience(userScope, row, {topic, asOf, pageSize: p.pageSize})
     if (!blank(p.resultDigest) && text(p.resultDigest) !== evaluated.resultDigest)
         denied(
             "PREVIEW_STALE",
@@ -913,13 +928,22 @@ function prepareSend(p) {
                 " eligible recipients, over the organization's limit of " +
                 policy.audienceLimit
         )
-    // the earlier preparation's recipients replaced (none was handed off: a send is released only once approved, P9)
-    find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId: "CrsSelected"}).updateAll({statusId: "CrsReplaced"})
     const revision = Number(row.sendRevision || 1)
+    // P10: the send's experiment: each variant's content checked and kept beside the send's, and each eligible person assigned once,
+    // stably (by their address), to a variant's sample or the remainder held for the winner (SAMPLE_TOO_SMALL)
+    const experiment = experiments().liveOf(row.campaignSendId)
+    const assigned = experiment ? experiments().prepare(row, experiment, content, revision, evaluated.rows) : null
+    // the earlier preparation's recipients replaced (none was handed off: a send is released only once approved, P9)
+    find(RECIPIENT, {campaignSendId: row.campaignSendId})
+        .condition("statusId", "in", ["CrsSelected", "CrsHeld"])
+        .updateAll({statusId: "CrsReplaced"})
     // P9 (P8 review F205): the recipients made in one bulk create, not a service call each
     ec.entity.createBulk(
-        evaluated.rows.map(recipient =>
-            ec.entity
+        evaluated.rows.map(recipient => {
+            // P10: a sample recipient's variant, or the remainder held
+            const variantId = assigned ? assigned.variantOf.get(recipient.destinationKey) || null : null
+            const held = !!assigned && !variantId
+            return ec.entity
                 .makeValue(RECIPIENT)
                 .setAll({
                     campaignSendId: row.campaignSendId,
@@ -931,10 +955,12 @@ function prepareSend(p) {
                     selectedDate: asOf,
                     tracked: recipient.tracked ? "Y" : "N",
                     executionKey: ec.user.randomString(20).replace(/[^A-Za-z0-9]/g, "x"),
-                    statusId: "CrsSelected"
+                    campaignExperimentVariantId: variantId,
+                    experimentRemainder: held ? "Y" : null,
+                    statusId: held ? "CrsHeld" : "CrsSelected"
                 })
                 .setSequencedIdPrimary()
-        )
+        })
     )
     // the content kept as a resource of its own: what a later read returns, whatever changes after
     const files = writeFiles(row.campaignSendId, "prepared-r" + revision, content.body, content.bodyText)
@@ -980,8 +1006,30 @@ function prepareSend(p) {
         matchedCount: evaluated.matchedCount,
         bucketCounts: evaluated.counts,
         resultDigest: evaluated.resultDigest,
-        pages: evaluated.pages
+        pages: evaluated.pages,
+        sampleCount: assigned ? assigned.sampleCount : null,
+        remainderCount: assigned ? assigned.remainderCount : null
     }
+}
+// The send's audience evaluated now (MarketingEligibility.js evaluateSend, in pages over the topic's members) as the calling user:
+// prepare#Send's, and P10's winner release's recheck (lenient: an archived list or segment is still read, so a winner is never held
+// back by an archive; the people it finds are what the audience admits now).
+function evaluateAudience(userScope, row, o = {}) {
+    const org = row.organizationPartyId
+    const audience = audienceOf(row)
+    const listRow = o.lenient ? id => one(LIST, {contactListId: id}) : id => listFor(id, org)
+    const segmentRow = o.lenient ? id => segments.segmentOfScope(userScope, id) : id => segmentFor(userScope, id, org)
+    return eligibility.evaluateSend({
+        userScope,
+        topic: o.topic || (o.lenient ? one(LIST, {contactListId: row.contactListId}) : topicFor(row.contactListId, org)),
+        purposeEnumId: row.purposeEnumId,
+        lists: audience.listIds.map(listRow).filter(Boolean),
+        segments: audience.segmentIds.map(segmentRow),
+        excludeLists: audience.excludeListIds.map(listRow).filter(Boolean),
+        excludeSegments: audience.excludeSegmentIds.map(segmentRow),
+        asOf: o.asOf || ec.user.nowTimestamp,
+        pageSize: o.pageSize
+    })
 }
 
 // ===== Marketing P9: the attachments as prepared (P8 review F200) =====
@@ -1044,6 +1092,8 @@ function getSend(p) {
     return {
         delivery: control.delivery,
         control: control.capabilities,
+        // P10: the send's experiment in short (its setup, variants and state), for SendDetail's Experiment box
+        experiment: experiments().summaryOf(userScope, row),
         send: sendRow(row, {
             replyToAddress: row.replyToAddress || "",
             purposeText: enumText(row.purposeEnumId),
@@ -1177,6 +1227,26 @@ const operations = {
         statusColors,
         preparedCurrent,
         approvedCampaignStatuses
+    },
+    // P10: what a send's experiment (MarketingExperiments.js) shares
+    forExperiments: {
+        readScope,
+        editScope,
+        sendOf,
+        requireEditable,
+        requireRevision,
+        revise,
+        checkLinks,
+        writeFiles,
+        draftContent,
+        render,
+        recipientValues,
+        evaluateAudience,
+        sendProblems,
+        label,
+        statusText,
+        preparedCurrent,
+        syntheticValues
     },
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown campaign send operation " + op)
