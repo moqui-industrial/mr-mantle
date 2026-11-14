@@ -9,10 +9,11 @@
 // never cut silently.
 //
 // Sales' report scope (impl-sales P19, design-sales §8 SalesAnalysis; Z10: Sales owns the report, Accounting mounts it): a report
-// reader (ACCOUNTING_VIEW) of the organization is answered as before, with the cost of what was shipped and its margin (Accounting's
-// finance columns); a holder of SALES_REPORT_VIEW without it is answered for an organization of their sales scope (SalesAccess.js
-// reportOrganizations), the cost and margin only when they read both prices and costs (PRICE_VIEW and PRODUCT_COST_VIEW), else
-// withheld (null, never zero; costShown false). A shipped line's cost is its issuances' quantity times their asset's acquire cost,
+// reader (ACCOUNTING_VIEW) of the organization is answered as before, with the cost of what was shipped and its margin only when
+// they also read product costs (PRODUCT_COST_VIEW; their report read is their read of the sales values: design §8, margin columns
+// only where both price and cost rights permit them; P19 review R1); a holder of SALES_REPORT_VIEW without it is answered for an
+// organization of their sales scope (SalesAccess.js reportOrganizations), the cost and margin only when they read both prices and
+// costs (PRICE_VIEW and PRODUCT_COST_VIEW); anyone else has them withheld (null, never zero; costShown false). A shipped line's cost is its issuances' quantity times their asset's acquire cost,
 // and only where that cost is in the sale's currency: a cost in another currency or none makes the row's cost unknown (named in
 // costIncomplete), never converted or counted as zero.
 const policy = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
@@ -90,6 +91,9 @@ function customerClasses(customerIds) {
     return out
 }
 
+// Accounting's report reader sees the cost and margin only with product cost read (P19 review R1: ACCOUNTING_VIEW alone, as
+// Accounting's approvers hold it, is no cost right)
+const costReader = () => access.has("PRODUCT_COST_VIEW")
 // The reader of the analysis (impl-sales P19): {organizationPartyId, finance, costShown}. Accounting's report reader of the
 // organization first; else a Sales report reader of an organization of their scope; else Accounting's refusal, as before.
 function analysisReader(p) {
@@ -99,9 +103,10 @@ function analysisReader(p) {
     if (caps.reportRead && caps.read) {
         const a = policy.access("reportRead")
         if (!salesReader || !named || a.allowedOrganizationPartyIds.includes(named))
-            return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: true}
+            return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: costReader()}
     }
-    if (!salesReader) return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: true}
+    if (!salesReader)
+        return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: costReader()}
     const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
     const userScope = salesAccess.scope()
     const org = named || salesAccess.defaultOrganization(userScope)

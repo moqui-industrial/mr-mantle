@@ -396,7 +396,7 @@ along with this software (see the LICENSE.md file). If not, see
             that is not a currency. Sales' report scope (impl-sales P19; Sales owns the report, Accounting mounts it): a holder
             of SALES_REPORT_VIEW without report read is answered for an organization of their sales scope, its periods those of
             the organization itself; ORGANIZATION_DENIED outside it. Each row also carries the shipped value and, for a report
-            reader or a holder of both PRICE_VIEW and PRODUCT_COST_VIEW (costShown), the cost of what was shipped (its
+            reader who also holds PRODUCT_COST_VIEW or a holder of both PRICE_VIEW and PRODUCT_COST_VIEW (costShown), the cost of what was shipped (its
             issuances at their asset's acquire cost) and the margin over the shipped value, unknown (null, costIncomplete named)
             where a cost is missing or in another currency than the sale's; withheld (null) from anyone else.</description>
         <in-parameters>

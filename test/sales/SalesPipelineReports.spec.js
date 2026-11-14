@@ -114,6 +114,8 @@ spec({
             users.reader = user("reader", orgA, edit.concat(["SALES_TEAM_VIEW", "SALES_REPORT_VIEW"]))
             users.costReader = user("cost", orgA, ["SALES_REPORT_VIEW", "PRICE_VIEW", "PRODUCT_COST_VIEW"])
             users.readerB = user("readerb", orgB, ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_REPORT_VIEW"])
+            // P19 review R1: Accounting's report read with Sales' and no product cost read (as BOSS_ACCOUNTING_APPROVE's ACCOUNTING_VIEW)
+            users.accountant = user("acct", orgA, ["ACCOUNTING_VIEW", "SALES_REPORT_VIEW"])
         })
         const deal = values =>
             as(
@@ -362,10 +364,11 @@ feature(
             return {
                 reader: as(users.reader, R, options),
                 cost: as(users.costReader, R, options),
-                other: as(users.readerB, R, options).refused
+                other: as(users.readerB, R, options).refused,
+                accountant: as(users.accountant, R, options)
             }
         },
-        then({reader, cost, other}) {
+        then({reader, cost, other, accountant}) {
             reader.refused == ""
             reader.costShown == false
             const plain = Array.from(reader.analysisRows).find(row => row.productId == prefix + "_PROD")
@@ -379,6 +382,10 @@ feature(
             num(costed.marginValue) == 60
             num(costed.marginPercent) == 60
             other.includes("ORGANIZATION_DENIED")
+            // a report reader without product cost read is answered without the cost and margin (P19 review R1)
+            accountant.refused == ""
+            accountant.costShown == false
+            Array.from(accountant.analysisRows).find(row => row.productId == prefix + "_PROD").issuedCost == null
         }
     }
 )

@@ -978,9 +978,10 @@ const readinessChecks = [
     }
 ]
 // ===== P19: readiness complete (impl-sales P19): Sales' jobs, its mail templates and its approval rules =====
-// Sales' scheduled jobs: the lead intake purge, the quote reminders and the agreement expiry; a job paused or whose last run failed
-// is named (instance-wide, so each organization's check names the same jobs).
-const salesJobs = ["purge_SalesLeadIntakes", "send_SalesQuoteReminders", "expire_SalesAgreements"]
+// Sales' scheduled jobs: the lead intake purge, the quote reminders, the agreement expiry and the recurrence worker (Mantle's
+// create_RecurringOrders, which places Sales' recurring orders, P16; P19 review); a job paused or whose last run failed is named
+// (instance-wide, so each organization's check names the same jobs).
+const salesJobs = ["purge_SalesLeadIntakes", "send_SalesQuoteReminders", "expire_SalesAgreements", "create_RecurringOrders"]
 // The mail Sales sends (the quote, its reminder and the storeless order confirmation) needs its template, a from address and a mail
 // server with a host.
 readinessChecks.push(
