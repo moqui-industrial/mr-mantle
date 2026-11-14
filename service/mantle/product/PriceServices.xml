@@ -173,7 +173,10 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="ProductPrice" authenticate="anonymous-view">
-        <description>Use ProductPrice records plus modifier services to determine the price to charge or pay for a Product.</description>
+        <description>Use ProductPrice records plus modifier services to determine the price to charge or pay for a Product. A
+            row or price list naming an agreement applies only for the agreement named (agreementId, and its item when the row names
+            one), ranked first, and only while that agreement is active (or has no status) and in its dates at validDate, is not a
+            template, is of the price organization and names no other counterparty (impl-sales P15, F20).</description>
         <in-parameters>
             <parameter name="productId" required="true"/>
             <parameter name="quantity" type="BigDecimal" default="1.0"/>
@@ -183,8 +186,6 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="productStoreId"/>
             <parameter name="vendorPartyId"/>
             <parameter name="customerPartyId"/>
-            <!-- TODO: to support look for records with this first and then with null: <parameter name="agreementId"/> -->
-            <!-- TODO: to support look for records with this first and then with null: <parameter name="agreementItemSeqId"/> -->
             <parameter name="defaultToListPrice" type="Boolean" default="true"/>
             <parameter name="organizationPartyId"/>
             <parameter name="direction"/>
@@ -633,8 +634,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A selling organization's sale price of a product for a customer, read as the seller's authority (impl-sales
             P7; design-sales §5, §7): get#ProductPrice's resolver and modifiers, where the selling organization's rows, the
             customer's own and the public ones are eligible, and the organization's published price lists apply, for a caller
-            without PRICE_VIEW too (get#ProductPrice gives such a caller no scoped row or list); never an agreement's row, an
-            average cost or another party's, and no trace. In process only: Sales' quote lines (mantle.order.SalesQuoteServices,
+            without PRICE_VIEW too (get#ProductPrice gives such a caller no scoped row or list); never an average cost or another
+            party's, and no trace. P15: the rows and lists of the organization's customer agreements (AgrSales, AgrProduct) with
+            the customer that are active and in their dates at validDate apply too, ranked first (the latest agreement first), and
+            no other agreement's. In process only: Sales' quote lines (mantle.order.SalesQuoteServices,
             SalesQuotes.js) call it after their own checks (the seller in the caller's sales scope, the customer an account of
             it, the quote the caller's).</description>
         <in-parameters>

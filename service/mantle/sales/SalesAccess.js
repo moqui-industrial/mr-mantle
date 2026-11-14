@@ -599,6 +599,28 @@ function decidedOrderIds() {
 }
 // ===== end of P12 =====
 
+// ===== P15: customer agreements (impl-sales P15; design-sales §7 Agreements, AgreementDetail) =====
+// A customer agreement is an Agreement of type AgrSales or AgrProduct of a selling organization (organizationPartyId) with its
+// customer (otherPartyId), on the one status flow Purchasing seeded (AgmSt*, F19). A Sales reader of the organization reads the
+// organization's every agreement and template (agreements are the organization's terms, not assigned work); a change needs
+// SALES_AGREEMENT_EDIT. Another organization's, a purchase agreement (AgrPurchase, Purchasing's) and any other type answer as
+// missing (RECORD_UNAVAILABLE).
+const agreementTypes = ["AgrSales", "AgrProduct"]
+function agreementOf(userScope, agreementId) {
+    if (!agreementId || !userScope.capabilities.anyRead) return null
+    const agreement = lib.one("mantle.party.agreement.Agreement", {agreementId: String(agreementId)})
+    if (!agreement || !agreementTypes.includes(agreement.agreementTypeEnumId)) return null
+    if (!covers(userScope, agreement.organizationPartyId)) return null
+    return {agreement, organizationPartyId: agreement.organizationPartyId, canEdit: !!userScope.capabilities.agreementEdit}
+}
+function requireAgreement(userScope, agreementId, edit = false) {
+    const found = agreementOf(userScope, agreementId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Agreement " + (agreementId || "") + " is not available")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Sales agreementEdit is required")
+    return found
+}
+// ===== end of P15 =====
+
 ;({
     permissions,
     reads,
@@ -655,5 +677,9 @@ function decidedOrderIds() {
     templateState,
     templateOf,
     requireTemplate,
-    decidedOrderIds
+    decidedOrderIds,
+    // P15: customer agreements
+    agreementTypes,
+    agreementOf,
+    requireAgreement
 })
