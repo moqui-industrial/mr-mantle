@@ -12,8 +12,8 @@
 //   never answered) and SarFreeLine (a free or zero-price line). With no quote rule in effect, a manual price on a quote needs an
 //   approver other than its author (SarOverride, design §9 "until configured").
 // - A requirement is a rule a quote meets at its current revision; its approval is an OrderDecision of purpose SapQuote bound to that
-//   revision and rule (SdrApproved or SdrRefused), an approval asked an SdrRequested row. A later revision supersedes every decision
-//   (the SECA on increment#OrderRevision marks invalidatedDate, and currency is read by revision anyway). The approver holds
+//   revision and rule (SdrApproved or SdrRefused), an approval asked an SdrRequested row of the rule. A later revision supersedes
+//   every decision (the SECA on increment#OrderRevision marks invalidatedDate, and currency is read by revision anyway). The approver holds
 //   SALES_APPROVE in the quote's organization (and is in the rule's group when it names one) and is not its author (its owner, who
 //   asked for the approval, or who entered a line the rule names) unless the rule allows it.
 // - The SalesQuoteApproval topic (data/MantleSetupData.xml) carries the request to the approvers; its title names the quote and the
@@ -232,6 +232,8 @@ function storePolicy(p) {
         })
     if (flag(p.previewOnly)) return {salesPolicyId: current?.salesPolicyId || null, changes, published: false}
     if (!reason) denied("REASON_REQUIRED", "Give the reason for the change")
+    // a successor names the revision of the defaults it replaces (§2 "every write names the revision it read")
+    if (current && blank(p.revision)) denied("REVISION_REQUIRED", "Open the defaults again and publish from them")
     if (current && !changes.length) denied("NO_CHANGE", "Nothing changed")
     if (current && ms(current.fromDate) >= fromMillis)
         denied("DATE_INVALID", "The new defaults start after the ones they replace (" + lib.dateText(current.fromDate) + ")")
@@ -441,7 +443,8 @@ function storeRule(p) {
         denied("RECORD_UNAVAILABLE", "Approval rule " + p.salesApprovalPolicyId + " is not available")
     const reason = text(p.changeReason)
     if (!reason) denied("REASON_REQUIRED", "Give the reason for the change")
-    if (replaced && !blank(p.revision) && String(p.revision) !== stamp(replaced))
+    if (replaced && blank(p.revision)) denied("REVISION_REQUIRED", "Open the rule again and change it from there")
+    if (replaced && String(p.revision) !== stamp(replaced))
         denied("REVISION_CHANGED", "The rule changed since you read it; open it again")
     if (replaced && (ms(replaced.thruDate) ?? Infinity) <= nowMs()) denied("RULE_ENDED", "The rule has ended")
     if (replaced && flag(p.endPolicy)) {
@@ -635,22 +638,22 @@ function decisionsAt(orderId, revision, purposeEnumId = purposes.quote) {
         .sort((a, b) => ms(b.decisionDate) - ms(a.decisionDate))
 }
 const keyOf = row => row.salesApprovalPolicyId || "default"
-// Each requirement's state at the revision: approved or refused by its latest decision, else requested when an approval was asked
-// at the revision, else required.
+// Each requirement's state at the revision by its rule's latest row: approved, refused, or requested (its approval asked, again after
+// a refusal too), else required. A rule set after an approval was asked is required until it is asked for itself.
 function withStates(requirements, decisions) {
-    const requested = decisions.find(row => row.decisionResultEnumId === results.requested)
     return requirements.map(requirement => {
-        const decided = decisions.find(row => row.decisionResultEnumId !== results.requested && keyOf(row) === requirement.key)
-        const state = decided
-            ? decided.decisionResultEnumId === results.approved
-                ? "approved"
-                : "refused"
-            : requested
-              ? "requested"
-              : "required"
+        const latest = decisions.find(row => keyOf(row) === requirement.key) || null
+        const requested = decisions.find(row => row.decisionResultEnumId === results.requested && keyOf(row) === requirement.key)
+        const state = !latest
+            ? "required"
+            : latest.decisionResultEnumId === results.approved
+              ? "approved"
+              : latest.decisionResultEnumId === results.refused
+                ? "refused"
+                : "requested"
         return Object.assign({}, requirement, {
             state,
-            decision: decided || null,
+            decision: latest && latest.decisionResultEnumId !== results.requested ? latest : null,
             requestedByUserId: requested?.decisionByUserId || null
         })
     })
@@ -739,11 +742,7 @@ function approvalOf(userScope, quote) {
         approved: open.length === 0,
         requested: states.some(row => row.state === "requested"),
         refused: states.some(row => row.state === "refused"),
-        canRequest:
-            draft &&
-            quote.canEdit &&
-            states.some(row => row.state === "required" || row.state === "refused") &&
-            !states.some(row => row.state === "requested"),
+        canRequest: draft && quote.canEdit && states.some(row => row.state === "required" || row.state === "refused"),
         requirements: states.map(row => {
             const refusal = draft && row.state !== "approved" ? decideRefusal(userScope, quote, row, decisions) : null
             return {
@@ -826,9 +825,11 @@ function freeDate(orderId, base = nowMs()) {
     while (one(DECISION, {orderId, decisionDate: new Date(at)})) at++
     return new Date(at)
 }
-// request#QuoteApproval: the rep asks the approvers of each requirement still open at the quote's revision (SdrRequested at the
-// revision; one SalesQuoteApproval notice naming the quote and the customer, never an amount). Needs SALES_QUOTE_EDIT on a draft the
-// caller sees, at its current revision; a quote that needs no approval, or whose approval is asked or given already, is refused.
+// request#QuoteApproval: the rep asks for each requirement not asked for or refused at the quote's revision (an SdrRequested row of
+// its rule at the revision), and one SalesQuoteApproval notice, naming the quote and the customer and never an amount, replaces the
+// earlier one and goes to the approvers of every rule still waiting (ruleKeys: what deciding the notice decides). Needs
+// SALES_QUOTE_EDIT on a draft the caller sees, at its current revision; a quote that needs no approval or is approved, and one whose
+// every open rule is asked for already, are refused.
 function requestApproval(p) {
     const userScope = salesAccess.scope()
     const quote = salesAccess.requireQuote(userScope, text(p.orderId), true)
@@ -840,22 +841,30 @@ function requestApproval(p) {
     if (!requirements.length) denied("APPROVAL_NOT_NEEDED", "Quote " + quote.order.orderId + " needs no approval")
     let decisions = decisionsAt(quote.order.orderId, revision)
     const states = withStates(requirements, decisions)
-    if (states.some(row => row.state === "requested")) denied("APPROVAL_REQUESTED", "Its approval is asked already")
-    const open = states.filter(row => row.state === "required" || row.state === "refused")
+    const open = states.filter(row => row.state !== "approved")
     if (!open.length) denied("APPROVAL_NOT_NEEDED", "Quote " + quote.order.orderId + " is approved")
-    call("create#" + DECISION, {
-        orderId: quote.order.orderId,
-        decisionDate: freeDate(quote.order.orderId),
-        decisionByPartyId: userScope.partyId,
-        decisionByUserId: ec.user.userId,
-        statusId: quote.order.statusId,
-        orderRevision: revision,
-        organizationPartyId: quote.organizationPartyId,
-        decisionPurposeEnumId: purposes.quote,
-        evaluatedDate: ec.user.nowTimestamp,
-        decisionResultEnumId: results.requested,
-        reasonText: text(p.note)
-    })
+    const asking = open.filter(row => row.state === "required" || row.state === "refused")
+    if (!asking.length) denied("APPROVAL_REQUESTED", "Its approval is asked already")
+    let at = nowMs()
+    for (const row of asking) {
+        const decisionDate = freeDate(quote.order.orderId, at)
+        at = decisionDate.getTime() + 1
+        call("create#" + DECISION, {
+            orderId: quote.order.orderId,
+            decisionDate,
+            decisionByPartyId: userScope.partyId,
+            decisionByUserId: ec.user.userId,
+            statusId: quote.order.statusId,
+            orderRevision: revision,
+            organizationPartyId: quote.organizationPartyId,
+            decisionPurposeEnumId: purposes.quote,
+            salesApprovalPolicyId: row.salesApprovalPolicyId,
+            ruleTypeEnumId: row.ruleTypeEnumId,
+            evaluatedDate: ec.user.nowTimestamp,
+            decisionResultEnumId: results.requested,
+            reasonText: text(p.note)
+        })
+    }
     decisions = decisionsAt(quote.order.orderId, revision)
     const userIds = Array.from(new Set(open.flatMap(row => approversOf(quote, row, decisions))))
     let notifiedCount = 0
@@ -872,6 +881,8 @@ function requestApproval(p) {
                     organizationName: partyName(quote.organizationPartyId),
                     // the kinds of the rules, never an amount (a notice's title names the quote alone)
                     ruleText: Array.from(new Set(open.map(row => L(ruleKinds[row.ruleTypeEnumId] || "approval")))).join(", "),
+                    // the rules asked for: deciding the notice decides these and no rule set after it was sent
+                    ruleKeys: open.map(row => row.key),
                     requestedByName: partyName(userScope.partyId) || userName(ec.user.userId)
                 })
                 .record(ORDER, quote.order.orderId)
@@ -886,8 +897,9 @@ function requestApproval(p) {
     return {orderId: quote.order.orderId, orderRevision: revision, notifiedCount}
 }
 // decide#Quote: approve or refuse the quote's requirements at the revision read (one rule with salesApprovalPolicyId, "default" for
-// the manual-price rule, else each open one the caller may decide), each an OrderDecision bound to the revision, rule and time with
-// the reason (a refusal needs one). Needs SALES_APPROVE in the quote's organization; refuses a quote not a draft (QUOTE_NOT_DRAFT), an
+// the manual-price rule; the open ones of a list with salesApprovalPolicyIds, the notice's rules; else every open one), each an
+// OrderDecision bound to the revision, rule and time with the reason (a refusal needs one). Every rule chosen must be the caller's
+// to decide, or none is decided: a notice decided leaves every approver's list, so it never decides some rules and strands the rest. Needs SALES_APPROVE in the quote's organization; refuses a quote not a draft (QUOTE_NOT_DRAFT), an
 // expired one (QUOTE_EXPIRED), a missing or stale revision naming the current one (REVISION_REQUIRED, REVISION_CHANGED), a rule the
 // quote no longer meets (APPROVAL_NOT_NEEDED), the author unless the rule allows it (SELF_APPROVAL) and one outside the rule's group
 // (APPROVER_INVALID). The same operation key answers the first result.
@@ -902,6 +914,7 @@ function decide(p) {
               orderId: quote.order.orderId,
               orderRevision: p.orderRevision ?? null,
               salesApprovalPolicyId: p.salesApprovalPolicyId ?? null,
+              salesApprovalPolicyIds: keysOf(p.salesApprovalPolicyIds),
               decision
           })
         : null
@@ -918,17 +931,17 @@ function decide(p) {
     const decisions = decisionsAt(quote.order.orderId, revision)
     const states = withStates(requirements, decisions)
     const wanted = text(p.salesApprovalPolicyId)
-    const chosen = wanted ? states.filter(row => row.key === wanted) : states.filter(row => row.state !== "approved")
+    const listed = keysOf(p.salesApprovalPolicyIds)
+    const chosen = wanted
+        ? states.filter(row => row.key === wanted)
+        : states.filter(row => row.state !== "approved" && (!listed || listed.includes(row.key)))
     if (!chosen.length)
         denied("APPROVAL_NOT_NEEDED", "Quote " + quote.order.orderId + " needs no such approval at revision " + revision)
-    const allowed = []
-    let firstRefusal = null
     for (const row of chosen) {
         const refusal = decideRefusal(userScope, quote, row, decisions)
-        if (refusal) firstRefusal = firstRefusal || refusal
-        else allowed.push(row)
+        if (refusal) denied(refusal.code, refusal.message)
     }
-    if (!allowed.length || (wanted && firstRefusal)) denied(firstRefusal.code, firstRefusal.message)
+    const allowed = chosen
     const resultEnumId = decision === "approve" ? results.approved : results.refused
     let at = nowMs()
     for (const row of allowed) {
@@ -965,14 +978,31 @@ function decide(p) {
     if (operation) lib.complete(operation, DECISION, quote.order.orderId, result)
     return Object.assign(result, {alreadyApplied: false})
 }
+// A list of rule keys (a List parameter or a message's array), or null.
+function keysOf(value) {
+    if (value == null || typeof value === "string" || typeof value.length !== "number") return null
+    const keys = Array.from(value)
+        .map(key => text(key))
+        .filter(Boolean)
+    return keys.length ? keys : null
+}
 // The SalesQuoteApproval topic's handlers (approve#QuoteMessage, refuse#QuoteMessage), called by the framework as the user deciding
-// the notice: the decision at the revision the message names, never the current one.
+// the notice: the decision at the revision the message names, never the current one, of the rules the message asked for (ruleKeys),
+// never one set after it was sent; each must be the approver's to decide, else none is (decide#Quote).
 function decideMessage(p, decision) {
     if (p.recordEntityName && p.recordEntityName !== ORDER) denied("SOURCE_INVALID", "Not a quote approval")
     const message = p.message || {}
     if (message.sourceRevision == null || message.sourceRevision === "")
         denied("REVISION_REQUIRED", "The approval names no revision of the quote; open it to decide")
-    return decide({orderId: p.recordId, orderRevision: message.sourceRevision, decision, reason: p.reason})
+    const ruleKeys = keysOf(message.ruleKeys)
+    if (!ruleKeys) denied("SOURCE_INVALID", "The approval names no rule of the quote; open it to decide")
+    return decide({
+        orderId: p.recordId,
+        orderRevision: message.sourceRevision,
+        salesApprovalPolicyIds: ruleKeys,
+        decision,
+        reason: p.reason
+    })
 }
 // The approvals a quote needs before it is proposed (propose#Quote's guard, design §5 "a direct service call cannot propose an
 // unapproved quote"): APPROVAL_REQUIRED naming the rules still open at its revision.
@@ -1025,6 +1055,13 @@ function revisionChanged(p) {
 // effect, the quote rules an accepted quote meets without a current approval and the order rules the order meets, as warnings; none
 // for an organization with no rule or an order that meets none. They stop autoApprove#Order as the credit and purchase warnings do;
 // with the seller's approval setting on, OrderDetail shows them to the person approving, whom they do not refuse (P11).
+// A warning's rule: its kind and id, never its threshold, the order's amounts or a cost (a warning reaches whoever reads the order's
+// pre-approval check and the server log; the quote's approval box shows the inputs to its readers).
+const warningRule = row =>
+    L(ruleKinds[row.ruleTypeEnumId] || "approval") +
+    " " +
+    L("rule") +
+    (row.salesApprovalPolicyId ? " " + row.salesApprovalPolicyId : "")
 function preApproveWarnings(p) {
     const order = blank(p.orderId) ? null : one(ORDER, {orderId: String(p.orderId)})
     if (!order) return {approveWarnings: []}
@@ -1038,21 +1075,11 @@ function preApproveWarnings(p) {
             if (configured) {
                 const states = withStates(requirements, decisionsAt(order.orderId, revisionOf(order)))
                 for (const row of states.filter(found => found.state !== "approved"))
-                    warnings.push(
-                        L("Sales approval needed") +
-                            ": " +
-                            row.ruleText +
-                            (row.inputs.length ? " (" + row.inputs.join("; ") + ")" : "")
-                    )
+                    warnings.push(L("Sales approval needed") + ": " + warningRule(row))
             }
         }
         for (const row of requirementsOf(order, part, purposes.order).requirements)
-            warnings.push(
-                L("Sales order approval needed") +
-                    ": " +
-                    row.ruleText +
-                    (row.inputs.length ? " (" + row.inputs.join("; ") + ")" : "")
-            )
+            warnings.push(L("Sales order approval needed") + ": " + warningRule(row))
     }
     return {approveWarnings: Array.from(new Set(warnings))}
 }

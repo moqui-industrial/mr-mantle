@@ -252,6 +252,11 @@ feature(
                 quoteValidityDays: "21",
                 changeReason: "Three weeks"
             }).refused
+            const unnamed = as(users.admin, "store#SalesPolicy", {
+                organizationPartyId: orgA,
+                quoteValidityDays: "21",
+                changeReason: "Three weeks"
+            }).refused
             const repRefused = as(users.rep, "store#SalesPolicy", {
                 organizationPartyId: orgA,
                 quoteValidityDays: "7",
@@ -281,9 +286,9 @@ feature(
             const part = one("mantle.order.OrderPart", {orderId: quote.orderId, orderPartSeqId: "01"})
             const ms = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js").ms
             const days = (ms(part.validThruDate) - ms(part.validFromDate)) / 86400000
-            return {preview, before, first, read, stale, repRefused, rule, badRule, repRule, days}
+            return {preview, before, first, read, stale, unnamed, repRefused, rule, badRule, repRule, days}
         },
-        then({preview, before, first, read, stale, repRefused, rule, badRule, repRule, days}) {
+        then({preview, before, first, read, stale, unnamed, repRefused, rule, badRule, repRule, days}) {
             preview.published == false
             Array.from(preview.changes).some(change => change.field == "quoteValidityDays" && change.afterText == "14")
             before == null
@@ -292,6 +297,7 @@ feature(
             read.policy.changeReason == "Two weeks"
             read.commercialRevisionOnly == true
             stale.includes("REVISION_CHANGED")
+            unnamed.includes("REVISION_REQUIRED")
             repRefused.includes("PERMISSION_DENIED")
             rule.refused == ""
             badRule.includes("THRESHOLD_REQUIRED")
@@ -323,6 +329,13 @@ feature("an entered price over the rule waits for an approver who is not its aut
                 .list()
         ).map(row => row.userId)
         const seen = as(users.approver, quoteService + "get#Quote", {orderId}).quoteFound
+        // an approver who also drafts quotes sees this one to decide it, not to change it
+        const leadEdit = as(users.lead, quoteService + "store#QuoteLine", {
+            orderId,
+            orderRevision: revision(orderId),
+            orderItemSeqId: quotes.discount.orderItemSeqId,
+            quantity: "3"
+        }).refused
         const repDecide = as(users.rep, "decide#Quote", {orderId, orderRevision: revision(orderId)}).refused
         const otherOrg = as(users.approverB, "decide#Quote", {orderId, orderRevision: revision(orderId)}).refused
         const staleDecide = as(users.approver, "decide#Quote", {orderId, orderRevision: revision(orderId) - 1}).refused
@@ -358,6 +371,7 @@ feature("an entered price over the rule waits for an approver who is not its aut
             notice,
             noticeUsers,
             seen,
+            leadEdit,
             repDecide,
             otherOrg,
             staleDecide,
@@ -382,6 +396,7 @@ feature("an entered price over the rule waits for an approver who is not its aut
         !String(r.notice.titleText).includes("85")
         !String(r.notice.messageJson).includes("85")
         r.seen == true
+        r.leadEdit.includes("PERMISSION_DENIED")
         r.repDecide.includes("PERMISSION_DENIED")
         r.otherOrg.includes("RECORD_UNAVAILABLE")
         r.staleDecide.includes("REVISION_CHANGED")
@@ -452,6 +467,7 @@ feature("a free line is the rep's where a rule will need it approved, a sales ap
             organizationPartyId: orgB,
             customerPartyId: accounts.b
         }).orderId
+        quotes.freeB = orderId
         const free = {orderId, productId: product, freeLine: "Y", overrideReason: "Sample"}
         const uncovered = as(
             users.repB,
@@ -483,6 +499,45 @@ feature("a free line is the rep's where a rule will need it approved, a sales ap
     }
 })
 
+feature("deciding the notice decides the rules it asked for, never one set after it was sent", {
+    when() {
+        const orderId = quotes.freeB
+        as(users.repB, "request#QuoteApproval", {orderId, orderRevision: revision(orderId)})
+        const notice = one("moqui.security.user.NotificationMessage", {
+            topic: "SalesQuoteApproval",
+            recordEntityName: "mantle.order.OrderHeader",
+            recordId: orderId
+        })
+        // a discount rule set after the notice was sent meets the free line too (100 % under its calculated price)
+        as(users.admin, "store#SalesApprovalPolicy", {
+            organizationPartyId: orgB,
+            purposeEnumId: "SapQuote",
+            ruleTypeEnumId: "SarDiscount",
+            discountPercent: "10",
+            changeReason: "Discount control"
+        })
+        const beforeDecide = states(approvalOf(users.repB, orderId))
+        const decided = as(users.approverB, "approve#QuoteMessage", {
+            recordEntityName: "mantle.order.OrderHeader",
+            recordId: orderId,
+            message: JSON.parse(notice.messageJson)
+        })
+        const afterDecide = approvalOf(users.repB, orderId)
+        // the rep asks again for the rule set since
+        const askedAgain = as(users.repB, "request#QuoteApproval", {orderId, orderRevision: revision(orderId)})
+        return {beforeDecide, decided, afterDecide, askedAgain, after: approvalOf(users.repB, orderId)}
+    },
+    then({beforeDecide, decided, afterDecide, askedAgain, after}) {
+        beforeDecide.join() == "SarFreeLine:requested,SarDiscount:required"
+        decided.refused == ""
+        states(afterDecide).join() == "SarFreeLine:approved,SarDiscount:required"
+        afterDecide.approved == false
+        afterDecide.canRequest == true
+        askedAgain.refused == ""
+        states(after).join() == "SarFreeLine:approved,SarDiscount:requested"
+    }
+})
+
 feature("with the approval setting off a Sales order rule stops autoApprove#Order and not a person's approve#Order", {
     when() {
         as(users.admin, "store#SalesApprovalPolicy", {
@@ -503,6 +558,8 @@ feature("with the approval setting off a Sales order rule stops autoApprove#Orde
     then({ruled, approvedByPerson, plain}) {
         ruled.statusId == "OrderPlaced"
         ruled.warnings.some(warning => warning.startsWith("Sales order approval needed"))
+        // the warning names the rule, never its threshold or the order's amounts
+        !ruled.warnings.some(warning => warning.startsWith("Sales") && warning.includes("$"))
         approvedByPerson == "OrderApproved"
         plain.statusId == "OrderApproved"
         !plain.warnings.some(warning => warning.startsWith("Sales"))

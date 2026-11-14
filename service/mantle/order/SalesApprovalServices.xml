@@ -25,8 +25,8 @@ along with this software (see the LICENSE.md file). If not, see
             ended where the new one starts, which keeps its values for each field not given; the acceptance thresholds, when given,
             replace the earlier ones (one per currency). previewOnly Y answers the changes and writes nothing. Needs SALES_CONFIGURE for
             an organization of the caller's sales scope (PERMISSION_DENIED, ORGANIZATION_DENIED); refuses no reason
-            (REASON_REQUIRED), nothing changed (NO_CHANGE), a start before now or before the row it replaces (DATE_INVALID), a stale
-            revision (REVISION_CHANGED), a team of another organization (TEAM_INVALID), an unknown template (TEMPLATE_INVALID), a
+            (REASON_REQUIRED), nothing changed (NO_CHANGE), a start before now or before the row it replaces (DATE_INVALID), a missing
+            or stale revision of the row it replaces (REVISION_REQUIRED, REVISION_CHANGED), a team of another organization (TEAM_INVALID), an unknown template (TEMPLATE_INVALID), a
             day count that is not a positive whole number (VALUE_INVALID) and a threshold without its currency or twice in one
             (CURRENCY_INVALID, THRESHOLD_DUPLICATE).</description>
         <in-parameters>
@@ -103,7 +103,8 @@ along with this software (see the LICENSE.md file). If not, see
             SALES_APPROVE) and self-approval (selfApprovalAllowed Y). Needs SALES_CONFIGURE for an organization of the caller's sales
             scope; refuses no reason (REASON_REQUIRED), an unknown purpose or type (PURPOSE_INVALID, RULE_INVALID), a type's missing
             or invalid input (THRESHOLD_REQUIRED, CURRENCY_INVALID, PERCENT_REQUIRED, PERCENT_INVALID, VALUE_INVALID), a group that
-            holds no SALES_APPROVE (APPROVER_INVALID), dates out of order (DATE_INVALID), a stale revision (REVISION_CHANGED) and an
+            holds no SALES_APPROVE (APPROVER_INVALID), dates out of order (DATE_INVALID), a missing or stale revision of the rule
+            changed (REVISION_REQUIRED, REVISION_CHANGED) and an
             ended rule (RULE_ENDED); another organization's rule answers as missing (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="salesApprovalPolicyId"/>
@@ -166,11 +167,12 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="request" noun="QuoteApproval" allow-remote="false">
-        <description>Ask the approvers of a draft quote's open rules at its revision (an OrderDecision of result SdrRequested; one
-            SalesQuoteApproval notice to the holders of SALES_APPROVE of the organization who may decide it, titled with the quote and
-            the customer and no amount). Needs SALES_QUOTE_EDIT on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED);
+        <description>Ask the approvers of a draft quote's open rules at its revision (an OrderDecision of result SdrRequested for
+            each rule not asked for or refused, a rule set since an earlier request among them; one SalesQuoteApproval notice, in
+            place of the earlier one, to the holders of SALES_APPROVE of the organization who may decide a rule still waiting,
+            titled with the quote and the customer and no amount, naming those rules as its ruleKeys). Needs SALES_QUOTE_EDIT on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED);
             refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), one
-            that needs no approval or is approved (APPROVAL_NOT_NEEDED) and one whose approval is asked already
+            that needs no approval or is approved (APPROVAL_NOT_NEEDED) and one whose every open rule is asked for already
             (APPROVAL_REQUESTED).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
@@ -188,9 +190,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="decide" noun="Quote" allow-remote="false">
         <description>Approve or refuse a quote's rules at the revision read (design §5 the approval binding): one rule
-            (salesApprovalPolicyId, "default" for the manual-price rule of an organization with no quote rule) or each open rule the
-            caller may decide, each an OrderDecision bound to the revision, the rule and the time, with the reason (required to
-            refuse). Needs SALES_APPROVE (PERMISSION_DENIED) in the quote's organization; refuses a quote that is no longer a draft
+            (salesApprovalPolicyId, "default" for the manual-price rule of an organization with no quote rule), the open ones of a list
+            (salesApprovalPolicyIds, a notice's rules) or every open rule, each an OrderDecision bound to the revision, the rule and the
+            time, with the reason (required to refuse); every rule chosen must be the caller's to decide, else none is. Needs SALES_APPROVE (PERMISSION_DENIED) in the quote's organization; refuses a quote that is no longer a draft
             (QUOTE_NOT_DRAFT) or has expired (QUOTE_EXPIRED), a missing or stale revision naming the current one (REVISION_REQUIRED,
             REVISION_CHANGED), a rule the quote no longer meets (APPROVAL_NOT_NEEDED), its author (its owner, who asked for the
             approval or entered the lines the rule names) unless the rule allows it (SELF_APPROVAL), one outside the rule's group
@@ -199,6 +201,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="orderId" required="true"/>
             <parameter name="orderRevision"/>
             <parameter name="salesApprovalPolicyId"/>
+            <parameter name="salesApprovalPolicyIds" type="List"><description>The rules to decide (their ids, "default" for the
+                manual-price rule): those of the notice decided (its ruleKeys), so a rule set after it was sent is not</description></parameter>
             <parameter name="decision" default-value="approve"/>
             <parameter name="reason"/>
             <parameter name="operationKey"/>
@@ -217,8 +221,10 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="approve" noun="QuoteMessage" allow-remote="false">
         <description>The approve service of the SalesQuoteApproval topic, which the framework's decide#NotificationMessage calls as
-            the user: decide#Quote at the revision in the message (sourceRevision), so a quote changed since is refused naming its
-            current revision and a message with none is refused (REVISION_REQUIRED); another record is SOURCE_INVALID.</description>
+            the user: decide#Quote at the revision in the message (sourceRevision) of the rules it asked for (ruleKeys), so a quote
+            changed since is refused naming its current revision, a message with none is refused (REVISION_REQUIRED), a rule set
+            after it was sent is not decided, and an approver who may not decide each of them decides none (the framework then
+            leaves the notice to the others); another record or a message naming no rule is SOURCE_INVALID.</description>
         <in-parameters>
             <parameter name="recordEntityName"/>
             <parameter name="recordId" required="true"/>
@@ -264,7 +270,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="check" noun="SalesPreApprove" allow-remote="false" read-only="true">
         <description>Sales' pre-approval warnings for the SECA on check#OrderPreApprove (impl-sales §4 Nov 11, F60): for each sales
             part of a seller with a Sales rule in effect, the quote rules an accepted quote meets without a current approval and the
-            order rules the order meets. None for an organization with no rule or an order that meets none.</description>
+            order rules the order meets, each naming the rule's kind and id and never an amount. None for an organization with no
+            rule or an order that meets none.</description>
         <in-parameters><parameter name="orderId"/></in-parameters>
         <out-parameters><parameter name="approveWarnings" type="List"/></out-parameters>
         <actions>

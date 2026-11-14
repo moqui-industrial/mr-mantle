@@ -323,6 +323,7 @@ function quoteOf(userScope, orderId) {
     const part = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
     if (!part || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
     if (!part.customerPartyId || isInternal(part.customerPartyId)) return null
+    let approverOnly = false
     if (!userScope.capabilities.teamRead) {
         const partyIds = assignmentParties(userScope)
         const assigned =
@@ -334,15 +335,18 @@ function quoteOf(userScope, orderId) {
                 .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
                 .count() > 0
         // P9: a holder of SALES_APPROVE sees a quote of their organizations that asked for an approval (design §1.1 "an assigned
-        // approval grants its authorized approver the source projection needed to decide that")
-        if (!assigned && !approvalAsked(userScope, orderId)) return null
+        // approval grants its authorized approver the source projection needed to decide that"), to read and decide, not to edit
+        if (!assigned) {
+            if (!approvalAsked(userScope, orderId)) return null
+            approverOnly = true
+        }
     }
     return {
         order,
         part,
         organizationPartyId: part.vendorPartyId,
         customerPartyId: part.customerPartyId,
-        canEdit: !!userScope.capabilities.quoteEdit
+        canEdit: !!userScope.capabilities.quoteEdit && !approverOnly
     }
 }
 // ===== P9: approvals (impl-sales P9; design-sales §1.1, §5 Approvals) =====
@@ -364,6 +368,8 @@ function requireQuote(userScope, orderId, edit = false) {
     const found = quoteOf(userScope, orderId)
     if (!found) denied("RECORD_UNAVAILABLE", "Quote " + (orderId || "") + " is not available")
     if (edit) requireCapability(userScope, "quoteEdit")
+    // P9: an approver who sees the quote only for its approval may not change it
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Quote " + orderId + " is for you to decide, not to change")
     return found
 }
 
