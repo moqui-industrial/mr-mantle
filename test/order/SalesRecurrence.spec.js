@@ -5,7 +5,10 @@
 // refused; two runs of the due occurrence and the job make one order, placed with no payment copied, for that occurrence; a paused
 // base and an ended one make none, and a resumed base skips the paused occurrence; a base whose agreement ended fails, named on the
 // base, and the next base still runs; a Shop contract's base is only Shop's; Subscriptions in Sales' context show a storeless
-// subscription of a generated order beside a store contract, and a follow-up is a task on the customer.
+// subscription of a generated order beside a store contract, and a follow-up is a task on the customer. Follow-up 2 (§4 Nov 14): a
+// base repeats the source's charge and discount lines with its products, each under its own parent; the order made is taxed then
+// by its seller's gateway (X1), not given the source's tax; with auto-invoice on it is billed once a person approves it, once, and a
+// base without it bills nothing.
 // Standalone: SalesQuoteIssueFixtures (organizations A and B, accounts, a priced product) and spec-local users and records.
 // Run: ./moq test mr-mantle --spec SalesRecurrence
 const fx = ec.resource.script("component://mr-mantle/test/order/SalesQuoteIssueFixtures.js")
@@ -54,6 +57,48 @@ function approvedOrder(organizationPartyId, customerPartyId) {
         return created.orderId
     })
 }
+// a service call that commits on its own (an approval's tx-commit rules run after it)
+const committed = (name, parameters) =>
+    system(() => ec.service.sync().name(name).parameters(parameters).disableAuthz().requireNewTransaction(true).call() || {})
+const lines = orderId =>
+    system(() =>
+        Array.from(ec.entity.find("mantle.order.OrderItem").condition("orderId", orderId).orderBy("orderItemSeqId").list())
+    )
+const taxTypes = ["ItemSalesTax", "ItemVatTax"]
+const amountOf = row => toDecimal(row.quantity ?? 1).multiply(toDecimal(row.unitAmount ?? 0))
+const taxTotal = orderId =>
+    lines(orderId)
+        .filter(row => taxTypes.includes(row.itemTypeEnumId))
+        .reduce((sum, row) => sum.add(amountOf(row)), toDecimal(0))
+// follow-up 2: an approved storeless order of C (its seller's gateway taxes it) with a product line, a shipping charge and a
+// discount of the product line, so its tax lines leave gaps in the line ids (each line change retaxes it)
+function chargedOrder() {
+    return system(() => {
+        const created = call("mantle.order.OrderServices.create#Order", {
+            vendorPartyId: f.orgC,
+            customerPartyId: f.accounts.c,
+            currencyUomId: "USD"
+        })
+        const item = values =>
+            call(
+                "mantle.order.OrderServices.create#OrderItem",
+                Object.assign({orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, requireInventory: false}, values)
+            ).orderItemSeqId
+        const product = item({productId: f.product, itemTypeEnumId: "ItemProduct", quantity: 2, unitAmount: 100})
+        item({itemTypeEnumId: "ItemShipping", quantity: 1, unitAmount: 15, itemDescription: "Freight"})
+        item({itemTypeEnumId: "ItemDiscount", quantity: 1, unitAmount: -20, parentItemSeqId: product, itemDescription: "Loyalty"})
+        call("mantle.order.OrderServices.place#Order", {orderId: created.orderId, requireInventory: false})
+        call("mantle.order.OrderServices.approve#Order", {orderId: created.orderId})
+        return created.orderId
+    })
+}
+// a value read again until it is truthy, for up to five seconds (what runs after a commit, on a service worker)
+function waitFor(read, millis = 5000) {
+    const end = Date.now() + millis
+    let value = read()
+    while (!value && Date.now() < end) value = read()
+    return value
+}
 const monthly = (extra = {}) =>
     Object.assign(
         {
@@ -89,6 +134,28 @@ spec({
             users.keeperB = user("keeperb", [f.orgB], ["SALES_VIEW", "SALES_RECURRENCE_MANAGE", "SALES_ACCOUNT_EDIT"])
             users.reader = user("reader", [f.orgA], ["SALES_VIEW", "SALES_TEAM_VIEW"])
             users.finance = user("finance", [f.orgA], ["SALES_VIEW", "SALES_RECURRENCE_MANAGE", "RECEIVABLE_EDIT"])
+            // follow-up 2: a keeper with the finance right of C, the seller with a tax gateway and no store
+            users.financeC = user("financec", [f.orgC], ["SALES_VIEW", "SALES_RECURRENCE_MANAGE", "RECEIVABLE_EDIT"])
+            make("mantle.other.tax.TaxAuthority", {
+                taxAuthorityId: f.prefix + "_UT",
+                taxAuthorityTypeEnumId: "TatState",
+                taxAuthGeoId: "USA_UT",
+                description: "Recurrence Utah"
+            })
+            make("mantle.other.tax.TaxAuthorityParty", {
+                taxAuthorityId: f.prefix + "_UT",
+                partyId: f.orgC,
+                fromDate: 0,
+                isNexus: "Y"
+            })
+            make("mantle.other.tax.TaxAuthorityRate", {
+                taxAuthorityRateId: f.prefix + "_RATE",
+                taxAuthorityId: f.prefix + "_UT",
+                rateTypeEnumId: "TarSalesTax",
+                taxPercentage: "6",
+                taxShipping: "Y",
+                fromDate: 0
+            })
             // a finance reader of A (the review's check that a customer's finance lists no base as an order)
             users.receivables = user("receivables", [f.orgA], ["RECEIVABLE_VIEW"])
             make("moqui.security.ArtifactGroupMember", {
@@ -482,5 +549,145 @@ feature("a Shop contract's base is only Shop's; Subscriptions show a storeless s
         follow.refused == ""
         follow.workEffortId != null
         one("mantle.work.effort.WorkEffort", {workEffortId: follow.workEffortId}).workEffortTypeEnumId == "WetTask"
+    }
+})
+
+feature("a base repeats the source's charge and discount lines; each order is taxed when placed and billed once approved", {
+    when() {
+        ids.charged = chargedOrder()
+        const sourceTax = taxTotal(ids.charged)
+        ids.chargedBase = as(
+            users.financeC,
+            svc + "store#SalesRecurrence",
+            monthly({orderId: ids.charged, recurAutoInvoice: "Y"})
+        ).baseOrderId
+        const baseLines = lines(ids.chargedBase)
+        // the rate rises before the occurrence: the order made is taxed then, not given the source's tax
+        system(() =>
+            call("update#mantle.other.tax.TaxAuthorityRate", {taxAuthorityRateId: f.prefix + "_RATE", taxPercentage: "7"})
+        )
+        const made = run(ids.chargedBase)
+        const madeLines = lines(made)
+        const madeTax = taxTotal(made)
+        const placedBillings = count("mantle.order.OrderItemBilling", {orderId: made})
+        const placedStatus = header(made).statusId
+        // a person approves it: the base's auto-invoice bills it, once
+        committed("mantle.order.OrderServices.approve#Order", {orderId: made})
+        // the approval's tx-commit rule runs on a service worker after the commit
+        const billings = waitFor(() => count("mantle.order.OrderItemBilling", {orderId: made}))
+        const invoiceIds = system(() =>
+            Array.from(
+                new Set(
+                    Array.from(ec.entity.find("mantle.order.OrderItemBilling").condition("orderId", made).list()).map(
+                        row => row.invoiceId
+                    )
+                )
+            )
+        )
+        const again = committed(svc + "invoice#RecurringOrder", {orderId: made}).invoiceIds || []
+        const billingsAgain = count("mantle.order.OrderItemBilling", {orderId: made})
+        // a base without auto-invoice: its order approved is not billed
+        const plain = children(ids.third)[0].orderId
+        committed("mantle.order.OrderServices.approve#Order", {orderId: plain})
+        const plainInvoices = committed(svc + "invoice#RecurringOrder", {orderId: plain}).invoiceIds || []
+        const plainBillings = count("mantle.order.OrderItemBilling", {orderId: plain})
+        // the review: a base whose order the gateway cannot tax (its rate ended) fails its occurrence, named on the base, and
+        // makes no order
+        const untaxed = as(
+            users.financeC,
+            svc + "store#SalesRecurrence",
+            monthly({orderId: chargedOrder(), recurAutoInvoice: "Y"})
+        ).baseOrderId
+        system(() =>
+            call("update#mantle.other.tax.TaxAuthorityRate", {
+                taxAuthorityRateId: f.prefix + "_RATE",
+                thruDate: String(Date.now() - 60 * dayMs - 1000)
+            })
+        )
+        system(() => call("mantle.order.OrderServices.create#RecurringOrders", {}))
+        const untaxedBase = header(untaxed)
+        const untaxedCount = children(untaxed).length
+        return {
+            untaxedBase,
+            untaxedCount,
+            sourceTax,
+            baseLines,
+            made,
+            madeLines,
+            madeTax,
+            placedStatus,
+            placedBillings,
+            billings,
+            invoiceIds,
+            again,
+            billingsAgain,
+            plainInvoices,
+            plainBillings
+        }
+    },
+    then({
+        sourceTax,
+        baseLines,
+        made,
+        madeLines,
+        madeTax,
+        placedStatus,
+        placedBillings,
+        billings,
+        invoiceIds,
+        again,
+        billingsAgain,
+        plainInvoices,
+        plainBillings,
+        untaxedBase,
+        untaxedCount
+    }) {
+        sourceTax.compare(0) > 0
+        // the base: the product, the shipping charge and the discount, each child under its own parent
+        const kinds = rows =>
+            rows
+                .filter(row => !taxTypes.includes(row.itemTypeEnumId))
+                .map(row => row.itemTypeEnumId)
+                .sort()
+                .join(",")
+        kinds(baseLines) == "ItemDiscount,ItemProduct,ItemShipping"
+        const parentOf = (rows, type) => {
+            const child = rows.find(row => row.itemTypeEnumId == type)
+            return rows.find(row => row.orderItemSeqId == child.parentItemSeqId)?.itemTypeEnumId
+        }
+        parentOf(baseLines, "ItemDiscount") == "ItemProduct"
+        baseLines
+            .filter(row => taxTypes.includes(row.itemTypeEnumId))
+            .every(row =>
+                ["ItemProduct", "ItemShipping"].includes(
+                    baseLines.find(line => line.orderItemSeqId == row.parentItemSeqId)?.itemTypeEnumId
+                )
+            )
+        // the order made: the same lines, its tax figured at the new rate under its own lines
+        made != null && !String(made).startsWith("error")
+        placedStatus == "OrderPlaced"
+        kinds(madeLines) == "ItemDiscount,ItemProduct,ItemShipping"
+        parentOf(madeLines, "ItemDiscount") == "ItemProduct"
+        madeLines.filter(row => taxTypes.includes(row.itemTypeEnumId)).length == 2
+        madeLines
+            .filter(row => taxTypes.includes(row.itemTypeEnumId))
+            .every(row =>
+                ["ItemProduct", "ItemShipping"].includes(
+                    madeLines.find(line => line.orderItemSeqId == row.parentItemSeqId)?.itemTypeEnumId
+                )
+            )
+        madeTax.compare(sourceTax) > 0
+        toDecimal(header(made).grandTotal).compare(toDecimal(195).add(madeTax)) == 0
+        placedBillings == 0
+        // approved by a person: every line billed on one invoice, and a second ask bills nothing more
+        billings == madeLines.length
+        invoiceIds.length == 1
+        again.length == 0
+        billingsAgain == billings
+        plainInvoices.length == 0
+        plainBillings == 0
+        untaxedBase.recurFailureDate != null
+        String(untaxedBase.recurFailureMessage).includes("No sales tax rate")
+        untaxedCount == 0
     }
 })

@@ -52,12 +52,12 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="SalesRecurrence" allow-remote="false">
         <description>RecurrenceSettings (design §7): a base's schedule. With orderId, an approved sales order of the caller's scope becomes
-            the source of a new base: a copy with no payments, approved, marked OrpRecurringTemplate, never reserved, shipped or billed
-            (the order it came from stays an ordinary order); an order made recurring before Sales is kept as it is. With baseOrderId
+            the source of a new base: a copy with no payments of every line (its charges and discounts with its products), approved,
+            marked OrpRecurringTemplate, never reserved, shipped or billed (the order it came from stays an ordinary order); an order made recurring before Sales is kept as it is. With baseOrderId
             and recurRevision, a base's schedule is changed. The schedule is monthly on a day (1-28, or L) at an hour, weekly on a day,
             yearly on a day of a month, or a cron expression (frequency cron), read in recurTimeZone (the user's when empty); between
             recurFromDate (now when empty for a new base) and recurThruDate; kept under recurAgreementId, an active agreement of the
-            seller with the customer (AGREEMENT_INVALID); recurAutoInvoice Y bills each order as it is approved and needs the finance
+            seller with the customer (AGREEMENT_INVALID); recurAutoInvoice Y bills each order made once it is approved, at placement or later by a person (invoice#RecurringOrder), and needs the finance
             right (RECEIVABLE_EDIT) to turn on. Through mantle.order.OrderServices.update#OrderRecur. Needs SALES_RECURRENCE_MANAGE
             (PERMISSION_DENIED); refuses another organization's order or base (RECORD_UNAVAILABLE), an order not approved
             (ORDER_NOT_APPROVED), a schedule that cannot be read (SCHEDULE_INVALID), an unknown zone (ZONE_INVALID), an end before
@@ -165,6 +165,24 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="workEffortId"/></out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('addSubscriptionFollowUp', context))</script>
+        </actions>
+    </service>
+    <service verb="invoice" noun="RecurringOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (impl-sales follow-up 2; §4 Nov 14): run by the SalesRecurrenceApprovedInvoice SECA once an order's
+            approval commits, by the job's automatic approval or a person's. An order the worker made for an occurrence of a base whose
+            auto-invoice is on (recurAutoInvoice Y), not a Shop contract's base, has each approved sale part with nothing billed invoiced
+            through Accounting's create#FulfillmentInvoice (the ordered basis, one invoice for a source), each part of the base's seller in its own
+            transaction under the part's lock, read again there (two approvals' rules at once bill it once);
+            any other order is left as it is, so it bills once. Reads only the records (no supplied party or flag); a part that cannot
+            be billed is logged naming the order and never fails the approval.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('invoiceRecurringOrder', context))</script>
         </actions>
     </service>
 </services>
