@@ -76,16 +76,7 @@ function getAccountHub(p) {
 }
 
 // Whether the signed-in account's current email address is verified (a PASS account's VerifiedAddress of it).
-function emailVerified() {
-    const account = ec.user.userAccount
-    const email = text(account?.emailAddress).toLowerCase()
-    return (
-        !!email &&
-        rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
-            row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === email
-        )
-    )
-}
+const emailVerified = () => ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js").currentVerified()
 // ===== a store's topics (StoreTopics.js) =====
 const cartReminderList = (productStoreId, create) => storeTopics().topicList("cartReminders", productStoreId, create)
 const cartReminderOn = (partyId, productStoreId) => storeTopics().topicOn("cartReminders", partyId, productStoreId)

@@ -7,6 +7,9 @@
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->
     <llm-facade><constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/></llm-facade>
+    <!-- Smithy's quota for Git LFS (mr-pass plan/design-smithy.md §11 Quotas): asked before an upload is accepted; it
+        returns at once for a repository with no SmithyRepository row -->
+    <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"/>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>

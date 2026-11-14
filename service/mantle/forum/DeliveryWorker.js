@@ -462,10 +462,11 @@ function mail(v, scope, build) {
         return { state: 'failed' }
     }
     if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
+        !ec.resource
+            .script(
+                'component://mr-mantle/service/mantle/public/ConfirmedAddress.js',
+            )
+            .verified(ua.userId)
     ) {
         set(v, { state: 'suppressed' })
         return { state: 'suppressed' }

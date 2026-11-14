@@ -1150,6 +1150,15 @@ function checkRedirect(ctx, redirect) {
     const owner = mountOfPath(ctx, oldPath)
     if (!owner || owner.appMountId !== ctx.mount.appMountId)
         refuse("PATH_RESERVED", "The old path " + oldPath + " belongs to another app of the site")
+    // a site's first segments are one set of names (mr-pass plan/design-smithy.md §4.2): a redirect takes no group path of
+    // the site, nor a handle where the site has Smithy
+    const smithyHere = ctx.mounts.some(mount => mount.app === "smithy")
+    if (
+        ec.resource
+            .script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
+            .nameHeld(ctx.site.siteId, oldPath.split("/")[1], smithyHere)
+    )
+        refuse("PATH_RESERVED", "The old path " + oldPath + " is a group's or an account's name on the site")
     const others = rows(REDIRECT, {siteId: ctx.site.siteId}).filter(
         row =>
             row.redirectId !== redirect.redirectId &&

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' fixed setup (impl-sales P2; IronStone Sales design §9 Stages, Teams, LeadSources and TypesAndReasons, SAL-CRM): the
+    values the opportunity services act on, so seed, not initial setup. The editable initial setup (the default pipeline and its
+    stages, the lost reasons, the recurring plans) is data/SalesData.xml's. The legacy LeadStatus flow there stays unused (F4).
+    - SalesOpportunityType: Lead and Opportunity, the fixed semantic ids SalesOpportunity.typeEnumId takes.
+    - The opportunity outcome (SalesOpportunity.statusId): Open, Won and Lost; Won and Lost are outcomes, not stages.
+    - SalesLostReason: the structured reasons (values in SalesData.xml), ended by Enumeration.thruDate, never deleted.
+    - SalesRecurringPlan: a recurring amount's plan, enumCode its months (values in SalesData.xml).
+    - A sales team is an Organization party with the SalesTeam role, owned by its organization; its dated PrtSalesTeamOf row to
+      the organization is its effective interval, and a member's dated PrtSalesTeamMember row (from a SalesRepresentative or a
+      Manager) is the membership (OpportunityServices store#SalesTeam and store#SalesTeamMember). No People record is read or
+      written: an organization without People picks members by party.
+    - The readiness service the framework's registry calls as the user (Admin's Health, Sales' Settings): every user may call it,
+      and it checks SALES_CONFIGURE and the organization itself, as Maintenance's (MaintenanceSettingsData.xml). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.EnumerationType enumTypeId="SalesOpportunityType" description="Sales Opportunity Type"/>
+    <moqui.basic.Enumeration enumId="SotLead" enumTypeId="SalesOpportunityType" description="Lead" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SotOpportunity" enumTypeId="SalesOpportunityType" description="Opportunity" sequenceNum="2"/>
+
+    <moqui.basic.StatusType statusTypeId="SalesOpportunity" description="Sales Opportunity Outcome"/>
+    <moqui.basic.StatusItem statusId="SalesOppOpen" statusTypeId="SalesOpportunity" description="Open" sequenceNum="1"/>
+    <moqui.basic.StatusItem statusId="SalesOppWon" statusTypeId="SalesOpportunity" description="Won" sequenceNum="2"/>
+    <moqui.basic.StatusItem statusId="SalesOppLost" statusTypeId="SalesOpportunity" description="Lost" sequenceNum="3"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppOpen" toStatusId="SalesOppWon" transitionName="Win"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppOpen" toStatusId="SalesOppLost" transitionName="Lose"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppWon" toStatusId="SalesOppOpen" transitionName="Reopen"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="SalesOppLost" toStatusId="SalesOppOpen" transitionName="Reopen"/>
+
+    <moqui.basic.EnumerationType enumTypeId="SalesLostReason" description="Sales Lost Reason"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesRecurringPlan" description="Sales Recurring Plan (enumCode: months)"/>
+
+    <!-- P4 (design-sales §3 OpportunityDetail): how a deal's probability is set (Stage: the stage's default, copied on create and
+        move; Manual: the rep's value, kept until Stage is chosen again), and a competitor's position on a deal -->
+    <moqui.basic.EnumerationType enumTypeId="SalesProbabilityMode" description="Sales Probability Mode"/>
+    <moqui.basic.Enumeration enumId="SpmStage" enumTypeId="SalesProbabilityMode" description="From the stage" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="SpmManual" enumTypeId="SalesProbabilityMode" description="Manual" sequenceNum="2"/>
+    <moqui.basic.EnumerationType enumTypeId="SalesCompetitorPosition" description="Sales Competitor Position"/>
+    <moqui.basic.Enumeration enumId="ScpLeading" enumTypeId="SalesCompetitorPosition" description="Ahead of us" sequenceNum="1"/>
+    <moqui.basic.Enumeration enumId="ScpEven" enumTypeId="SalesCompetitorPosition" description="Even" sequenceNum="2"/>
+    <moqui.basic.Enumeration enumId="ScpTrailing" enumTypeId="SalesCompetitorPosition" description="Behind us" sequenceNum="3"/>
+
+    <mantle.party.RoleType roleTypeId="SalesTeam" description="Sales Team"/>
+    <moqui.basic.Enumeration enumId="PrtSalesTeamOf" description="Sales Team of" enumTypeId="PartyRelationshipType"/>
+    <moqui.basic.Enumeration enumId="PrtSalesTeamMember" description="Sales Team Member" enumTypeId="PartyRelationshipType"/>
+
+    <moqui.security.ArtifactGroup artifactGroupId="MantleSalesSetupServices" description="Sales' readiness service"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleSalesSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.sales.SalesWorkspaceServices.get#SalesReadiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleSalesSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleSalesSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+</entity-facade-xml>

@@ -878,12 +878,9 @@ const isInternal = partyId => !!one("mantle.party.PartyRole", {partyId, roleType
 function accountState(partyId) {
     const account = rows("moqui.security.UserAccount", {partyId})[0]
     if (!account) return {key: "guest", text: "Guest", verified: false, selfAccess: false}
-    const email = text(account.emailAddress).toLowerCase()
-    const verified =
-        !!email &&
-        rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
-            row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === email
-        )
+    const verified = ec.resource
+        .script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js")
+        .verified(account.userId)
     const staff = rows("mantle.party.PartyRelationship", {fromPartyId: partyId}).some(
         row =>
             ["PrtEmployee", "PrtAgent", "PrtMember", "PrtRepresentative"].includes(row.relationshipTypeEnumId) &&

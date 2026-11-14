@@ -162,12 +162,7 @@ function ensureParty() {
     const ua = ec.user.userAccount
     if (!ua) fail('AuthenticationRequired', 'Sign in to join')
     if (ua.partyId) return ua.partyId
-    if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
-    )
+    if (!verifiedAddress(ua.userId))
         fail('Unauthorized', 'Verify your email before joining')
     const account = one(
         'moqui.security.UserAccount',
@@ -218,6 +213,11 @@ function readingBoundary(root, siteId, contactListId) {
     }
 }
 
+/* Whether an account has verified its current email address: the one check (mantle/public/ConfirmedAddress.js). */
+const verifiedAddress = (userId) =>
+    ec.resource
+        .script('component://mr-mantle/service/mantle/public/ConfirmedAddress.js')
+        .verified(userId)
 const methods = {}
 const moderation = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumModeration.js',
@@ -367,12 +367,7 @@ methods.joinSite = (p) => {
     )
         fail('Unauthorized', 'An invitation is required')
     const ua = ec.user.userAccount
-    if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
-    )
+    if (!verifiedAddress(ua.userId))
         fail('Unauthorized', 'Verify your email before joining')
     const old = member(p.siteId)
     if (old && old.state === 'active')
@@ -562,6 +557,16 @@ methods.storeProfile = (p) => {
     })
     if (dup && dup.partyId !== partyId)
         fail('Conflict', 'Handle is unavailable')
+    // A handle is a first path segment where Smithy is a site's root app, in one set with the group paths and the
+    // reserved words (mr-pass plan/design-smithy.md §4.2), so a new handle takes none of them on any site; the site's
+    // row is locked above, so a handle and a group path are not taken at the same time.
+    if (
+        old?.handle !== p.handle &&
+        !ec.resource
+            .script('component://mr-mantle/service/mantle/smithy/SmithyCore.js')
+            .nameFree(p.siteId, p.handle, partyId, 'handle')
+    )
+        fail('Conflict', 'Handle is unavailable')
     const avatarId =
         p.avatarId === undefined ? old?.avatarId || null : p.avatarId || null
     if (avatarId && avatarId !== old?.avatarId) {
@@ -605,7 +610,18 @@ methods.storeProfile = (p) => {
         timeZone: p.timeZone,
         revision: Number(old?.revision || 0) + 1,
     }
+    const oldHandle = old?.handle || null
     old ? update(old, fields) : create(S + 'PublicSiteProfile', fields)
+    // a handle is a personal namespace of Smithy: a changed one moves its repositories' paths and leaves a redirect,
+    // and a handle that is taken ends the redirect from it (design-smithy §4.3)
+    if (oldHandle !== p.handle) {
+        const smithyCore = ec.resource.script(
+            'component://mr-mantle/service/mantle/smithy/SmithyCore.js',
+        )
+        if (oldHandle)
+            smithyCore.handleChanged(p.siteId, partyId, oldHandle, p.handle)
+        else smithyCore.releasePath(p.siteId, p.handle)
+    }
     return {
         profile: pick(
             fields,
@@ -2118,6 +2134,12 @@ methods.storeMounts = (p) => {
     )
     const existing = rows(S + 'PublicSiteApp', { siteId: p.siteId }, 100)
     const named = new Set(mounts.map((m) => m.app))
+    // a mount takes no group path of the site, nor a handle where the site has Smithy (design-smithy §4.2)
+    const smithyCore = ec.resource.script(
+        'component://mr-mantle/service/mantle/smithy/SmithyCore.js',
+    )
+    const smithyHere =
+        named.has('smithy') || existing.some((old) => old.app === 'smithy')
     const kept = existing.filter(
         (old) => registry.apps[old.app]?.target && !named.has(old.app),
     )
@@ -2134,7 +2156,9 @@ methods.storeMounts = (p) => {
             invalid('Invalid or reserved mount')
         // one root app per site, Forum or Shop: two at '/' overlap below
         if (m.pathPrefix === '/' && !app.root)
-            invalid('ROOT_NOT_ALLOWED[pathPrefix]: Only Forum or Shop may mount at root')
+            invalid('ROOT_NOT_ALLOWED[pathPrefix]: Only Forum, Shop or Smithy may mount at root')
+        if (smithyCore.nameHeld(p.siteId, m.pathPrefix.split('/')[1], smithyHere))
+            invalid('NAME_TAKEN[pathPrefix]: A group or an account of the site has that path')
         if (
             app.onePerSite &&
             mounts.slice(0, i).concat(kept).some((other) => other.app === m.app)
@@ -2292,10 +2316,7 @@ methods.redeemInvitation = (p) => {
         v = invitation(p, true),
         ua = ec.user.userAccount
     if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        }) ||
+        !verifiedAddress(ua.userId) ||
         hash(String(ua.emailAddress || '').toLowerCase()) !== v.emailHash
     )
         fail('Unauthorized', 'Sign in with the verified intended address')
@@ -4851,10 +4872,7 @@ methods.testRoute = (p) => {
     if (!settings) fail('Conflict', 'Configure outbound mail first')
     if (
         !ua?.emailAddress ||
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
+        !verifiedAddress(ua.userId)
     )
         fail('Conflict', 'Your own address must be verified')
     const out = ec.service
@@ -5061,10 +5079,7 @@ function processInbound(ctx) {
     if (
         !ua ||
         !ua.partyId ||
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
+        !verifiedAddress(ua.userId)
     )
         return record('held', 'Sender is not a verified account address')
     const domain = sender.split('@')[1]
@@ -5595,6 +5610,8 @@ function execute(operation, p) {
     policy,
     mentionHandles,
     plainText,
+    // the word rules, for Smithy's names and descriptions (mr-pass plan/design-smithy.md §11)
+    applyRules,
     processInbound,
     postInbound,
     replyAddress,

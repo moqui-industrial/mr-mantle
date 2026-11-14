@@ -578,15 +578,11 @@
                 if (
                     !account ||
                     account.partyId !== m.targetId ||
-                    !find('moqui.security.public.VerifiedAddress', {
-                        userId: account.userId,
-                    })
-                        .condition(
-                            ec.entity.conditionFactory
-                                .makeCondition('emailAddress', 'equals', email)
-                                .ignoreCase(),
+                    !ec.resource
+                        .script(
+                            'component://mr-mantle/service/mantle/public/ConfirmedAddress.js',
                         )
-                        .count()
+                        .verified(account.userId)
                 )
                     invalid(
                         'A source identity maps only to the account with the same verified address',

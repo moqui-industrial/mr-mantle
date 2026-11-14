@@ -18,7 +18,8 @@ along with this software (see the LICENSE.md file). If not, see
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
             (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
             the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
-            unchanged.</description>
+            unchanged. A holder of SALES_REPORT_VIEW without report read is answered for the organizations of their sales scope (an
+            organization named must be one of them), costs withheld without PRODUCT_COST_VIEW (Sales P1, F2).</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="intervalCount" type="Integer" default="13"/>
@@ -195,7 +196,8 @@ along with this software (see the LICENSE.md file). If not, see
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
             (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
             the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
-            unchanged.</description>
+            unchanged. A holder of SALES_REPORT_VIEW without report read is answered for the organizations of their sales scope (an
+            organization named must be one of them), costs withheld without PRODUCT_COST_VIEW (Sales P1, F2).</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="intervalCount" type="Integer" default="13"/>
@@ -429,7 +431,8 @@ along with this software (see the LICENSE.md file). If not, see
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
             (F6). A holder of COMMERCE_VIEW without report read is answered for productStoreIds all in their store scope, as
             the stores' organizations, costs withheld without PRODUCT_COST_VIEW (Commerce P11, F21); ACCOUNTING_VIEW's answers are
-            unchanged.</description>
+            unchanged. A holder of SALES_REPORT_VIEW without report read is answered for the organizations of their sales scope (an
+            organization named must be one of them), costs withheld without PRODUCT_COST_VIEW (Sales P1, F2).</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="thruDate" type="Date" default="ec.user.nowTimestamp"/>
@@ -459,6 +462,8 @@ along with this software (see the LICENSE.md file). If not, see
             const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
                     .execute('organizations', {organizationPartyIds: vendorPartyIds, productStoreIds: productStoreIds})
             vendorPartyIds = readScope.organizationPartyIds
+            // a reader whose costs are withheld is not ranked by them either (which products are top by cost would tell them)
+            if (readScope.costWithheld && /cost/i.test(String(orderByField || ''))) orderByField = 'totalSales'
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
 
             const perMap = {d:'day', w:'week', M:'month', q:'quarter', y:'year'}
@@ -499,7 +504,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="InvoicesByCustomerClass">
         <description>Sales invoice totals by customer class from the sales search index, for the organizations named (vendorPartyIds or fromPartyIds), else every organization the user
             works in. Refuses a user without report read (ACCOUNTING_VIEW) and an organization the user may not read
-            (F6).</description>
+            (F6). A holder of SALES_REPORT_VIEW without report read is answered for the organizations of their sales scope (an
+            organization named must be one of them), costs withheld without PRODUCT_COST_VIEW (Sales P1, F2).</description>
         <in-parameters>
             <parameter name="interval" default-value="M"/><!-- day = d, week = w, month = M, quarter = q, year = y -->
             <parameter name="thruDate" type="Date" default="ec.user.nowTimestamp"/>
@@ -521,8 +527,11 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             // report read, and only organizations the user may read: those named, else every one the user works in (F6)
-            fromPartyIds = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
-                    .execute('organizations', {organizationPartyIds: fromPartyIds}).organizationPartyIds
+            const readScope = ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
+                    .execute('organizations', {organizationPartyIds: fromPartyIds})
+            fromPartyIds = readScope.organizationPartyIds
+            // a reader whose costs are withheld is not ordered by them either
+            if (readScope.costWithheld && /cost/i.test(String(orderByField || ''))) orderByField = '-invoiceTotal'
             // aggregation metrics are decimals on Postgres and numbers on OpenSearch; the summaries work in numbers
             const num = (value) => value == null ? 0 : (typeof value === 'number' ? value : toDecimal(value).toNumber())
             const addNumbersInMap = (total, line) => {
@@ -606,6 +615,8 @@ along with this software (see the LICENSE.md file). If not, see
             invoicesTotal.costPercent = null
 
             topCustomerClassList.push(invoicesTotal)
+            // a Sales report reader without PRODUCT_COST_VIEW gets no cost (withheld, never zero)
+            if (readScope.costWithheld) for (const line of topCustomerClassList) { line.productCostTotal = null; line.costPercent = null }
         ]]></script></actions>
     </service>
 </services>

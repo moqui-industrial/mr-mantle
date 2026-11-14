@@ -1158,15 +1158,26 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="check" noun="GitRepositoryAuthz">
         <description>The authzServiceName of the ALL_USERS grant on the GitRepositories artifact group (design-projects.md
-            §7, §15 "Repository access by role"), by the user's party's current WorkEffortParty roles on the projects the
-            repository is linked to: an internal member may view it and push new refs and fast-forwards (AUTHZA_VIEW,
-            AUTHZA_CREATE, AUTHZA_UPDATE); a lead of such a project (ProjectManager, Manager, ProgrammerLead, SysArchitect)
-            also force-pushes and deletes refs and changes the settings (AUTHZA_DELETE); a client contact (Customer,
-            CustomerBillTo, ClientManager, ClientBilling) only views it, and only when that project shares its repositories
-            with the client (WorkEffortSetting WstShareRepositories Y). A client contact who signs in (the PROJECT_CLIENT
-            permission, ProjectServices.get#ClientProjectInfo: its party's or its organization's client role on a project that
-            allows client sign-in) only views the repositories of its client projects that share them, whatever other role its
-            party holds (impl-projects.md P10). For anyone else nothing (AUTHZT_NONE), so other grants decide.</description>
+            §7, §15 "Repository access by role"; mr-pass plan/design-smithy.md §5.4), for git over HTTP and SSH, the framework's REST and its
+            hosting services: for a repository with a SmithyRepository row Smithy's answer alone, which counts the project
+            roles as one of the role's sources and fails closed (hidden, a site that is not published, a suspension); for
+            any other repository the project roles' answer. The userId is empty for a request with no credentials.
+
+            By project roles, the user's party's current WorkEffortParty roles on the projects the repository is linked to:
+            an internal member may view it and push new refs and fast-forwards (AUTHZA_VIEW, AUTHZA_CREATE, AUTHZA_UPDATE); a
+            lead of such a project (ProjectManager, Manager, ProgrammerLead, SysArchitect) also force-pushes and deletes refs
+            and changes the settings (AUTHZA_DELETE); a client contact (Customer, CustomerBillTo, ClientManager,
+            ClientBilling) only views it, and only when that project shares its repositories with the client
+            (WorkEffortSetting WstShareRepositories Y). A client contact who signs in (the PROJECT_CLIENT permission,
+            ProjectServices.get#ClientProjectInfo: its party's or its organization's client role on a project that allows
+            client sign-in) only views the repositories of its client projects that share them, whatever other role its
+            party holds (impl-projects.md P10).
+
+            By Smithy (mantle.smithy.SmithyServices.get#RepositoryRights):
+            view for whoever may view it, which for a repository that is public in effect, not hidden and on a published
+            site is anyone, with no user too; create and update for a Developer or higher with a confirmed address; delete
+            for a Maintainer or higher with a confirmed address. For anyone else nothing (AUTHZT_NONE), so other grants
+            decide.</description>
         <in-parameters>
             <parameter name="userId"/>
             <parameter name="authzActionEnumId"/>
@@ -1177,37 +1188,46 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             authzTypeEnumId = 'AUTHZT_NONE'
             const action = authzActionEnumId
-            if (!userId || !['AUTHZA_VIEW', 'AUTHZA_CREATE', 'AUTHZA_UPDATE', 'AUTHZA_DELETE'].includes(action)) return
-            const account = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).useCache(true).disableAuthz().one()
-            if (!account?.partyId) return
-            const projectIds = Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', artifactName)
-                    .conditionDate('fromDate', 'thruDate', null).disableAuthz().list()).map((link) => link.workEffortId)
-            if (!projectIds.length) return
-            // a client contact who signs in (PROJECT_CLIENT; impl-projects.md P10): only views, and only a repository of one of its
-            // client projects that shares its repositories (its own party's or its organization's client role), whatever other
-            // role its party holds; a failed check gives nothing
-            const client = ec.service.sync().name('mantle.work.ProjectServices.get#ClientProjectInfo').parameter('userId', userId).call()
-            if (ec.message.hasError() || client == null) return
-            if (client.isClient) {
-                if (action === 'AUTHZA_VIEW' && projectIds.some((id) => Array.from(client.shareRepositoryProjectIds || []).includes(id)))
-                    authzTypeEnumId = 'AUTHZT_ALLOW'
+            if (!['AUTHZA_VIEW', 'AUTHZA_CREATE', 'AUTHZA_UPDATE', 'AUTHZA_DELETE'].includes(action)) return
+            // what Smithy gives a repository it has a row for (design-smithy §5.4), and nothing else then: view by the effective
+            // visibility and role, a push by a Developer, a force push or a ref's delete by a Maintainer, each push with a
+            // confirmed address; a failed check gives nothing
+            const smithy = ec.service.sync().name('mantle.smithy.SmithyServices.get#RepositoryRights')
+                    .parameters({repositoryId: artifactName, userId: userId || null}).call()
+            if (ec.message.hasError() || smithy == null) return
+            if (smithy.known) {
+                const needed = action === 'AUTHZA_VIEW' ? 0 : action === 'AUTHZA_DELETE' ? 40 : 30
+                if (smithy.canView && (needed === 0 || (smithy.confirmed && Number(smithy.rank || 0) >= needed))) authzTypeEnumId = 'AUTHZT_ALLOW'
                 return
             }
-            const roles = Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', projectIds)
-                    .condition('partyId', account.partyId).conditionDate('fromDate', 'thruDate', null).disableAuthz().list())
-            if (!roles.length) return
-            const clientRoles = ['Customer', 'CustomerBillTo', 'ClientManager', 'ClientBilling']
-            const leadRoles = ['ProjectManager', 'Manager', 'ProgrammerLead', 'SysArchitect']
-            const internal = roles.filter((row) => !clientRoles.includes(row.roleTypeId))
-            if (internal.length) {
-                if (action !== 'AUTHZA_DELETE' || internal.some((row) => leadRoles.includes(row.roleTypeId))) authzTypeEnumId = 'AUTHZT_ALLOW'
-                return
+            // a repository with no Smithy row: what the project roles give, as before Smithy
+            const projectAllows = () => {
+                if (!userId) return false
+                const account = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).useCache(true).disableAuthz().one()
+                if (!account?.partyId) return false
+                const projectIds = Array.from(ec.entity.find('mantle.work.effort.WorkEffortGitRepository').condition('repositoryId', artifactName)
+                        .conditionDate('fromDate', 'thruDate', null).disableAuthz().list()).map((link) => link.workEffortId)
+                if (!projectIds.length) return false
+                // a client contact who signs in (PROJECT_CLIENT; impl-projects.md P10): only views, and only a repository of one of its
+                // client projects that shares its repositories (its own party's or its organization's client role), whatever other
+                // role its party holds; a failed check gives nothing
+                const client = ec.service.sync().name('mantle.work.ProjectServices.get#ClientProjectInfo').parameter('userId', userId).call()
+                if (ec.message.hasError() || client == null) return false
+                if (client.isClient)
+                    return action === 'AUTHZA_VIEW' && projectIds.some((id) => Array.from(client.shareRepositoryProjectIds || []).includes(id))
+                const roles = Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', 'in', projectIds)
+                        .condition('partyId', account.partyId).conditionDate('fromDate', 'thruDate', null).disableAuthz().list())
+                if (!roles.length) return false
+                const clientRoles = ['Customer', 'CustomerBillTo', 'ClientManager', 'ClientBilling']
+                const leadRoles = ['ProjectManager', 'Manager', 'ProgrammerLead', 'SysArchitect']
+                const internal = roles.filter((row) => !clientRoles.includes(row.roleTypeId))
+                if (internal.length) return action !== 'AUTHZA_DELETE' || internal.some((row) => leadRoles.includes(row.roleTypeId))
+                if (action !== 'AUTHZA_VIEW') return false
+                const clientProjectIds = Array.from(new Set(roles.map((row) => row.workEffortId)))
+                return ec.entity.find('mantle.work.effort.WorkEffortSetting').condition('workEffortId', 'in', clientProjectIds)
+                        .condition('settingTypeEnumId', 'WstShareRepositories').condition('settingValue', 'Y').disableAuthz().count() > 0
             }
-            if (action !== 'AUTHZA_VIEW') return
-            const clientProjectIds = Array.from(new Set(roles.map((row) => row.workEffortId)))
-            const shared = ec.entity.find('mantle.work.effort.WorkEffortSetting').condition('workEffortId', 'in', clientProjectIds)
-                    .condition('settingTypeEnumId', 'WstShareRepositories').condition('settingValue', 'Y').disableAuthz().count()
-            if (shared > 0) authzTypeEnumId = 'AUTHZT_ALLOW'
+            if (projectAllows()) authzTypeEnumId = 'AUTHZT_ALLOW'
         ]]></script></actions>
     </service>
 </services>

@@ -770,7 +770,34 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
         </actions>
     </service>
+    <service verb="check" noun="PartyMerge" read-only="true">
+        <description>Whether the caller may merge fromPartyId into toPartyId, as merge#Parties' guards would decide, without failing
+            (mantle/party/PartyMerge.js; impl-sales P3, X15): allowed, how the caller is admitted (system, contactAdmin, owner,
+            sales) and, when refused, the reason code and message. Commons' Compare asks it before it offers a merge.</description>
+        <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="allowed" type="Boolean"/>
+            <parameter name="admittedBy"/>
+            <parameter name="reasonCode"/>
+            <parameter name="message"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/party/PartyMerge.js').check(toPartyId, fromPartyId)"/>
+            <set field="allowed" from="found.allowed"/>
+            <set field="admittedBy" from="found.admittedBy"/>
+            <set field="reasonCode" from="found.reasonCode"/>
+            <set field="message" from="found.message"/>
+        </actions>
+    </service>
     <service verb="merge" noun="Parties">
+        <description>Merges fromPartyId into toPartyId: the merged party is disabled (mergedToPartyId) and its contact information,
+            roles, relationships, documents and history move to the kept one. The guards are here, so every caller meets them
+            (mantle/party/PartyMerge.js; design-drawers-commons §6, design-sales §4, X15; impl-sales P3): a caller that disabled
+            authorization or runs as the system, a contact administrator (CONTACT_ADMIN), the owner of a personal contact merging
+            it, or, for an account of their organization, a Sales manager or administrator; two parties of one kind and one owner
+            organization; the merged party's opportunities and agreements of that organization only. Refusals carry reason codes
+            (PERMISSION_DENIED, PARTY_KIND_MISMATCH, ORGANIZATION_MISMATCH, DEPENDENCY_OTHER_ORGANIZATION,
+            DEPENDENCY_UNAVAILABLE).</description>
         <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromIntRole">
@@ -793,6 +820,9 @@ along with this software (see the LICENSE.md file). If not, see
 
             <if condition="toParty.disabled == 'Y'"><return message="To Party ${toPartyId} is disabled, not merging into it"/></if>
             <if condition="fromParty.mergedToPartyId"><return message="From Party ${fromPartyId} already merged to Party ${fromParty.mergedToPartyId}"/></if>
+            <!-- the merge guards (impl-sales P3): who may merge, one kind, one owner organization, no other organization's
+                dependency; a refusal fails the service with its reason code -->
+            <script>ec.resource.script('component://mr-mantle/service/mantle/party/PartyMerge.js').guard(toPartyId, fromPartyId)</script>
 
             <log level="info" message="Merging Party ${fromPartyId} to Party ${toPartyId}"/>
             <!-- disable from Party and set mergedToPartyId -->
@@ -846,6 +876,11 @@ along with this software (see the LICENSE.md file). If not, see
             </iterate>
 
             <script><![CDATA[
+                // the moves read without the caller's entity filters (impl-sales P3 review): the guards above decided who may merge
+                // and that no other organization's opportunity, agreement or (for a Sales merger) order, invoice or payment is
+                // touched, so a row a filtered root does not see is moved with the party, not left behind on a disabled one
+                const mergeAuthzWasDisabled = ec.artifactExecution.disableAuthz()
+                try { // the moves, not indented apart from the original
                 // TODO: the Groovy original disabled entity ECAs for the merge (disableEntityEca and
                 //     enableEntityEca on the artifact execution facade), the script runtime does not have them so they run here
 
@@ -1076,6 +1111,17 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 if (contractCount) ec.message.addMessage(`Moved ${contractCount} Shop subscriptions from Party ${fromPartyId} to ${toPartyId}; each asks for its renewal consent again`)
 
+                // Sales P3 (design-sales §4, X15): the rows a merge left behind before, moved with the party after the guards
+                // refused another organization's: a PASS contact grant (as the account's party and as the outside party), an
+                // agreement and its parties, an opportunity's account and parties
+                let salesCount = moveAll("mantle.party.ExternalAccessContact", "partyId", "partyId")
+                salesCount += moveAll("mantle.party.ExternalAccessContact", "outsidePartyId", "outsidePartyId")
+                salesCount += moveAll("mantle.party.agreement.Agreement", "otherPartyId", "otherPartyId")
+                salesCount += moveKeyed("mantle.party.agreement.AgreementParty", "partyId")
+                salesCount += moveAll("mantle.sales.opportunity.SalesOpportunity", "accountPartyId", "accountPartyId")
+                salesCount += moveKeyed("mantle.sales.opportunity.SalesOpportunityParty", "partyId")
+                if (salesCount) ec.message.addMessage(`Moved ${salesCount} contact grants, agreements and opportunities from Party ${fromPartyId} to ${toPartyId}`)
+
                 // PartyNotDuplicate: the from Party's decisions become the to Party's (the lower id first); one between the two is
                 // dropped, as they are now one party
                 for (const row of ec.entity.find("mantle.party.PartyNotDuplicate").condition(cf.makeCondition([
@@ -1089,6 +1135,9 @@ along with this software (see the LICENSE.md file). If not, see
                         }
                     }
                     row.delete()
+                }
+                } finally {
+                    if (!mergeAuthzWasDisabled) ec.artifactExecution.enableAuthz()
                 }
             ]]></script>
 

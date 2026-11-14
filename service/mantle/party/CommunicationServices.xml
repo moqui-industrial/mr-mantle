@@ -2116,6 +2116,12 @@ along with this software (see the LICENSE.md file). If not, see
             its person, their manager, the reviewer of its review and a development reader of its employer (Reviews.js
             goalVisible); both for every caller, authorization disabled or not; a call with no user sees none.
 
+            A lead or opportunity (mantle.sales.opportunity.SalesOpportunity, IronStone Sales' content host, impl-sales P4) and its
+            files (SalesOpportunityContent) are seen only by a Sales reader of its organization to whom it is assigned, or to a team
+            of theirs, and by a reader of the organization's pipeline (mantle.sales.OpportunityServices.check#OpportunityAccess),
+            for every caller, authorization disabled or not; a call with no user sees none. Its activities are linked through
+            SalesOpportunityWorkEffort.
+
             A payslip (mantle.humanres.payroll.Payslip, IronStone People's payslip content host, P26) and its files (PayslipContent)
             are seen only by a payroll reader of its employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person
             reads their own issued slip through get#MyPayslip), for every caller, authorization disabled or not; a call with no user
@@ -2151,6 +2157,9 @@ along with this software (see the LICENSE.md file). If not, see
                 'moqui.resource.wiki.WikiPage': {entityName: 'mantle.party.communication.WikiPageCommunicationEvent', keyField: 'wikiPageId'}}
             const workEffortJoins = {
                 'mantle.request.Request': {entityName: 'mantle.request.RequestWorkEffort', keyField: 'requestId'},
+                // IronStone Sales' opportunity (impl-sales P4, design-sales §12.2): its activities keep SalesOpportunityWorkEffort
+                'mantle.sales.opportunity.SalesOpportunity': {entityName: 'mantle.sales.opportunity.SalesOpportunityWorkEffort',
+                    keyField: 'salesOpportunityId'},
                 'moqui.resource.wiki.WikiPage': {entityName: 'mantle.work.effort.WikiPageWorkEffort', keyField: 'wikiPageId'}}
             const requestJoins = {
                 'mantle.work.effort.WorkEffort': {entityName: 'mantle.request.RequestWorkEffort', keyField: 'workEffortId'},
@@ -2205,7 +2214,10 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.humanres.ability.PerformanceReview': content('mantle.humanres.ability.PerformanceReviewContent',
                         'performanceReviewId', 'contentTypeEnumId'),
                 // People's payslip content host (IronStone People PE-01, impl-people P26): a payslip's files, payroll's alone
-                'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId')}
+                'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId'),
+                // IronStone Sales' opportunity content host (impl-sales P4, F69): a lead's or opportunity's files, its Sales readers'
+                'mantle.sales.opportunity.SalesOpportunity': content('mantle.sales.opportunity.SalesOpportunityContent',
+                        'salesOpportunityId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2641,6 +2653,13 @@ along with this software (see the LICENSE.md file). If not, see
                         if (owners.length && !owners.some((partyId) => s.orgIds.includes(partyId))) return false
                     }
                 }
+                // IronStone Sales' lead or opportunity and its files (impl-sales P4, F69): a Sales reader of its organization to whom it
+                // is assigned (or to a team of theirs), or a reader of the organization's pipeline (SALES_TEAM_VIEW)
+                // (mantle.sales.OpportunityServices.check#OpportunityAccess), whatever the entity filters and authorization; a call
+                // with no user sees none
+                if (entityName === 'mantle.sales.opportunity.SalesOpportunity' || entityName === 'mantle.sales.opportunity.SalesOpportunityContent')
+                    return !!ec.service.sync().name('mantle.sales.OpportunityServices.check#OpportunityAccess')
+                            .parameter('salesOpportunityId', value.salesOpportunityId).disableAuthz().call()?.recordVisible
                 // an agreement: of one of the user's organizations, with a party the user may see
                 if (entityName === 'mantle.party.agreement.Agreement') {
                     const orgIds = userOrganizationIds()
