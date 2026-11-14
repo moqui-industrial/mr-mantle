@@ -292,6 +292,12 @@
     // Commerce P14: a store feed's active build at the Shop mount's feed path (feeds/{feedKey}.{extension}), checked against
     // the site's current generation
     ['GET', 'shop/feeds', 'getShopFeed'],
+    // IronStone Sales P13: PASS Sales' quotes
+    ['GET', 'sales/quotes', 'findSalesQuotes'],
+    ['GET', 'sales/quote', 'getSalesQuote'],
+    ['GET', 'sales/quote/document', 'getSalesQuoteDocument'],
+    ['POST', 'sales/quote/response', 'respondSalesQuote'],
+    ['GET', 'sales/quote/response', 'getSalesQuoteResponse'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],

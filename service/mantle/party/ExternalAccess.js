@@ -147,16 +147,33 @@ const records = {
     // organization (its sales part's vendor) to an outside customer: OrderView, the guest's order link a Shop checkout
     // issues at its confirmation; Download (P6) and RenewalAction (P7) follow. The customer's own verified account reaches
     // it by the self relationship. Customer Service staff may issue or revoke a link (a resent order link).
+    // Sales P13 (impl-sales §4, F17, F42, F48; design-sales §10.1): the quote scopes QuoteView and QuoteRespond, a quote of
+    // an internal seller (its purpose OrpSalesQuote) issued to an outside customer once it is out of draft; their capability
+    // binds the issue's commercial revision (recordRevision, required: only send#Quote makes them, never create#AccessCapability),
+    // ends no later than the offer, is issued under SALES_QUOTE_SEND and opens the organization's Sales mount (CustomerQuote),
+    // while OrderView keeps Shop's page; a signed-in contact reaches a quote by a grant of the sales app. The quote's issue,
+    // response and receipt rules are SalesPortal.js'.
     SalesOrder: {
         permissions: ["SUPPORT_CASE_EDIT"],
-        scopes: ["OrderView", "Download", "RenewalAction"],
+        scopes: ["OrderView", "Download", "RenewalAction", "QuoteView", "QuoteRespond"],
         page: {app: "shop", path: "/Orders/Status?token="},
+        scopePages: {
+            QuoteView: {app: "sales", path: "/CustomerQuote?token=", target: "organization"},
+            QuoteRespond: {app: "sales", path: "/CustomerQuote?token=", target: "organization"}
+        },
+        scopePermissions: {QuoteView: ["SALES_QUOTE_SEND"], QuoteRespond: ["SALES_QUOTE_SEND"]},
+        boundScopes: ["QuoteView", "QuoteRespond"],
         self: true,
         // Shop P6 (F82): the link's site is the order's store's Shop site (a Shop mount targets a store, not the organization)
         siteTarget: recordId => one("mantle.order.OrderHeader", {orderId: recordId})?.productStoreId || null,
-        resolve(recordId) {
+        resolve(recordId, scope) {
             const order = one("mantle.order.OrderHeader", {orderId: recordId})
-            if (!order || ["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
+            if (!order) return null
+            if (quoteScopes.includes(scope)) {
+                // a quote out of draft: proposed, or placed or cancelled after its response (the receipt stays reachable)
+                if (order.orderPurposeEnumId !== "OrpSalesQuote" || ["OrderOpen", "OrderBeingChanged"].includes(order.statusId))
+                    return null
+            } else if (["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
                 return null
             const part = rows("mantle.order.OrderPart", {orderId: recordId}).find(
                 row => internal(row.vendorPartyId) && row.customerPartyId && !internal(row.customerPartyId)
@@ -165,10 +182,23 @@ const records = {
         }
     }
 }
-// The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule).
-function requirePermissions(kind, organizationPartyId) {
-    const held = kind.permissions.find(permission => lib.entityLib.access.has(permission))
-    if (!held) denied("PERMISSION_DENIED", kind.permissions.join(" or ") + " authority is required")
+// Sales P13: the scopes of a customer's quote (the SalesOrder kind), which never share a capability with an order's
+const quoteScopes = ["QuoteView", "QuoteRespond"]
+// The page of a scope: its own (scopePages: app, path, and the site's target, the record's organization), else the kind's.
+function pageOf(kind, scopes) {
+    const scope = (scopes || []).find(name => kind.scopePages?.[name])
+    if (scope) return kind.scopePages[scope]
+    return {app: kind.page.app, path: pagePath(kind, scopes || []), target: null}
+}
+// The app whose contact grants reach a scope of a kind (Sales P13: a quote's, the sales app's; else the kind's page's).
+const appOf = (kind, scope) => kind.scopePages?.[scope]?.app || kind.page.app
+// The issuer's check: one of the record type's permissions, then the organization (InvoiceWorkflowLib's rule). Sales P13: a scope
+// with permissions of its own (a quote's, SALES_QUOTE_SEND) asks those instead.
+function requirePermissions(kind, organizationPartyId, scopes) {
+    const scoped = scopeList(scopes).find(scope => kind.scopePermissions?.[scope])
+    const permissions = scoped ? kind.scopePermissions[scoped] : kind.permissions
+    const held = permissions.find(permission => lib.entityLib.access.has(permission))
+    if (!held) denied("PERMISSION_DENIED", permissions.join(" or ") + " authority is required")
     lib.organization(organizationPartyId, held)
 }
 // The page a capability's link opens: the first of its scopes with a page of its own, else the record type's.
@@ -181,17 +211,18 @@ const unavailable = () => {
     error.moquiErrorKind = "NotFound"
     throw error
 }
-function recordOf(recordType, recordId) {
+// The record for a scope (Sales P13: a quote's scopes resolve a quote, the others an order).
+function recordOf(recordType, recordId, scope) {
     const kind = records[recordType]
-    return kind && recordId ? kind.resolve(recordId) : null
+    return kind && recordId ? kind.resolve(recordId, scope) : null
 }
-// An internal user issuing or revoking: the record type's permission in the record's organization.
-function requireIssuer(recordType, recordId) {
+// An internal user issuing or revoking: the record type's permission (or its scopes', Sales P13) in the record's organization.
+function requireIssuer(recordType, recordId, scopes) {
     const kind = records[recordType]
     if (!kind) denied("RECORD_TYPE_INVALID", "External access is not available for this record")
-    const record = recordOf(recordType, recordId)
+    const record = recordOf(recordType, recordId, scopeList(scopes)[0])
     if (!record) denied("RECORD_UNAVAILABLE", "This record cannot be shared outside the organization now")
-    requirePermissions(kind, record.organizationPartyId)
+    requirePermissions(kind, record.organizationPartyId, scopes)
     return record
 }
 function scopeList(scopes) {
@@ -205,7 +236,11 @@ function create(p) {
     const scopes = scopeList(p.scopes)
     if (!kind || !scopes.length || scopes.some(scope => !kind.scopes.includes(scope)))
         denied("SCOPE_INVALID", "Choose what the link allows")
-    const record = recordOf(p.recordType, p.recordId)
+    // Sales P13: a bound scope (a quote's) is never mixed with another kind of scope and always names the revision it binds
+    const bound = scopes.filter(scope => kind.boundScopes?.includes(scope))
+    if (bound.length && (bound.length !== scopes.length || p.recordRevision == null || p.recordRevision === ""))
+        denied("SCOPE_INVALID", "Choose what the link allows")
+    const record = recordOf(p.recordType, p.recordId, scopes[0])
     if (!record) denied("RECORD_UNAVAILABLE", "This record cannot be shared outside the organization now")
     // a link lasts validDays (60 by default) or to thruDate, never more than 366 days
     const days = Math.min(Math.max(Number(p.validDays || 60), 1), 366)
@@ -226,10 +261,13 @@ function create(p) {
         thruDate,
         createdByUserId: ec.user.userId
     })
-    // the link: the record's page of the organization's first published site with the app
+    // the link: the record's page of the organization's first published site with the app (Sales P13: a scope's own page, on a
+    // site whose mount of its app targets the organization)
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
-    const siteId = apps.sitesFor(kind.page.app, kind.siteTarget ? kind.siteTarget(p.recordId) : record.organizationPartyId)[0]
-    const url = siteId ? apps.pageUrl(siteId, kind.page.app, pagePath(kind, scopes) + encodeURIComponent(token)) : null
+    const page = pageOf(kind, scopes)
+    const target = page.target === "organization" || !kind.siteTarget ? record.organizationPartyId : kind.siteTarget(p.recordId)
+    const siteId = apps.sitesFor(page.app, target)[0]
+    const url = siteId ? apps.pageUrl(siteId, page.app, page.path + encodeURIComponent(token)) : null
     return {capabilityId: out.capabilityId, token, url, thruDate, organizationPartyId: record.organizationPartyId}
 }
 // The capability a token names while it is in effect, or null. Every lookup counts against the requester's limit
@@ -307,7 +345,7 @@ function check(p) {
             (p.organizationPartyId && row.organizationPartyId !== p.organizationPartyId)
         )
             unavailable()
-        const record = recordOf(row.recordType, row.recordId)
+        const record = recordOf(row.recordType, row.recordId, p.scope)
         if (!record || record.organizationPartyId !== row.organizationPartyId || record.partyId !== row.partyId) unavailable()
         return {
             via: "token",
@@ -320,14 +358,14 @@ function check(p) {
     }
     // a contact needs the organization the page serves, and a grant for this record type's app there; a party-less kind (a
     // queue's intake) is reached only by its token
-    const record = recordOf(p.recordType, p.recordId)
+    const record = recordOf(p.recordType, p.recordId, p.scope)
     if (kind.partyless || !record || !p.organizationPartyId || record.organizationPartyId !== p.organizationPartyId)
         unavailable()
     // P15: the account's own party (self), else a contact grant, which a kind may narrow (a case: the contact's own unless an
     // administrator)
     if (kind.self && selfOf(record.partyId))
         return {via: "self", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
-    const held = grants(p.organizationPartyId, kind.page.app).filter(row => row.outsidePartyId === record.partyId)
+    const held = grants(p.organizationPartyId, appOf(kind, p.scope)).filter(row => row.outsidePartyId === record.partyId)
     if (!held.length || (kind.contactAllows && !kind.contactAllows(p.recordId, held))) unavailable()
     return {via: "contact", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
 }
@@ -357,7 +395,7 @@ function actingParties(organizationPartyId, app, selfRole = null) {
 function requireCapabilityIssuer(row) {
     const kind = records[row.recordType]
     if (!kind) denied("RECORD_TYPE_INVALID", "External access is not available for this record")
-    requirePermissions(kind, row.organizationPartyId)
+    requirePermissions(kind, row.organizationPartyId, row.scopes)
 }
 function revoke(p) {
     const row = find(C, {capabilityId: p.capabilityId}).forUpdate(true).one()
@@ -405,7 +443,10 @@ const appKinds = {
     billing: {permissions: ["RECEIVABLE_EDIT"]},
     supplier: {permissions: ["PAYABLE_EDIT", "PURCHASE_ORDER_EDIT"]},
     // P15 (F57): a customer may be a person (a consumer) under the Support app
-    support: {permissions: ["SUPPORT_CONTACT_INVITE"], persons: true}
+    support: {permissions: ["SUPPORT_CONTACT_INVITE"], persons: true},
+    // Sales P13 (design-sales §4 Invite to Sales, §10.1): a customer's contact invited to PASS Sales by a holder of
+    // SALES_CUSTOMER_INVITE, the customer a person or an organization, as Support's
+    sales: {permissions: ["SALES_CUSTOMER_INVITE"], persons: true}
 }
 function invite(p) {
     const app = appKinds[p.app]
@@ -417,7 +458,7 @@ function invite(p) {
     if (!party.partyTypeEnumId || !["PtyOrganization", "PtyPerson"].includes(party.partyTypeEnumId))
         denied("PARTY_INVALID", "Choose an outside organization or person")
     // a Support invitation is for a customer of the organization (Customer Service P15)
-    if (p.app === "support" && !one("mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: "Customer"}))
+    if (["support", "sales"].includes(p.app) && !one("mantle.party.PartyRole", {partyId: p.partyId, roleTypeId: "Customer"}))
         denied("PARTY_INVALID", "Choose a customer")
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
     const siteId = apps.sitesFor(p.app, p.organizationPartyId)[0]
@@ -482,6 +523,8 @@ function bindContact(partyId, scopes) {
     revoke,
     revokeActive,
     list,
+    // Sales P13: the quote scopes of the SalesOrder kind
+    quoteScopes,
     invite,
     bindContact
 })

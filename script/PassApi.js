@@ -63,6 +63,8 @@ const TOKEN_WRITES = [
     'requestOrderCancel',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
+    // IronStone Sales P13: a quote link's acceptance or decline (input.token)
+    'respondSalesQuote',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)
