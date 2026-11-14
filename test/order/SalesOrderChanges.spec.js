@@ -174,6 +174,15 @@ spec({
         // the order's owner applies the commercial kinds (SALES_ORDER_CHANGE in the seller's sales scope)
         state.salesChange = user("SOC_SCHANGE", ["SALES_VIEW", "SALES_ORDER_CHANGE", "ORDER_CHANGE_HOLD_RELEASE"])
         state.otherChange = user("SOC_OCHANGE", ["SALES_VIEW", "SALES_ORDER_CHANGE", "ORDER_CHANGE_HOLD_RELEASE"], otherOrg)
+        // P14 review: a change operator who also edits receivables (a packed line's draft invoice), and one who cannot release the
+        // Change hold apply places (a failure after the first write)
+        state.arChange = user("SOC_ARCHANGE", [
+            "SALES_VIEW",
+            "SALES_ORDER_CHANGE",
+            "ORDER_CHANGE_HOLD_RELEASE",
+            "RECEIVABLE_EDIT"
+        ])
+        state.noRelease = user("SOC_NORELEASE", ["SALES_VIEW", "SALES_ORDER_CHANGE"])
         call("create#mantle.facility.Facility", {facilityId: facility, facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
         call("create#mantle.facility.FacilityLocation", {
             facilityId: facility,
@@ -293,6 +302,8 @@ feature("a price change and a quantity increase with a new line are applied by t
             {productId: "SOC_B", quantity: 1}
         ])
         call("mantle.order.OrderServices.hold#Order", {orderId: orderTwo, holdTypeEnumId: "OhtCredit", holdComment: "Over limit"})
+        // the customer's credit standing: the approver's to see, not the change operator's (P14 review)
+        const approverPreview = run(state.sales, S + "preview#OrderChange", {requestId: more.requestId}).preview
         const moreApplied = salesApply(more)
         const items = rows("mantle.order.OrderItem", {orderId: orderTwo}).filter(row => row.itemTypeEnumId === "ItemProduct")
         return {
@@ -305,6 +316,7 @@ feature("a price change and a quantity increase with a new line are applied by t
             priced,
             tooLow,
             more,
+            approverPreview,
             moreApplied,
             first: items.find(row => row.orderItemSeqId === "01"),
             added: items.find(row => row.productId === "SOC_B"),
@@ -335,6 +347,8 @@ feature("a price change and a quantity increase with a new line are applied by t
         code(r.tooLow) === "QUANTITY_INVALID"
         r.more.saved.error === ""
         r.more.preview.lines.length === 2
+        !r.more.preview.effects.creditText.includes("The customer is")
+        r.approverPreview.effects.creditText.includes("The customer is")
         // under the commercial revision the Credit hold moves no revision, so the approval still holds
         r.moreApplied.error === ""
         r.moreApplied.result.stillHeld === true
@@ -402,8 +416,12 @@ feature("a commercial change waits on an active pick, a shipped and invoiced lin
         const expired = salesApply(expiring)
         // the handoffs (ShipmentDetail and InvoiceDetail under Sales): the shipment of an order the change operator sees, read only, and
         // missing to another organization's; an invoice only for a receivable reader
-        const shipmentRead = run(state.salesChange, "mantle.order.SalesOrderServices.get#SalesShipment", {shipmentId: shipment.shipmentId})
-        const shipmentOther = run(state.otherChange, "mantle.order.SalesOrderServices.get#SalesShipment", {shipmentId: shipment.shipmentId})
+        const shipmentRead = run(state.salesChange, "mantle.order.SalesOrderServices.get#SalesShipment", {
+            shipmentId: shipment.shipmentId
+        })
+        const shipmentOther = run(state.otherChange, "mantle.order.SalesOrderServices.get#SalesShipment", {
+            shipmentId: shipment.shipmentId
+        })
         const invoiceId = rows("mantle.order.OrderItemBilling", {orderId: shippedOrder})[0]?.invoiceId
         const invoiceRead = run(state.salesChange, "mantle.order.SalesOrderServices.check#SalesInvoice", {invoiceId})
         return {
@@ -438,3 +456,84 @@ feature("a commercial change waits on an active pick, a shipped and invoiced lin
         code(r.invoiceRead) === "RECORD_UNAVAILABLE"
     }
 })
+
+feature(
+    "a packed price line's draft invoice is released by a receivables editor; a failure after the hold leaves the order as it was",
+    {
+        when() {
+            // part packed, not shipped: its draft invoice waits for a receivables editor, who releases it and reprices the line
+            const packedOrder = salesOrder([["SOC_A", 2, 5]])
+            const out = shipmentOf(packedOrder)
+            call("mantle.shipment.ShipmentServices.pack#ShipmentProduct", {
+                shipmentId: out.shipmentId,
+                shipmentPackageSeqId: out.shipmentPackageSeqId,
+                productId: "SOC_A",
+                quantity: 1
+            })
+            call("mantle.shipment.ShipmentServices.pack#Shipment", {shipmentId: out.shipmentId})
+            const billed = () => rows("mantle.order.OrderItemBilling", {orderId: packedOrder})
+            const invoiceIds = [...new Set(billed().map(row => row.invoiceId))]
+            const packed = approvedCommercial(state.requester, packedOrder, "OckPrice", [
+                {orderItemSeqId: "01", proposedUnitAmount: 4}
+            ])
+            const waits = salesApply(packed)
+            const arPreview = run(state.arChange, S + "preview#OrderChange", {requestId: packed.requestId}).preview
+            const packedStatus = one("mantle.order.OrderHeader", {orderId: packedOrder}).statusId
+            const released = salesApply(
+                Object.assign({}, packed, {previewVersion: arPreview?.previewVersion}),
+                {},
+                state.arChange
+            )
+            // a failure after the first write (the Change hold placed, the price written, then its release refused): nothing stays
+            const failOrder = salesOrder([["SOC_A", 2, 5]])
+            const failing = approvedCommercial(state.requester, failOrder, "OckPrice", [
+                {orderItemSeqId: "01", proposedUnitAmount: 4}
+            ])
+            const revisionBefore = revisionOfOrder(failOrder)
+            const failed = salesApply(failing, {}, state.noRelease)
+            const after = {
+                item: itemOf(failOrder, "01"),
+                holds: openHolds(failOrder),
+                request: one("mantle.request.Request", {requestId: failing.requestId}),
+                pdf: rows("mantle.order.OrderContent", {orderId: failOrder, orderContentTypeEnumId: "OctOrderChangeApplied"}),
+                revision: revisionOfOrder(failOrder),
+                status: one("mantle.order.OrderHeader", {orderId: failOrder}).statusId
+            }
+            const retried = salesApply(failing)
+            return {
+                invoiceIds,
+                packed,
+                packedStatus,
+                waits,
+                released,
+                packedItem: itemOf(packedOrder, "01"),
+                invoices: invoiceIds.map(invoiceId => one("mantle.account.invoice.Invoice", {invoiceId})),
+                billedAfter: billed(),
+                failed,
+                revisionBefore,
+                after,
+                retried,
+                retriedItem: itemOf(failOrder, "01")
+            }
+        },
+        then(r) {
+            r.invoiceIds.length === 1
+            r.packed.preview.conflicts.some(row => row.code === "BILLING_CONFLICT")
+            code(r.waits) === "BILLING_CONFLICT"
+            r.released.error === ""
+            r.released.result.released.length === 1
+            n(r.packedItem.unitAmount) === 4
+            r.invoices.every(row => row.statusId === "InvoiceCancelled")
+            r.billedAfter.length === 0
+            code(r.failed) === "PERMISSION_DENIED"
+            n(r.after.item.unitAmount) === 5
+            r.after.holds.length === 0
+            r.after.request.statusId === "ReqSubmitted"
+            r.after.pdf.length === 0
+            r.after.revision === r.revisionBefore
+            r.after.status === "OrderApproved"
+            r.retried.error === ""
+            n(r.retriedItem.unitAmount) === 4
+        }
+    }
+)

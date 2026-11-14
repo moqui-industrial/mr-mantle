@@ -468,7 +468,18 @@ function effects(ch, checked, amounts) {
         afterText: amounts ? money(before.add(delta).add(taxDelta), currency) : null,
         deltaText: amounts ? money(delta, currency) : null
     }
-    if (delta.compare(toDecimal(0)) > 0) {
+    // the customer's credit standing only for a reader of it (Accounting's CUSTOMER_CREDIT_VIEW, a finance reader) or an approver, who
+    // sees an order's credit warning when approving it (impl-sales P11); to others only that the check runs again (P14 review)
+    const creditReader = [
+        "CUSTOMER_CREDIT_VIEW",
+        "ACCOUNTING_VIEW",
+        "SALES_APPROVE",
+        "SALES_ORDER_APPROVE",
+        "ORDER_APPROVE"
+    ].some(has)
+    if (delta.compare(toDecimal(0)) > 0 && !creditReader)
+        result.creditText = "Accounting's credit check runs again on the higher total when the change is applied"
+    else if (delta.compare(toDecimal(0)) > 0) {
         ec.message.pushErrors()
         try {
             const credit =

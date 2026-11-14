@@ -70,10 +70,11 @@ const readPermissions = [
     "ORDER_CHANGE_APPROVE",
     "ORDER_CHANGE_APPLY",
     "SALES_APPROVE",
-    "SALES_ORDER_CHANGE",
-    // impl-sales P14: a Sales manager or reader of the organization's orders (OrderChanges under Sales)
-    "SALES_TEAM_VIEW"
+    "SALES_ORDER_CHANGE"
 ]
+// impl-sales P14: a Sales manager or reader of the organization's orders (SALES_TEAM_VIEW) lists the organization's commercial
+// proposals (Sales' Changes); a cancel or substitute only of an order they see (OrderDetail's Changes; P14 review)
+const ownerListPermission = "SALES_TEAM_VIEW"
 const amountPermissions = ["PRICE_VIEW", "ACCOUNTING_VIEW", "RECEIVABLE_VIEW", "ORDER_APPROVE"]
 const financePermissions = ["ACCOUNTING_VIEW", "RECEIVABLE_VIEW"]
 // a completed order may still have a package not shipped (pack#Shipment completes the part); its shipped lines are refused
@@ -1373,9 +1374,15 @@ function preview(p) {
     }
 }
 function findChanges(p) {
-    // impl-sales P14: one order's changes for a Sales reader who sees it (OrderDetail's Changes)
-    if (!hasAny(readPermissions) && (blank(p.orderId) || !sales().seesOrder(p.orderId)))
-        denied("PERMISSION_DENIED", readPermissions.join(" or ") + " is required to read order changes")
+    // impl-sales P14: one order's changes for a Sales reader who sees it (OrderDetail's Changes); the organization's commercial ones
+    // for a Sales manager or reader of the organization's orders
+    const orderSeen = !blank(p.orderId) && !hasAny(readPermissions) && sales().seesOrder(p.orderId)
+    const ownerKindsOnly = !hasAny(readPermissions) && !orderSeen && has(ownerListPermission)
+    if (!hasAny(readPermissions) && !orderSeen && !ownerKindsOnly)
+        denied(
+            "PERMISSION_DENIED",
+            readPermissions.concat(ownerListPermission).join(" or ") + " is required to read order changes"
+        )
     const userScope = facilityScope.scope()
     let query = ec.entity
         .find(REQUEST)
@@ -1390,7 +1397,7 @@ function findChanges(p) {
     // impl-sales P14: by kind, or by who applies it (applied: Customer Service's cancel and substitute; owner: the commercial kinds)
     if (!blank(p.orderChangeKindEnumId)) query = query.condition("orderChangeKindEnumId", p.orderChangeKindEnumId)
     if (p.kindGroup === "applied") query = query.condition("orderChangeKindEnumId", "in", appliedKinds)
-    else if (p.kindGroup === "owner") query = query.condition("orderChangeKindEnumId", "not-in", appliedKinds)
+    else if (p.kindGroup === "owner" || ownerKindsOnly) query = query.condition("orderChangeKindEnumId", "not-in", appliedKinds)
     // the user's organizations' orders: their OrgInternal party, read in the query
     const orgIds = userScope.organizationPartyIds
     const partyFilter = (roleTypeId, partyIds) =>

@@ -104,8 +104,8 @@ along with this software (see the LICENSE.md file). If not, see
             applied change's stored PDF, and what the user may do (save, decide, apply, withdraw), each false with the reason
             when not. Prices and amounts only for a price or finance reader (PRICE_VIEW, ACCOUNTING_VIEW, RECEIVABLE_VIEW,
             ORDER_APPROVE, and for a commercial kind SALES_APPROVE or SALES_ORDER_CHANGE, or a Sales reader who sees the order),
-            else withheld. Requires ORDER_CHANGE_REQUEST, ORDER_CHANGE_APPROVE, ORDER_CHANGE_APPLY, SALES_APPROVE,
-            SALES_ORDER_CHANGE or SALES_TEAM_VIEW (PERMISSION_DENIED), the filer, or a Sales reader who sees the order in Sales
+            else withheld. Requires ORDER_CHANGE_REQUEST, ORDER_CHANGE_APPROVE, ORDER_CHANGE_APPLY, SALES_APPROVE or
+            SALES_ORDER_CHANGE (PERMISSION_DENIED), the filer, or a Sales reader who sees the order in Sales
             (impl-sales P14: its owner, its team, an approver or change operator of its organization); refuses a missing proposal, another type and
             another organization's alike (RECORD_UNAVAILABLE).</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
@@ -126,7 +126,8 @@ along with this software (see the LICENSE.md file). If not, see
             finalized invoice, or a packed quantity's draft invoice that only a receivables editor may release;
             PRODUCT_NOT_USABLE and PRICE_UNAVAILABLE for a new line) and its effects: the order's total before and after, the
             tax (an estimate at the order's rate; the gateway recalculates it at apply), the freight and the credit (the
-            customer's credit now; Accounting's check again at apply on a higher total). Prices as get#OrderChange. Requires the
+            customer's credit now, for CUSTOMER_CREDIT_VIEW, ACCOUNTING_VIEW or an approver; Accounting's check again at apply on
+            a higher total). Prices as get#OrderChange. Requires the
             read permissions of get#OrderChange.</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
         <out-parameters><parameter name="preview" type="Map"/></out-parameters>
@@ -274,7 +275,8 @@ along with this software (see the LICENSE.md file). If not, see
             and the order's current revision, the kind, the requested lines in words, the reason, who asked and when, the
             decision and the approver, a hold or conflict, and the state; by kind (orderChangeKindEnumId) or by who applies it
             (kindGroup: applied, Customer Service's cancel and substitute; owner, the commercial kinds; impl-sales P14). Requires
-            the read permissions of get#OrderChange; a Sales reader who sees an order lists that order's (orderId).</description>
+            the read permissions of get#OrderChange; a Sales reader who sees an order lists that order's (orderId), and a holder of
+            SALES_TEAM_VIEW alone the organization's commercial kinds only.</description>
         <in-parameters>
             <parameter name="orderId"/>
             <parameter name="customerPartyId"/>
