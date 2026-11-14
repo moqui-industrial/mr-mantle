@@ -24,6 +24,9 @@
     <field name="templateKey" type="id"><description>The EmailTemplate (emailTemplateId) for the email channel.</description></field>
     <field name="siteId" type="id"/>
     <field name="productStoreId" type="id"/>
+    <field name="organizationPartyId" type="id"><description>The organization the delivery is from (a seller's quote, Sales P10;
+      a campaign's, Marketing P9), whose suppressions it meets beside every organization's; empty: its store's organization, when
+      it names a store (impl-marketing P3 review).</description></field>
     <field name="parametersJson" type="text-long"><description>The template's body parameters as handed off, without
       secrets kept elsewhere (a link's token is put in only for the send and never stored).</description></field>
     <field name="transactional" type="text-indicator"><description>Y for a notice of the recipient's own purchase or
@@ -83,5 +86,59 @@
     <field name="emailMessageId" type="id"/>
     <field name="error" type="text-medium"/>
     <relationship type="one" related="mantle.party.MessageDelivery"/>
+  </entity>
+
+  <!-- Comms' suppressions (design-marketing §4 Suppressions, §14.1 MessageSuppression; impl-marketing P3, F13, F16; owner contract,
+    design-drawers-commons): a destination that no delivery of the ledger may reach, for every organization or one, kept apart
+    from list membership and consent. A subscription never ends one; only a holder of MESSAGE_SUPPRESSION_REVIEW ends one, with new
+    evidence, and the row and its source event stay. mantle.party.MessageServices find#Suppressions, store#Suppression and
+    check#Suppressions; attempt#Delivery refuses a suppressed destination. -->
+  <entity entity-name="MessageSuppression" package="mantle.party" cache="never">
+    <description>A block on one destination of a channel (an email address, normalized: trimmed and in lower case), for every
+      organization (organizationPartyId empty) or one, by its reason (a hard bounce, a complaint, staff, repeated soft failures)
+      and source (a provider callback, a delivery status or abuse report, staff entry), with the evidence, from and thru dates, who
+      added it and who ended it with what evidence. Rows are history: an end sets thruDate and the reviewer's evidence; nothing is
+      deleted.</description>
+    <field name="suppressionId" type="id" is-pk="true"/>
+    <field name="channelEnumId" type="id"><description>MessageDeliveryChannel (MdcEmail)</description></field>
+    <field name="destinationKey" type="text-medium"><description>The normalized destination (an email address trimmed and in
+      lower case)</description></field>
+    <field name="organizationPartyId" type="id"><description>Empty: every organization (a provider-level block)</description></field>
+    <field name="reasonEnumId" type="id"/>
+    <field name="sourceEnumId" type="id"/>
+    <field name="sourceRef" type="text-medium"><description>The source event: a delivery, a report's message id</description></field>
+    <field name="evidenceText" type="text-long"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="endedByUserId" type="id"/>
+    <field name="endEvidenceText" type="text-long"/>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageSuppressionReason" related="moqui.basic.Enumeration">
+      <key-map field-name="reasonEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageSuppressionSource" related="moqui.basic.Enumeration">
+      <key-map field-name="sourceEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_SUPPRESSION_DEST">
+      <index-field name="channelEnumId"/>
+      <index-field name="destinationKey"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message suppression reason" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrHardBounce" description="Hard bounce" sequenceNum="1" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrComplaint" description="Complaint" sequenceNum="2" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrSoftFailures" description="Repeated soft failures" sequenceNum="3" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.Enumeration enumId="MsrStaff" description="Staff block" sequenceNum="4" enumTypeId="MessageSuppressionReason"/>
+      <moqui.basic.EnumerationType description="Message suppression source" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssProvider" description="Provider callback" sequenceNum="1" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssReport" description="Delivery status or abuse report" sequenceNum="2" enumTypeId="MessageSuppressionSource"/>
+      <moqui.basic.Enumeration enumId="MssStaff" description="Staff entry" sequenceNum="3" enumTypeId="MessageSuppressionSource"/>
+    </seed-data>
   </entity>
 </entities>
