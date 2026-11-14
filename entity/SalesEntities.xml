@@ -277,13 +277,25 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="internalPartyId" type="id"/>
         <field name="timePeriodId" type="id"/>
         <field name="currencyUomId" type="id"/>
-        <field name="quotaAmount" type="currency-amount"/>
+        <field name="quotaAmount" type="currency-amount" enable-audit-log="true"/>
         <field name="forecastAmount" type="currency-amount" enable-audit-log="true"/>
-        <field name="bestCaseAmount" type="currency-amount"/>
+        <field name="bestCaseAmount" type="currency-amount" enable-audit-log="true"/>
         <field name="closedAmount" type="currency-amount" enable-audit-log="true"/>
         <field name="percentOfQuotaForecast" type="number-decimal"/>
         <field name="percentOfQuotaClosed" type="number-decimal"/>
         <field name="pipelineAmount" type="currency-amount"/>
+        <!-- impl-sales P18 (design-sales §8 Forecast and TargetAttainment, §9 Targets; SAL-FORECAST): a forecast's key is its
+            organization, internal party (a person, a sales team or the organization itself), time period and currency, unique
+            (SALES_FCST_KEY); a target is its quota with the one measurement basis it is compared with (a SalesForecastBasis value:
+            won opportunity value, placed sales order value or finalized sales invoice value; won by default), both audit-logged, so
+            a past target keeps its history and a change never rewrites measured actuals; the entered judgement (forecastAmount,
+            bestCaseAmount) records when and by whom it was last entered, its reason in the audit log. The calculated measures
+            (pipeline, won, orders, invoices) are never stored here: mantle.sales.ForecastServices computes them as read
+            (SalesForecasts.js), so closedAmount, pipelineAmount and the percent fields are left unwritten. Written only by
+            ForecastServices. -->
+        <field name="basisEnumId" type="id" enable-audit-log="true"/>
+        <field name="forecastDate" type="date-time"/>
+        <field name="forecastByUserId" type="id"/>
         <relationship type="one" title="Parent" related="mantle.sales.forecast.SalesForecast">
             <key-map field-name="parentSalesForecastId" related="salesForecastId"/></relationship>
         <relationship type="one" title="Organization" related="mantle.party.Party">
@@ -293,6 +305,18 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" related="mantle.party.time.TimePeriod"/>
         <relationship type="one" title="Currency" related="moqui.basic.Uom">
             <key-map field-name="currencyUomId"/></relationship>
+        <relationship type="one" title="SalesForecastBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="basisEnumId"/></relationship>
+        <relationship type="one" title="ForecastBy" related="moqui.security.UserAccount">
+            <key-map field-name="forecastByUserId" related="userId"/></relationship>
+        <index name="SALES_FCST_KEY" unique="true"><index-field name="organizationPartyId"/><index-field name="internalPartyId"/>
+            <index-field name="timePeriodId"/><index-field name="currencyUomId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales Forecast Basis" enumTypeId="SalesForecastBasis"/>
+            <moqui.basic.Enumeration description="Won opportunity value" enumId="SfbWonOpportunity" enumTypeId="SalesForecastBasis" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Placed sales order value" enumId="SfbPlacedOrder" enumTypeId="SalesForecastBasis" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Finalized sales invoice value" enumId="SfbFinalInvoice" enumTypeId="SalesForecastBasis" sequenceNum="3"/>
+        </seed-data>
     </entity>
     <entity entity-name="SalesForecastDetail" package="mantle.sales.forecast">
         <field name="salesForecastId" type="id" is-pk="true"/>
