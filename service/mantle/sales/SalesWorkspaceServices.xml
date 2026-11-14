@@ -234,4 +234,51 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="transferred" from="!!ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('transferAssignment', context).transferred"/>
         </actions>
     </service>
+    <!-- P11: the order list (design §6 OrderList; service/mantle/order/SalesOrders.js findOrders) -->
+    <service verb="find" noun="SalesOrders" allow-remote="false" read-only="true">
+        <description>The one scoped list of sales orders (design §6 OrderList, Home, Insights and the palette): orders whose first
+            part sells (an internal vendor of the caller's scope, a customer that is not internal), the caller's and their teams'
+            (the organization's every one for SALES_TEAM_VIEW; and for SALES_ORDER_APPROVE those awaiting approval or held), never a
+            quote not yet placed, a quote template, a recurring base or an open cart (a direct draft is listed under draft). Saved
+            lists: recent (any, the default), draft, awaiting (Placed: Awaiting approval), held, blocked (awaiting or held),
+            toFulfill (approved, nothing shipped), partFulfilled (approved, some shipped), toInvoice (shipped, nothing billed),
+            cancelled; filtered by organization, customer, opportunity, owner (mine Y: the caller), store and text (id, name or the
+            customer's reference), paged in the query. Each row's customer (unnamed when the caller may not see the account),
+            seller, kind, state, total, open holds and progress (shipped of ordered by line unit, billed of the total by currency;
+            never summed across units), and on the awaiting list its pre-approval warnings. Needs a Sales read
+            (PERMISSION_DENIED); an organization outside the scope is refused (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="list"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="productStoreId"/>
+            <parameter name="text"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderList" type="List"/>
+            <parameter name="orderListCount" type="Integer"/>
+            <parameter name="orderListPageIndex" type="Integer"/>
+            <parameter name="orderListPageSize" type="Integer"/>
+            <parameter name="orderListPageMaxIndex" type="Integer"/>
+            <parameter name="orderListPageRangeLow" type="Integer"/>
+            <parameter name="orderListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('findOrders', context)"/>
+            <set field="orderList" from="found.orderList"/>
+            <set field="orderListCount" from="found.orderListCount"/>
+            <set field="orderListPageIndex" from="found.orderListPageIndex"/>
+            <set field="orderListPageSize" from="found.orderListPageSize"/>
+            <set field="orderListPageMaxIndex" from="found.orderListPageMaxIndex"/>
+            <set field="orderListPageRangeLow" from="found.orderListPageRangeLow"/>
+            <set field="orderListPageRangeHigh" from="found.orderListPageRangeHigh"/>
+        </actions>
+    </service>
 </services>

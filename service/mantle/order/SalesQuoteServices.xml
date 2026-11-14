@@ -26,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
             selling part is of an organization of the caller's scope, the caller's and their teams' (or the organization's every
             one for SALES_TEAM_VIEW), never a Shop cart, a recurring base or another purpose's order; filtered by organization,
             customer, opportunity, owner (mine Y: the caller) or team, state (open, the default: Open, Requested and Proposed;
-            draft; requested; proposed; cancelled; all), validity (expiring within seven days, expired), currency and text (id or
+            draft; requested; proposed; cancelled; all, never a quote once placed, which is an order's, impl-sales P11), validity (expiring within seven days, expired), currency and text (id or
             name, ignoring case), paged in the query. Each row's customer (unnamed when the caller may not see the account),
             seller, total, validity, owner and revision. Needs a Sales read (PERMISSION_DENIED); an organization outside the
             scope is refused (ORGANIZATION_DENIED).</description>
@@ -39,6 +39,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="teamPartyId"/>
             <parameter name="state"/>
             <parameter name="validity"><description>expiring or expired; empty for any</description></parameter>
+            <parameter name="issue"><description>P11: unsent, a quote with no issue standing (Quotes to send)</description></parameter>
             <parameter name="currencyUomId"/>
             <parameter name="text"/>
             <parameter name="orderByField"/>

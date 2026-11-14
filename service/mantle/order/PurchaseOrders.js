@@ -19,6 +19,8 @@ const revisions = () => ec.resource.script("component://mr-mantle/service/mantle
 const requests = () => ec.resource.script("component://mr-mantle/service/mantle/request/PurchaseRequests.js")
 // P13: a purchase agreement's approval is decided here too (PurchaseAgreements.js)
 const agreements = () => ec.resource.script("component://mr-mantle/service/mantle/party/PurchaseAgreements.js")
+// Sales P11: the seller's approval setting on approve#Order's sales parts (SalesOrders.js)
+const salesOrders = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesOrders.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const ORDER = "mantle.order.OrderHeader",
@@ -442,7 +444,21 @@ function approvalWarnings(orderId) {
 function approveRefusal(orderId, orderPartSeqId) {
     const parts = rows(PART, {orderId}).filter(part => blank(orderPartSeqId) || part.orderPartSeqId === orderPartSeqId)
     const purchase = parts.filter(isPurchasePart)
-    if ((purchase.length < parts.length || !parts.length) && !ec.user.hasPermission("ORDER_APPROVE"))
+    // Sales P11 (impl-sales §4 Nov 11, F11): a sales part whose seller's approval setting is on needs SALES_ORDER_APPROVE and a
+    // current Sales decision of each order rule it meets, not ORDER_APPROVE (SalesOrders.js); every other sales or internal part
+    // ORDER_APPROVE as before, or Sales' own approval of an accepted net-terms order as the system (SalesOrders.js asSystemApproval,
+    // a claim only Mantle's code sets for the one order, never a request parameter)
+    const salesGate = salesOrders().gatedParts(parts)
+    if (salesGate.length) {
+        const refusal = salesOrders().gateRefusal(orderId, salesGate)
+        if (refusal) return refusal
+    }
+    const ungated = parts.filter(part => !purchase.includes(part) && !salesGate.includes(part))
+    if (
+        (ungated.length || !parts.length) &&
+        !ec.user.hasPermission("ORDER_APPROVE") &&
+        !(parts.length && salesOrders().systemApproval(orderId))
+    )
         return "Order Approve permission required"
     if (!purchase.length) return null
     if (purchase.some(part => gateOn(part.customerPartyId))) {
@@ -470,6 +486,24 @@ function holdAllowed(orderId, orderPartSeqId, holdTypeEnumId, enumCode) {
                 : ec.user.hasPermission("ORDER_CHANGE_APPLY") || ec.user.hasPermission("SALES_ORDER_CHANGE")
         )
     )
+}
+// hold#Order's and release#OrderHold's organization and direction check (impl-sales P11, Customer Service F78, F12): null when the
+// user works for the internal organization of each part (the seller of a sales part, the buyer of a purchase part, either of a part
+// between two internal organizations) or administers every organization, else the refusal; a Purchase reason only on a purchase part.
+// A call with no user (a job, the system scope) is its caller's to check.
+function holdScopeRefusal(orderId, orderPartSeqId, holdTypeEnumId) {
+    const parts = rows(PART, {orderId}).filter(part => blank(orderPartSeqId) || part.orderPartSeqId === orderPartSeqId)
+    if (holdTypeEnumId === "OhtPurchase" && !(parts.length && parts.every(isPurchasePart)))
+        return "HOLD_TYPE_DIRECTION: A Purchase hold is placed on a purchase order only"
+    if (!ec.user.userId) return null
+    const userScope = facilityScope.scope()
+    if (userScope.systemAdmin || userScope.organizationPartyIds == null) return null
+    const member = new Set(userScope.memberPartyIds)
+    const allowed = parts.every(part => {
+        const internal = [part.vendorPartyId, part.customerPartyId].filter(partyId => partyId && isInternal(partyId))
+        return !internal.length || internal.some(partyId => member.has(partyId))
+    })
+    return allowed ? null : "ORDER_UNAVAILABLE: Order " + orderId + " not found"
 }
 // Whether every part of an order (or the part) is a purchase part, for hold#Order's un-send of a sent purchase order.
 function allPurchase(orderId, orderPartSeqId) {
@@ -596,6 +630,7 @@ const operations = {create, update, storeItem, removeItem, place, cancel, clone,
     approvalWarnings,
     approveRefusal,
     holdAllowed,
+    holdScopeRefusal,
     allPurchase,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown purchase order operation " + op)

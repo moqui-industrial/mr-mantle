@@ -77,6 +77,34 @@ function person(partyId, name) {
     make("mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
     make("mantle.party.Person", {partyId, firstName: name, lastName: "Contact"})
 }
+// A user of the spec, agent of the organizations, in a group of its own holding the permissions and the spec's service grant (P11:
+// exported for SalesOrderApproval and StorelessOrderConfirmation).
+function addUser(f, kind, organizationPartyIds, permissions) {
+    const id = f.prefix + "_" + kind.toUpperCase()
+    make("mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
+    make("mantle.party.Person", {partyId: id, firstName: "Issue", lastName: kind})
+    for (const toPartyId of organizationPartyIds)
+        make("mantle.party.PartyRelationship", {
+            fromPartyId: id,
+            toPartyId,
+            relationshipTypeEnumId: "PrtAgent",
+            toRoleTypeId: "OrgInternal",
+            fromDate: 0
+        })
+    make("moqui.security.UserGroup", {userGroupId: id, description: "Issue " + kind})
+    for (const userPermissionId of permissions)
+        make("moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId, fromDate: 0})
+    make("moqui.security.UserAccount", {
+        userId: id,
+        username: id,
+        partyId: id,
+        currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+        passwordHashType: "SHA"
+    })
+    make("moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
+    make("moqui.security.UserGroupMember", {userId: id, userGroupId: f.prefix + "_GRANT", fromDate: 0})
+    return id
+}
 // The fixtures of a spec: ids under its prefix.
 function setup(prefix) {
     const f = {
@@ -130,7 +158,7 @@ function setup(prefix) {
         make("moqui.security.ArtifactGroup", {artifactGroupId: prefix + "_SERVICES", description: "Quote issue spec services"})
         make("moqui.security.ArtifactGroupMember", {
             artifactGroupId: prefix + "_SERVICES",
-            artifactName: "mantle\\.order\\.Sales(Quote|Approval|QuoteIssue)Services\\..*",
+            artifactName: "mantle\\.(order\\.Sales(Quote|Approval|QuoteIssue|Order)Services|sales\\.SalesWorkspaceServices)\\..*",
             artifactTypeEnumId: "AT_SERVICE",
             nameIsPattern: "Y",
             inheritAuthz: "Y"
@@ -142,32 +170,7 @@ function setup(prefix) {
             authzTypeEnumId: "AUTHZT_ALLOW",
             authzActionEnumId: "AUTHZA_ALL"
         })
-        const user = (kind, organizationPartyIds, permissions) => {
-            const id = prefix + "_" + kind.toUpperCase()
-            make("mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
-            make("mantle.party.Person", {partyId: id, firstName: "Issue", lastName: kind})
-            for (const toPartyId of organizationPartyIds)
-                make("mantle.party.PartyRelationship", {
-                    fromPartyId: id,
-                    toPartyId,
-                    relationshipTypeEnumId: "PrtAgent",
-                    toRoleTypeId: "OrgInternal",
-                    fromDate: 0
-                })
-            make("moqui.security.UserGroup", {userGroupId: id, description: "Issue " + kind})
-            for (const userPermissionId of permissions)
-                make("moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId, fromDate: 0})
-            make("moqui.security.UserAccount", {
-                userId: id,
-                username: id,
-                partyId: id,
-                currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
-                passwordHashType: "SHA"
-            })
-            make("moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
-            make("moqui.security.UserGroupMember", {userId: id, userGroupId: prefix + "_GRANT", fromDate: 0})
-            return id
-        }
+        const user = (kind, organizationPartyIds, permissions) => addUser(f, kind, organizationPartyIds, permissions)
         const rep = ["SALES_VIEW", "SALES_QUOTE_EDIT", "SALES_QUOTE_SEND"]
         f.users.rep = user("rep", [f.orgA, f.orgB, f.orgC], rep)
         f.users.drafter = user("drafter", [f.orgA], ["SALES_VIEW", "SALES_QUOTE_EDIT"])
@@ -245,6 +248,7 @@ const key = name => (name + "-" + ec.user.randomString(12)).slice(0, 40)
     one,
     email,
     postal,
+    addUser,
     setup,
     revision,
     status,

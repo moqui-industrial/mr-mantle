@@ -1073,6 +1073,131 @@ function preApproveWarnings(p) {
     return {approveWarnings: Array.from(new Set(warnings))}
 }
 
+// ===== P11: a sales order's approval (impl-sales P11, §4 Nov 11; design-sales §1.1, §6 OrderDetail) =====
+// The seller's approval setting (SalesPolicy.orderApprovalRequired): Y, no sales order of the seller is approved automatically and a
+// person's approval needs SALES_ORDER_APPROVE and a current decision of every order rule (SapOrder) the order meets; N or no policy,
+// every caller approves as built. Read for each part's seller (its vendor) by approve#Order, autoApprove#Order and the callers that
+// approve as built (SalesOrders.js).
+const orderGateOn = organizationPartyId => policyOf(organizationPartyId)?.orderApprovalRequired === "Y"
+// The order rules an order meets at its revision for its part's seller, with their states (approved, refused, required); none for a
+// seller with no order rule in effect.
+function orderRequirements(order, part) {
+    if (!rulesOf(part.vendorPartyId, purposes.order).length) return []
+    const {requirements} = requirementsOf(order, part, purposes.order)
+    return withStates(requirements, decisionsAt(order.orderId, revisionOf(order), purposes.order))
+}
+// The parties and users who may not decide an order rule unless it allows it: the order's owner, who entered it and who placed it,
+// and who entered a line the rule names.
+function orderAuthors(order, requirement) {
+    const owners = rows(PART_PARTY, {orderId: order.orderId, roleTypeId: salesAccess.quoteRoles.owner}).map(row => row.partyId)
+    const placers = rows("moqui.entity.EntityAuditLog", {
+        changedEntityName: ORDER,
+        changedFieldName: "statusId",
+        pkPrimaryValue: order.orderId,
+        newValueText: "OrderPlaced"
+    }).map(row => row.changedByUserId)
+    return {
+        partyIds: owners.concat(order.enteredByPartyId ? [order.enteredByPartyId] : []),
+        userIds: placers.concat(requirement.authorUserIds).filter(Boolean)
+    }
+}
+// Why the user may not decide an order rule ({code, message}), or null.
+function orderDecideRefusal(userScope, order, requirement) {
+    if (!userScope.capabilities.orderApprove && !ec.user.hasPermission("ORDER_APPROVE"))
+        return {code: "PERMISSION_DENIED", message: "An order approver decides it"}
+    if (requirement.approverUserGroupId && !isMember(requirement.approverUserGroupId, ec.user.userId))
+        return {code: "APPROVER_INVALID", message: requirement.approverText + " decides it"}
+    if (!requirement.selfApprovalAllowed) {
+        const authors = orderAuthors(order, requirement)
+        if ((userScope.partyId && authors.partyIds.includes(userScope.partyId)) || authors.userIds.includes(ec.user.userId))
+            return {code: "SELF_APPROVAL", message: "Another approver decides an order you own, entered or placed"}
+    }
+    return null
+}
+// The order's approval as OrderDetail shows it: the setting, each order rule it meets with its state and whether the user may decide
+// it, and the pre-approval warnings (check#OrderPreApprove: the credit, purchase, store and Sales warnings), shown to the person
+// approving; with the setting on they refuse nothing (§4).
+function orderApprovalOf(userScope, order, part) {
+    const states = orderRequirements(order, part)
+    return {
+        gateOn: orderGateOn(part.vendorPartyId),
+        requirements: states.map(row => {
+            const refusal = row.state === "approved" ? null : orderDecideRefusal(userScope, order, row)
+            return {
+                key: row.key,
+                salesApprovalPolicyId: row.salesApprovalPolicyId,
+                ruleTypeEnumId: row.ruleTypeEnumId,
+                ruleText: row.ruleText,
+                inputsText: row.inputs.join(" · "),
+                approverText: row.approverText,
+                state: row.state,
+                stateText: L(
+                    {approved: "Approved", refused: "Refused", requested: "Waiting for approval", required: "Needs approval"}[
+                        row.state
+                    ]
+                ),
+                decidedByName: row.decision ? userName(row.decision.decisionByUserId) : "",
+                canDecide: row.state !== "approved" && !refusal,
+                decideRefusal: refusal?.message || ""
+            }
+        })
+    }
+}
+// approve#Order's sales direction for a part whose seller has the setting on: null when the user may approve it, else the refusal.
+// SALES_ORDER_APPROVE in an organization of the user's sales scope, and every order rule the order meets decided at its revision.
+function orderApproveRefusal(order, part) {
+    if (!ec.user.hasPermission("SALES_ORDER_APPROVE"))
+        return (
+            "PERMISSION_DENIED: SALES_ORDER_APPROVE is required to approve sales order " +
+            order.orderId +
+            "; its seller's sales orders wait for a Sales approver"
+        )
+    if (!salesAccess.covers(salesAccess.scope(), part.vendorPartyId))
+        return "ORGANIZATION_DENIED: Order " + order.orderId + " is of an organization outside your sales scope"
+    const open = orderRequirements(order, part).filter(row => row.state !== "approved")
+    if (open.length)
+        return (
+            "SALES_APPROVAL_REQUIRED: Sales order " +
+            order.orderId +
+            " revision " +
+            revisionOf(order) +
+            " needs a Sales decision first (" +
+            open.map(row => warningRule(row)).join("; ") +
+            "); approve it through Sales"
+        )
+    return null
+}
+// The decisions approve#SalesOrder records before the native approval: an SdrApproved OrderDecision of purpose SapOrder for each
+// order rule the order meets and has not approved at its revision, each the user's to decide (refused naming the first that is
+// not). Answers the number recorded.
+function decideOrderRules(userScope, order, part) {
+    const open = orderRequirements(order, part).filter(row => row.state !== "approved")
+    for (const row of open) {
+        const refusal = orderDecideRefusal(userScope, order, row)
+        if (refusal) denied(refusal.code, refusal.message)
+    }
+    let at = nowMs()
+    for (const row of open) {
+        const decisionDate = freeDate(order.orderId, at)
+        at = decisionDate.getTime() + 1
+        call("create#" + DECISION, {
+            orderId: order.orderId,
+            decisionDate,
+            decisionByPartyId: userScope.partyId,
+            decisionByUserId: ec.user.userId,
+            statusId: order.statusId,
+            orderRevision: revisionOf(order),
+            organizationPartyId: part.vendorPartyId,
+            decisionPurposeEnumId: purposes.order,
+            salesApprovalPolicyId: row.salesApprovalPolicyId,
+            ruleTypeEnumId: row.ruleTypeEnumId,
+            evaluatedDate: ec.user.nowTimestamp,
+            decisionResultEnumId: results.approved
+        })
+    }
+    return open.length
+}
+
 const operations = {
     storePolicy,
     getPolicy,
@@ -1095,6 +1220,13 @@ const operations = {
     // P10: propose#Quote's approval guard and the quote's product lines (SalesQuoteIssues.js)
     requireApproved,
     linesOf,
+    // P11: a sales order's approval (SalesOrders.js, PurchaseOrders.js approveRefusal)
+    orderGateOn,
+    orderRequirements,
+    orderApprovalOf,
+    orderApproveRefusal,
+    decideOrderRules,
+    preApproveWarnings,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales approval operation " + op)
         return operations[op](parameters || {})

@@ -4,7 +4,8 @@
 //
 // - Home (get#SalesHome): each counter is the count of the scoped list it opens (find#Opportunities with the list's own filters,
 //   SalesOpportunities.js), so a counter and its list never disagree; a counter that fails is unavailable, never zero, and the
-//   others go on. The counters of records later phases build (requests for quote, quotes, blocked orders) are not configured.
+//   others go on. P8 adds the requests for quote, P11 the quotes to send, the quotes expiring and the orders blocked (awaiting approval
+//   or held).
 // - The row filter (get#PipelineRowFilter, the report engine's ReportScopePolicy MantleSalesScope): Sales' scope, the organization
 //   and then the assignment or team (SalesAccess.js), not the organization alone, which would show a representative the
 //   organization's whole pipeline (impl-sales F66).
@@ -68,11 +69,21 @@ function counterDefinitions(organizationPartyId) {
         }
     ]
 }
-// the counters of the records later phases build: not configured until then, never zero
-const laterCounters = [
-    {counterKey: "quotesToSend", title: "Quotes to send", source: "Quotes"},
-    {counterKey: "quotesExpiring", title: "Quotes expiring", source: "Quotes"},
-    {counterKey: "ordersBlocked", title: "Orders blocked", source: "Orders"}
+// P11: the quote and order counters, each the count of the scoped list it opens (SalesOrders.js workSummary)
+const workCounters = [
+    {
+        counterKey: "quotesToSend",
+        title: "Quotes to send",
+        listPath: "Quotes/Quotes",
+        parameters: {state: "proposed", issue: "unsent"}
+    },
+    {
+        counterKey: "quotesExpiring",
+        title: "Quotes expiring",
+        listPath: "Quotes/Quotes",
+        parameters: {state: "open", validity: "expiring"}
+    },
+    {counterKey: "ordersBlocked", title: "Orders blocked", listPath: "Orders/Orders", parameters: {list: "blocked"}}
 ]
 function findDeals(parameters) {
     ec.message.pushErrors()
@@ -136,17 +147,26 @@ function salesHome(p) {
         ec.message.popErrors()
     }
     counters.push(rfqCounter)
-    for (const later of laterCounters)
+    let work = {}
+    try {
+        work = ec.resource
+            .script("component://mr-mantle/service/mantle/order/SalesOrders.js")
+            .execute("workSummary", organizationPartyId ? {organizationPartyId} : {}).counts
+    } catch (error) {
+        ec.logger.error("Sales Home quote and order counters are unavailable: " + error.message)
+    }
+    for (const definition of workCounters) {
+        const count = work[definition.counterKey]
         counters.push({
-            counterKey: later.counterKey,
-            title: L(later.title),
-            listPath: null,
-            parameters: {},
-            count: null,
-            state: "notConfigured",
-            stateText: L("Not configured"),
-            source: L(later.source)
+            counterKey: definition.counterKey,
+            title: L(definition.title),
+            listPath: definition.listPath,
+            parameters: Object.assign({}, definition.parameters, organizationPartyId ? {organizationPartyId} : {}),
+            count: count == null ? null : count,
+            state: count == null ? "unavailable" : "ready",
+            stateText: count == null ? L("Unavailable") : String(count)
         })
+    }
     // the next commercial actions: the user's own open leads and opportunities, the soonest to close first, with their next activity
     let assignedWork = []
     let assignedCount = null

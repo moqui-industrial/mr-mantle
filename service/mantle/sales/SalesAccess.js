@@ -373,6 +373,77 @@ function requireQuote(userScope, orderId, edit = false) {
     return found
 }
 
+// ===== P11: sales orders (impl-sales P11; design-sales §1.1, §6 Orders) =====
+// A sales order is a native order whose first part sells: its vendor an internal organization of the scope, its customer not
+// internal. It is a direct order (purpose OrpSalesOrder, a draft while Open), an accepted quote (OrpSalesQuote once placed), or any
+// other sales order of the seller (a store's, Projects', a replacement), placed. Never a quote not yet placed, a quote template, a
+// recurring base or an open cart. Inside the organization a Sales reader sees the orders assigned to them or a team of theirs (the
+// part's SalesRepresentative and SalesTeam rows) and a holder of SALES_TEAM_VIEW the organization's every one; a holder of
+// SALES_ORDER_APPROVE or ORDER_APPROVE sees the organization's orders awaiting approval or on hold, to decide them, not to change them (design
+// §1.1 "an assigned approval grants its authorized approver the source projection"). One outside the scope answers as missing.
+const orderPurposes = {direct: "OrpSalesOrder", quote: quotePurpose}
+const orderExcludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
+const approvalStatuses = ["OrderPlaced", "OrderHold"]
+// Whether an order header and its first part are a sales order of Sales' kind (above), the scope aside.
+function isSalesOrder(order, part) {
+    if (!order || !part) return false
+    if (orderExcludedPurposes.includes(order.orderPurposeEnumId)) return false
+    if (order.orderPurposeEnumId === quotePurpose && !order.placedDate) return false
+    if (order.statusId === "OrderOpen" && order.orderPurposeEnumId !== orderPurposes.direct) return false
+    return !!part.vendorPartyId && isInternal(part.vendorPartyId) && !!part.customerPartyId && !isInternal(part.customerPartyId)
+}
+// The ids of the orders assigned now to the caller or a team of theirs, or null for a reader of the organizations' every one.
+function assignedOrderIds(userScope) {
+    return assignedQuoteOrderIds(userScope)
+}
+// Whether the caller approves sales orders: SALES_ORDER_APPROVE (a seller whose approval setting is on) or ORDER_APPROVE (elsewhere).
+function orderApprover(userScope) {
+    return !!userScope.capabilities.orderApprove || access.has("ORDER_APPROVE")
+}
+// The order as the caller may see it, or null: {order, part, parts, organizationPartyId, customerPartyId, canEdit, approverOnly}.
+function orderOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order) return null
+    const parts = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())
+    const part = parts[0]
+    if (!isSalesOrder(order, part) || !covers(userScope, part.vendorPartyId)) return null
+    let approverOnly = false
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned =
+            partyIds.length > 0 &&
+            lib
+                .find("mantle.order.OrderPartParty")
+                .condition("orderId", orderId)
+                .condition("partyId", "in", partyIds)
+                .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                .count() > 0
+        if (!assigned) {
+            if (!orderApprover(userScope) || !approvalStatuses.includes(order.statusId)) return null
+            approverOnly = true
+        }
+    }
+    return {
+        order,
+        part,
+        parts,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.orderEdit && !approverOnly,
+        approverOnly
+    }
+}
+// The order or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for a change without
+// SALES_ORDER_EDIT or by an approver who sees it only to decide it.
+function requireOrder(userScope, orderId, edit = false) {
+    const found = orderOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Order " + (orderId || "") + " is not available")
+    if (edit) requireCapability(userScope, "orderEdit")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Order " + orderId + " is for you to decide, not to change")
+    return found
+}
+
 // ===== P8: requests for quote (impl-sales P8; design-sales §1.1, §5 QuoteRequests) =====
 // A request for quote (RFQ) is a Request of type RqtQuote whose current OrgInternal RequestParty is its selling organization; its
 // customer and contact are its Customer and Contact rows, its owner and team its SalesRepresentative and SalesTeam rows, as a quote's
@@ -488,5 +559,13 @@ function requireQuoteRequest(userScope, requestId, edit = false) {
     requestParties,
     assignedQuoteRequestIds,
     quoteRequestOf,
-    requireQuoteRequest
+    requireQuoteRequest,
+    // P11: sales orders
+    orderPurposes,
+    orderExcludedPurposes,
+    isSalesOrder,
+    assignedOrderIds,
+    orderApprover,
+    orderOf,
+    requireOrder
 })

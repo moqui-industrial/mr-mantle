@@ -367,6 +367,16 @@ const operations = {print, store, resend, storeOnPlace, cancelFailed}
     allowedRecipients,
     // P10: the order-change confirmation's sender (OrderChanges.js confirm)
     senderAccount,
+    // Sales P11: the storeless confirmation's build (SalesOrders.js), after its own order checks: the stored confirmation as placed,
+    // made once, with no user check (the delivery ledger's attempt runs as the system)
+    storeAsSystem: orderId => {
+        const stored = storeOf(salesOrder(orderId, false, false))
+        return {
+            orderContentId: stored.content.orderContentId,
+            contentLocation: stored.content.contentLocation,
+            stored: stored.stored
+        }
+    },
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown order confirmation operation " + op)
         return operations[op](parameters)
