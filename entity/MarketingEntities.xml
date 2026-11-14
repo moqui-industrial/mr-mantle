@@ -352,6 +352,104 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P3 ===== -->
 
+    <!-- ===== Marketing P4: audience import and merge (impl-marketing P4; design-marketing §4 AudienceImport, AudienceMerge, §14.1,
+        §18) ===== -->
+    <!-- An import of a file of contacts into a Marketing list (design §14.1 "AudienceImport and item results";
+        mantle.marketing.AudienceServices preview#, apply#, get#AudienceImport, find#AudienceImportRuns): the staged file by
+        reference and hash (fileLocation, fileHash; never shown, never shell context), its column mapping, the evidence it was
+        classified with (source, date, text, or columns of the file giving them per row; accept with the evidence or request
+        confirmation), who staged and applied it, its state and counts, and an expiry after which the staged file is removed
+        (purge#AudienceImports) and the outcomes kept. A list supplies no evidence. importKey is the user's, the list's and the file's
+        hash, so the same file staged again before it is applied answers the same import. -->
+    <entity entity-name="AudienceImport" package="mantle.marketing.contact" cache="never">
+        <field name="audienceImportId" type="id" is-pk="true"/>
+        <field name="contactListId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The list's organization when it was staged</description></field>
+        <field name="importKey" type="text-medium"><description>A digest of the user, the list and the file's hash</description></field>
+        <field name="fileName" type="text-medium"/>
+        <field name="fileLocation" type="text-medium"><description>The staged file; emptied when it is purged</description></field>
+        <field name="fileHash" type="text-medium"><description>The sha256 of the staged file's text</description></field>
+        <field name="rowCount" type="number-integer"/>
+        <field name="mappingJson" type="text-very-long"><description>The column mapping (column name to contact field) and the
+            columns named for evidence</description></field>
+        <field name="sourceEnumId" type="id"><description>PartyConsentSource of the evidence; PcsImport by default</description></field>
+        <field name="evidenceDate" type="date-time"><description>When the evidence was given, for a row without its own date</description></field>
+        <field name="evidenceText" type="text-long"><description>What the people did or said, for a row without its own evidence</description></field>
+        <field name="evidenceColumn" type="text-medium"><description>The file's column giving a row's evidence</description></field>
+        <field name="evidenceDateColumn" type="text-medium"><description>The file's column giving a row's evidence date</description></field>
+        <field name="acceptEvidence" type="text-indicator"><description>Y: accepted with the evidence (MARKETING_CONSENT_EDIT); else
+            each request waits for the person's confirmation</description></field>
+        <field name="stateEnumId" type="id"><description>AudienceImportState: staged, applying, complete, partial, expired</description></field>
+        <field name="stagedDate" type="date-time"/>
+        <field name="stagedByUserId" type="id"/>
+        <field name="appliedDate" type="date-time"/>
+        <field name="appliedByUserId" type="id"/>
+        <field name="completedDate" type="date-time"/>
+        <field name="expireDate" type="date-time"><description>After it the import is not applied and its staged file is purged</description></field>
+        <field name="purgedDate" type="date-time"/>
+        <field name="pendingCount" type="number-integer"/>
+        <field name="acceptedCount" type="number-integer"/>
+        <field name="existingCount" type="number-integer"/>
+        <field name="refusedCount" type="number-integer"/>
+        <field name="skippedCount" type="number-integer"/>
+        <field name="failedCount" type="number-integer"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="PartyConsentSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="AudienceImportState" related="moqui.basic.Enumeration" short-alias="state">
+            <key-map field-name="stateEnumId"/></relationship>
+        <relationship type="one" title="StagedBy" related="moqui.security.UserAccount">
+            <key-map field-name="stagedByUserId" related="userId"/></relationship>
+        <relationship type="one" title="AppliedBy" related="moqui.security.UserAccount">
+            <key-map field-name="appliedByUserId" related="userId"/></relationship>
+        <index name="AUD_IMPORT_LIST"><index-field name="contactListId"/><index-field name="stagedDate"/></index>
+        <index name="AUD_IMPORT_KEY"><index-field name="importKey"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Audience import state" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisStaged" description="Previewed" sequenceNum="1" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisApplying" description="Applying" sequenceNum="2" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisComplete" description="Complete" sequenceNum="3" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisPartial" description="Complete with failures" sequenceNum="4" enumTypeId="AudienceImportState"/>
+            <moqui.basic.Enumeration enumId="AisExpired" description="Expired" sequenceNum="5" enumTypeId="AudienceImportState"/>
+            <!-- a list merge's requests (merge#Lists): the target list's membership filed from a source list's -->
+            <moqui.basic.Enumeration enumId="SrkMerge" description="List merge" sequenceNum="6" enumTypeId="SubscriptionRequestKind"/>
+        </seed-data>
+    </entity>
+    <!-- One row of an AudienceImport: its preview (the proposed action, the matched contact, the address masked, the exclusion the
+        preview found) and its outcome, applied once under its import and row identity through request#Subscriptions' filing
+        (file#SubscriptionRequest, whose SubscriptionRequest names the import and row as its source record): pending, accepted,
+        existing (already a member or pending), refused (WITHDRAWN, CONSENT_WITHDRAWN and the like, decided when applied), skipped (an
+        empty row, an address earlier in the file, a row the preview excluded) or failed (an error, retried by retry). Never the raw
+        address: the staged file holds it until it is purged. -->
+    <entity entity-name="AudienceImportItem" package="mantle.marketing.contact" cache="never">
+        <field name="audienceImportId" type="id" is-pk="true"/>
+        <field name="rowNumber" type="number-integer" is-pk="true"/>
+        <field name="proposedAction" type="text-short"><description>add (a new contact), match (an existing contact), skip or
+            exclude</description></field>
+        <field name="matchedPartyId" type="id"/>
+        <field name="matchReason" type="text-short"/>
+        <field name="addressMasked" type="text-medium"/>
+        <field name="contactName" type="text-medium"/>
+        <field name="exclusionCode" type="text-short"><description>Why the preview excludes it (INVALID_ADDRESS, MISSING_ADDRESS,
+            EVIDENCE_REQUIRED, EVIDENCE_DATE_INVALID, DUPLICATE_IN_FILE, EMPTY_ROW) or a note it is applied with (SUPPRESSED,
+            ALREADY_MEMBER, WITHDRAWN)</description></field>
+        <field name="problemText" type="text-long"/>
+        <field name="outcome" type="text-short"><description>staged, pending, accepted, existing, refused, skipped or failed</description></field>
+        <field name="reasonCode" type="text-short"/>
+        <field name="partyId" type="id"/>
+        <field name="subscriptionRequestId" type="id"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="appliedDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.contact.AudienceImport"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="Matched" related="mantle.party.Party">
+            <key-map field-name="matchedPartyId" related="partyId"/></relationship>
+        <relationship type="one" related="mantle.marketing.contact.SubscriptionRequest"/>
+    </entity>
+    <!-- ===== end of Marketing P4 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

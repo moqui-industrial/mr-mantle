@@ -750,21 +750,34 @@ function fileRequest(p) {
     const list = one(LIST, {contactListId: p.contactListId})
     return {result: fileOne(list, currentPolicy(list.contactListId), p.request, p.partyId)}
 }
+// The evidence of a request, as request#Subscriptions and the import (MarketingAudienceTransfers.js) check it: its text, its source
+// (a PartyConsentSource) and its date, now when empty and never in the future.
+function evidenceTextOf(value) {
+    const evidenceText = text(value)
+    if (!evidenceText) denied("EVIDENCE_REQUIRED", "Give the evidence of the request: what the person did or said")
+    return evidenceText
+}
+function sourceOf(value, fallback) {
+    const sourceEnumId = text(value) || fallback
+    if (!one("moqui.basic.Enumeration", {enumId: sourceEnumId, enumTypeId: "PartyConsentSource"}))
+        denied("SOURCE_INVALID", "Unknown evidence source " + sourceEnumId)
+    return sourceEnumId
+}
+function evidenceDateOf(value) {
+    const evidenceMs = blank(value) ? nowMs() : lib.ms(value)
+    if (evidenceMs == null || !Number.isFinite(evidenceMs) || evidenceMs > nowMs() + 60000)
+        denied("EVIDENCE_DATE_INVALID", "The evidence's date is a date not in the future")
+    return new Date(evidenceMs)
+}
 function requestSubscriptions(p) {
     const userScope = audienceScope("audienceEdit")
     const accept = p.accept === true || p.accept === "true" || p.accept === "Y"
     if (accept) marketingAccess.requireCapability(userScope, "consentEdit")
     const list = listOfScope(userScope, p.contactListId)
     requireOpen(list)
-    const evidenceText = text(p.evidenceText)
-    if (!evidenceText) denied("EVIDENCE_REQUIRED", "Give the evidence of the request: what the person did or said")
-    const sourceEnumId = text(p.sourceEnumId) || "PcsStaff"
-    if (!one("moqui.basic.Enumeration", {enumId: sourceEnumId, enumTypeId: "PartyConsentSource"}))
-        denied("SOURCE_INVALID", "Unknown evidence source " + sourceEnumId)
-    const evidenceMs = blank(p.evidenceDate) ? nowMs() : lib.ms(p.evidenceDate)
-    if (evidenceMs == null || !Number.isFinite(evidenceMs) || evidenceMs > nowMs() + 60000)
-        denied("EVIDENCE_DATE_INVALID", "The evidence's date is a date not in the future")
-    const evidenceDate = new Date(evidenceMs)
+    const evidenceText = evidenceTextOf(p.evidenceText)
+    const sourceEnumId = sourceOf(p.sourceEnumId, "PcsStaff")
+    const evidenceDate = evidenceDateOf(p.evidenceDate)
     // the items: parties named, and the contacts of the Sales leads and accounts named (each record's failure its own)
     const items = []
     for (const partyId of listOf(p.partyIdList)) items.push({kind: "staff", recordId: partyId, partyIds: [partyId]})
@@ -914,6 +927,23 @@ const operations = {
 ;({
     statusTexts,
     recentRequestCount,
+    // P4: what the audience import and the list merge (MarketingAudienceTransfers.js, MarketingListMerge.js) share with
+    // request#Subscriptions: the scope, the list, its policy and purpose, the evidence checks, the request's filing and the masks
+    audience: {
+        audienceScope,
+        listOfScope,
+        requireOpen,
+        currentPolicy,
+        purposeOf,
+        evidenceTextOf,
+        sourceOf,
+        evidenceDateOf,
+        requestableParty,
+        fileApart,
+        addressText,
+        statusColors,
+        archived
+    },
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown audience operation " + op)
         return operations[op](parameters || {})
