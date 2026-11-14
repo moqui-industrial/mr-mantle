@@ -183,8 +183,16 @@ function findQuotes(p) {
     const state = text(p.state) || "open"
     if (!Object.hasOwn(states, state)) denied("STATE_INVALID", "Choose a quote state")
     if (states[state]) add("statusId", "in", states[state])
-    // a cancelled quote is one withdrawn or declined before placement; an accepted quote placed and later cancelled is an order's
-    if (state === "cancelled") add("placedDate", "is-null", null)
+    // a cancelled quote is one withdrawn or declined before placement; an accepted quote placed and later cancelled is an order's.
+    // P11 (P7's review): any state is a quote's only before placement, so an accepted quote is listed with the orders, not twice
+    if (state === "cancelled" || state === "all") add("placedDate", "is-null", null)
+    // P11: Home's and Insights' "Quotes to send", a proposed quote with no issue standing (SalesQuoteIssue, P10)
+    if (p.issue === "unsent") {
+        const standing = Array.from(
+            find("mantle.sales.quote.SalesQuoteIssue").condition("endedDate", "is-null", null).selectField("orderId").list()
+        ).map(row => row.orderId)
+        if (standing.length) add("orderId", "not-in", Array.from(new Set(standing)))
+    }
     const now = ms(ec.user.nowTimestamp)
     if (p.validity === "expired") {
         add("validThruDate", "is-not-null", null)
@@ -283,10 +291,12 @@ function findQuotes(p) {
 // of it (or a shared one), in one currency (the one given, else the opportunity's, else the seller's base currency), with or without
 // a store of the organization (X1: without one the seller's gateway taxes it), its validity on the part, the customer's address, the
 // caller as its owner and the opportunity's team (else the caller's only team of the organization), and the opportunity linked.
-function createQuote(p) {
+function createQuote(p, kind = "quote") {
+    // P11: a direct sales order (create#SalesOrder, SalesOrders.js) is made here too, of purpose OrpSalesOrder, with no validity
+    const direct = kind === "order"
     const userScope = salesAccess.scope()
     salesAccess.requireCapability(userScope, "anyRead")
-    salesAccess.requireCapability(userScope, "quoteEdit")
+    salesAccess.requireCapability(userScope, direct ? "orderEdit" : "quoteEdit")
     const organizationPartyId = text(p.organizationPartyId) || salesAccess.defaultOrganization(userScope)
     if (!organizationPartyId) denied("ORGANIZATION_DENIED", "Choose the selling organization")
     if (!salesAccess.isInternal(organizationPartyId))
@@ -321,11 +331,13 @@ function createQuote(p) {
     if (!currencyUomId) denied("CURRENCY_REQUIRED", "Choose the quote's currency")
     if (one("moqui.basic.Uom", {uomId: currencyUomId})?.uomTypeEnumId !== "UT_CURRENCY_MEASURE")
         denied("CURRENCY_INVALID", "Choose a currency")
-    const validFromDate = dateOf(p.validFromDate, "Valid from") || ec.user.nowTimestamp
+    const validFromDate = direct ? null : dateOf(p.validFromDate, "Valid from") || ec.user.nowTimestamp
     // P9: with no end given, the organization's quote validity in days from the start (SalesPolicy; none, an open end)
-    const validityDays = Number(approvals().policyOf(organizationPartyId)?.quoteValidityDays || 0)
-    const validThruDate =
-        dateOf(p.validThruDate, "Valid through") || (validityDays > 0 ? new Date(ms(validFromDate) + validityDays * dayMs) : null)
+    const validityDays = direct ? 0 : Number(approvals().policyOf(organizationPartyId)?.quoteValidityDays || 0)
+    const validThruDate = direct
+        ? null
+        : dateOf(p.validThruDate, "Valid through") ||
+          (validityDays > 0 ? new Date(ms(validFromDate) + validityDays * dayMs) : null)
     if (validThruDate && ms(validThruDate) <= ms(validFromDate))
         denied("VALIDITY_INVALID", "Valid through must be after valid from")
     const created = call("mantle.order.OrderServices.create#Order", {
@@ -334,12 +346,13 @@ function createQuote(p) {
         currencyUomId,
         productStoreId,
         orderName: text(p.orderName) || (opportunity ? opportunity.opportunityName : null),
-        orderPurposeEnumId: purpose,
+        orderPurposeEnumId: direct ? salesAccess.orderPurposes.direct : purpose,
         statusId: "OrderOpen",
         validFromDate,
         validThruDate,
         postalContactMechId: customerAddress(customerPartyId),
-        otherPartyOrderId: text(p.otherPartyOrderId)
+        otherPartyOrderId: text(p.otherPartyOrderId),
+        shipBeforeDate: direct ? dateOf(p.shipBeforeDate, "Required by") : null
     })
     const assign = (partyId, roleTypeId) => {
         if (partyId && !one(PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId}))
@@ -451,7 +464,10 @@ function priceFields(userScope, quote, productId, price, p, current) {
 // (itemTypeEnumId ItemShipping: an amount the rep enters, the storeless quote's freight).
 function storeLine(p) {
     const userScope = salesAccess.scope()
-    const quote = salesAccess.requireQuote(userScope, text(p.orderId), true)
+    return storeLineOf(userScope, salesAccess.requireQuote(userScope, text(p.orderId), true), p)
+}
+// P11: the line of a draft the caller may change, a quote's or a direct order's (store#SalesOrderLine, SalesOrders.js).
+function storeLineOf(userScope, quote, p) {
     requireDraft(quote)
     requireRevision(quote.order, p.orderRevision)
     const orderId = quote.order.orderId
@@ -530,7 +546,9 @@ function storeLine(p) {
 // delete#QuoteLine: a draft's line removed, with its tax (the native delete, which retaxes the part).
 function deleteLine(p) {
     const userScope = salesAccess.scope()
-    const quote = salesAccess.requireQuote(userScope, text(p.orderId), true)
+    return deleteLineOf(salesAccess.requireQuote(userScope, text(p.orderId), true), p)
+}
+function deleteLineOf(quote, p) {
     requireDraft(quote)
     requireRevision(quote.order, p.orderRevision)
     const orderId = quote.order.orderId
@@ -799,6 +817,11 @@ function quoteAccess(p) {
 
 const operations = {findQuotes, createQuote, updateQuote, storeLine, deleteLine, getQuote, explainLine, quoteAccess}
 ;({
+    // P11: a direct sales order's draft and lines (SalesOrders.js), never a service's parameters
+    createDraft: p => createQuote(p, "order"),
+    storeLineOf,
+    deleteLineOf,
+    history,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales quote operation " + op)
         return operations[op](parameters)

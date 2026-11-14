@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.order.SalesOrderServices (Q of IronStone Sales design §12.1; design §6 Orders and OrderDetail's sales-order context,
+    §13.1, §16; impl-sales P11, F11, F12, F15, F52, F60, F61): Sales' verbs over the native order lifecycle
+    (service/mantle/order/SalesOrders.js; the scope in service/mantle/sales/SalesAccess.js orderOf). Each checks its own permission,
+    the selling organization and the assignment, and names the revision it read; the native primitives (place#Order, approve#Order,
+    hold#Order, release#OrderHold, cancel#OrderItem, clone#Order) run after the guard and keep their own checks. The seller's approval
+    setting itself is enforced in approve#Order and autoApprove#Order (OrderServices.xml), so a direct call meets it too. The order
+    list is SalesWorkspaceServices.find#SalesOrders. All allow-remote="false". -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="create" noun="SalesOrder" allow-remote="false">
+        <description>A direct sales order draft (design §6 NewSalesOrder; no quote acceptance) over create#Order: purpose
+            OrpSalesOrder, one selling part of an organization of the caller's scope for a customer that is an account of it or a
+            shared one, one currency, with or without a store of that organization (without one, X1: the seller's tax gateway), the
+            date it is required by (the part's shipBeforeDate), the caller as its owner, the opportunity's team and the opportunity
+            linked. Needs SALES_ORDER_EDIT and a Sales read (PERMISSION_DENIED); refuses as create#Quote does (ORGANIZATION_DENIED,
+            RECORD_UNAVAILABLE, CUSTOMER_INVALID, OPPORTUNITY_INVALID, CONTACT_INVALID, STORE_INVALID, CURRENCY_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId" required="true"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="orderName"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="shipBeforeDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="created" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('createOrder', context)"/>
+            <set field="orderId" from="created.orderId"/>
+            <set field="orderPartSeqId" from="created.orderPartSeqId"/>
+            <set field="orderRevision" from="created.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesOrderLine" allow-remote="false">
+        <description>A direct order draft's product or shipping charge line, as store#QuoteLine stores a quote's (the seller's
+            price for the customer unless one is entered with its reason; a free line under the approval rules). Needs
+            SALES_ORDER_EDIT on an order the caller may change (RECORD_UNAVAILABLE, PERMISSION_DENIED); refuses an order that is not
+            a direct draft (ORDER_NOT_DRAFT) and a stale revision (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="itemTypeEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="freeLine"/>
+            <parameter name="useCalculatedPrice"/>
+            <parameter name="overrideReason"/>
+            <parameter name="itemDescription"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('storeLine', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderItemSeqId" from="out.orderItemSeqId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="SalesOrderLine" allow-remote="false">
+        <description>A direct order draft's line removed with its tax. Refuses as store#SalesOrderLine does.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('deleteLine', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="place" noun="SalesOrder" allow-remote="false">
+        <description>Place a direct order draft through place#Order (impl-sales §2: every placement goes through it), at the
+            revision read. Needs SALES_ORDER_EDIT on an order the caller may change; refuses one that is not a direct draft
+            (ORDER_NOT_DRAFT), a stale revision (REVISION_CHANGED) and one with no product line (LINES_REQUIRED). The outcome is the
+            native rules': placed, or approved or held by an automatic approval on a covering payment (never for a seller whose
+            approval setting is on).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="outcome"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('placeOrder', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+            <set field="outcome" from="out.outcome"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="SalesOrder" allow-remote="false">
+        <description>Approve a placed sales order the caller sees (theirs, their team's, the organization's for SALES_TEAM_VIEW, or
+            awaiting approval for SALES_ORDER_APPROVE), at the revision read: SALES_ORDER_APPROVE where the seller's approval setting
+            is on, else ORDER_APPROVE (PERMISSION_DENIED); each order rule it meets (SalesApprovalPolicy of purpose SapOrder) decided
+            by the caller, an OrderDecision bound to the revision (SELF_APPROVAL for its owner, who entered or placed it, unless the
+            rule allows it; APPROVER_INVALID outside the rule's group); then approve#Order, whose credit check may hold it instead
+            (outcome held, creditHeld). Pre-approval warnings are shown, never refusing. Refuses one not placed (ORDER_NOT_PLACED) and
+            a stale revision (REVISION_CHANGED). The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="outcome"/>
+            <parameter name="decidedCount" type="Integer"/>
+            <parameter name="creditHeld" type="Boolean"/>
+            <parameter name="creditWarning"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('approveOrder', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+            <set field="outcome" from="out.outcome"/>
+            <set field="decidedCount" from="out.decidedCount"/>
+            <set field="creditHeld" from="!!out.creditHeld"/>
+            <set field="creditWarning" from="out.creditWarning"/>
+            <set field="alreadyApplied" from="!!out.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="hold" noun="SalesOrder" allow-remote="false">
+        <description>Put an order the caller sees on a Manual or a Change hold with its reason, through hold#Order (which needs the
+            type's permission: ORDER_APPROVE for Manual, ORDER_CHANGE_HOLD_RELEASE or SALES_ORDER_CHANGE for Change, and checks the
+            order's organization). Sales never places a Credit, Purchase or Payment hold (HOLD_TYPE_INVALID); a comment is required
+            (COMMENT_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="holdTypeEnumId"/>
+            <parameter name="holdComment" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="outcome"/>
+            <parameter name="orderHoldReasonId"/>
+            <parameter name="alreadyHeld" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('holdOrder', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="outcome" from="out.outcome"/>
+            <set field="orderHoldReasonId" from="out.orderHoldReasonId"/>
+            <set field="alreadyHeld" from="out.alreadyHeld"/>
+        </actions>
+    </service>
+    <service verb="release" noun="SalesOrderHold" allow-remote="false">
+        <description>Release a Manual or a Change hold of an order the caller sees with a comment, through release#OrderHold (the
+            type's permission, the order's organization; the order returns where it was once no other hold is open). Another
+            type's hold is its owner's (HOLD_TYPE_DENIED); another organization's hold, or one of an order the caller does not see,
+            answers as missing (HOLD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderHoldReasonId" required="true"/>
+            <parameter name="releaseComment" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="outcome"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('releaseHold', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="outcome" from="out.outcome"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="SalesOrderRemainder" allow-remote="false">
+        <description>Cancel what is left of an open order the caller may change (SALES_ORDER_EDIT on an assigned order): each line's
+            quantity not yet issued, through cancel#OrderItem, the shipped and billed history kept (design §6). Refuses an order
+            that is not open (ORDER_NOT_OPEN), a stale revision (REVISION_CHANGED) and one with nothing left (NOTHING_TO_CANCEL).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="outcome"/>
+            <parameter name="cancelledCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('cancelRemainder', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="outcome" from="out.outcome"/>
+            <set field="cancelledCount" from="out.cancelledCount"/>
+        </actions>
+    </service>
+    <service verb="clone" noun="SalesOrder" allow-remote="false">
+        <description>Copy an order the caller may change as a new direct order draft of theirs (clone#Order without files, notes or
+            payments; its validity and the customer's reference cleared; retaxed).</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('cloneOrder', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="SalesOrderBatch" allow-remote="false">
+        <description>OrderBatch (design §6): approve or close the remainders of the orders chosen ("orderId@revision"), each on its
+            own through approve#SalesOrder (approve#Order and its credit check, F12) or cancel#SalesOrderRemainder, in its own
+            transaction and operation key; each refusal is named with its reason and the rest go on.</description>
+        <in-parameters>
+            <parameter name="operation" required="true"><description>approve or close</description></parameter>
+            <parameter name="orderKeys" type="List" required="true"/>
+            <parameter name="operationKey" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="successCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('applyBatch', context)"/>
+            <set field="results" from="out.results"/>
+            <set field="successCount" from="out.successCount"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesOrder" allow-remote="false" read-only="true">
+        <description>OrderDetail's sales-order context (design §6) as the caller may see it (SalesAccess.js orderOf), else orderFound
+            false: its facts with names, the accepted quote's evidence, lines with shipped and billed quantities, open holds (each
+            releasable in Sales when Manual or Change and the type's permission is held), the approval while it waits (the seller's
+            setting, each order rule with its state, the pre-approval warnings), shipments, invoices and payments for a holder of
+            RECEIVABLE_VIEW or ACCOUNTING_VIEW, the history of its audited fields and what the caller may do now. No cost or margin.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderFound" type="Boolean"/>
+            <parameter name="order" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="holds" type="List"/>
+            <parameter name="approval" type="Map"/>
+            <parameter name="warnings" type="List"/>
+            <parameter name="shipments" type="List"/>
+            <parameter name="invoices" type="List"/>
+            <parameter name="payments" type="List"/>
+            <parameter name="showMoney" type="Boolean"/>
+            <parameter name="history" type="List"/>
+            <parameter name="can" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('getOrder', context)"/>
+            <set field="orderFound" from="!!found.orderFound"/>
+            <set field="order" from="found.order || null"/>
+            <set field="lines" from="found.lines || []"/>
+            <set field="holds" from="found.holds || []"/>
+            <set field="approval" from="found.approval || null"/>
+            <set field="warnings" from="found.warnings || []"/>
+            <set field="shipments" from="found.shipments || []"/>
+            <set field="invoices" from="found.invoices || []"/>
+            <set field="payments" from="found.payments || []"/>
+            <set field="showMoney" from="!!found.showMoney"/>
+            <set field="history" from="found.history || []"/>
+            <set field="can" from="found.can || {}"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesWorkSummary" allow-remote="false" read-only="true">
+        <description>Home's and Insights' Sales counts, each the count of the scoped list it opens: quotes to send (proposed, no
+            issue standing), quotes expiring within a week, orders awaiting approval and orders blocked (awaiting approval or held).
+            A count that fails is null, never zero. Needs a Sales read.</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters><parameter name="counts" type="Map"/></out-parameters>
+        <actions>
+            <set field="counts" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('workSummary', context).counts"/>
+        </actions>
+    </service>
+    <service verb="send" noun="OrderConfirmation" allow-remote="false">
+        <description>Internal, for the OrderPlacedSalesConfirmation rule (X1, design §16): a storeless sales order of Sales' (a
+            direct order, an accepted quote) placed or approved has Customer Service's stored confirmation as placed sent to its
+            contact, else its customer, through the delivery ledger (MdsrcSalesOrderConfirmation, the seller's confirmation
+            template or MANTLE_SALES_ORDER_CONFIRMATION), once for the order's revision and recipient, tried at once. A store order
+            keeps its store mail; another order sends nothing. Never fails: a failure is logged with the order.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="queued" type="Boolean"/>
+            <parameter name="deliveryId"/>
+            <parameter name="stateEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('sendConfirmation', context)"/>
+            <set field="queued" from="!!out.queued"/>
+            <set field="deliveryId" from="out.deliveryId"/>
+            <set field="stateEnumId" from="out.stateEnumId"/>
+        </actions>
+    </service>
+    <service verb="build" noun="OrderConfirmationMessage" allow-remote="false">
+        <description>The delivery ledger's build of a storeless confirmation (each attempt): suppressed once the order is cancelled;
+            else the stored confirmation as placed (made once) attached, from the selling organization's own email (none fails the
+            delivery, to be sent again), to the recipient's current email.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+            <parameter name="templateKey"/>
+            <parameter name="channelEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppress"/>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="body"/>
+            <parameter name="attachments" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('buildConfirmation', context)"/>
+            <set field="suppress" from="out.suppress || null"/>
+            <set field="toAddress" from="out.toAddress || null"/>
+            <set field="bodyParameters" from="out.bodyParameters || null"/>
+            <set field="body" from="out.body || null"/>
+            <set field="attachments" from="out.attachments || null"/>
+        </actions>
+    </service>
+</services>

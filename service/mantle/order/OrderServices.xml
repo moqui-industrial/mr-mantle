@@ -1237,7 +1237,11 @@ General Order Placement and eCommerce Usage
             hold instead of approving it (the order when it has one part), keeping its reservations, and answers creditHeld;
             an order of several parts approves the parts that were not held, each on its own, and never touches a part it
             does not approve. A Warn result approves with creditWarning. An organization with no credit policy approves as
-            before.</description>
+            before. Sales' direction (impl-sales P11, §4 Nov 11, F11): a sales part whose seller's SalesPolicy has the approval setting
+            on (orderApprovalRequired) needs SALES_ORDER_APPROVE in the approver's sales scope and a current Sales decision of each
+            order rule it meets (SALES_APPROVAL_REQUIRED; mantle.order.SalesOrderServices.approve#SalesOrder records them), not
+            ORDER_APPROVE; with the setting off, its default, ORDER_APPROVE as before. Pre-approval warnings never refuse a person's
+            approval (this service does not call check#OrderPreApprove).</description>
         <implements service="mantle.order.OrderServices.change#OrderStatusInterface"/>
         <in-parameters>
             <parameter name="approvedDate" type="Timestamp" default="ec.user.nowTimestamp"/>
@@ -1310,9 +1314,12 @@ General Order Placement and eCommerce Usage
             released with PAYMENT_HOLD_RELEASE); the other types need the
             permission their type names (enumCode), and a Change or Purchase reason may also be placed under the order's
             change permission for its direction (PURCHASE_ORDER_EDIT on a purchase part, ORDER_CHANGE_APPLY or
-            SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. It
-            checks no organization: its callers check
-            the order's organization before calling it (as the credit services do).</description>
+            SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. The order's
+            organization and direction (impl-sales P11, Customer Service F78, F12): a user places a Manual, Change or Purchase reason
+            only on an order of an organization they work for (the seller of a sales part, the buyer of a purchase part;
+            ORDER_UNAVAILABLE otherwise, as for a missing order) and a Purchase reason only on a purchase part (HOLD_TYPE_DIRECTION);
+            a Credit or Payment reason is its owner service's, which checks the organization, and a call with no user is its
+            caller's to check.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderPartSeqId"/>
@@ -1352,6 +1359,10 @@ General Order Placement and eCommerce Usage
                 <if condition="orderPart == null">
                     <return error="true" message="ORDER_UNAVAILABLE: Order ${orderId} part ${orderPartSeqId} not found"/></if>
             </if>
+            <!-- Sales P11 (Customer Service F78, F12): the order's organization and direction for a user's hold -->
+            <set field="holdRefusal" from="['OhtCredit', 'OhtPayment'].includes(holdTypeEnumId) ? null
+                : ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js').holdScopeRefusal(orderId, orderPartSeqId, holdTypeEnumId)"/>
+            <if condition="holdRefusal"><return error="true" message="${holdRefusal}"/></if>
             <set field="currentStatusId" from="(orderPart ?? orderHeader).statusId"/>
             <!-- a sent purchase order un-sends to Approved first (D7): Mantle has no Sent to Hold transition -->
             <if condition="currentStatusId == 'OrderSent' &amp;&amp; ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
@@ -1393,8 +1404,10 @@ General Order Placement and eCommerce Usage
             part) returns from OrderHold to the reason's return status only when no other reason is open on it (on that part,
             or on the whole order), so one app's release never releases another's hold; a part's release touches only that
             part. Needs the permission the reason's type names (enumCode); refuses a released reason (HOLD_ALREADY_RELEASED)
-            and a release without a comment. It checks no organization: its callers check the order's organization first
-            (release#CreditHold does).</description>
+            and a release without a comment. The order's organization (impl-sales P11, Customer Service F78, F12): a Manual,
+            Change or Purchase reason is released only by a user who works for the order's organization (HOLD_UNAVAILABLE
+            otherwise, as for a missing reason); a Credit or Payment reason's owner service checks it (release#CreditHold does), and
+            a call with no user is its caller's to check.</description>
         <in-parameters>
             <parameter name="orderHoldReasonId" required="true"/>
             <parameter name="releaseComment" required="true"/>
@@ -1414,6 +1427,10 @@ General Order Placement and eCommerce Usage
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
             <set field="orderId" from="reason.orderId"/>
             <set field="orderPartSeqId" from="reason.orderPartSeqId || null"/>
+            <!-- Sales P11 (Customer Service F78, F12): the order's organization for a user's release -->
+            <if condition="!['OhtCredit', 'OhtPayment'].includes(reason.holdTypeEnumId) &amp;&amp; ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+                    .holdScopeRefusal(orderId, orderPartSeqId, null)">
+                <return error="true" message="HOLD_UNAVAILABLE: The hold is not available"/></if>
             <!-- Warehouse's lock order (F294, Packing.js lockOrders): the order parts (the reason's, else all), then the
                 header, then the reason -->
             <entity-find entity-name="mantle.order.OrderPart" list="lockedParts" for-update="true" disable-authz="true">
@@ -1499,12 +1516,20 @@ General Order Placement and eCommerce Usage
             then change the order status to Approved.
 
             This is called by SECA rule on OrderHeader change to OrderPlaced status, and directly in PaymentServices.authorize#OrderPayments.
+
+            Sales' approval setting (impl-sales P11, §4 Nov 11, F52): an order with a sales part whose seller's SalesPolicy has
+            orderApprovalRequired Y is never approved here; it stays placed (its payment authorized) for a holder of
+            SALES_ORDER_APPROVE, whichever app placed it. With the setting off, its default, nothing changes.
         </description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId != 'OrderPlaced'"><return/></if>
+            <if condition="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId)">
+                <log message="Not auto-approving Order ${orderId}: its seller's sales orders wait for a Sales approver"/>
+                <return/>
+            </if>
 
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                 <econdition field-name="orderId"/>

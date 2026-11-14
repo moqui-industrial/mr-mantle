@@ -199,8 +199,9 @@ feature("each Home counter is its list's count, and the assigned work is the use
         r.counters.myOpportunities.count == 2
         r.counters.pastClose.count == r.lists.pastClose
         r.counters.pastClose.count == 1
-        r.counters.quotesToSend.state == "notConfigured"
-        r.counters.quotesToSend.count == null
+        r.counters.quotesToSend.state == "ready"
+        r.counters.quotesToSend.count == 0
+        r.counters.ordersBlocked.state == "ready" && r.counters.ordersBlocked.listPath == "Orders/Orders"
         r.home.assignedCount == 3
         Array.from(r.home.assignedWork)
             .map(row => row.salesOpportunityId)

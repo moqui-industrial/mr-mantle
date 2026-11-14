@@ -1092,8 +1092,10 @@ along with this software (see the LICENSE.md file). If not, see
                             shipmentMethodEnumId:returnHeader.shipmentMethodEnumId}"/>
                     <!-- place and approve order, come from here ready to ship -->
                     <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:approvedOrderOut.orderId}"/>
-                    <!-- a settler without order approval leaves the replacement placed, for the order's approver -->
-                    <if condition="!settlement || ec.user.hasPermission('ORDER_APPROVE')">
+                    <!-- a settler without order approval leaves the replacement placed, for the order's approver; so does a seller
+                        whose sales orders wait for a Sales approver (impl-sales P11, F61: its approval setting on) -->
+                    <if condition="(!settlement || ec.user.hasPermission('ORDER_APPROVE'))
+                            &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(approvedOrderOut.orderId)">
                         <service-call name="mantle.order.OrderServices.approve#Order"
                                 in-map="{orderId:approvedOrderOut.orderId}"/></if>
                 </if>
@@ -1125,7 +1127,8 @@ along with this software (see the LICENSE.md file). If not, see
                             <break/>
                         </if>
                     </iterate>
-                    <if condition="approveOrder &amp;&amp; (!settlement || ec.user.hasPermission('ORDER_APPROVE'))">
+                    <if condition="approveOrder &amp;&amp; (!settlement || ec.user.hasPermission('ORDER_APPROVE'))
+                            &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(originalReplacementOrderId)">
                         <service-call name="mantle.order.OrderServices.approve#Order" in-map="{orderId:originalReplacementOrderId}"/>
                     </if>
                 </if>

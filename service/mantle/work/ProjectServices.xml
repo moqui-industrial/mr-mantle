@@ -3486,11 +3486,13 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const orderId of orderIds) {
                         const header = ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()
                         if (!header || !['OrderOpen', 'OrderProposed'].includes(header.statusId)) continue
-                        // placed (from the quote), then approved unless the store approved it on placing
+                        // placed (from the quote), then approved unless the store approved it on placing, or its seller's sales orders
+                        // wait for a Sales approver (impl-sales P11, §4 Q12: the seller's approval setting on leaves it placed)
                         ec.service.sync().name('mantle.order.OrderServices.update#OrderStatus').parameters({orderId: orderId, statusId: 'OrderPlaced',
                             placedDate: ec.user.nowTimestamp}).call()
                         if (ec.message.hasError()) return
-                        if (ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()?.statusId === 'OrderPlaced')
+                        if (ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()?.statusId === 'OrderPlaced'
+                                && !ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId))
                             ec.service.sync().name('mantle.order.OrderServices.update#OrderStatus').parameters({orderId: orderId, statusId: 'OrderApproved',
                                 approvedDate: ec.user.nowTimestamp}).call()
                         if (ec.message.hasError()) return

@@ -892,6 +892,9 @@ function respondQuote(p) {
             })
         // every placement goes through place#Order (impl-sales §2; Marketing's attribution sees it)
         call("mantle.order.OrderServices.place#Order", {orderId: order.orderId})
+        // P11: the seller's option to approve an accepted net-terms order as the system while its approval setting is off, through
+        // approve#Order and its credit check (a credit hold makes the outcome held; F60)
+        ec.resource.script("component://mr-mantle/service/mantle/order/SalesOrders.js").approveAccepted(order.orderId)
     } else {
         call("mantle.order.OrderServices.cancel#Order", {orderId: order.orderId})
         endIssues(order, ends.declined, request.reason)
