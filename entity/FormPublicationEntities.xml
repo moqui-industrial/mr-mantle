@@ -43,6 +43,15 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time"/>
         <field name="createdDate" type="date-time"/>
         <field name="createdByUserId" type="id"/>
+        <!-- impl-marketing P12 (design-drawers-commons §19; design-marketing §10 SurveyDistribution, §13 SubmitForm): what a public
+            page shows around the form and when it was opened -->
+        <field name="titleText" type="text-medium"><description>The page's heading (empty: the form's name)</description></field>
+        <field name="introText" type="text-long"><description>Plain text above the questions; no expression</description></field>
+        <field name="completionMessage" type="text-medium"><description>The receipt's words after an answer (empty: a neutral thank
+            you)</description></field>
+        <field name="publishedDate" type="date-time"/>
+        <field name="publishedByUserId" type="id"/>
+        <field name="closedByUserId" type="id"/>
         <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
         <relationship type="one" title="FormPublicationPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
             <key-map field-name="purposeEnumId" related="enumId"/></relationship>
@@ -57,6 +66,10 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Form Publication Purpose" enumTypeId="FormPublicationPurpose"/>
             <moqui.basic.Enumeration enumId="FppCaseFeedback" description="Case feedback" sequenceNum="1" enumTypeId="FormPublicationPurpose"/>
             <moqui.basic.Enumeration enumId="FppSurvey" description="Survey" sequenceNum="2" enumTypeId="FormPublicationPurpose"/>
+            <!-- impl-marketing P12: Marketing's public purposes beside the survey (a lead form, P13's handoff; an event's
+                registration questions, P16) -->
+            <moqui.basic.Enumeration enumId="FppLead" description="Lead form" sequenceNum="3" enumTypeId="FormPublicationPurpose"/>
+            <moqui.basic.Enumeration enumId="FppRegistration" description="Registration questions" sequenceNum="4" enumTypeId="FormPublicationPurpose"/>
             <moqui.basic.EnumerationType description="Form Publication Access" enumTypeId="FormPublicationAccess"/>
             <moqui.basic.Enumeration enumId="FpaInvited" description="Invited recipients" sequenceNum="1" enumTypeId="FormPublicationAccess"/>
             <moqui.basic.Enumeration enumId="FpaAnonymous" description="Anyone with the page" sequenceNum="2" enumTypeId="FormPublicationAccess"/>
@@ -88,6 +101,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="scopeServiceName" type="text-medium"/>
         <field name="accessEnumIds" type="text-medium"/>
         <field name="formNoun" type="text-short"/>
+        <field name="fieldAudienceEnumId" type="id"><description>impl-marketing P12: the audience every field of the purpose takes
+            (CfaCustomer for a public purpose, whose every question a visitor answers); empty: the one each field is given,
+            internal by default</description></field>
         <field name="ownServices" type="text-indicator"><description>Y: its forms are built only through its app's own services,
             which add the app's rules (Customer Service's case templates and case feedback: CaseTemplateServices and
             CaseFeedbackServices, the customer audience and the rating); FormDefinitionServices reads them and refuses to make or
@@ -113,6 +129,54 @@ along with this software (see the LICENSE.md file). If not, see
     <extend-entity entity-name="FormResponseAnswer" package="moqui.screen.form">
         <field name="valueText" type="text-long" ai-opt-out="true"/>
     </extend-entity>
+
+    <!-- impl-marketing P12 (design-marketing §10, §13 SubmitForm): a choice option's score for a survey's summary, on the shared
+        definition (FormDefinitions.js: an option line "value | label | score"); a whole number from 0 to 1000 on a single choice.
+        A change of a published option's score ends that option and starts a new one with the same value from now, so a response
+        reads the scores as of its date. -->
+    <extend-entity entity-name="DbFormFieldOption" package="moqui.screen.form">
+        <field name="scoreValue" type="number-integer"/>
+    </extend-entity>
+
+    <entity entity-name="FormSubmission" package="mantle.party" cache="never">
+        <description>impl-marketing P12 (design-drawers-commons §19; design-marketing §13 SubmitForm): one accepted public answer of a
+            publication (mantle.party.FormPublicationServices accept#Submission): the response it made (formResponseId, read with the
+            form as of submittedDate), the invitation it answered when invited, the party verified for it (an invitation's
+            recipient or a signed-in account's own party; never one an email field names), the site, the request identity
+            (requestKey: a digest of the page's request key, unique, so a repeat answers the first) with the digest of what was
+            sent (payloadDigest: the same key with other answers is refused), and the state of its effects after acceptance (a
+            subscription choice, an automation, a lead handoff), each separate and replay-safe. Its response is kept as
+            submitted, as an invited one is (FormPublication.eecas.xml).</description>
+        <field name="formSubmissionId" type="id" is-pk="true"/>
+        <field name="publicationId" type="id"/>
+        <field name="formId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="invitationId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="requestKey" type="text-medium"/>
+        <field name="payloadDigest" type="text-medium"/>
+        <field name="submittedDate" type="date-time"/>
+        <field name="statusEnumId" type="id"/>
+        <field name="effectsText" type="text-medium"><description>What its effects did, or why one failed (no answer text)</description></field>
+        <relationship type="one" related="mantle.party.FormPublication" short-alias="publication"/>
+        <relationship type="one" related="moqui.screen.form.DbForm" short-alias="form"/>
+        <relationship type="one-nofk" related="moqui.screen.form.FormResponse" short-alias="response"/>
+        <relationship type="one-nofk" related="mantle.party.FormInvitation" short-alias="invitation"/>
+        <relationship type="one-nofk" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="FormSubmissionStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <index name="FORM_SUB_KEY" unique="true"><index-field name="requestKey"/></index>
+        <index name="FORM_SUB_RESPONSE"><index-field name="formResponseId"/></index>
+        <index name="FORM_SUB_PUB"><index-field name="publicationId"/><index-field name="submittedDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Form Submission Status" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbAccepted" description="Accepted, effects pending" sequenceNum="1" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbApplied" description="Accepted, effects applied" sequenceNum="2" enumTypeId="FormSubmissionStatus"/>
+            <moqui.basic.Enumeration enumId="FsbEffectFailed" description="Accepted, an effect failed" sequenceNum="3" enumTypeId="FormSubmissionStatus"/>
+        </seed-data>
+    </entity>
 
     <entity entity-name="FormInvitation" package="mantle.party" cache="never">
         <description>One recipient's invitation to answer a publication once: the recipient (partyId, the party the answer is

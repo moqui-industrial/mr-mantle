@@ -1745,4 +1745,22 @@
         service: 'mantle.marketing.MarketingPortalServices.verify#Subscription',
         fields: ['siteId', 'token', 'operationId'],
     },
+    // IronStone Marketing P12 (impl-marketing P12; design-marketing §13 SubmitForm): the SubmitForm page (a public or an invited
+    // publication's form and its answer)
+    getMarketingForm: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Form',
+        fields: ['siteId', 'publicationId', 'token'],
+    },
+    submitMarketingForm: {
+        service: 'mantle.marketing.MarketingPortalServices.submit#Form',
+        fields: [
+            'siteId',
+            'publicationId',
+            'token',
+            'values',
+            'subscribe',
+            'subscriptionEmail',
+            'operationId',
+        ],
+    },
 })

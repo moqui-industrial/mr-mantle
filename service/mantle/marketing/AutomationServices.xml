@@ -58,6 +58,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sendingProfileId"/>
             <parameter name="triggerEnumId"/>
             <parameter name="triggerSegmentId"/>
+            <parameter name="formPublicationId"><description>P12: the form-submission trigger's Marketing publication of the organization</description></parameter>
             <parameter name="productStoreId"/>
             <parameter name="timeZone"/>
         </in-parameters>
@@ -93,6 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sendingProfileId"/>
             <parameter name="triggerEnumId"/>
             <parameter name="triggerSegmentId"/>
+            <parameter name="formPublicationId"><description>P12: the form-submission trigger's Marketing publication of the organization</description></parameter>
             <parameter name="productStoreId"/>
             <parameter name="goalSegmentId"/>
             <parameter name="reentryEnumId"/>

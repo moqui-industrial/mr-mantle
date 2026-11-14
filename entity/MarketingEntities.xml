@@ -1094,6 +1094,38 @@ along with this software (see the LICENSE.md file). If not, see
     </extend-entity>
     <!-- ===== end of Marketing P11 ===== -->
 
+    <!-- ===== Marketing P12: surveys and form publication (impl-marketing P12; design-marketing §10 SurveyDistribution, §13
+        SubmitForm) ===== -->
+    <!-- A Marketing publication's own fields (Commons keeps FormPublication; mantle.marketing.MarketingFormServices store#Publication):
+        the list a respondent may choose to subscribe to beside the answers (a separate choice, filed through the audience's evidenced
+        request with its own confirmation, never inferred from an answer or a typed address). The campaign is the publication's
+        context record (contextEntityName MarketingCampaign) and its CampaignAssociation (CakForm). -->
+    <extend-entity entity-name="FormPublication" package="mantle.party">
+        <field name="subscriptionListId" type="id"/>
+        <relationship type="one-nofk" title="SubscriptionList" related="mantle.marketing.contact.ContactList">
+            <key-map field-name="subscriptionListId" related="contactListId"/></relationship>
+    </extend-entity>
+    <!-- An invitation send (MarketingFormServices create#Invitations): an ordinary CampaignSend whose every recipient's message carries
+        their own invitation link to the publication (build#CampaignDelivery makes the FormInvitation once per recipient and a link per
+        attempt), so an invitation reaches only a recipient the send's preparation and dispatch admit (promotional eligibility). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="formPublicationId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="FormPublication" related="mantle.party.FormPublication">
+            <key-map field-name="formPublicationId" related="publicationId"/></relationship>
+        <index name="CMP_SEND_FORM_PUB"><index-field name="formPublicationId"/></index>
+    </extend-entity>
+    <!-- The form-submission trigger of an automation (P11's triggers, design §6): a submission of the publication by a known party (an
+        invitation's recipient or a signed-in account's own party; an anonymous answer names no one). -->
+    <extend-entity entity-name="MarketingAutomation" package="mantle.marketing.automation">
+        <field name="formPublicationId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="FormPublication" related="mantle.party.FormPublication">
+            <key-map field-name="formPublicationId" related="publicationId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="AtrFormSubmitted" description="Form submitted" sequenceNum="6" enumTypeId="AutomationTrigger"/>
+        </seed-data>
+    </extend-entity>
+    <!-- ===== end of Marketing P12 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
