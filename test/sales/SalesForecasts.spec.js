@@ -330,12 +330,23 @@ feature("a second forecast or target for a key, a cycle, a stale revision, a rep
         return {
             duplicateTarget: as(users.manager, F + "store#Target", Object.assign({quotaAmount: "1"}, key)).refused,
             duplicateForecast: as(users.rep, F + "store#Forecast", Object.assign({forecastAmount: "1"}, key)).refused,
-            cycle: as(users.manager, F + "store#Target", {
-                salesForecastId: keys.team,
-                quotaAmount: "5000",
-                parentSalesForecastId: keys.rep,
-                expectedRevision: revisionOf(users.manager, keys.team)
-            }).refused,
+            // West's target under East, then East under West: a cycle
+            cycle: (() => {
+                keys.west = as(users.manager, F + "store#Target", {
+                    organizationPartyId: orgA,
+                    internalPartyId: teams.west,
+                    timePeriodId: keys.quarter,
+                    currencyUomId: "USD",
+                    quotaAmount: "100",
+                    parentSalesForecastId: keys.team
+                }).salesForecastId
+                return as(users.manager, F + "store#Target", {
+                    salesForecastId: keys.team,
+                    quotaAmount: "5000",
+                    parentSalesForecastId: keys.west,
+                    expectedRevision: revisionOf(users.manager, keys.team)
+                }).refused
+            })(),
             stale: as(users.rep, F + "store#Forecast", {salesForecastId: keys.rep, forecastAmount: "800", expectedRevision: "1"})
                 .refused,
             repTarget: as(users.rep, F + "store#Target", {
@@ -467,5 +478,140 @@ feature("attainment compares each target with its own basis; orders with no repr
         r.found.unassignedList[0].amountText.includes("80")
         r.audit.includes("SfbPlacedOrder:Measured on orders")
         r.repReport.includes("PERMISSION_DENIED")
+    }
+})
+
+feature(
+    "an invoice counts for a reader who sees every order it bills; a team manager enters no member's judgement; the hierarchy and allocations hold",
+    {
+        when() {
+            system(() => {
+                for (const orderId of [prefix + "_ORD_REP", prefix + "_ORD_NONE"])
+                    make("mantle.order.OrderItem", {
+                        orderId,
+                        orderItemSeqId: "01",
+                        orderPartSeqId: "01",
+                        itemTypeEnumId: "ItemProduct",
+                        quantity: 1,
+                        unitAmount: 1
+                    })
+                // the rep's order billed alone, and with the order of no representative on one invoice
+                const invoice = (amounts, orderIds) => {
+                    const invoiceId = make("mantle.account.invoice.Invoice", {
+                        invoiceTypeEnumId: "InvoiceSales",
+                        fromPartyId: orgA,
+                        toPartyId: prefix + "_CUSTOMER",
+                        statusId: "InvoiceFinalized",
+                        invoiceDate: ec.user.nowTimestamp,
+                        currencyUomId: "USD"
+                    }).invoiceId
+                    orderIds.forEach((orderId, index) => {
+                        const invoiceItemSeqId = "0" + (index + 1)
+                        const amount = amounts[index]
+                        make("mantle.account.invoice.InvoiceItem", {
+                            invoiceId,
+                            invoiceItemSeqId,
+                            itemTypeEnumId: "ItemProduct",
+                            quantity: 1,
+                            amount
+                        })
+                        make("mantle.order.OrderItemBilling", {
+                            orderId,
+                            orderItemSeqId: "01",
+                            invoiceId,
+                            invoiceItemSeqId,
+                            quantity: 1,
+                            amount
+                        })
+                    })
+                }
+                invoice([250], [prefix + "_ORD_REP"])
+                invoice([250, 80], [prefix + "_ORD_REP", prefix + "_ORD_NONE"])
+                // a second category holding the product, and another organization's category
+                make("mantle.product.category.ProductCategory", {
+                    productCategoryId: prefix + "_CAT2",
+                    categoryName: "Forecast category 2"
+                })
+                make("mantle.product.category.ProductCategoryMember", {
+                    productCategoryId: prefix + "_CAT2",
+                    productId: prefix + "_PROD",
+                    fromDate: 0
+                })
+                make("mantle.product.category.ProductCategory", {
+                    productCategoryId: prefix + "_CAT_B",
+                    categoryName: "B's",
+                    ownerPartyId: orgB
+                })
+            })
+            const detail = values =>
+                as(
+                    users.rep,
+                    F + "store#ForecastDetail",
+                    Object.assign({salesForecastId: keys.rep, expectedRevision: revisionOf(users.rep, keys.rep)}, values)
+                ).refused
+            return {
+                rep: forecastOf(users.rep, {salesForecastId: keys.rep}),
+                organization: forecastOf(users.manager, {
+                    organizationPartyId: orgA,
+                    internalPartyId: orgA,
+                    timePeriodId: keys.quarter
+                }),
+                leadJudgesRep: as(users.lead, F + "store#Forecast", {
+                    salesForecastId: keys.rep,
+                    forecastAmount: "1",
+                    expectedRevision: revisionOf(users.lead, keys.rep)
+                }).refused,
+                leadJudgesTeam: as(users.lead, F + "store#Forecast", {
+                    salesForecastId: keys.team,
+                    forecastAmount: "1500",
+                    expectedRevision: revisionOf(users.lead, keys.team)
+                }).refused,
+                personParent: as(users.manager, F + "store#Target", {
+                    salesForecastId: keys.mate,
+                    quotaAmount: "0",
+                    parentSalesForecastId: keys.rep,
+                    expectedRevision: revisionOf(users.manager, keys.mate)
+                }).refused,
+                twoCategories: detail({productCategoryId: prefix + "_CAT2", amount: "1"}),
+                otherCategory: detail({productCategoryId: prefix + "_CAT_B", amount: "1"})
+            }
+        },
+        then(r) {
+            // the rep sees the invoice of their order alone, not the one that also bills an order they do not see
+            measureOf(r.rep, "invoices") == 250
+            // the organization's reader counts both; the invoice of two differently attributed orders is unassigned
+            measureOf(r.organization, "invoices") == 580
+            measureOf(r.organization, "unassignedInvoices") == 330
+            r.leadJudgesRep.includes("PERMISSION_DENIED")
+            r.leadJudgesTeam == ""
+            r.personParent.includes("PARENT_INVALID")
+            r.twoCategories.includes("DETAIL_OVERLAP")
+            r.otherCategory.includes("CATEGORY_INVALID")
+        }
+    }
+)
+
+feature("a measure past its row limit is refused, never counted short", {
+    when() {
+        system(() => {
+            const day = ec.l10n.parseTimestamp(today() + " 12:00", "yyyy-MM-dd HH:mm")
+            for (let index = 0; index <= 2000; index++)
+                make("mantle.sales.opportunity.SalesOpportunity", {
+                    salesOpportunityId: prefix + "_BULK_" + index,
+                    organizationPartyId: orgA,
+                    typeEnumId: "SotOpportunity",
+                    opportunityName: "Bulk " + index,
+                    currencyUomId: "USD",
+                    estimatedAmount: 1,
+                    estimatedCloseDate: day
+                })
+        })
+        return {
+            refused: forecastOf(users.manager, {organizationPartyId: orgA, internalPartyId: orgA, timePeriodId: keys.quarter})
+                .refused
+        }
+    },
+    then(r) {
+        r.refused.includes("TOO_MANY_RECORDS")
     }
 })

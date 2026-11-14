@@ -57,6 +57,17 @@ const moneyText = (value, currencyUomId) =>
 const percentText = value => (value == null ? "" : Number(String(value)) + " %")
 const dayText = value => (value == null || value === "" ? "" : ec.l10n.format(new Date(ms(value)), "d MMM yyyy"))
 const partyName = partyId => (partyId ? lib.partyNames([partyId])[partyId] || partyId : "")
+// A query's rows up to the limit; past it the read is refused naming what to narrow, never counted short (a measure over the
+// first rows only would undercount without saying so).
+function limitedList(query, what) {
+    const found = Array.from(query.limit(dealLimit + 1).list())
+    if (found.length > dealLimit)
+        denied(
+            "TOO_MANY_RECORDS",
+            "More than " + dealLimit + " " + what + " to count here; choose a shorter period, a team or a person"
+        )
+    return found
+}
 
 // ===== keys, periods and revisions =====
 // A forecast's revision: the latest stamp of the row and its details.
@@ -292,7 +303,10 @@ function dealMeasures(userScope, key, subjects, at) {
     }
     let ids = subjectDealIds(subjects, at)
     const visible = salesAccess.assignedOpportunityIds(userScope)
-    if (visible != null) ids = ids == null ? visible : ids.filter(id => visible.includes(id))
+    if (visible != null) {
+        const visibleIds = new Set(visible)
+        ids = ids == null ? visible : ids.filter(id => visibleIds.has(id))
+    }
     if (ids != null && !ids.length) return out
     const factory = ec.entity.conditionFactory
     const from = new Date(key.period.fromMs)
@@ -338,9 +352,8 @@ function dealMeasures(userScope, key, subjects, at) {
             )
         )
         .orderBy(["estimatedCloseDate", "salesOpportunityId"])
-        .limit(dealLimit)
     if (ids != null) query = query.condition("salesOpportunityId", "in", ids)
-    const found = Array.from(query.list())
+    const found = limitedList(query, "deals")
     const months = recurringMonths(found.map(row => row.recurringPlanEnumId))
     const owners = {}
     if (found.length)
@@ -447,14 +460,13 @@ function orderMeasures(userScope, key, subjects, at) {
         .selectField("orderId")
         .selectField("grandTotal")
         .distinct(true)
-        .limit(dealLimit)
     const visible = salesAccess.assignedOrderIds(userScope)
     if (visible != null) {
         if (!visible.length) return out
         query = query.condition("orderId", "in", visible)
     }
     const totals = {}
-    for (const row of query.list()) totals[row.orderId] = row.grandTotal
+    for (const row of limitedList(query, "orders")) totals[row.orderId] = row.grandTotal
     const attributions = orderAttributions(Object.keys(totals))
     const memberCache = {}
     for (const [orderId, total] of Object.entries(totals)) {
@@ -476,7 +488,7 @@ function orderMeasures(userScope, key, subjects, at) {
 function invoiceMeasures(userScope, key, subjects, at) {
     const out = {amount: zero(), count: 0, unassigned: zero(), unassignedCount: 0}
     const internal = Array.from(new Set(rows("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).map(row => row.partyId)))
-    const invoices = Array.from(
+    const invoices = limitedList(
         find("mantle.account.invoice.Invoice")
             .condition("fromPartyId", key.organizationPartyId)
             .condition("invoiceTypeEnumId", "InvoiceSales")
@@ -486,12 +498,12 @@ function invoiceMeasures(userScope, key, subjects, at) {
             .condition("invoiceDate", "less", new Date(key.period.thruMs))
             .condition("toPartyId", "not-in", internal)
             .selectField("invoiceId")
-            .selectField("invoiceTotal")
-            .limit(dealLimit)
-            .list()
+            .selectField("invoiceTotal"),
+        "invoices"
     )
     if (!invoices.length) return out
-    const orderOf = {}
+    // the orders an invoice bills (OrderItemBilling), each once
+    const ordersOf = {}
     for (const row of find("mantle.order.OrderItemBilling")
         .condition(
             "invoiceId",
@@ -503,14 +515,23 @@ function invoiceMeasures(userScope, key, subjects, at) {
         .selectField("orderId")
         .distinct(true)
         .list())
-        orderOf[row.invoiceId] = orderOf[row.invoiceId] || row.orderId
-    const visible = salesAccess.assignedOrderIds(userScope)
-    const attributions = orderAttributions(Array.from(new Set(Object.values(orderOf))))
+        (ordersOf[row.invoiceId] = ordersOf[row.invoiceId] || new Set()).add(row.orderId)
+    const assigned = salesAccess.assignedOrderIds(userScope)
+    const visible = assigned == null ? null : new Set(assigned)
+    const attributions = orderAttributions(Array.from(new Set(Object.values(ordersOf).flatMap(orderIds => Array.from(orderIds)))))
+    const none = {ownerPartyId: null, teamPartyId: null}
     const memberCache = {}
     for (const invoice of invoices) {
-        const orderId = orderOf[invoice.invoiceId] || null
-        if (visible != null && (!orderId || !visible.includes(orderId))) continue
-        const attribution = orderId ? attributions[orderId] : {ownerPartyId: null, teamPartyId: null}
+        const orderIds = Array.from(ordersOf[invoice.invoiceId] || [])
+        // a reader of their own and their team's sees an invoice only when they see every order it bills: its total carries them all
+        if (visible != null && (!orderIds.length || orderIds.some(orderId => !visible.has(orderId)))) continue
+        // an invoice of several orders is attributed only when they are all attributed alike, else it is unassigned
+        const each = orderIds.map(orderId => attributions[orderId] || none)
+        const attribution =
+            each.length &&
+            each.every(found => found.ownerPartyId === each[0].ownerPartyId && found.teamPartyId === each[0].teamPartyId)
+                ? each[0]
+                : none
         const amount = toDecimal(invoice.invoiceTotal ?? 0)
         if (!attribution.ownerPartyId && !attribution.teamPartyId) {
             out.unassigned = out.unassigned.add(amount)
@@ -782,7 +803,8 @@ function storeForecast(p) {
 
 // ===== store#ForecastDetail =====
 // An allocation of a forecast's judgement to a product or a category (one of them), or its removal; the allocations never add up to
-// more than the forecast, and a product is never counted both directly and through a category it is a member of.
+// more than the forecast, and a product is never counted twice: directly and through a category it is a member of, or through two
+// categories. The product or category is the forecast organization's or a shared one (as Sales' choices offer them).
 function categoryProducts(productCategoryId) {
     return rows("mantle.product.category.ProductCategoryMember", {productCategoryId})
         .filter(row => lib.active(row))
@@ -806,16 +828,20 @@ function storeForecastDetail(p) {
     const productId = text(p.productId)
     const productCategoryId = text(p.productCategoryId)
     if (!!productId === !!productCategoryId) denied("DIMENSION_REQUIRED", "Choose a product or a category, not both")
-    if (productId && !one("mantle.product.Product", {productId})) denied("PRODUCT_INVALID", "Choose a product")
-    if (productCategoryId && !one("mantle.product.category.ProductCategory", {productCategoryId}))
+    const owned = row => !!row && [forecast.organizationPartyId, "_NA_"].includes(row.ownerPartyId || "_NA_")
+    if (productId && !owned(one("mantle.product.Product", {productId}))) denied("PRODUCT_INVALID", "Choose a product")
+    if (productCategoryId && !owned(one("mantle.product.category.ProductCategory", {productCategoryId})))
         denied("CATEGORY_INVALID", "Choose a category")
+    const members = {}
+    const membersOf = categoryId => (members[categoryId] = members[categoryId] || categoryProducts(categoryId))
     const others = details.filter(row => row !== existing && row.salesForecastDetailSeqId !== seqId)
     for (const other of others) {
         const overlaps = productId
-            ? other.productId === productId ||
-              (other.productCategoryId && categoryProducts(other.productCategoryId).includes(productId))
+            ? other.productId === productId || (other.productCategoryId && membersOf(other.productCategoryId).includes(productId))
             : other.productCategoryId === productCategoryId ||
-              (other.productId && categoryProducts(productCategoryId).includes(other.productId))
+              (other.productId && membersOf(productCategoryId).includes(other.productId)) ||
+              (other.productCategoryId &&
+                  membersOf(other.productCategoryId).some(memberId => membersOf(productCategoryId).includes(memberId)))
         if (overlaps) denied("DETAIL_OVERLAP", "This product is already allocated, directly or through a category")
     }
     const amount = amountOf(p.amount, forecast.currencyUomId, "The amount")
@@ -899,6 +925,14 @@ function storeTarget(p) {
             parent.currencyUomId !== key.currencyUomId
         )
             denied("PARENT_INVALID", "The parent is a forecast of the same organization, period and currency")
+        // the hierarchy runs from the organization through its teams: a parent is the organization's or a team's forecast, never a
+        // person's (whose measures would then take in every deal below it), and the organization's own forecast has none
+        const parentKind = salesAccess.forecastSubjectKind(parent.organizationPartyId, parent.internalPartyId)
+        const ownKind = forecast
+            ? salesAccess.forecastSubjectKind(forecast.organizationPartyId, forecast.internalPartyId)
+            : key.kind
+        if (!["organization", "team"].includes(parentKind) || ownKind === "organization")
+            denied("PARENT_INVALID", "A forecast rolls up to its organization's or a sales team's forecast")
         // no cycle: the parent and its ancestors never reach this forecast
         const seen = new Set()
         let at = parent
@@ -950,9 +984,7 @@ function findTargets(p) {
     let query = find(FORECAST).condition("organizationPartyId", organizationPartyId)
     if (text(p.timePeriodId)) query = query.condition("timePeriodId", text(p.timePeriodId))
     if (!flag(p.includeForecasts)) query = query.condition("quotaAmount", "is-not-null", null)
-    const found = Array.from(query.limit(dealLimit).list()).filter(
-        row => !!salesAccess.forecastOf(userScope, row.salesForecastId)
-    )
+    const found = limitedList(query, "forecasts").filter(row => !!salesAccess.forecastOf(userScope, row.salesForecastId))
     const periodIds = Array.from(new Set(found.map(row => row.timePeriodId).filter(Boolean)))
     const periods = periodIds.length
         ? Object.fromEntries(
