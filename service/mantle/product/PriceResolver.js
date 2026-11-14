@@ -58,7 +58,11 @@ function context(p) {
     // Shop's catalog prices as the authority for its routed store and signed-in customer (impl-shop P3, F18): only
     // get#StoreProductPrice sets this, in its own script (no service declares it, so no caller's input can)
     out.storeAuthority = p.storeAuthority === true && !!out.productStoreId && out.direction === "sales"
-    out.traceAllowed = !!p.explain && !out.storeAuthority && read(out.direction)
+    // A seller's prices as the authority for a sale its own checks admitted (impl-sales P7): only get#SellerProductPrice sets
+    // this, in its own script, for Sales' quote lines after SalesQuotes.js checked the seller and the customer
+    out.sellerAuthority =
+        p.sellerAuthority === true && !out.storeAuthority && out.direction === "sales" && !!out.organizationPartyId
+    out.traceAllowed = !!p.explain && !out.storeAuthority && !out.sellerAuthority && read(out.direction)
     out.priceTrace = []
     out.priceWarnings = []
     return out
@@ -70,9 +74,9 @@ function readable(row, c) {
     if (row.priceTypeEnumId === "PptAverage" && !read(c.direction, true)) return false
     const d = internal(row.vendorPartyId) ? "sales" : row.vendorPartyId ? "purchase" : "sales"
     if (d !== c.direction) return false
-    // The store's authority (get#StoreProductPrice): the public rows, the store organization's and the customer's own;
-    // never an agreement's, an average cost or another party's.
-    if (c.storeAuthority)
+    // The store's authority (get#StoreProductPrice) and the seller's (get#SellerProductPrice): the public rows, the store's or
+    // selling organization's and the customer's own; never an agreement's, an average cost or another party's.
+    if (c.storeAuthority || c.sellerAuthority)
         return (
             row.priceTypeEnumId !== "PptAverage" &&
             !row.agreementId &&
@@ -261,13 +265,14 @@ function fallback(c, type) {
 // scope's owners; as the store's authority (get#StoreProductPrice, impl-shop P4, F64), the features with no owner (_NA_) or the
 // store organization's (the selling vendor), so a shopper's variant price is the one staff see.
 function extras(c, selected) {
-    if (!selected?.virtualFallback || c.direction !== "sales" || !(c.storeAuthority || read("sales"))) return selected
+    const authority = c.storeAuthority || c.sellerAuthority
+    if (!selected?.virtualFallback || c.direction !== "sales" || !(authority || read("sales"))) return selected
     let price = toDecimal(selected.price)
     const unit = one(P + "Product", {productId: selected.productId})?.amountUomId,
         factor = conversion(1, c.quantityUomId || unit, unit, c.validDate, c, "quantity-unit-factor"),
-        s = c.storeAuthority ? null : policy().scope()
+        s = authority ? null : policy().scope()
     const owned = feature =>
-        c.storeAuthority
+        authority
             ? !feature.ownerPartyId || feature.ownerPartyId === "_NA_" || feature.ownerPartyId === c.vendorPartyId
             : s.systemAdmin || s.ownerPartyIds.includes(feature.ownerPartyId)
     for (const appl of rows(P + "feature.ProductFeatureAppl", {productId: c.productId}).filter(
@@ -545,10 +550,18 @@ function evaluate(list, c, path = []) {
 function applyList(p) {
     const c = p.pricingContext || context(p)
     if (p.listModifierApplied) return {}
-    if (!ec.user.userId || !read(c.direction)) return {listModifierApplied: true}
+    // the seller's authority (get#SellerProductPrice) reads its organization's published lists, which listEligible keeps to
+    // the selling organization, without the reader's own price grant
+    if (!c.sellerAuthority && (!ec.user.userId || !read(c.direction))) return {listModifierApplied: true}
+    const getList = id => {
+        if (!c.sellerAuthority) return policy().getList(id)
+        const found = one(P + "ProductPriceList", {priceListId: id})
+        if (!found) throw new Error("Price list is not available")
+        return found
+    }
     let selected
     if (c.priceListId) {
-        selected = policy().getList(c.priceListId)
+        selected = getList(c.priceListId)
         if (!listEligible(selected, c)) throw new Error("Selected price list is not effective for the transaction context")
     } else {
         const defaults = c.organizationPartyId
@@ -557,7 +570,7 @@ function applyList(p) {
                   .sort((a, b) => ms(b.fromDate) - ms(a.fromDate))[0]
             : null
         if (defaults?.defaultPriceListId && c.direction === "sales") {
-            const candidate = policy().getList(defaults.defaultPriceListId)
+            const candidate = getList(defaults.defaultPriceListId)
             if (
                 listEligible(candidate, c) &&
                 rows(P + "ProductPriceRule", {priceListId: candidate.priceListId}).some(r => eligibleRule(r, c))
@@ -571,7 +584,7 @@ function applyList(p) {
                     String(a.priceListId).localeCompare(String(b.priceListId))
             )) {
                 try {
-                    policy().getList(list.priceListId)
+                    getList(list.priceListId)
                 } catch (e) {
                     continue
                 }

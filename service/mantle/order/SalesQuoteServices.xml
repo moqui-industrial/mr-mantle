@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.order.SalesQuoteServices (Q, IronStone Sales design §12.1; design §5 Quotes and OrderDetail's quote context; impl-sales
+    P7, SAL-QUOTE): quote drafts over the native order (service/mantle/order/SalesQuotes.js; the scope in
+    service/mantle/sales/SalesAccess.js quoteOf). Each checks its own permission, the selling organization and the assignment, and
+    every party, opportunity, store, address and product given; each change names the order revision it read. Issue, send, the
+    response, revise and clone are P10's; approval P9's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Quotes" allow-remote="false" read-only="true">
+        <description>The one scoped list of quotes (design §5 QuoteList, Home and the palette): orders of purpose SalesQuote whose
+            selling part is of an organization of the caller's scope, the caller's and their teams' (or the organization's every
+            one for SALES_TEAM_VIEW), never a Shop cart, a recurring base or another purpose's order; filtered by organization,
+            customer, opportunity, owner (mine Y: the caller) or team, state (open, the default: Open, Requested and Proposed;
+            draft; requested; proposed; cancelled; all), validity (expiring within seven days, expired), currency and text (id or
+            name, ignoring case), paged in the query. Each row's customer (unnamed when the caller may not see the account),
+            seller, total, validity, owner and revision. Needs a Sales read (PERMISSION_DENIED); an organization outside the
+            scope is refused (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="state"/>
+            <parameter name="validity"><description>expiring or expired; empty for any</description></parameter>
+            <parameter name="currencyUomId"/>
+            <parameter name="text"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="quoteList" type="List"/>
+            <parameter name="quoteListCount" type="Integer"/>
+            <parameter name="quoteListPageIndex" type="Integer"/>
+            <parameter name="quoteListPageSize" type="Integer"/>
+            <parameter name="quoteListPageMaxIndex" type="Integer"/>
+            <parameter name="quoteListPageRangeLow" type="Integer"/>
+            <parameter name="quoteListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('findQuotes', context)"/>
+            <set field="quoteList" from="found.quoteList"/>
+            <set field="quoteListCount" from="found.quoteListCount"/>
+            <set field="quoteListPageIndex" from="found.quoteListPageIndex"/>
+            <set field="quoteListPageSize" from="found.quoteListPageSize"/>
+            <set field="quoteListPageMaxIndex" from="found.quoteListPageMaxIndex"/>
+            <set field="quoteListPageRangeLow" from="found.quoteListPageRangeLow"/>
+            <set field="quoteListPageRangeHigh" from="found.quoteListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Quote" allow-remote="false">
+        <description>A draft quote (design §5 NewQuote) over create#Order: one selling part of an organization of the caller's scope
+            (the one given, else the active or only one) for a customer that is an account of it or a shared one, one currency
+            (the one given, else the opportunity's, else the seller's base currency), with or without a store of that organization
+            (without one, X1: the seller's tax gateway), its validity on the part (from now unless given), the customer's postal
+            address, the caller as its owner, the opportunity's team (else the caller's only team of the organization), a contact of
+            the customer and the opportunity linked. Needs SALES_QUOTE_EDIT and a Sales read (PERMISSION_DENIED); refuses an
+            organization outside the scope (ORGANIZATION_DENIED), an account it may not see (RECORD_UNAVAILABLE) or of another
+            organization (CUSTOMER_INVALID), an opportunity of another organization or account (OPPORTUNITY_INVALID), a contact of
+            another account (CONTACT_INVALID), another organization's store (STORE_INVALID), no currency (CURRENCY_REQUIRED) and a
+            validity that ends before it starts (VALIDITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId" required="true"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="orderName"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="validFromDate" type="Timestamp"/>
+            <parameter name="validThruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderPartSeqId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="created" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('createQuote', context)"/>
+            <set field="orderId" from="created.orderId"/>
+            <set field="orderPartSeqId" from="created.orderPartSeqId"/>
+            <set field="orderRevision" from="created.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Quote" allow-remote="false" read-only="true">
+        <description>OrderDetail's quote (design §5) as the caller may see it (SalesAccess.js quoteOf), else quoteFound false: its
+            facts with names (an account the caller may not see unnamed), validity, owner, team and opportunity (when the caller sees
+            it), its lines with their price provenance (the calculated basis, the source, an entered price's reason and actor) and
+            tax, the totals of products, shipping and tax, the tax gateway that taxes it, the history of its audited fields, the
+            customer's addresses and whether the caller may edit it (a draft and SALES_QUOTE_EDIT) or enter a free line
+            (SALES_APPROVE). No cost or margin.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="quoteFound" type="Boolean"/>
+            <parameter name="quote" type="Map"/>
+            <parameter name="lines" type="List"/>
+            <parameter name="history" type="List"/>
+            <parameter name="addresses" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('getQuote', context)"/>
+            <set field="quoteFound" from="!!found.quoteFound"/>
+            <set field="quote" from="found.quote || null"/>
+            <set field="lines" from="found.lines || []"/>
+            <set field="history" from="found.history || []"/>
+            <set field="addresses" from="found.addresses || []"/>
+        </actions>
+    </service>
+    <service verb="update" noun="Quote" allow-remote="false">
+        <description>A draft quote's name, validity (validFromDate, validThruDate on the part), the customer's reference (its PO,
+            otherPartyOrderId) and address (one of the customer's). Needs SALES_QUOTE_EDIT on a quote the caller sees
+            (RECORD_UNAVAILABLE, PERMISSION_DENIED); refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale revision
+            (REVISION_CHANGED, naming the current one), a validity that ends before it starts (VALIDITY_INVALID) and another
+            party's address (ADDRESS_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="orderName"/>
+            <parameter name="validFromDate" type="Timestamp"/>
+            <parameter name="validThruDate" type="Timestamp"/>
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="postalContactMechId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="updated" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('updateQuote', context)"/>
+            <set field="orderId" from="updated.orderId"/>
+            <set field="orderRevision" from="updated.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="QuoteLine" allow-remote="false">
+        <description>A draft quote's line, new or changed (orderItemSeqId). A product line (ItemProduct, the default): a product
+            usable for selling (check#ProductUsable, PRODUCT_NOT_USABLE) at the one resolver's price for the seller and the customer
+            (get#SellerProductPrice), with its provenance and calculated basis; a changed quantity is repriced. An entered price
+            (unitAmount) or a free line (freeLine Y) keeps the calculated basis with the value, the reason (overrideReason,
+            OVERRIDE_REASON_REQUIRED) and the actor; useCalculatedPrice Y returns to the calculated price. A free line or an entered
+            zero needs SALES_APPROVE (FREE_LINE_DENIED); a product with no price the caller has not entered one for is refused
+            (PRICE_UNAVAILABLE). A shipping charge line (ItemShipping): the amount the rep enters, a storeless quote's freight.
+            Tax follows from the native order rules (X1). Needs SALES_QUOTE_EDIT on a quote the caller sees; refuses a quote that
+            is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_CHANGED), a line not on the quote or a tax line
+            (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="itemTypeEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="unitAmount" type="BigDecimal"/>
+            <parameter name="freeLine"/>
+            <parameter name="useCalculatedPrice"/>
+            <parameter name="overrideReason"/>
+            <parameter name="itemDescription"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderItemSeqId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('storeLine', context)"/>
+            <set field="orderId" from="stored.orderId"/>
+            <set field="orderItemSeqId" from="stored.orderItemSeqId"/>
+            <set field="orderRevision" from="stored.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="delete" noun="QuoteLine" allow-remote="false">
+        <description>A draft quote's line removed with its tax (OrderServices.delete#OrderItem, which retaxes the part). Needs
+            SALES_QUOTE_EDIT on a quote the caller sees; refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale
+            revision (REVISION_CHANGED) and a line not on the quote or a tax line (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="deleted" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('deleteLine', context)"/>
+            <set field="orderId" from="deleted.orderId"/>
+            <set field="orderRevision" from="deleted.orderRevision"/>
+        </actions>
+    </service>
+    <service verb="explain" noun="QuoteLinePrice" allow-remote="false" read-only="true">
+        <description>The safe explanation of a quote line's price for anyone who sees the quote (design §7, PriceExplain's Sales
+            branch): the selected price, where it came from (a price, a customer price, a price list, the list price, an entered
+            price with its reason, a free line), the calculated basis, the list price, the price list's name and today's price
+            when it differs; never the trace, a cost or another party's price, which stay Products' for a holder of PRICE_VIEW.
+            Refuses a quote the caller does not see (RECORD_UNAVAILABLE) and a line that is no product line of it
+            (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderItemSeqId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="explanation" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="explanation" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('explainLine', context).explanation"/>
+        </actions>
+    </service>
+</services>
