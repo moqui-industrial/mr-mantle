@@ -236,22 +236,35 @@ kit => {
             core.actor()
         )
         const view = agreement().view(r, held)
-        // what keeps it from merging: the host's reasons, and Smithy's own
-        const missingList = Array.from(out.missingList || [])
-        if (view.required && view.state !== "signed") missingList.push("The contributor agreement is not signed")
-        return {
-            mergeRequest: requestView(r, held, {
-                approvalCount: Number(out.approvalCount || 0),
-                checkState: out.checkState || null
-            }),
-            reviewerList: reviewerViews(p.siteId, out.reviewerList),
-            checkList: Array.from(out.checkList || []).map(check => ({
+        // the checks of its head with the pipeline runs they came from (DG5), and the required ones not reported yet
+        const checks = kit.pipelines.mergeChecks(
+            r,
+            mr,
+            Array.from(out.checkList || []).map(check => ({
                 context: check.context,
                 state: check.state,
                 description: check.description || "",
                 targetUrl: check.targetUrl || null,
                 required: rules.requiredStatusContexts.includes(check.context)
             })),
+            rules.requiredStatusContexts
+        )
+        // what keeps it from merging: the host's reasons, and Smithy's own
+        const missingList = Array.from(out.missingList || [])
+        if (view.required && view.state !== "signed") missingList.push("The contributor agreement is not signed")
+        if (checks.ciFileChanged)
+            missingList.push("It changes ci.xml, whose jobs the required checks ran: a Maintainer merges it")
+        const capable = capabilities(r, held, rules)
+        if (checks.requiredRole && r.rank < RANK[checks.requiredRole]) capable.canMerge = false
+        return {
+            mergeRequest: requestView(r, held, {
+                approvalCount: Number(out.approvalCount || 0),
+                checkState: out.checkState || null
+            }),
+            reviewerList: reviewerViews(p.siteId, out.reviewerList),
+            checkList: checks.checkList,
+            runList: checks.runList,
+            ciFileChanged: checks.ciFileChanged,
             missingList,
             branchRules: {
                 protected: rules.protected,
@@ -264,7 +277,7 @@ kit => {
             },
             agreement: view,
             linkedIssues: linked,
-            capabilities: capabilities(r, held, rules),
+            capabilities: capable,
             pending: held.pending
         }
     }
@@ -1092,6 +1105,9 @@ kit => {
             .map(check => check.context)
         const failing = rules.requiredStatusContexts.filter(context => !passed.includes(context))
         if (failing.length) invalid("checksRequired: Checks not passed: " + failing.join(", "))
+        // a head that changes ci.xml wrote the jobs its required checks ran: a Maintainer merges it (DG5)
+        if (rules.requiredStatusContexts.some(context => context.startsWith("ci/")) && kit.pipelines.ciFileChanged(r, mr))
+            core.requireRole(r, "SmrMaintainer")
         if (approvalsOf(mr.mergeRequestId) < rules.requiredApprovals)
             invalid("The branch rules ask for " + rules.requiredApprovals + " approvals")
         // the source branch goes only when the caller could delete it: a Developer of the source repository (a fork's

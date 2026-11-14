@@ -332,8 +332,13 @@ feature(
 feature("a fork of a hidden repository is hidden with it, a hidden repository is not forked, and neither runs its pipelines", {
     when() {
         const fork = lib.row("mantle.smithy.SmithyRepository", {siteId: SITE, repositoryPath: "smtnew/f1"})
-        const check = repositoryId =>
-            lib.run("mantle.smithy.SmithyServices.check#PipelineRun", {repositoryId, event: "push"}).decision || null
+        // the engine's run check (SmithyPipelineServices.check#Run), for a trusted push of a repository whose pipelines are on
+        for (const repositoryId of [ids.repositoryId, fork.repositoryId])
+            lib.set("mantle.smithy.SmithyRepository", {repositoryId}, {pipelinesEnabled: "Y"})
+        const check = repositoryId => {
+            const out = lib.run("mantle.smithy.SmithyPipelineServices.check#Run", {repositoryId, event: "push", trusted: true})
+            return out.decision === "refuse" && /hidden/.test(out.message) ? "hidden" : out.decision || null
+        }
         const before = check(ids.repositoryId)
         hide("SMT_MOD", "repository", true)
         lib.settled(SITE, "SMT_AUTHOR")
@@ -349,11 +354,11 @@ feature("a fork of a hidden repository is hidden with it, a hidden repository is
         return out
     },
     then({before, stranger, forkOwner, fork, runs}) {
-        before == null
+        before == "allow"
         stranger == "NotFound"
         forkOwner == null
         fork.kind == "Conflict"
         fork.reason == "repositoryHidden"
-        runs == ["refuse", "refuse"]
+        runs == ["hidden", "hidden"]
     }
 })

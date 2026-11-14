@@ -884,8 +884,11 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="notify" noun="CommitStatusFailed">
         <description>A failure or error status posted on a commit (the SECA on org.moqui.git.GitServices.create#GitCommitStatus):
-            topic CommitStatusFailed to the commit's author (its Moqui-User-Id, else the user accounts with its email) and to
-            the authors of the open merge requests whose head it is, not the one who posted it. Message: repositoryId,
+            topic CommitStatusFailed to the commit's author (its Moqui-User-Id, else the user accounts with its email), to
+            the authors of the open merge requests whose head it is, and for a pipeline's status (a ci/ context, which the
+            engine writes) to the account that pushed or asked for the run, not the one who posted it. Nobody is told who
+            may not see it: for a repository Smithy has only those who view it, and for the head of a hidden merge request
+            (a held one, and its hidden run) only that merge request's author. Message: repositoryId,
             commitId, shortId, summary, checkContext (a template's context names the context itself), state, stateLabel, description, targetUrl. A notice that fails is logged.</description>
         <in-parameters><parameter name="commitStatusId" required="true"/></in-parameters>
         <out-parameters><parameter name="notifiedUserIdList" type="List"/></out-parameters>
@@ -904,9 +907,31 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const account of Array.from(ec.entity.find('moqui.security.UserAccount').condition('emailAddress', commit.authorEmail)
                             .selectField('userId').disableAuthz().list())) userIds.push(account.userId)
                 }
-                for (const mr of Array.from(ec.entity.find('moqui.resource.GitMergeRequest').condition({repositoryId, headCommitId: status.commitId})
-                        .condition('statusId', 'in', ['GmrDraft', 'GmrOpen']).disableAuthz().list())) userIds.push(mr.authorUserId)
-                const wanted = Array.from(new Set(userIds.filter((id) => id && id !== status.createdByUserId && id !== ec.user.userId)))
+                const heads = Array.from(ec.entity.find('moqui.resource.GitMergeRequest').condition({repositoryId, headCommitId: status.commitId})
+                        .limit(50).disableAuthz().list())
+                for (const mr of heads) if (['GmrDraft', 'GmrOpen'].includes(mr.statusId)) userIds.push(mr.authorUserId)
+                // a pipeline's status: the account that pushed or asked for the newest run of that pipeline at this commit
+                let run = null
+                if (String(status.context || '').startsWith('ci/')) {
+                    run = Array.from(ec.entity.find('moqui.resource.GitPipelineRun')
+                            .condition({repositoryId, commitId: status.commitId, pipelineName: String(status.context).split('/')[1] || '_NONE_'})
+                            .orderBy('-runNum').limit(1).disableAuthz().list())[0] || null
+                    if (run?.triggeredByUserId) userIds.push(run.triggeredByUserId)
+                }
+                // a hidden merge request's head (its run hidden with it) is told to that merge request's author alone
+                const hiddenAuthors = heads.filter((mr) => !!mr.hiddenDate).map((mr) => mr.authorUserId)
+                if (run?.hidden === 'Y' && run.mergeRequestId) {
+                    const own = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', run.mergeRequestId).disableAuthz().one()
+                    hiddenAuthors.push(own?.authorUserId || '_NONE_')
+                }
+                let candidates = userIds.filter((id) => id && id !== status.createdByUserId && id !== ec.user.userId)
+                if (hiddenAuthors.length) candidates = candidates.filter((id) => hiddenAuthors.includes(id))
+                // a repository Smithy has: only those who view it (its hidden, private and members-only rules)
+                if (ec.entity.find('mantle.smithy.SmithyRepository').condition('repositoryId', repositoryId).disableAuthz().count() > 0) {
+                    const smithy = ec.resource.script('component://mr-mantle/service/mantle/smithy/Smithy.js')
+                    candidates = candidates.filter((id) => smithy.rights(repositoryId, id).canView)
+                }
+                const wanted = Array.from(new Set(candidates))
                 if (wanted.length) {
                     ec.makeNotificationMessage().topic('CommitStatusFailed').userIds(wanted).message({repositoryId, commitId: status.commitId,
                         shortId: commit.shortId || String(status.commitId).substring(0, 10), summary: commit.summary || '', checkContext: status.context || 'default',

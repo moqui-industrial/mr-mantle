@@ -23,6 +23,9 @@
         <field name="groupRunnerMinutes" type="number-integer"><description>A group's default, a month; 2000 when empty</description></field>
         <field name="maxEditBytes" type="number-integer"><description>The page editor's limit; 1048576 when empty</description></field>
         <field name="repositoryKind" type="text-short"><description>The kind of a new repository, a GitRepository.repositoryKind: db when empty, or local</description></field>
+        <field name="outsideRunApproval" type="text-short"><description>When an outside pipeline run (untrusted: a fork's or a
+            pushed-for-review merge request, an account below Developer) waits for a Maintainer's approval: first (the
+            default: until its author has a merged merge request in the repository), always, or never. A group may set its own</description></field>
         <field name="revision" type="number-integer"/>
         <relationship type="one" related="mantle.public.PublicSite"/>
         <relationship type="one-nofk" title="Home" related="mantle.smithy.SmithyGroup">
@@ -54,11 +57,15 @@
         <field name="landingPath" type="text-medium"/>
         <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
         <field name="agreementPath" type="text-medium"><description>AUTHORS.md when empty</description></field>
-        <field name="runnerPoolId" type="id"><description>Trusted runs</description></field>
-        <field name="outsideRunnerPoolId" type="id"><description>Untrusted runs</description></field>
+        <field name="runnerPoolId" type="id"><description>The GitRunnerPool of trusted runs, one an operator allowed (a shared pool or one
+            of the top-level group's); empty: the nearest group above that sets it, else the engine's choice</description></field>
+        <field name="outsideRunnerPoolId" type="id"><description>The pool of untrusted runs, as runnerPoolId</description></field>
+        <field name="outsideRunApproval" type="text-short"><description>first, always or never (SmithySite.outsideRunApproval);
+            empty: the nearest group above that sets it, else the site's</description></field>
         <field name="maxRepositoryBytes" type="number-integer"><description>Empty: the site's default</description></field>
         <field name="maxLfsBytes" type="number-integer"><description>Empty: the site's default</description></field>
-        <field name="runnerMinutesMonthly" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="runnerMinutesMonthly" type="number-integer"><description>A top-level group's, for every repository below it
+            (the pipeline runs' owner); empty: the site's default</description></field>
         <field name="hiddenAt" type="date-time"><description>Set: Not Found to everyone but its Owners and the site's staff</description></field>
         <field name="hiddenByPartyId" type="id"/>
         <field name="hideReason" type="text-long"/>

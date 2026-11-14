@@ -272,6 +272,7 @@ kit => {
             homeGroupPath: home?.groupPath || null,
             ...Object.fromEntries(SETTING_NUMBERS.map(name => [name, s[name]])),
             repositoryKind: s.repositoryKind,
+            outsideRunApproval: s.outsideRunApproval,
             revision: s.revision
         }
     }
@@ -289,6 +290,11 @@ kit => {
         if (given(p.repositoryKind)) {
             if (p.repositoryKind && !["db", "local"].includes(p.repositoryKind)) invalid("repositoryKind must be db or local")
             fields.repositoryKind = p.repositoryKind || null
+        }
+        if (given(p.outsideRunApproval)) {
+            if (p.outsideRunApproval && !kit.OUTSIDE_APPROVALS.includes(p.outsideRunApproval))
+                invalid("outsideRunApproval must be first, always or never")
+            fields.outsideRunApproval = p.outsideRunApproval || null
         }
         if (given(p.homeGroupPath)) {
             const home = p.homeGroupPath
@@ -1028,6 +1034,8 @@ kit => {
             about = {kind: "account", handle: owner.handle}
             revision = Number(limits.account?.revision || 0)
         }
+        // runner minutes are a top-level group's, for everything below it, or an account's (the runs' owner, DG5)
+        const minutes = owner.r ? kit.pipelines.groupMinutes(owner.r.chain, s) : kit.pipelines.accountMinutes(p.siteId, owner.partyId, s)
         // usage is the framework's to count; when it cannot, the counts of bytes are not known
         const used = usageOf(repositories.map(row => row.repositoryId))
         const bytes = (row, field) => Number(used.get(row.repositoryId)?.[field] || 0)
@@ -1040,7 +1048,7 @@ kit => {
                 repositories: limits.repositories,
                 repositoryBytes: limits.repositoryBytes,
                 lfsBytes: limits.lfsBytes,
-                runnerMinutes: limits.runnerMinutes
+                runnerMinutes: minutes.limit
             },
             // what the row itself sets, empty where it leaves the default (setQuota with an empty value clears one)
             ownLimits: {
@@ -1054,8 +1062,9 @@ kit => {
                 // a repository's limit is for one repository: the largest is what is near it
                 repositoryBytes: used ? Math.max(0, ...repositories.map(row => bytes(row, "storedBytes"))) : null,
                 lfsBytes: used ? repositories.reduce((sum, row) => sum + bytes(row, "lfsBytes"), 0) : null,
-                // pipelines are DG5's
-                runnerMinutes: 0
+                // this month's, as the engine counted them; null when they cannot be read
+                runnerMinutes: minutes.used ? minutes.used.minutesUsed : null,
+                runnerPeriod: minutes.used ? minutes.used.periodKey : null
             },
             repositoryList: repositories.slice(0, 200).map(row => ({
                 repositoryPath: row.repositoryPath,
@@ -1076,6 +1085,8 @@ kit => {
         if (owner.r) {
             if (given(p.maxRepositories) || given(p.bot) || given(p.botOperatorHandle))
                 invalid("maxRepositories and the bot mark are an account's, not a group's")
+            if (given(p.runnerMinutesMonthly) && owner.r.chain.length > 1)
+                invalid("runnerMinutesMonthly is a top-level group's: it counts every repository below it")
             const group = one(M + "SmithyGroup", {groupId: owner.r.group.groupId}, true)
             const before = revisionOf(group)
             fresh(before, p.expectedRevision)

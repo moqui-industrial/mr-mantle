@@ -1145,7 +1145,9 @@ const kit = {
     GIT_REPOSITORY,
     commitViews,
     fileViews,
-    boundedDiffs
+    boundedDiffs,
+    // DG5: when an outside pipeline run waits for a Maintainer's approval (SmithySite and SmithyGroup outsideRunApproval)
+    OUTSIDE_APPROVALS: ["first", "always", "never"]
 }
 // issues (§15.4): its own module; what the other modules need of it is in the kit
 const issues = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyIssues.js")(kit)
@@ -1160,6 +1162,9 @@ kit.agreement = agreements
 // the forum inside Smithy, Report and Hide, the report address (§15.7); its views are read by getGroup and getRepository
 const forumScope = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyForum.js")(kit)
 kit.forumScope = forumScope
+// pipelines (§15.6): the operations, the engine's run check and run URL, and the merge box's runs
+const pipelines = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyPipelines.js")(kit)
+kit.pipelines = pipelines
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1184,11 +1189,13 @@ const NUMBERS = [
     "duplicateOfNumber",
     "mergeRequestNum",
     "oldLine",
-    "newLine"
+    "newLine",
+    "runNum",
+    "afterChunkSeq"
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
 const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles", "postIds"]
-const TEXTS = ["body"]
+const TEXTS = ["body", "value"]
 /* A file's text as a page's editor sends it: bounded here well above the site's maxEditBytes, which commitFile holds. */
 const FILE_TEXTS = ["content"]
 /* A review's pending line comments: at most 50 maps of a line comment's own fields. */
@@ -1221,7 +1228,9 @@ const FLAGS = [
     "resolved",
     "agent",
     "enabled",
-    "hidden"
+    "hidden",
+    "watch",
+    "approvalRequired"
 ]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
@@ -1328,7 +1337,9 @@ function privileged(work) {
     // DG6: a report by mail filed as its confirmed sender, and the day's limit of pipeline runs
     fileMailReport: p => privileged(() => core.withMemo(() => forumScope.fileMailReport(p || {}))),
     countPipelineRun: p => privileged(() => core.withMemo(() => forumScope.countPipelineRun(p || {}))),
-    checkPipelineRun: p => privileged(() => core.withMemo(() => forumScope.checkPipelineRun(p || {}))),
+    // DG5: the engine's hooks (SmithyPipelineServices.xml, git-ci run-check-service and run-url-service)
+    checkRun: p => privileged(() => core.withMemo(() => pipelines.checkRun(p || {}))),
+    runUrl: p => privileged(() => core.withMemo(() => pipelines.runUrl(p || {}))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

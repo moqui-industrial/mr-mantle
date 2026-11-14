@@ -594,18 +594,11 @@
         </actions>
     </service>
     <service verb="count" noun="PipelineRun" authenticate="anonymous-all" allow-remote="false">
-        <description>The day's limit of pipeline runs an account asks for (by hand, or an outside run), by its trust level in the site (the post gate's kind pipelineRun, design-smithy §12.2): whether one more is allowed, and it is counted when it is. A Maintainer of the repository and the site's staff have no limit. For the CI's pre-queue hook (DG5); not an operation.</description>
+        <description>The day's limit of pipeline runs an account asks for (by hand, or an outside run), by its trust level in the site (the post gate's kind pipelineRun, design-smithy §12.2): whether one more is allowed, and it is counted when it is. A Maintainer of the repository and the site's staff have no limit. For the CI's run check (SmithyPipelineServices.check#Run); not an operation.</description>
         <in-parameters><parameter name="repositoryId" required="true"/><parameter name="userId" required="true"/></in-parameters>
         <out-parameters><parameter name="allowed" type="Boolean"/><parameter name="reason"/><parameter name="message"/></out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").countPipelineRun({repositoryId, userId}))</script>
-        </actions>
-    </service>
-    <service verb="check" noun="PipelineRun" authenticate="anonymous-all" allow-remote="false">
-        <implements service="org.moqui.git.GitCiServices.check#PipelineRun"/>
-        <description>Smithy's run check, for the conf's git-ci run-check-service: a run of a repository that is hidden (by itself, a group above it, or the repository it was forked from; design-smithy §12.3) is refused, so its pipelines stop while it is hidden. No decision for any other run, so the engine's own rule holds. Not an operation.</description>
-        <actions>
-            <script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkPipelineRun({repositoryId}))</script>
         </actions>
     </service>
 </services>

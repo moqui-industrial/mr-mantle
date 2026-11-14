@@ -87,6 +87,7 @@
             "groupRunnerMinutes",
             "maxEditBytes",
             "repositoryKind",
+            "outsideRunApproval",
             "expectedRevision"
         ]
     },
@@ -488,5 +489,78 @@
     claimHeldReport: {
         service: "mantle.smithy.SmithyIssueServices.claim#HeldReport",
         fields: ["siteId", "token", "operationId"]
+    },
+    // DG5 (§15.6): pipelines
+    findPipelineRuns: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Runs",
+        fields: ["siteId", "repositoryId", "refName", "event", "state", "mergeRequestNum", "commitId", "pipelineName", "limit", "cursor"]
+    },
+    getPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.get#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    getJobRun: {
+        service: "mantle.smithy.SmithyPipelineServices.get#JobRun",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId"]
+    },
+    getJobLog: {
+        service: "mantle.smithy.SmithyPipelineServices.get#JobLog",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId", "afterChunkSeq", "offset", "limit", "watch"]
+    },
+    downloadArtifact: {
+        service: "mantle.smithy.SmithyPipelineServices.download#Artifact",
+        fields: ["siteId", "repositoryId", "artifactId"]
+    },
+    runPipeline: {
+        service: "mantle.smithy.SmithyPipelineServices.run#Pipeline",
+        fields: ["siteId", "repositoryId", "pipelineName", "refName", "operationId"]
+    },
+    rerunPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.rerun#Run",
+        fields: ["siteId", "repositoryId", "runNum", "operationId"]
+    },
+    cancelPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.cancel#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    retryJobRun: {
+        service: "mantle.smithy.SmithyPipelineServices.retry#JobRun",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId", "operationId"]
+    },
+    approvePipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.approve#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    findCiSecrets: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Secrets",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeCiSecret: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Secret",
+        fields: ["siteId", "repositoryId", "secretId", "name", "value", "scope", "environmentId", "operationId"]
+    },
+    deleteCiSecret: {
+        service: "mantle.smithy.SmithyPipelineServices.delete#Secret",
+        fields: ["siteId", "repositoryId", "secretId"]
+    },
+    findCiEnvironments: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Environments",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeCiEnvironment: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Environment",
+        fields: ["siteId", "repositoryId", "environmentId", "name", "allowedRefs", "approvalRequired", "operationId"]
+    },
+    deleteCiEnvironment: {
+        service: "mantle.smithy.SmithyPipelineServices.delete#Environment",
+        fields: ["siteId", "repositoryId", "environmentId"]
+    },
+    getPipelineSettings: {
+        service: "mantle.smithy.SmithyPipelineServices.get#Settings",
+        fields: ["siteId", "repositoryId", "groupId"]
+    },
+    storePipelineSettings: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Settings",
+        fields: ["siteId", "groupId", "runnerPoolId", "outsideRunnerPoolId", "outsideRunApproval", "expectedRevision"]
     }
 })

@@ -522,16 +522,5 @@ kit => {
         forum.gateCommit(gated)
         return {allowed: true}
     }
-    /* check#PipelineRun (the git-ci run-check-service, org.moqui.git.GitCiServices.check#PipelineRun): no run is queued
-       for a repository that is hidden, by itself, a group above it or the repository it was forked from (design §12.3:
-       a hidden repository's pushes by its Owners go on, its runs do not). No decision otherwise, so the engine's own
-       rule holds. */
-    function checkPipelineRun(p) {
-        const repo = p.repositoryId ? one(M + "SmithyRepository", {repositoryId: p.repositoryId}) : null
-        if (!repo) return {}
-        const r = core.repositoryRights(repo, core.actor(null))
-        if (r.hidden) return {decision: "refuse", message: "This repository is hidden by a moderator: its pipelines do not run"}
-        return {}
-    }
-    return {applyForum, narrow, follow, forumView, mailRouteView, fileMailReport, countPipelineRun, checkPipelineRun}
+    return {applyForum, narrow, follow, forumView, mailRouteView, fileMailReport, countPipelineRun}
 }

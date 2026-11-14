@@ -97,6 +97,8 @@ const DOWNLOADS = [
     'getShopThemeAsset',
     // Smithy (mr-pass plan/design-smithy.md §15.2): a tree as a zip or tar.gz, a file the framework wrote
     'downloadArchive',
+    // Smithy DG5 (§15.6): a run's artifact or report
+    'downloadArtifact',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's

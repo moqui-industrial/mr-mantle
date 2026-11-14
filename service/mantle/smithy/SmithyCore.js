@@ -220,7 +220,9 @@ const SETTING_DEFAULTS = {
     groupLfsBytes: 5368709120,
     groupRunnerMinutes: 2000,
     maxEditBytes: 1048576,
-    repositoryKind: "db"
+    repositoryKind: "db",
+    // DG5: when an outside pipeline run waits for a Maintainer's approval (first, always, never)
+    outsideRunApproval: "first"
 }
 /* A site's Smithy settings, each its default where the row, or its field, is empty; row is the SmithySite or null. */
 function settings(siteId) {
