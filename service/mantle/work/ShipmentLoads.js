@@ -75,6 +75,9 @@ function evaluate(part, facilityId, options, lock = false) {
     const facility = one("mantle.facility.Facility", {facilityId})
     if (orderPart.facilityId ? orderPart.facilityId !== facilityId : orderPart.vendorPartyId !== facility?.ownerPartyId)
         return exclude("OTHER_FACILITY", "Order " + partKey(part) + " ships from " + (orderPart.facilityId || "another facility"))
+    // impl-sales P16: a recurring base is a template; only the orders generated from it ship
+    if (["OrpRecurringTemplate", "OrpSalesQuoteTemplate"].includes(header.orderPurposeEnumId))
+        return exclude("RECURRING_TEMPLATE", "Order " + part.orderId + " is a recurring base: only the orders made from it ship")
     if (header.statusId === "OrderHold" || orderPart.statusId === "OrderHold")
         return exclude("ORDER_HELD", "Order " + part.orderId + " is on hold: it gets no new shipment")
     if (orderPart.statusId !== "OrderApproved")

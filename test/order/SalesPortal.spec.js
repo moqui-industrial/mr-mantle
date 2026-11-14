@@ -572,3 +572,44 @@ feature(
         }
     }
 )
+
+// Sales P19 (the user's call of Nov 14, P17's review): a cancelled order stays on My orders and opens from its link, marked Cancelled
+// and read only; its link is not revoked by the cancellation, and it is never counted open
+feature("a cancelled order stays listed and opens from its link marked Cancelled, read only, and is not counted open", {
+    when() {
+        capture.clear()
+        const orderId = placedOrder(f.accounts.a, {contactPartyId: f.contacts.mailed})
+        drain()
+        const mail = capture.getMessages().find(message => String(message.subject).includes(orderId))
+        const token = orderTokenOf(mail?.body)
+        const cardBefore = page("SPT_BUYER", "get#AccountCard", {})
+        system(() => call("mantle.order.OrderServices.cancel#Order", {orderId}))
+        const header = system(() => one("mantle.order.OrderHeader", {orderId}))
+        const byLink = page(null, "get#CustomerOrder", {token})
+        const byId = page("SPT_BUYER", "get#CustomerOrder", {orderId})
+        const all = page("SPT_BUYER", "find#CustomerOrders", {})
+        const open = page("SPT_BUYER", "find#CustomerOrders", {state: "open"})
+        const cardAfter = page("SPT_BUYER", "get#AccountCard", {})
+        const revoked = system(() =>
+            ec.entity
+                .find("mantle.party.ExternalAccessCapability")
+                .condition("recordType", "SalesOrder")
+                .condition("recordId", orderId)
+                .condition("revokedDate", "is-not-null", null)
+                .count()
+        )
+        return {orderId, token, header, byLink, byId, all, open, cardBefore, cardAfter, revoked}
+    },
+    then({orderId, token, header, byLink, byId, all, open, cardBefore, cardAfter, revoked}) {
+        token != null && header.statusId == "OrderCancelled" && revoked == 0
+        byLink.order.orderId == orderId && byLink.order.cancelled == true && byLink.order.stateText == "Cancelled"
+        byLink.order.lines.length == 1
+        byLink.actions.requestCancelUrl == null && byLink.actions.requestReturnUrl == null
+        byId.order.cancelled == true && byId.actions.requestCancelUrl == null && byId.actions.requestReturnUrl == null
+        byId.actions.cancellationRequested == false && byId.invoices.every(row => row.billingUrl == null)
+        all.orderList.find(row => row.orderId == orderId).stateText == "Cancelled"
+        all.orderList.find(row => row.orderId == orderId).cancelled == true
+        !open.orderList.some(row => row.orderId == orderId)
+        cardBefore.lines.join(" ") != cardAfter.lines.join(" ")
+    }
+})

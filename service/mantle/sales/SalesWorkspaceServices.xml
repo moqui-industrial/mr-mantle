@@ -26,7 +26,10 @@ along with this software (see the LICENSE.md file). If not, see
             checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the organization as
             subject and scope, and for a check that is not ready its owner's place as a route key (fixRoute, with fixId where it
             names a record): a default pipeline (salesStages), a pipeline in effect without stages (salesStages, the pipeline), a
-            team with a member (salesTeams) and a lead source offered (salesLeadSources). Later phases add theirs. One check that
+            team with a member (salesTeams) and a lead source offered (salesLeadSources); P9 the Sales defaults and the commercial
+            revision (salesDefaults), P13 the public quote pages, and P19 Sales' scheduled jobs (none paused or failing on its last
+            run), its mail templates (the organization's or Mantle's quote, reminder and confirmation templates with a from address
+            and a mail server) and its approval rules (salesApprovalPolicies: the approval setting on with no rule). One check that
             fails is unavailable by name and the others go on. Changes nothing. Refuses a caller without SALES_CONFIGURE
             (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
         <in-parameters>
@@ -279,6 +282,24 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="orderListPageMaxIndex" from="found.orderListPageMaxIndex"/>
             <set field="orderListPageRangeLow" from="found.orderListPageRangeLow"/>
             <set field="orderListPageRangeHigh" from="found.orderListPageRangeHigh"/>
+        </actions>
+    </service>
+    <!-- ========== P19: the report catalogue ========== -->
+    <service verb="get" noun="SalesReports" allow-remote="false" read-only="true">
+        <description>Sales' report catalogue (design-sales §8 Reports SalesReportCatalogue; impl-sales P19), the catalogue service of
+            Sales' entries in Insights' catalog (catalogueService, called with appRoot): the reports the caller may read, each with its
+            entry id, report id, owner, title, description, path under the app root, parameters and whether it exports. Sales
+            summary, Sales analysis, Pipeline analysis, Win/loss and Target attainment for a report reader (SALES_REPORT_VIEW),
+            Forecast for every Sales reader. Refuses another app root (REPORTS_UNAVAILABLE: Accounting's mount of Sales analysis
+            has its own entry under Accounting's catalogue, F59) and a caller who reads no Sales (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="appRoot"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reports" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="reports" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('salesReports', context).reports"/>
         </actions>
     </service>
 </services>

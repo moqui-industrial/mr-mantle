@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' recurring orders' auto-invoice (impl-sales follow-up 2; §4 Nov 14; design-sales §7): once an order's approval commits, at
+    placement or later by a person, an order made for an occurrence of a base whose auto-invoice is on is invoiced once
+    (mantle.order.SalesRecurrenceServices.invoice#RecurringOrder, in a transaction of its own, never failing the approval). Every other
+    order is unchanged: the service returns at once for an order with no base. A Shop contract's renewals are Shop's
+    (ShopFulfillment.secas.xml). -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="SalesRecurrenceApprovedInvoice" service="update#mantle.order.OrderHeader" when="tx-commit">
+        <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
+        <actions><service-call name="mantle.order.SalesRecurrenceServices.invoice#RecurringOrder" in-map="{orderId:orderId}"
+                disable-authz="true" transaction="force-new" ignore-error="true"/></actions>
+    </seca>
+</secas>

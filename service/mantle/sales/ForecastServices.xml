@@ -247,4 +247,122 @@ along with this software (see the LICENSE.md file). If not, see
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('ensureSalesPeriods', context))</script>
         </actions>
     </service>
+    <!-- ========== P19: the pipeline reports (design §8 PipelineAnalysis, WinLoss; impl-sales P19), over SalesPipelineReports.js ========== -->
+    <service verb="get" noun="PipelineAnalysis" allow-remote="false" read-only="true">
+        <description>PipelineAnalysis (design §8 PipelineMeasures, PipelineFunnel): the open qualified deals a Sales report reader sees,
+            as they stood at the as-of time (now by default; each field from its audit log), under the filters (organization, team,
+            owner, pipeline, stage, source, campaign, account, currency, expected close period), grouped by stage, source, owner or
+            age band and by currency: count, estimated and weighted amount, monthly recurring amount, average age, missing estimates
+            and next-activity coverage (open tasks now), never added across currencies; the open leads counted apart. Stage
+            durations from the audited stage changes up to the time, reopenings included, a stay whose entry or exit the log does
+            not show counted unknown, never guessed. Lead conversion over the leads created between cohortFrom and cohortThru (the
+            90 days to the time by default): created, qualified (convertedDate), disqualified, still open, won. The funnel's steps
+            visits (Marketing's count#SalesVisits when it exists, else not available), leads, qualified and won, as counts. The open
+            deals behind the measures, paged (pageNoLimit for an export, up to 2,000). Refuses a caller without SALES_REPORT_VIEW
+            (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), an unknown grouping (GROUPING_INVALID) and
+            more than 2,000 deals (TOO_MANY_RECORDS).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="closeFrom"/>
+            <parameter name="closeThru"/>
+            <parameter name="cohortFrom"/>
+            <parameter name="cohortThru"/>
+            <parameter name="asOfDate"/>
+            <parameter name="groupBy" default-value="stage"><description>stage, source, owner or age</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="groupBy"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="openDealCount" type="Integer"/>
+            <parameter name="openLeadCount" type="Integer"/>
+            <parameter name="measureList" type="List"/>
+            <parameter name="stageDurationList" type="List"/>
+            <parameter name="conversion" type="Map"/>
+            <parameter name="funnelSteps" type="List"/>
+            <parameter name="activityNote"/>
+            <parameter name="dealList" type="List"/>
+            <parameter name="dealListCount" type="Integer"/>
+            <parameter name="dealListPageIndex" type="Integer"/>
+            <parameter name="dealListPageSize" type="Integer"/>
+            <parameter name="dealListPageMaxIndex" type="Integer"/>
+            <parameter name="dealListPageRangeLow" type="Integer"/>
+            <parameter name="dealListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesPipelineReports.js').execute('pipelineAnalysis', context))</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="WinLoss" allow-remote="false" read-only="true">
+        <description>WinLoss (design §8 OutcomeOptions, OutcomeResults): the deals a Sales report reader sees closed in a period (the
+            calendar quarter holding the as-of time by default), under the filters (organization, team, owner, account, source,
+            currency, lost reason). In the final-outcome mode (mode final, the default) each deal once, by its outcome and close date
+            as of the report time; in the event mode (events) each close event in the period, a reopened deal's earlier closes among
+            them. Won and lost counts and amounts by currency, never added across currencies; win rate as won over won and lost
+            opportunities only; leads closed Lost (disqualified before qualification) counted apart; loss reasons (as recorded at
+            the close) with counts and amounts by currency; average cycle time (created to closed) of won and of lost deals; the
+            reopenings of the deals counted; the outcomes listed, paged (pageNoLimit for an export, up to 2,000). Refuses a caller
+            without SALES_REPORT_VIEW (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), an unknown mode
+            (MODE_INVALID) and more than 2,000 deals (TOO_MANY_RECORDS).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="lostReasonEnumId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="asOfDate"/>
+            <parameter name="mode" default-value="final"><description>final or events</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="mode"/>
+            <parameter name="modeText"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="wonCount" type="Integer"/>
+            <parameter name="lostCount" type="Integer"/>
+            <parameter name="disqualifiedCount" type="Integer"/>
+            <parameter name="winRatePercent"/>
+            <parameter name="winRateText"/>
+            <parameter name="averageWonCycleDays"/>
+            <parameter name="averageWonCycleText"/>
+            <parameter name="averageLostCycleText"/>
+            <parameter name="reopenCount" type="Integer"/>
+            <parameter name="outcomeList" type="List"/>
+            <parameter name="reasonList" type="List"/>
+            <parameter name="dealList" type="List"/>
+            <parameter name="dealListCount" type="Integer"/>
+            <parameter name="dealListPageIndex" type="Integer"/>
+            <parameter name="dealListPageSize" type="Integer"/>
+            <parameter name="dealListPageMaxIndex" type="Integer"/>
+            <parameter name="dealListPageRangeLow" type="Integer"/>
+            <parameter name="dealListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesPipelineReports.js').execute('winLoss', context))</script>
+        </actions>
+    </service>
 </services>

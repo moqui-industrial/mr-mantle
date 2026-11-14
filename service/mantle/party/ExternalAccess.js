@@ -182,7 +182,13 @@ const records = {
                 // a quote out of draft: proposed, or placed or cancelled after its response (the receipt stays reachable)
                 if (order.orderPurposeEnumId !== "OrpSalesQuote" || ["OrderOpen", "OrderBeingChanged"].includes(order.statusId))
                     return null
-            } else if (["OrderOpen", "OrderRequested", "OrderProposed", "OrderCancelled", "OrderRejected"].includes(order.statusId))
+            } else if (
+                ["OrderOpen", "OrderRequested", "OrderProposed", "OrderRejected"].includes(order.statusId) ||
+                // Sales P19 (the user's call of Nov 14): a storeless order's OrderView link outlives its cancellation, opening the
+                // order marked Cancelled and read only (SalesPortal.js); a store order's link (Shop's page) and every other scope
+                // still end with it
+                (order.statusId === "OrderCancelled" && (scope !== "OrderView" || order.productStoreId))
+            )
                 return null
             const part = rows("mantle.order.OrderPart", {orderId: recordId}).find(
                 row => internal(row.vendorPartyId) && row.customerPartyId && !internal(row.customerPartyId)

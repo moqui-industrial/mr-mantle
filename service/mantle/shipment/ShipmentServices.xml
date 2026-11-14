@@ -544,6 +544,9 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
             <if condition="!(['OrderApproved', 'OrderSent'].includes(orderPart.statusId) || ['OrderApproved', 'OrderSent'].includes(orderHeader.statusId))">
                 <return type="danger" message="Cannot create Shipment for Order Part in status ${orderPart.statusId}"/></if>
+            <!-- a recurring base is never shipped (impl-sales P16): only the orders generated from it are -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader?.orderPurposeEnumId)">
+                <return error="true" message="RECURRING_TEMPLATE: Order ${orderId} is a recurring base; only the orders made from it ship"/></if>
 
             <!-- does the OrderPart have shippable items? -->
             <entity-find-related value-field="orderPart" relationship-name="mantle.order.OrderItem" list="orderItemList"
@@ -705,6 +708,11 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart"/>
             <if condition="!(['OrderApproved', 'OrderSent'].includes(orderPart.statusId))">
                 <return error="true" message="Cannot add Order Part in status ${orderPart.statusId} to Shipment"/></if>
+            <!-- a recurring base is never shipped (impl-sales P16) -->
+            <entity-find-one entity-name="mantle.order.OrderHeader" value-field="partOrderHeader">
+                <field-map field-name="orderId" from="orderPart.orderId"/></entity-find-one>
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(partOrderHeader?.orderPurposeEnumId)">
+                <return error="true" message="RECURRING_TEMPLATE: Order ${orderPart.orderId} is a recurring base; only the orders made from it ship"/></if>
 
             <entity-find entity-name="moqui.basic.EnumGroupMember" list="productItemTypeEgms" cache="true">
                 <econdition field-name="enumGroupEnumId" value="EngItemsProduct"/></entity-find>

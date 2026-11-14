@@ -2472,6 +2472,12 @@ General Order Placement and eCommerce Usage
             <set field="orderHeader.recurCronExpression" from="null"/>
             <set field="orderHeader.lastOrderedDate" from="null"/>
             <set field="orderHeader.recurAutoInvoice" from="null"/>
+            <!-- Sales' recurrence fields (impl-sales P16, entity/SalesRecurrenceEntities.xml) are a base's own, never a copy's -->
+            <script><![CDATA[
+                for (const field of ['recurTimeZone', 'recurFromDate', 'recurThruDate', 'recurPausedDate', 'recurResumedDate',
+                        'recurAgreementId', 'recurRevision', 'recurFailureDate', 'recurFailureMessage', 'recurOccurrenceDate'])
+                    orderHeader.set(field, null)
+            ]]></script>
 
             <if condition="clearDates">
                 <!-- set the fields even if null, don't do this for other fields -->
@@ -2511,11 +2517,18 @@ General Order Placement and eCommerce Usage
 
             <entity-find entity-name="mantle.order.OrderItem" list="valueList">
                 <econdition field-name="orderId" from="baseOrderId"/><order-by field-name="orderItemSeqId"/></entity-find>
+            <!-- every line copied (impl-sales follow-up 2): a child line (a discount, a tax line) keeps its own parent, whose id in the
+                copy differs from the source's where the source's ids have gaps (each retax deletes and adds tax lines) -->
+            <script>const copiedSeqIds = {}</script>
             <iterate list="valueList" entry="value">
                 <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.includes(value.itemTypeEnumId))"><continue/></if>
+                <set field="sourceSeqId" from="value.orderItemSeqId"/>
                 <set field="value.orderId" from="orderId"/>
                 <set field="value.orderItemSeqId" from="null"/>
+                <if condition="!productItemsOnly &amp;&amp; value.parentItemSeqId &amp;&amp; copiedSeqIds[value.parentItemSeqId]">
+                    <set field="value.parentItemSeqId" from="copiedSeqIds[value.parentItemSeqId]"/></if>
                 <entity-sequenced-id-secondary value-field="value"/>
+                <script>copiedSeqIds[sourceSeqId] = value.orderItemSeqId</script>
                 <if condition="clearDates"><set field="value.requiredByDate" from="requiredByDate"/></if>
                 <entity-create value-field="value"/>
             </iterate>
@@ -2609,19 +2622,27 @@ General Order Placement and eCommerce Usage
             <!-- cancel reservations if there are any -->
             <service-call name="mantle.product.AssetServices.remove#OrderReservations" in-map="{orderId:orderId}"/>
 
-            <!-- TODO: don't allow AssetReservation, ShipmentItemSource, or OrderItemBilling for OrderHeader with recurCronExpression -->
+            <!-- a base marked OrpRecurringTemplate (Shop's and Sales' bases, impl-sales P16) is refused reservation
+                (reserve#AssetForOrderItem), shipment (create#OrderPartShipment, add#OrderPartToShipment, the load evaluation) and
+                invoicing (create#InvoiceFromSource) wherever they are asked -->
         </actions>
     </service>
 
-    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all">
-        <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve</description>
+    <!-- impl-sales P19 (design-sales §8 shipped definitions): the recurrence worker is the operation sales.recurrence.run -->
+    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all" operation="sales.recurrence.run">
+        <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve. A Shop-linked base goes
+            to Shop's occurrence coordinator. Every other base is due as Sales' recurrence reads it (impl-sales P16,
+            service/mantle/order/SalesRecurrence.js occurrenceOf: its latest scheduled time in its own zone after its last order,
+            inside its dates and not paused; a base without those fields as before) and is ordered in its own transaction, one
+            after another: a base that fails is named in the log and on the base, and the next one runs.</description>
         <actions>
             <entity-find entity-name="mantle.order.OrderHeader" list="orderHeaderList" cache="false">
                 <econdition field-name="statusId" value="OrderApproved"/>
                 <econdition field-name="recurCronExpression" operator="is-not-null"/>
-                <select-field field-name="orderId,recurCronExpression,lastOrderedDate"/>
+                <econdition field-name="recurPausedDate" operator="is-null"/>
                 <order-by field-name="orderId"/>
             </entity-find>
+            <set field="recurrence" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js')"/>
             <iterate list="orderHeaderList" entry="orderHeader">
                 <!-- a Shop-linked base (its StoreRecurringContract; mr-pass impl-shop P7, X5) is never cloned here: it goes to
                     Shop's occurrence coordinator, which claims the contract's due period once; every other base as before -->
@@ -2632,17 +2653,26 @@ General Order Placement and eCommerce Usage
                             in-map="{baseOrderId:orderHeader.orderId}" async="true"/>
                     <continue/>
                 </if>
-                <!-- check recurCronExpression vs lastOrderedDate to see if we need to run -->
-                <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(orderHeader.recurCronExpression, orderHeader.lastOrderedDate)"/>
-
-                <if condition="shouldRun">
-                    <service-call name="mantle.order.OrderServices.create#RecurringOrder"
-                            in-map="{baseOrderId:orderHeader.orderId}" async="true"/>
+                <!-- the base's due occurrence (impl-sales P16): in its zone, its dates, not paused -->
+                <if condition="recurrence.occurrenceOf(orderHeader).due">
+                    <script>recurrence.runOccurrence(orderHeader.orderId)</script>
                 </if>
             </iterate>
         </actions>
     </service>
     <service verb="create" noun="RecurringOrder" authenticate="anonymous-all">
+        <description>One occurrence of a recurring base, under the base's lock: refused unless it is Approved with a cadence and
+            due (impl-sales P16, SalesRecurrence.js occurrenceOf: in its zone, inside its dates, not paused) and unless every
+            agreement it or a line's price names still applies at the occurrence (AGREEMENT_INACTIVE, an error, so the job records
+            it). One order for an occurrence (recurOccurrenceDate on the order), for the job and an operator alike: an occurrence
+            already ordered answers that order. The order is a copy of the base with no payment copied (copyPayment=false: a
+            renewal payment is Accounting's to make), no purpose, placed through place#Order, so the seller's approval setting
+            and every placement rule apply. A Sales base (marked OrpRecurringTemplate) repeats every line, its charges and
+            discounts with its products, and the order is retaxed before it is placed by its own path (handle#OrderMajorChange: a
+            storeless seller's gateway, X1; a store's promotions, shipping and tax); a base not marked repeats its product lines as
+            before. Auto-invoice (recurAutoInvoice) bills the order when it is approved, at placement or later by a person
+            (SalesRecurrence.secas.xml, SalesRecurrenceServices.invoice#RecurringOrder; impl-sales follow-up 2). A Shop-linked base
+            is Shop's.</description>
         <in-parameters>
             <parameter name="baseOrderId" required="true"/>
         </in-parameters>
@@ -2664,31 +2694,44 @@ General Order Placement and eCommerce Usage
             <if condition="shopContractCount &gt; 0">
                 <return type="warning" message="Order ${baseOrderId} is a Shop subscription's base; its renewals are Shop's"/></if>
 
-            <!-- check again to make sure hasn't run since last execution time -->
-            <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(baseOrderHeader.recurCronExpression, baseOrderHeader.lastOrderedDate)"/>
-            <if condition="!shouldRun"><return type="warning" message="Order ${baseOrderHeader.orderId} is not yet scheduled to reorder since last order time ${baseOrderHeader.lastOrderedDate}"/></if>
+            <!-- check again, under the lock, that an occurrence is due (impl-sales P16: its zone, dates and pause) -->
+            <set field="recurrence" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js')"/>
+            <set field="occurrence" from="recurrence.occurrenceOf(baseOrderHeader)"/>
+            <if condition="!occurrence.due"><return type="warning" message="${occurrence.message}"/></if>
+            <set field="occurrenceDate" from="new Date(occurrence.occurrenceDate)"/>
+            <!-- one order for an occurrence -->
+            <set field="orderId" from="recurrence.orderForOccurrence(baseOrderId, occurrence.occurrenceDate)"/>
+            <if condition="orderId"><return type="warning" message="Order ${orderId} was already made for this occurrence of order ${baseOrderId}"/></if>
+            <!-- the agreement price guard: the base's agreements still apply at the occurrence -->
+            <set field="agreementRefusal" from="recurrence.agreementRefusal(baseOrderHeader, occurrence.occurrenceDate)"/>
+            <if condition="agreementRefusal"><return error="true" message="${agreementRefusal}"/></if>
 
-            <!-- clone the order -->
-            <service-call name="mantle.order.OrderServices.clone#Order" out-map="cloneOut" in-map="{baseOrderId:baseOrderId}"/>
+            <!-- clone the order: no payment copied (design-sales §7, X5), not a template, for this occurrence; a Sales base's every
+                line (impl-sales follow-up 2), another base's product lines as before -->
+            <set field="salesBase" from="baseOrderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"/>
+            <service-call name="mantle.order.OrderServices.clone#Order" out-map="cloneOut"
+                    in-map="{baseOrderId:baseOrderId, copyPayment:false, productItemsOnly:!salesBase}"/>
             <set field="orderId" from="cloneOut.orderId"/>
-
-            <!-- Place the Order -->
-            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
-
-            <!-- if recurAutoInvoice == 'Y' AND Order was auto-approved then create Invoice -->
-            <if condition="baseOrderHeader.recurAutoInvoice == 'Y'">
+            <service-call name="update#mantle.order.OrderHeader"
+                    in-map="{orderId:orderId, orderPurposeEnumId:null, recurOccurrenceDate:occurrenceDate}"/>
+            <!-- a Sales base's order retaxed now by its own path (its seller's gateway, or its store's promotions, shipping and
+                tax), so the lines copied from the base are figured once, at this occurrence -->
+            <if condition="salesBase">
                 <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
                     <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
                 <iterate list="orderPartList" entry="orderPart">
-                    <if condition="orderPart?.statusId == 'OrderApproved'">
-                        <service-call name="mantle.account.InvoiceServices.create#EntireOrderPartInvoice"
-                                in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
-                    </if>
+                    <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
+                            in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </iterate>
             </if>
 
-            <!-- set lastOrderedDate on recurring order -->
+            <!-- Place the Order; auto-invoice bills it once it is approved (SalesRecurrence.secas.xml), now or later -->
+            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
+
+            <!-- set lastOrderedDate on recurring order; a run that made its order clears the last failure -->
             <set field="baseOrderHeader.lastOrderedDate" from="ec.user.nowTimestamp"/>
+            <set field="baseOrderHeader.recurFailureDate" from="null"/>
+            <set field="baseOrderHeader.recurFailureMessage" from="null"/>
             <entity-update value-field="baseOrderHeader"/>
         </actions>
     </service>
