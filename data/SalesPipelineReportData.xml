@@ -44,22 +44,56 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="20" fieldPath="closedDate"/>
         <fields fieldSeqId="31" fieldPath="stage:description" fieldNameAlias="stageName"/>
         <fields fieldSeqId="32" fieldPath="stage:sequenceNum" fieldNameAlias="stageSequence"/>
-        <!-- the stage's order and name in one value, so a funnel's terms sort by the pipeline's order -->
+        <!-- the stage's order and name in one value, so a funnel's terms sort by the pipeline's order; an expression field is mapped
+            as a number unless typed, so the derived ids and label are keyword (impl-sales P20: a terms split on them was empty) -->
         <fields fieldSeqId="33" fieldPath="((stageSequence == null ? '99' : String(stageSequence).padStart(2, '0')) + ' ' + (stageName || 'No stage'))"
-                fieldNameAlias="stageLabel"/>
+                fieldNameAlias="stageLabel" fieldType="keyword"/>
         <fields fieldSeqId="41" fieldPath="parties:partyId" fieldNameAlias="assignedPartyId"/>
         <fields fieldSeqId="42" fieldPath="parties:roleTypeId" fieldNameAlias="assignedRoleTypeId"/>
         <fields fieldSeqId="43" fieldPath="parties:thruDate" fieldNameAlias="assignedThruDate"/>
         <!-- the current owner and team: the party rows of those roles not ended -->
         <fields fieldSeqId="51" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesRepresentative' &amp;&amp; !it.assignedThruDate)?.assignedPartyId)"
-                fieldNameAlias="ownerPartyId"/>
+                fieldNameAlias="ownerPartyId" fieldType="keyword"/>
         <fields fieldSeqId="52" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesTeam' &amp;&amp; !it.assignedThruDate)?.assignedPartyId)"
-                fieldNameAlias="teamPartyId"/>
+                fieldNameAlias="teamPartyId" fieldType="keyword"/>
+    </dataDocuments>
+    <!-- impl-sales P20 (§4 Nov 14, the user's call): the quote dataset's document, MantleSalesQuote, a Sales quote's part (OrderPart of an
+        order of purpose OrpSalesQuote; a template, OrpSalesQuoteTemplate, is never one) with its selling organization, customer, validity,
+        status, total and currency, placed date and current owner and team, indexed by the same push feed and read by
+        report/mantle-sales-quotes.json, timed by the quote's valid-through date (the quote-expiring alert), whose row filter is Sales'
+        quote scope (get#QuoteRowFilter, the ReportScopePolicy MantleSalesQuoteScope): a placed quote is left out there, as the open
+        quotes' lists leave it out. -->
+    <dataDocuments dataDocumentId="MantleSalesQuote" indexName="mantle_sales" documentName="Sales Quote"
+            primaryEntityName="mantle.order.OrderPart" documentTitle="${orderId}:${orderPartSeqId}">
+        <fields fieldSeqId="01" fieldPath="orderId"/>
+        <fields fieldSeqId="02" fieldPath="orderPartSeqId"/>
+        <fields fieldSeqId="03" fieldPath="vendorPartyId"/>
+        <fields fieldSeqId="04" fieldPath="customerPartyId"/>
+        <fields fieldSeqId="05" fieldPath="validFromDate"/>
+        <fields fieldSeqId="06" fieldPath="validThruDate"/>
+        <fields fieldSeqId="07" fieldPath="partTotal"/>
+        <fields fieldSeqId="11" fieldPath="orderHeader:orderName"/>
+        <fields fieldSeqId="12" fieldPath="orderHeader:statusId"/>
+        <fields fieldSeqId="13" fieldPath="orderHeader:entryDate"/>
+        <fields fieldSeqId="14" fieldPath="orderHeader:placedDate"/>
+        <fields fieldSeqId="15" fieldPath="orderHeader:currencyUomId"/>
+        <fields fieldSeqId="16" fieldPath="orderHeader:grandTotal"/>
+        <fields fieldSeqId="17" fieldPath="orderHeader:orderPurposeEnumId"/>
+        <fields fieldSeqId="21" fieldPath="parties:partyId" fieldNameAlias="assignedPartyId"/>
+        <fields fieldSeqId="22" fieldPath="parties:roleTypeId" fieldNameAlias="assignedRoleTypeId"/>
+        <!-- the owner and team: the part's party rows of those roles (create#Quote writes one of each; a change replaces it) -->
+        <fields fieldSeqId="31" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesRepresentative')?.assignedPartyId)"
+                fieldNameAlias="ownerPartyId" fieldType="keyword"/>
+        <fields fieldSeqId="32" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesTeam')?.assignedPartyId)"
+                fieldNameAlias="teamPartyId" fieldType="keyword"/>
+        <conditions conditionSeqId="01" fieldNameAlias="orderPurposeEnumId" fieldValue="OrpSalesQuote"/>
     </dataDocuments>
     <moqui.entity.feed.DataFeed dataFeedId="MantleSalesPipeline" dataFeedTypeEnumId="DTFDTP_RT_PUSH"
             feedName="Mantle Sales Pipeline" feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
             feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument">
         <documents dataDocumentId="MantleSalesOpportunity"/>
+        <documents dataDocumentId="MantleSalesQuote"/>
     </moqui.entity.feed.DataFeed>
     <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesOpportunity" userGroupId="ADMIN"/>
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesQuote" userGroupId="ADMIN"/>
 </entity-facade-xml>
