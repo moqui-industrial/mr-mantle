@@ -87,7 +87,7 @@
     </service>
     <service verb="find" noun="Environments" authenticate="anonymous-all" allow-remote="false">
         <description>The environments of a repository, for a Developer, without the target's token (hasToken): name,
-            allowedRefs, approvalRequired, approverGroupId, requiredPipeline, the last deployment, and the target's and
+            allowedRefs, approvalRequired, requiredPipeline, the last deployment, and the target's and
             clone addresses as the engine gives them to the caller; canChange (a Maintainer), canDeploy (a Developer, pipelines
             on).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
@@ -95,7 +95,7 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findCiEnvironments", input)</script></actions>
     </service>
     <service verb="store" noun="Environment" authenticate="anonymous-all" allow-remote="false">
-        <description>Make an environment (name) or change one (environmentId), by a Maintainer with a confirmed address, through the engine as the Maintainer: allowedRefs (branch patterns whose runs get its secrets and which deploy to it, besides a protected ref's) and approvalRequired (its secrets only to an approved run, and a deployment waits for an approver); for deployments targetUrl, token (written, never read back; left out it stays), cloneUrl (no user or password in an https one), requiredPipeline (with the deploy event) and approverGroupId (who of the Maintainers decides; any Maintainer when empty). An empty value clears a field. allowedRefs names branches or tags: a pattern of only wildcards (*, refs/heads/*) is refused. nameTaken for a name the repository has. A new one takes operationId; the receipt keeps no trace of the token.</description>
+        <description>Make an environment (name) or change one (environmentId), by a Maintainer with a confirmed address, through the engine as the Maintainer: allowedRefs (branch patterns whose runs get its secrets and which deploy to it, besides a protected ref's) and approvalRequired (its secrets only to an approved run, and a deployment waits for an approver); for deployments targetUrl (no user or password in it), token (written, never read back; left out or empty it stays: the engine clears no token, a new one replaces it), cloneUrl (no user or password in an https one) and requiredPipeline (with the deploy event). An empty value clears a field, except the token. Smithy has no approver groups: approverGroupId is refused, and every store clears the environment's (an approval is a Maintainer's other than the requester's). allowedRefs names branches or tags: a pattern of only wildcards (*, refs/heads/*) is refused. nameTaken for a name the repository has. A new one takes operationId; the receipt keeps no trace of the token.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeCiEnvironment", input)</script></actions>
@@ -108,37 +108,37 @@
     </service>
     <!-- DG10: deployments (design-smithy "Deploy environments"), through the engine as the caller after Smithy's check -->
     <service verb="find" noun="Deployments" authenticate="anonymous-all" allow-remote="false">
-        <description>The deployments of a repository, for who views it, newest first: by environment, state (requested, waiting-pipeline, waiting-approval, deploying, deployed, failed, refused, cancelled) and commitId, a page (pageIndex, limit up to 100). Each with its environment, commit, branch, state, run and its page, who asked, approved or refused (handles), the target's answer, and its message as the engine gives it to the caller. canDeploy.</description>
+        <description>The deployments of a repository, for a Developer, newest first: by environment, state (requested, waiting-pipeline, waiting-approval, deploying, deployed, failed, refused, cancelled) and commitId, a page (pageIndex, limit up to 100). Each with its environment, commit, branch, state, run and its page, who asked, approved or refused (handles), the target's answer, and its message as the engine gives it to the caller. canDeploy.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findDeployments", input)</script></actions>
     </service>
     <service verb="get" noun="Deployment" authenticate="anonymous-all" allow-remote="false">
-        <description>One deployment of a repository (deploymentId), for who views it; Not Found for another repository's. capabilities: canDecide (a Maintainer other than who asked, and an approver of its environment, while it waits for approval), canCancel (its requester being a Developer, or a Maintainer, before its deploy step begins).</description>
+        <description>One deployment of a repository (deploymentId), for a Developer; Not Found for another repository's. capabilities, by the rules decide#Deploy and cancel#Deploy hold: canDecide (a Maintainer other than who asked, while it waits for approval), canCancel (its requester being a Developer, or a Maintainer, before its deploy step begins: requested, waiting for its pipeline or approval, or deploying with its step not started).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getDeployment", input)</script></actions>
     </service>
     <service verb="request" noun="Deploy" authenticate="anonymous-all" allow-remote="false">
-        <description>Deploy the head of a branch (refName, the default branch when empty; commitId, when given, must be that head) to an environment (environment or environmentId), by a Developer with a confirmed address, in a repository whose pipelines are on (notAvailable) and with the owner's minutes (quotaExceeded). The branch must be protected or named by the environment's allowedRefs. The engine queues the environment's requiredPipeline with the deploy event as the requester (Smithy's run check decides), then waits for approval when the environment requires it. Answers deploymentId, state (waiting-pipeline, or failed with message), runNum and runPath. Takes operationId.</description>
+        <description>Deploy the head of a branch (refName, the default branch when empty; commitId, when given, must be that head) to an environment of the repository (environment or environmentId; another repository's is Not Found), by a Developer with a confirmed address, in a repository whose pipelines are on (notAvailable) and with the owner's minutes (quotaExceeded). The branch must be protected or named by the environment's allowedRefs. The engine queues the environment's requiredPipeline with the deploy event as the requester (Smithy's run check decides), then waits for approval when the environment requires it. Answers deploymentId, state (waiting-pipeline, or failed with message), runNum and runPath. Takes operationId: the deployment and its receipt are written together, so a retry answers the first call's deployment. A deploy run counts in the account's day of runs as a manual one.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("requestDeploy", input)</script></actions>
     </service>
     <service verb="decide" noun="Deploy" authenticate="anonymous-all" allow-remote="false">
-        <description>Approve or refuse (decision, reason) a deployment that waits for approval, by a Maintainer with a confirmed address who is not its requester (accessDenied) and an approver of its environment (its approverGroupId's member, when it names one). Conflict when it does not wait. Approved, it deploys.</description>
+        <description>Approve or refuse (decision, reason) a deployment that waits for approval, by a Maintainer with a confirmed address who is not its requester (accessDenied). Conflict when it does not wait. Approved, it deploys. The reason is kept in Smithy's audit only; the engine is given none, so no refusal's words reach the commit's deploy/ status or the deployment's error.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("decideDeploy", input)</script></actions>
     </service>
     <service verb="cancel" noun="Deploy" authenticate="anonymous-all" allow-remote="false">
-        <description>Cancel a deployment whose deploy step has not begun (Conflict otherwise), with its pipeline's run: by its requester while a Developer, or by a Maintainer.</description>
+        <description>Cancel a deployment whose deploy step has not begun (requested, waiting for its pipeline or approval, or deploying with its step not started; Conflict otherwise), with its pipeline's run: by its requester while a Developer, or by a Maintainer.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("cancelDeploy", input)</script></actions>
     </service>
     <service verb="handle" noun="DeploymentNotice" authenticate="false" allow-remote="false">
-        <description>For the SmithyDeploymentNotice rule (entity/Smithy.eecas.xml): the engine told a deployment's requester (topic GitDeployment, no record) that it waits for approval; when its environment names no approver group, the repository's Maintainers and Owners other than the requester are told too, on the same topic, with the repository as its record. Not an operation. Never fails the write: a failure is logged.</description>
+        <description>For the SmithyDeploymentNotice rule (entity/Smithy.eecas.xml): the engine told a deployment's requester (topic GitDeployment, no record) that it waits for approval; when its environment names no approver group (none Smithy made does), the repository's Maintainers and Owners other than the requester are told too, on the same topic, with the repository as its record. Not an operation. Never fails the write: a failure is logged.</description>
         <in-parameters>
             <parameter name="subTopic"/>
             <parameter name="messageJson"/>

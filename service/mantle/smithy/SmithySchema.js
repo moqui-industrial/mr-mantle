@@ -561,7 +561,6 @@
             "token",
             "cloneUrl",
             "requiredPipeline",
-            "approverGroupId",
             "operationId"
         ]
     },

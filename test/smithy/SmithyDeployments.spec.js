@@ -129,6 +129,14 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             environmentId: stored.environmentId,
             cloneUrl: "https://someone:secret@git.example.com/a.git"
         })
+        const targetWithUser = op("SDP_MAINT", "storeCiEnvironment", {
+            environmentId: stored.environmentId,
+            targetUrl: "https://deployer:secret@deploy.sdp.example.com"
+        })
+        // Smithy names no approver group (a framework group, another site's, would be told of the repository and decide)
+        const withGroup = lib.service("SDP_MAINT", "mantle.smithy.SmithyPipelineServices.store#Environment", {
+            input: {siteId: SITE, repositoryId: ids.repositoryId, environmentId: stored.environmentId, approverGroupId: "ADMIN"}
+        })
         const receipt = lib.row("mantle.forum.ForumOperationReceipt", {
             siteId: SITE,
             operationId: "sdp-env-1",
@@ -139,6 +147,8 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             developer,
             stored,
             withUser,
+            targetWithUser,
+            groupRefused: withGroup.refused === true && withGroup.message.includes("approverGroupId"),
             receiptText: receipt ? JSON.stringify(receipt.getMap()) : "",
             receiptFound: !!receipt,
             listed,
@@ -146,10 +156,14 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             reporter: op("SDP_REPORTER", "findCiEnvironments")
         }
     },
-    then({developer, stored, withUser, receiptText, receiptFound, listed, listedText, reporter}) {
+    then({developer, stored, withUser, targetWithUser, groupRefused, receiptText, receiptFound, listed, listedText, reporter}) {
         developer.reason == "accessDenied"
         typeof stored.environmentId == "string"
         withUser.kind == "Unprocessable"
+        targetWithUser.kind == "Unprocessable"
+        targetWithUser.message.includes("targetUrl")
+        groupRefused == true
+        !("approverGroupId" in listed.environmentList[0])
         receiptFound == true
         !receiptText.includes(TOKEN)
         listed.environmentList.length == 1
@@ -190,7 +204,12 @@ feature("a Developer asks for a deployment and a Reporter is refused; a Maintain
         })
         const again = op("SDP_MAINT", "decideDeploy", {deploymentId: asked.deploymentId, decision: "approve"})
         const listed = op("SDP_DEV", "findDeployments", {environment: "demo"})
+        const reporterReads = {
+            list: op("SDP_REPORTER", "findDeployments"),
+            one: op("SDP_REPORTER", "getDeployment", {deploymentId: asked.deploymentId})
+        }
         return {
+            reporterReads,
             reporter,
             asked,
             queued,
@@ -226,6 +245,10 @@ feature("a Developer asks for a deployment and a Reporter is refused; a Maintain
         out.again.kind == "Conflict"
         out.row.statusId == "refused"
         out.row.refusedByUserId == "SDP_MAINT"
+        // the reason is Smithy's audit's, not the engine's error or the commit's status
+        !String(out.row.errorText || "").includes("Not today")
+        out.reporterReads.list.reason == "accessDenied"
+        out.reporterReads.one.reason == "accessDenied"
         out.listed.deploymentList.length == 2
         out.listed.deploymentList.some(
             d => d.deploymentId == ids.deploymentId && d.state == "refused" && d.refusedBy == "sdpmaint"
@@ -235,15 +258,56 @@ feature("a Developer asks for a deployment and a Reporter is refused; a Maintain
 
 feature("a Developer cancels their own deployment, a Maintainer any; another Developer's is not theirs to cancel", {
     when() {
+        const runsToday = () => {
+            const counts = JSON.parse(
+                lib.row("mantle.forum.ForumMemberState", {siteId: SITE, partyId: "SDP_DEV"})?.dailyCounts || "{}"
+            )
+            return Object.entries(counts)
+                .filter(([name]) => /pipeline/i.test(name))
+                .reduce((sum, [, count]) => sum + Number(count || 0), 0)
+        }
+        const before = runsToday()
         const mine = op("SDP_DEV", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-3"})
         settled(mine.deploymentId)
+        const counted = runsToday() - before
+        // a retry answers the first call's deployment and makes none
+        const deployments = () =>
+            ec.entity.find("moqui.resource.GitDeployment").condition("repositoryId", ids.repositoryId).disableAuthz().count()
+        const made = deployments()
+        const retried = op("SDP_DEV", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-3"})
+        const madeAfter = deployments()
         const notTheirs = op("SDP_DEV", "cancelDeploy", {deploymentId: ids.ownDeploymentId})
         const own = op("SDP_DEV", "cancelDeploy", {deploymentId: mine.deploymentId})
         const anyByMaintainer = op("SDP_OWNER", "cancelDeploy", {deploymentId: ids.ownDeploymentId})
         const ended = op("SDP_OWNER", "cancelDeploy", {deploymentId: ids.ownDeploymentId})
-        return {notTheirs, own, anyByMaintainer, ended, run: deploymentRow(mine.deploymentId)}
+        // deploying, its step not begun (as the engine leaves one until its step claims it): cancelled, as the page says
+        const ready = op("SDP_DEV", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-5"}).deploymentId
+        settled(ready)
+        lib.set("moqui.resource.GitDeployment", {deploymentId: ready}, {statusId: "deploying"})
+        const readyView = op("SDP_OWNER", "getDeployment", {deploymentId: ready}).capabilities
+        const readyCancel = op("SDP_OWNER", "cancelDeploy", {deploymentId: ready})
+        return {
+            notTheirs,
+            own,
+            anyByMaintainer,
+            ended,
+            run: deploymentRow(mine.deploymentId),
+            counted,
+            retried,
+            mine,
+            made,
+            madeAfter,
+            readyView,
+            readyCancel
+        }
     },
-    then({notTheirs, own, anyByMaintainer, ended, run}) {
+    then({notTheirs, own, anyByMaintainer, ended, run, counted, retried, mine, made, madeAfter, readyView, readyCancel}) {
+        // a deploy run counts in the day's runs as a manual one
+        counted == 1
+        retried.deploymentId == mine.deploymentId
+        madeAfter == made
+        readyView.canCancel == true
+        readyCancel.state == "cancelled"
         notTheirs.reason == "accessDenied"
         own.state == "cancelled"
         anyByMaintainer.state == "cancelled"
@@ -293,6 +357,22 @@ feature(
                 reporter: notices("SDP_REPORTER").length
             }
             op("SDP_OWNER", "cancelDeploy", {deploymentId: waiting})
+            // a Maintainer's own request: the other Maintainers and Owners are told, not the requester again
+            const owned = op("SDP_MAINT", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-6"}).deploymentId
+            passed(owned)
+            const beforeOwned = {maintainer: notices("SDP_MAINT").length, owner: notices("SDP_OWNER").length}
+            ec.makeNotificationMessage()
+                .topic("GitDeployment")
+                .subTopic(ids.repositoryId)
+                .userId("SDP_MAINT")
+                .message({deploymentId: owned, repositoryId: ids.repositoryId, statusId: "waiting-approval"})
+                .persistOnSend(true)
+                .send()
+            const toldOwned = {
+                requester: notices("SDP_MAINT").length - beforeOwned.maintainer,
+                owner: notices("SDP_OWNER").length - beforeOwned.owner
+            }
+            op("SDP_OWNER", "cancelDeploy", {deploymentId: owned})
             lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {hiddenAt: ec.user.nowTimestamp})
             const hidden = {
                 list: op("SDP_DEV", "findDeployments"),
@@ -300,9 +380,11 @@ feature(
                 ask: op("SDP_DEV", "requestDeploy", {environment: "demo", operationId: "sdp-deploy-hidden"})
             }
             lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {hiddenAt: null})
-            return {told, hidden}
+            return {told, toldOwned, hidden}
         },
-        then({told, hidden}) {
+        then({told, toldOwned, hidden}) {
+            toldOwned.requester == 1
+            toldOwned.owner == 1
             told.maintainer == 1
             told.owner == 1
             // the requester has the engine's own notices only
@@ -314,3 +396,49 @@ feature(
         }
     }
 )
+
+feature("another repository's deployment and environment are Not Found through this one", {
+    when() {
+        const other = lib.createRepository(lib.OPERATOR, {
+            siteId: SITE,
+            groupId: ids.groupId,
+            slug: "other",
+            visibility: "public"
+        }).repositoryId
+        const onOther = (username, operation, input) => op(username, operation, {repositoryId: other, ...input})
+        const environmentId = onOther("SDP_MAINT", "storeCiEnvironment", {
+            name: "elsewhere",
+            allowedRefs: "main",
+            operationId: "sdp-env-other"
+        }).environmentId
+        lib.make("moqui.resource.GitDeployment", {
+            deploymentId: "SDP_OTHER_DEPLOY",
+            repositoryId: other,
+            environmentId,
+            environmentName: "elsewhere",
+            commitId: ids.head,
+            refName: "refs/heads/main",
+            statusId: "waiting-approval",
+            requestedByUserId: "SDP_DEV",
+            createdDate: ec.user.nowTimestamp
+        })
+        return {
+            // the same Maintainer, through the repository the deployment is of: found
+            there: onOther("SDP_MAINT", "getDeployment", {deploymentId: "SDP_OTHER_DEPLOY"}),
+            decide: op("SDP_MAINT", "decideDeploy", {deploymentId: "SDP_OTHER_DEPLOY", decision: "refuse"}),
+            cancel: op("SDP_OWNER", "cancelDeploy", {deploymentId: "SDP_OTHER_DEPLOY"}),
+            one: op("SDP_MAINT", "getDeployment", {deploymentId: "SDP_OTHER_DEPLOY"}),
+            request: op("SDP_DEV", "requestDeploy", {environmentId, operationId: "sdp-deploy-other"}),
+            row: deploymentRow("SDP_OTHER_DEPLOY")
+        }
+    },
+    then({there, decide, cancel, one, request, row}) {
+        there.deployment.deploymentId == "SDP_OTHER_DEPLOY"
+        there.capabilities.canDecide == true
+        decide.kind == "NotFound"
+        cancel.kind == "NotFound"
+        one.kind == "NotFound"
+        request.kind == "NotFound"
+        row.statusId == "waiting-approval"
+    }
+})
