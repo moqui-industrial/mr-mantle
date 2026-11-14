@@ -1257,10 +1257,7 @@ function actionsOf(ch, state, revision) {
             open && (ch.own || has(kindPermission)),
             open ? "Only who filed it or an approver" : "The change is closed"
         ),
-        confirm: why(
-            ch.request.statusId === "ReqCompleted" && mayConfirm(ch),
-            "Only an applied change is confirmed"
-        )
+        confirm: why(ch.request.statusId === "ReqCompleted" && mayConfirm(ch), "Only an applied change is confirmed")
     }
 }
 function get(p) {
