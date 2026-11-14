@@ -25,7 +25,7 @@ function placedOrder(organizationPartyId, customerPartyId, quantity = 1) {
     return orderId
 }
 // Follow-up 3 (F210): the placement's confirmation (OrderPlacedSalesConfirmation, a tx-commit rule on a service worker) stores the
-// confirmation as an OrderContent, which counts a revision where the seller counts every change (B, C); read before it lands (a
+// confirmation as an OrderContent, which counts a revision where the seller counts every change (B; A and C count commercial changes only); read before it lands (a
 // busy worker pool beside other specs), a revision goes stale and the batch refused the order REVISION_CHANGED. Before reading the
 // revision of such an order, wait for this order's own row, not for the shared pool to empty, which other specs keep busy.
 function confirmed(orderId) {
