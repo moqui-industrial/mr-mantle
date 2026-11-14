@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' commercial order changes (IronStone Sales design §6 OrderChangeDetail, §17 SAL-CHANGE; impl-sales P14): the commercial
+    kinds of Customer Service's proposal (SupportOrderChangeEntities.xml) are applied by the order's owner under SALES_ORDER_CHANGE
+    (mantle.order.OrderChangeServices over OrderChanges.js and SalesOrderChanges.js). An address, ship method or carrier change
+    applies to one part of the order, named on the proposal, so it never reaches a part the proposal did not show; the field is
+    audit-logged and so counts in the proposal's revision. No change or application record of Sales' own. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="Request" package="mantle.request">
+        <field name="orderPartSeqId" type="id" enable-audit-log="true"><description>An order change of an address, ship method or
+            carrier (OckAddress, OckShipMethod, OckCarrier): the part of the order it changes; empty on another kind (its lines
+            name their order lines) and on every other request.</description></field>
+    </extend-entity>
+</entities>

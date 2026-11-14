@@ -385,6 +385,9 @@ function requireQuote(userScope, orderId, edit = false) {
 const orderPurposes = {direct: "OrpSalesOrder", quote: quotePurpose}
 const orderExcludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
 const approvalStatuses = ["OrderPlaced", "OrderHold"]
+// P14: the statuses in which a change operator (SALES_ORDER_CHANGE) sees the organization's orders, read only, to propose and apply
+// commercial changes (design §1.1 BOSS_SALES_CHANGE; mantle.order.OrderChangeServices checks the change itself)
+const changeStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
 // Whether an order header and its first part are a sales order of Sales' kind (above), the scope aside.
 function isSalesOrder(order, part) {
     if (!order || !part) return false
@@ -421,10 +424,12 @@ function orderOf(userScope, orderId) {
                 .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
                 .count() > 0
         if (!assigned) {
-            if (!orderApprover(userScope)) return null
             // P12 (the user's call of Nov 14, P11's review): an approver keeps read-only sight of an order they decided (an
             // OrderDecision of theirs) once it is approved; the organization's other approved orders stay out of sight
-            if (!approvalStatuses.includes(order.statusId) && !decidedBy(orderId)) return null
+            const approverReach = orderApprover(userScope) && (approvalStatuses.includes(order.statusId) || decidedBy(orderId))
+            // P14: a change operator's reach, read only (changeStatuses)
+            const changeReach = !!userScope.capabilities.orderChange && changeStatuses.includes(order.statusId)
+            if (!approverReach && !changeReach) return null
             approverOnly = true
         }
     }
@@ -599,6 +604,28 @@ function decidedOrderIds() {
 }
 // ===== end of P12 =====
 
+// ===== P15: customer agreements (impl-sales P15; design-sales §7 Agreements, AgreementDetail) =====
+// A customer agreement is an Agreement of type AgrSales or AgrProduct of a selling organization (organizationPartyId) with its
+// customer (otherPartyId), on the one status flow Purchasing seeded (AgmSt*, F19). A Sales reader of the organization reads the
+// organization's every agreement and template (agreements are the organization's terms, not assigned work); a change needs
+// SALES_AGREEMENT_EDIT. Another organization's, a purchase agreement (AgrPurchase, Purchasing's) and any other type answer as
+// missing (RECORD_UNAVAILABLE).
+const agreementTypes = ["AgrSales", "AgrProduct"]
+function agreementOf(userScope, agreementId) {
+    if (!agreementId || !userScope.capabilities.anyRead) return null
+    const agreement = lib.one("mantle.party.agreement.Agreement", {agreementId: String(agreementId)})
+    if (!agreement || !agreementTypes.includes(agreement.agreementTypeEnumId)) return null
+    if (!covers(userScope, agreement.organizationPartyId)) return null
+    return {agreement, organizationPartyId: agreement.organizationPartyId, canEdit: !!userScope.capabilities.agreementEdit}
+}
+function requireAgreement(userScope, agreementId, edit = false) {
+    const found = agreementOf(userScope, agreementId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Agreement " + (agreementId || "") + " is not available")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Sales agreementEdit is required")
+    return found
+}
+// ===== end of P15 =====
+
 ;({
     permissions,
     reads,
@@ -647,6 +674,8 @@ function decidedOrderIds() {
     isSalesOrder,
     assignedOrderIds,
     orderApprover,
+    // P14: the change operator's statuses
+    changeStatuses,
     orderOf,
     requireOrder,
     // P12: quote templates; the orders an approver decided
@@ -655,5 +684,9 @@ function decidedOrderIds() {
     templateState,
     templateOf,
     requireTemplate,
-    decidedOrderIds
+    decidedOrderIds,
+    // P15: customer agreements
+    agreementTypes,
+    agreementOf,
+    requireAgreement
 })
