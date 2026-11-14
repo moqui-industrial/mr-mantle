@@ -315,10 +315,16 @@ feature("adoption assigns each unowned record once, by reason code per record, a
                     organizationPartyId: orgA,
                     lastUpdatedStamp: stamp(prefix + "_LST_NONE")
                 },
-                {recordKind: "campaign", recordId: prefix + "_CMP_NONE", organizationPartyId: orgA},
+                {
+                    recordKind: "campaign",
+                    recordId: prefix + "_CMP_NONE",
+                    organizationPartyId: orgA,
+                    lastUpdatedStamp: stamp(prefix + "_CMP_NONE")
+                },
                 {recordKind: "segment", recordId: prefix + "_SEG_NONE", organizationPartyId: orgB},
                 {recordKind: "segment", recordId: prefix + "_SEG_A", organizationPartyId: orgA},
                 {recordKind: "list", recordId: prefix + "_MBX_B", organizationPartyId: orgA},
+                {recordKind: "segment", recordId: prefix + "_SEG_NONE", organizationPartyId: orgA},
                 {recordKind: "segment", recordId: prefix + "_SEG_NONE", organizationPartyId: orgA, lastUpdatedStamp: 1},
                 {recordKind: "store", recordId: prefix + "_LST_A", organizationPartyId: orgA}
             ]
@@ -374,6 +380,7 @@ feature("adoption assigns each unowned record once, by reason code per record, a
                 "ORGANIZATION_DENIED",
                 "ALREADY_OWNED",
                 "RECORD_UNAVAILABLE",
+                "REVISION_REQUIRED",
                 "REVISION_CHANGED",
                 "UNKNOWN_KIND"
             ])

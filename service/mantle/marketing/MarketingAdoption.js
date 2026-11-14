@@ -8,14 +8,15 @@
 // - preview: the unowned records of each kind, at most recordLimit each, with their counts and revisions.
 // - apply: each assignment on its own (its own transaction and error frame), refused by reason code and the others applied: an
 //   unknown kind UNKNOWN_KIND, a record that is missing or a mailbox RECORD_UNAVAILABLE, a record already owned ALREADY_OWNED
-//   (an adoption applies once: a second apply of the same record changes nothing), a revision that is not the one read
-//   REVISION_CHANGED (naming the current one), an organization outside the administrator's scope ORGANIZATION_DENIED.
+//   (an adoption applies once: a second apply of the same record changes nothing), no revision named REVISION_REQUIRED, a
+//   revision that is not the one read REVISION_CHANGED (naming the current one), an organization outside the administrator's
+//   scope ORGANIZATION_DENIED. The record is read locked in the adoption's transaction, so concurrent adoptions apply once.
 // - unownedCounts: the counts the readiness check and Home's attention read.
 //
 // Every operation needs MARKETING_CONFIGURE (PERMISSION_DENIED).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
-const {find, one, denied, reasonCode} = lib
+const {find, denied, reasonCode} = lib
 
 const recordLimit = 200
 const unownedValues = ["_NA_"]
@@ -99,18 +100,27 @@ function adoptOne(userScope, assignment) {
     const recordId = String(assignment.recordId || "")
     const organizationPartyId = String(assignment.organizationPartyId || "")
     marketingAccess.requireOrganization(userScope, organizationPartyId)
-    const row = recordId ? one(kind.entity, {[kind.key]: recordId}) : null
-    if (!row || (kind.excluded && kind.excluded(row)))
-        denied("RECORD_UNAVAILABLE", kind.name + " " + recordId + " is not available")
-    if (!marketingAccess.unowned(row[kind.ownerField]))
-        denied("ALREADY_OWNED", kind.name + " " + recordId + " already belongs to an organization")
     const read = assignment.lastUpdatedStamp
-    if (read != null && read !== "" && lib.ms(read) !== lib.ms(row.lastUpdatedStamp))
-        denied(
-            "REVISION_CHANGED",
-            kind.name + " " + recordId + " changed since it was read; its revision is now " + row.lastUpdatedStamp
-        )
+    // the record is read locked in the adoption's own transaction, so two administrators adopting it at once cannot both
+    // pass the checks: the second waits, then finds it owned
     ec.transaction.runRequireNew(60, "Error adopting " + kind.name + " " + recordId, () => {
+        const row = recordId
+            ? find(kind.entity, {[kind.key]: recordId})
+                  .forUpdate(true)
+                  .one()
+            : null
+        if (!row || (kind.excluded && kind.excluded(row)))
+            denied("RECORD_UNAVAILABLE", kind.name + " " + recordId + " is not available")
+        if (!marketingAccess.unowned(row[kind.ownerField]))
+            denied("ALREADY_OWNED", kind.name + " " + recordId + " already belongs to an organization")
+        // every write names the revision it read (§2)
+        if (read == null || read === "")
+            denied("REVISION_REQUIRED", "Name the revision of " + kind.name.toLowerCase() + " " + recordId + " you read")
+        if (lib.ms(read) !== lib.ms(row.lastUpdatedStamp))
+            denied(
+                "REVISION_CHANGED",
+                kind.name + " " + recordId + " changed since it was read; its revision is now " + row.lastUpdatedStamp
+            )
         lib.call("update#" + kind.entity, {
             [kind.key]: recordId,
             [kind.ownerField]: organizationPartyId,

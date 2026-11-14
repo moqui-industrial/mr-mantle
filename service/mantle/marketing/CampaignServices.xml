@@ -42,12 +42,13 @@ along with this software (see the LICENSE.md file). If not, see
             row, each audited with the change reason "Adopted by" the administrator. Unknown historical consent stays unknown:
             nothing but the owner changes. A result is adopted, or refused by reasonCode with the others applied: UNKNOWN_KIND;
             RECORD_UNAVAILABLE for a record that is missing or a mailbox; ALREADY_OWNED for a record that belongs to an
-            organization (an adoption applies once per record); REVISION_CHANGED for a revision that is not the one read, naming
+            organization (an adoption applies once per record, the record read locked); REVISION_REQUIRED for an assignment that
+            names no revision; REVISION_CHANGED for a revision that is not the one read, naming
             the current one; ORGANIZATION_DENIED for an organization outside the scope. Refuses a caller without
             MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="assignments" type="List" required="true"><description>Maps of recordKind, recordId,
-                organizationPartyId and lastUpdatedStamp (a Timestamp or its millis; checked when given)</description></parameter>
+                organizationPartyId and lastUpdatedStamp (a Timestamp or its millis; required)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"/>
