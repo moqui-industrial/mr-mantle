@@ -25,6 +25,15 @@
 //   sending organization's offered topics with the recipient's state; a topic turned on files a public request for the
 //   recipient's address (a verified account's own address is accepted at once, as a checkout's is).
 // - Answers are allow-listed projections; addresses are masked; tokens never leave the verification message.
+// - P12: get#Form and submit#Form (the SubmitForm page): a Marketing publication answered on its own site, open, of the organization
+//   the site serves (a public one by its id, an invited one by its link's token: ExternalAccess, scope MarketingSurvey); anything else
+//   the same NotFound. The form is the publication's as of now on the server (its customer-visible questions and rules); an answer
+//   goes through Commons' accept#Submission (unknown, internal and hidden fields refused, each value of its type, the request key's one
+//   submission, an invitation answered once). A submission past the client's or site's limit, an oversized one, or one with a field
+//   the page never offered answers the same neutral receipt and keeps nothing; a value the visitor can fix (a required answer, an
+//   answer to a question its rules hide) answers what to fix. The
+//   subscription choice is separate: a public request of the publication's list for the address typed beside it, with its own
+//   verification message (as Subscribe's), after the answer is kept and never inferred from an answer.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const audiences = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAudiences.js").audience
 const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -47,7 +56,11 @@ const limits = {
     siteRequests: 1000,
     addressRequests: 5,
     addressMails: 3,
-    tokenLookups: 100
+    tokenLookups: 100,
+    // P12: the SubmitForm page's limits and sizes
+    formClient: 30,
+    formSite: 1000,
+    formPayloadChars: 65536
 }
 const MINUTES_10 = 600000
 const HOUR = 3600000
@@ -536,6 +549,208 @@ function verifySubscription(p) {
     })
 }
 
+// ===== P12: get#Form and submit#Form (the SubmitForm page) =====
+const forms = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingForms.js")
+const publications = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js")
+const PUBLICATION = "mantle.party.FormPublication"
+const FORM_RECEIPT = "Thank you. Your answer is recorded."
+// The open Marketing publications of a site for its organization (readiness).
+const openFormsOf = (siteId, organizationPartyId) =>
+    rows(PUBLICATION, {siteId, organizationPartyId}).filter(
+        row => forms().PUBLICATION_PURPOSES.includes(row.purposeEnumId) && publications().stateOf(row) === "open"
+    ).length
+// The publication a page answers on this site, while it is open: by its link's token (an invited one: {publication, invitation}) or
+// by its id (a public or an account one); anything else the same NotFound.
+function publicationOfPage(p, organizationPartyId) {
+    let row = null,
+        invitation = null
+    if (!blank(p.token)) {
+        const checked = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").check({
+            token: p.token,
+            scope: "MarketingSurvey",
+            recordType: "FormInvitation",
+            organizationPartyId
+        })
+        invitation = one("mantle.party.FormInvitation", {invitationId: checked.recordId})
+        row = invitation ? one(PUBLICATION, {publicationId: invitation.publicationId}) : null
+        if (!row || row.accessEnumId !== "FpaInvited") unavailable()
+    } else {
+        row = blank(p.publicationId) ? null : one(PUBLICATION, {publicationId: text(p.publicationId)})
+        if (!row || !["FpaAnonymous", "FpaAccount"].includes(row.accessEnumId)) unavailable()
+    }
+    if (
+        !forms().PUBLICATION_PURPOSES.includes(row.purposeEnumId) ||
+        row.organizationPartyId !== organizationPartyId ||
+        row.siteId !== p.siteId ||
+        publications().stateOf(row) !== "open"
+    )
+        unavailable()
+    const form = one("moqui.screen.form.DbForm", {formId: row.formId})
+    if (!form || !forms().PURPOSES.includes(form.purposeEnumId) || form.ownerPartyId !== organizationPartyId) unavailable()
+    return {row, form, invitation}
+}
+// The subscription choice a publication offers beside its answers: its list while it is offered on the site, else none.
+function subscriptionOffer(row, organizationPartyId) {
+    return row.subscriptionListId ? offerOf(row.subscriptionListId, row.siteId, organizationPartyId) : null
+}
+function formReceipt(row) {
+    return {receipt: {message: row.completionMessage || L(FORM_RECEIPT)}}
+}
+// getForm: the page's form, read only: its heading, introduction, questions and rules as of now, the subscription choice, and for an
+// invitation already answered or an account's once policy already answered the receipt in place of the questions.
+function getForm(p) {
+    const organizationPartyId = served(p.siteId)
+    const {row, form, invitation} = publicationOfPage(p, organizationPartyId)
+    const accountPartyId = ec.user.userAccount?.partyId || null
+    const needsAccount = row.accessEnumId === "FpaAccount" && !accountPartyId
+    const answered =
+        !!invitation?.formResponseId ||
+        (row.accessEnumId === "FpaAccount" &&
+            row.repeatEnumId === "FprOnce" &&
+            !!accountPartyId &&
+            find("mantle.party.FormSubmission", {publicationId: row.publicationId, partyId: accountPartyId}).count() > 0)
+    const offer = subscriptionOffer(row, organizationPartyId)
+    return {
+        form: {
+            publicationId: row.accessEnumId === "FpaInvited" ? null : row.publicationId,
+            title: row.titleText || form.description || "",
+            intro: row.introText || "",
+            organizationName: organizationName(organizationPartyId),
+            access: row.accessEnumId === "FpaInvited" ? "invited" : row.accessEnumId === "FpaAccount" ? "account" : "anyone",
+            needsAccount,
+            answered,
+            fields: answered || needsAccount ? [] : publications().pageFields(row.formId),
+            subscription:
+                offer && !answered ? {name: offer.list.contactListName || "", consentText: topicView(offer).consentText} : null
+        },
+        receipt: answered ? formReceipt(row).receipt : null
+    }
+}
+// The values a page sends: a map, or its JSON text (a form post through a remote frontend); null for one that is not.
+function formValuesOf(value) {
+    if (value == null || value === "") return {}
+    if (typeof value === "string") {
+        if (value.length > limits.formPayloadChars) return null
+        const parsed = lib.json(value, null)
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null
+    }
+    return Object.assign({}, value)
+}
+// submitForm: the answer kept through accept#Submission, then the subscription choice apart; the neutral receipt.
+function submitForm(p) {
+    const organizationPartyId = served(p.siteId)
+    const {row, invitation} = publicationOfPage(p, organizationPartyId)
+    const receipt = formReceipt(row)
+    const operationId = String(p.operationId || "")
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(operationId)) fail("Unprocessable", "Reload the page and try again")
+    // the limits and the size: over any, the receipt and nothing kept
+    const values = formValuesOf(p.values)
+    if (
+        !values ||
+        JSON.stringify(values).length > limits.formPayloadChars ||
+        !allowed("mkt-form-client:" + requester(), limits.formClient, MINUTES_10) ||
+        !allowed("mkt-form-site:" + p.siteId, limits.formSite, HOUR)
+    )
+        return receipt
+    const accountPartyId = ec.user.userAccount?.partyId || null
+    if (row.accessEnumId === "FpaAccount" && !accountPartyId) fail("AuthenticationRequired", "Sign in to answer this form")
+    let accepted
+    try {
+        // Commons' accept#Submission's rule, in this operation's transaction
+        accepted = publications().acceptSubmission({
+            publicationId: row.publicationId,
+            values,
+            requestKey: operationId,
+            invitationId: invitation?.invitationId || null,
+            partyId: row.accessEnumId === "FpaAccount" ? accountPartyId : null,
+            siteId: p.siteId
+        })
+    } catch (error) {
+        const code = lib.reasonCode(error)
+        ec.message.clearErrors()
+        // what the page never offers (an unknown or hidden field, an oversized value): refused with the same receipt, nothing kept
+        if (["FIELD_UNKNOWN", "VALUE_TOO_LONG"].includes(code)) return receipt
+        // a question its rules hide: a visitor without JavaScript sees every question, so the page says what to fix; nothing kept
+        if (code === "FIELD_HIDDEN")
+            fail("Unprocessable", "Leave unanswered the questions that do not apply to your other answers")
+        if (code === "ALREADY_ANSWERED") return receipt
+        if (code === "PUBLICATION_CLOSED" || code === "INVITATION_REQUIRED") unavailable()
+        if (code === "FORM_VALUES_INVALID")
+            fail(
+                "Unprocessable",
+                String(error.message)
+                    .replace(/^FORM_VALUES_INVALID: /, "")
+                    .split("\n")[0]
+            )
+        if (code === "REQUEST_KEY_REUSED" || code === "REQUEST_KEY_INVALID")
+            fail("Unprocessable", "Reload the page and try again")
+        throw error
+    }
+    if (!accepted.alreadyApplied) applySubmissionEffects(row, accepted.formSubmissionId, organizationPartyId, p)
+    return receipt
+}
+// The effects after an answer is kept, each apart and replay-safe (a repeat of the request key does not run them again): the
+// subscription choice as a public request with its own verification message (Subscribe's path, its address limit). Recorded on the
+// submission; a failure is logged and the answer stands.
+function applySubmissionEffects(row, formSubmissionId, organizationPartyId, p) {
+    const notes = []
+    let failed = false
+    try {
+        const offer = subscriptionOffer(row, organizationPartyId)
+        if (offer && yes(p.subscribe)) {
+            const address = String(p.subscriptionEmail || "")
+                .trim()
+                .toLowerCase()
+            if (!address || address.length > limits.address || !emailPattern.test(address))
+                notes.push("subscription: no valid address")
+            else if (!allowed("mkt-request:" + addressKey(address), limits.addressRequests, HOUR))
+                notes.push("subscription: address limit")
+            else {
+                const subscriber = apart("Error making the subscriber", () => subscriberOf(address, null))
+                const site = one("mantle.public.PublicSite", {siteId: row.siteId})
+                fileGroup({
+                    siteId: row.siteId,
+                    organizationPartyId,
+                    offers: [offer],
+                    subscriber,
+                    address,
+                    requestKey: ec.user.singleUseCodeHash("mkt-form-subscription:" + formSubmissionId),
+                    sourceEnumId: "PcsForm",
+                    evidenceText: (list, policy) =>
+                        (policy.evidenceText || "Subscribe to " + (list.contactListName || list.contactListId)) +
+                        " (the subscription choice beside form " +
+                        row.publicationId +
+                        " on site " +
+                        (site?.name || row.siteId) +
+                        ", ticked)"
+                })
+                notes.push("subscription: requested")
+            }
+        }
+    } catch (error) {
+        failed = true
+        notes.push("subscription failed")
+        ec.logger.error(
+            "Form submission " +
+                formSubmissionId +
+                ": the subscription choice failed: " +
+                String(error?.message || error).split("\n")[0]
+        )
+        ec.message.clearErrors()
+    }
+    try {
+        publications().recordEffects(formSubmissionId, failed, notes.join("; "))
+    } catch (error) {
+        ec.logger.error(
+            "Form submission " +
+                formSubmissionId +
+                ": its effects not recorded: " +
+                String(error?.message || error).split("\n")[0]
+        )
+        ec.message.clearErrors()
+    }
+}
+
 // ===== check#MarketingAppReadiness =====
 // The Marketing app's checks of a site (PublicApps.js): its target an internal organization, a list offered there (a mount with
 // no published record is named), a ready transactional sending profile, a published confirmation template on each offered list, and the
@@ -546,11 +761,13 @@ function appReadiness(p) {
     return {
         checks: [
             {name: "organization", ready: organization},
-            {name: "published list", ready: offers.length > 0},
+            // P12: a list offered or a form publication open on the site
+            {name: "published list or form", ready: offers.length > 0 || (organization && openFormsOf(p.siteId, p.targetId) > 0)},
             {name: "transactional sending profile", ready: organization && !!profileFor(p.targetId)},
             {
                 name: "confirmation template",
-                ready: offers.length > 0 && offers.every(offer => !!confirmationOf(offer.policy, p.targetId))
+                // P12: each offered list's (a site offering only forms needs none)
+                ready: organization && offers.every(offer => !!confirmationOf(offer.policy, p.targetId))
             },
             {name: "canonical host", ready: !!apps().pageUrl(p.siteId, p.app || "marketing", "/")}
         ]
@@ -677,7 +894,9 @@ const operations = {
     appReadiness,
     buildVerification,
     attemptVerification,
-    fileCheckout
+    fileCheckout,
+    getForm,
+    submitForm
 }
 const internalOperations = new Set(["appReadiness", "buildVerification", "attemptVerification", "fileCheckout"])
 ;({

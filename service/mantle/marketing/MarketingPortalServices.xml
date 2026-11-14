@@ -66,9 +66,41 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('verifySubscription', input)"/>
         </actions>
     </service>
+    <!-- P12 (design §13 SubmitForm): the SubmitForm page's two operations, getMarketingForm and submitMarketingForm -->
+    <service verb="get" noun="Form" authenticate="anonymous-all" allow-remote="false">
+        <description>getMarketingForm: a Marketing publication answered on this site, by its id (anyone with the page, or signed-in
+            accounts) or by an invitation link's token (scope MarketingSurvey): open, of the organization the site's marketing mount
+            serves; its heading, introduction, organization and the questions with their rules as of now (the customer-visible
+            fields; never an internal field, a score or a draft), the subscription choice its list offers on the site, and the receipt
+            in place of the questions once an invitation (or an account under the once policy) has answered. A site without the mount,
+            an unpublished, closed or another site's publication and a forged, expired or another site's token answer the same
+            NotFound; each token lookup counts against the requester's limit.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getForm', input)"/>
+        </actions>
+    </service>
+    <service verb="submit" noun="Form" authenticate="anonymous-all" allow-remote="false">
+        <description>submitMarketingForm (a POST; anonymous for a public publication, a bearer write with an invitation's token):
+            publicationId or token, values (a map, or its JSON text), operationId (PASS's request key), subscribe and subscriptionEmail
+            (the separate subscription choice). The answer is kept through mantle.party.FormPublicationServices.accept#Submission's
+            rule (the form as of now, each value of its type, the request key's one submission, an invitation answered once); then the
+            subscription choice files a public request of the publication's list with its own verification message (Subscribe's path
+            and address limit), apart, recorded on the submission. Answers the publication's neutral receipt, also for a submission past
+            the client's (30 in ten minutes) or site's (1,000 an hour) limit, an oversized one, one naming a field the page never
+            offered, and a repeat (nothing kept); Unprocessable with what to fix for a value the visitor can fix (an answer to a
+            question its rules hide among them);
+            NotFound as getMarketingForm.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('submitForm', input)"/>
+        </actions>
+    </service>
     <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
         <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
-            offered there, a ready transactional sending profile of the organization (a promotional one never sends a verification), a
+            offered there or a form publication open there (P12), a ready transactional sending profile of the organization (a promotional one never sends a verification), a
             published confirmation template on each offered list, and
             the site's canonical host.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>

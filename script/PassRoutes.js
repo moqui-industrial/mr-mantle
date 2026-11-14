@@ -308,6 +308,10 @@
     ['POST', 'marketing/subscription', 'requestSubscription'],
     ['GET', 'marketing/subscription/request', 'getSubscriptionRequest'],
     ['POST', 'marketing/subscription/verification', 'verifySubscription'],
+    // IronStone Marketing P12: the SubmitForm page (the answer an anonymous write PASS's request key and the limits bound, or a
+    // bearer write with an invitation's token)
+    ['GET', 'marketing/form', 'getMarketingForm'],
+    ['POST', 'marketing/form/submission', 'submitMarketingForm'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],

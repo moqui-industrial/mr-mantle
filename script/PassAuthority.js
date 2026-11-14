@@ -78,6 +78,9 @@ const TOKEN_WRITES = [
     // and its confirmation link's POST (input.token)
     'requestSubscription',
     'verifySubscription',
+    // IronStone Marketing P12: a form's answer (anonymous for a public publication: PASS's request key, its limits and the neutral
+    // receipt bound it; an invitation's link with input.token)
+    'submitMarketingForm',
 ]
 /* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
    connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads

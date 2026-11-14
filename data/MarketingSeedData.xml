@@ -152,4 +152,24 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsCancelled" transitionName="Cancel"/>
     <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsReplaced" transitionName="Replace"/>
     <!-- ===== end of Marketing P10 ===== -->
+
+    <!-- ===== Marketing P12: surveys and form publication (impl-marketing P12; design-marketing §10; F21, F53, F70) ===== -->
+    <!-- Marketing's purposes of the survey builder (mantle.party.FormPurpose, FormDefinitions.js): the survey (the framework's
+        DbfpSurvey), the lead form (P13's handoff) and an event's registration questions (P16), each built by a content author
+        (MARKETING_CONTENT_EDIT) and read by an audience or report reader of the organizations Marketing's scope answers
+        (MarketingFormServices get#FormScope), every field customer-visible (a respondent answers each). A survey is published to
+        invited recipients, anyone with the page or signed-in accounts; a lead form and registration questions to anyone or accounts,
+        never by an invitation. No case feedback or People form is in reach: those are other purposes. -->
+    <moqui.basic.Enumeration enumId="DbfpLead" description="Lead form" sequenceNum="31" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="DbfpRegistration" description="Registration questions" sequenceNum="32" enumTypeId="DbFormPurpose"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpSurvey" publicationPurposeEnumId="FppSurvey" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaInvited,FpaAnonymous,FpaAccount" formNoun="survey" fieldAudienceEnumId="CfaCustomer"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpLead" publicationPurposeEnumId="FppLead" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaAnonymous,FpaAccount" formNoun="form" fieldAudienceEnumId="CfaCustomer"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpRegistration" publicationPurposeEnumId="FppRegistration" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaAnonymous,FpaAccount" formNoun="form" fieldAudienceEnumId="CfaCustomer"/>
+    <!-- ===== end of Marketing P12 ===== -->
 </entity-facade-xml>

@@ -1260,6 +1260,13 @@ function buildDelivery(p) {
         if (!prepared) return {suppress: "The recipient's variant was not prepared with the send"}
     } else if (recipient.experimentRemainder === "Y") return {suppress: "The recipient waits for the winner"}
     const rendered = s.render(prepared, s.recipientValues(recipient.partyId))
+    // P12: an invitation send's recipient gets their own invitation link (the FormInvitation once, a capability per attempt)
+    const survey = row.formPublicationId
+        ? ec.resource
+              .script("component://mr-mantle/service/mantle/marketing/MarketingForms.js")
+              .invitationLink(row, recipient, mech.infoString)
+        : null
+    if (survey?.suppress) return {suppress: survey.suppress}
     const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
     const where = unsubscribeLink(row, profile, row.unsubscribeBaseUrl)
     if (!where.ready) return {suppress: "The unsubscribe link has no address"}
@@ -1279,6 +1286,15 @@ function buildDelivery(p) {
     if (rendered.preheader)
         body =
             '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">' + encode(rendered.preheader) + "</div>" + body
+    if (survey?.url && body)
+        body +=
+            '<p><a href="' +
+            encode(survey.url) +
+            '">' +
+            encode(ec.l10n.localize("Answer the survey")) +
+            "</a></p><p><small>" +
+            encode(ec.l10n.localize("The link is yours alone and answers once.")) +
+            "</small></p>"
     if (body && !body.includes(url))
         body +=
             '<p style="font-size:12px;color:#666666">You receive this email because you subscribed to ' +
@@ -1287,6 +1303,7 @@ function buildDelivery(p) {
             encode(url) +
             '">Unsubscribe</a></p>'
     let bodyText = rendered.bodyText || ""
+    if (survey?.url && bodyText) bodyText += "\n\n" + ec.l10n.localize("Answer the survey") + ": " + survey.url + "\n"
     if (bodyText && !bodyText.includes(url))
         bodyText += "\n\n--\nYou receive this email because you subscribed to " + topicName + ". Unsubscribe: " + url + "\n"
     const attachments = []

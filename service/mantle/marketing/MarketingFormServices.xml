@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingFormServices (F, IronStone Marketing design §14.2; impl-marketing P12): Marketing's form publications,
+    their invitation sends and the responses (MarketingForms.js), thin wrappers over Commons' mantle.party.FormPublicationServices and
+    the survey builder's mantle.party.FormDefinitionServices that add the campaign, the site's Marketing mount and the promotional
+    eligibility of invitations. Each service checks its permission and the organization itself (mantle/marketing/MarketingAccess.js,
+    the purposes' registrations). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="FormScope" allow-remote="false" read-only="true">
+        <description>The scope service of Marketing's form purposes (mantle.party.FormPurpose scopeServiceName): the organizations of
+            the caller's Marketing scope (every internal one for a holder of MARKETING_ALL_ORGANIZATIONS or a system administrator),
+            none for a caller who reads nothing of Marketing.</description>
+        <out-parameters><parameter name="organizationPartyIds" type="List"/></out-parameters>
+        <actions>
+            <set field="organizationPartyIds" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('formScope', context).organizationPartyIds"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Publication" allow-remote="false">
+        <description>A new publication of a Marketing form (formId) or a change of one (publicationId, at expectedRevision), by a
+            content author (MARKETING_CONTENT_EDIT) of the form's organization: the access kind its purpose admits, the repeat policy,
+            the site (a published one whose marketing mount targets the organization: SITE_INVALID), the campaign (an open one of the
+            organization, its context record and CampaignAssociation; CAMPAIGN_CLOSED, CAMPAIGN_FIXED), the list a respondent may choose to
+            subscribe to (a Marketing list of the organization), the closing date and the page's words; the Commons rules of
+            mantle.party.FormPublicationServices.store#Publication apply. It opens by publish#Publication.</description>
+        <in-parameters>
+            <parameter name="publicationId"/>
+            <parameter name="formId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="accessEnumId"/>
+            <parameter name="repeatEnumId"/>
+            <parameter name="siteId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="subscriptionListId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="titleText"/>
+            <parameter name="introText"/>
+            <parameter name="completionMessage"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="created" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('storePublication', context)"/>
+            <set field="publicationId" from="out.publicationId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="Publication" allow-remote="false">
+        <description>A publication opens at fromDate (now or later) once its readiness holds (NOT_READY naming what is missing: the
+            form's questions published, a site whose Marketing pages serve the organization, and for invitations a campaign), by a
+            content author of its organization at the revision read.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="state"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('publishPublication', context)"/>
+            <set field="publicationId" from="out.publicationId"/>
+            <set field="state" from="out.state"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Publications" allow-remote="false" read-only="true">
+        <description>The Marketing publications of the caller's scope (a Marketing reader), of one form or campaign when named, newest
+            first (at most 200): each one's form, purpose, access, repeat policy, site, campaign, subscription choice, state, dates,
+            invitation and answer counts and public page.</description>
+        <in-parameters>
+            <parameter name="formId"/>
+            <parameter name="marketingCampaignId"/>
+        </in-parameters>
+        <out-parameters><parameter name="publications" type="List"/></out-parameters>
+        <actions>
+            <set field="publications" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('findPublications', context).publications"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Publication" allow-remote="false" read-only="true">
+        <description>One Marketing publication of the caller's scope (RECORD_UNAVAILABLE otherwise), or with formId alone what a new
+            publication of that form offers: its view, its readiness, its invitation sends with their invited and answered counts, the
+            access kinds, sites, campaigns and lists to choose from, and what the caller may do (canEdit, canPublish, canClose,
+            canInvite).</description>
+        <in-parameters>
+            <parameter name="publicationId"/>
+            <parameter name="formId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="publication" type="Map"/>
+            <parameter name="form" type="Map"/>
+            <parameter name="readiness" type="List"/>
+            <parameter name="invitationSends" type="List"/>
+            <parameter name="choices" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canPublish" type="Boolean"/>
+            <parameter name="canClose" type="Boolean"/>
+            <parameter name="canInvite" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getPublication', context))</script>
+        </actions>
+    </service>
+    <service verb="create" noun="Invitations" allow-remote="false">
+        <description>An invitation send of a publication of invited recipients (PUBLICATION_NOT_OFFERED, PUBLICATION_CLOSED; a campaign
+            and a site first: CAMPAIGN_REQUIRED, NOT_READY), by a send author (MARKETING_SEND_EDIT): a draft CampaignSend of the
+            publication's campaign to a topic and audience (mantle.marketing.CampaignSendServices.create#Send's rules) that names the
+            publication. Its preparation, approval, release and dispatch are the send's own, so an invitation reaches only a recipient
+            the promotional checks admit; each message carries the recipient's own invitation link, made at each attempt.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sendName"/>
+            <parameter name="messageTemplateId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendId"/></out-parameters>
+        <actions>
+            <set field="campaignSendId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('createInvitations', context).campaignSendId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Responses" allow-remote="false" read-only="true">
+        <description>A Marketing form's responses for a reader of its purpose (MARKETING_AUDIENCE_VIEW or MARKETING_REPORT_VIEW) and
+            organization: only those submitted to a Marketing publication of the scope (one publication's when named), newest first (at
+            most 200), each with its publication, date, respondent (named for an audience reader only, else "A respondent"; anonymous
+            when none was verified), how it came (invitation, signed in, public page) and score; the form and publication choices and
+            the summary (get#ResponseStats). A case's feedback on any form is never among them.</description>
+        <in-parameters>
+            <parameter name="formId"/>
+            <parameter name="publicationId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formOptions" type="List"/>
+            <parameter name="formId"/>
+            <parameter name="publicationOptions" type="List"/>
+            <parameter name="publicationId"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="stats" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('findResponses', context))</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Response" allow-remote="false" read-only="true">
+        <description>One response submitted to a Marketing publication of the caller's scope, for a reader of its purpose, with the form
+            as of its submission (each answer with its question and option text then), its publication, respondent (as find#Responses
+            names one), how it came and score. Any other response (a case's feedback, one of no Marketing publication, another
+            organization's) is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="formResponseId" required="true"/></in-parameters>
+        <out-parameters><parameter name="response" type="Map"/></out-parameters>
+        <actions>
+            <set field="response" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getResponse', context).response"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ResponseStats" allow-remote="false" read-only="true">
+        <description>The summary of a Marketing form's responses (one publication's when named) for a reader of its purpose: invited,
+            delivered and answered, the response rate, the average score of the answered scored questions with the answered count and
+            maximum apart (an unscored or unanswered question left out), and each choice's answers by option, each response read with
+            the form of its date; truncated past 5,000 responses.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="publicationId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="stats" type="Map"/></out-parameters>
+        <actions>
+            <set field="stats" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getResponseStats', context).stats"/>
+        </actions>
+    </service>
+</services>

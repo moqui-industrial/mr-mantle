@@ -69,6 +69,9 @@ const TOKEN_WRITES = [
     // and its confirmation link's POST (input.token)
     'requestSubscription',
     'verifySubscription',
+    // IronStone Marketing P12: a form's answer (anonymous for a public publication: PASS's request key, its limits and the neutral
+    // receipt bound it; an invitation's link with input.token)
+    'submitMarketingForm',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

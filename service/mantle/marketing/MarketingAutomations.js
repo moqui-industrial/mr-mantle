@@ -83,7 +83,8 @@ const limits = {
     capRetryMinutes: 24 * 60
 }
 const waitBounds = {AwuMinutes: [1, 525600], AwuHours: [1, 8760], AwuDays: [1, 365], AwuBusinessDays: [1, 260]}
-const triggers = ["AtrSubscription", "AtrSegment", "AtrStaff", "AtrOrderPlaced", "AtrCartAbandoned"]
+// P12: a form submitted (AtrFormSubmitted: a submission of a Marketing publication of the organization by a known party)
+const triggers = ["AtrSubscription", "AtrSegment", "AtrStaff", "AtrOrderPlaced", "AtrCartAbandoned", "AtrFormSubmitted"]
 const stepKinds = {send: "AskSendEmail", wait: "AskWait", condition: "AskCondition"}
 const editableStatuses = ["MaDraft", "MaAwaitingApproval", "MaApproved", "MaActive", "MaPaused"]
 const closedCampaignStatuses = ["MKTG_CAMP_COMPLETED", "MKTG_CAMP_CANCELLED"]
@@ -443,6 +444,7 @@ function automationProblems(row) {
     if (steps.length > maxStepsOf(row.organizationPartyId)) problems.push("it has more steps than the policy allows")
     if (row.triggerEnumId === "AtrSegment" && !row.triggerSegmentId) problems.push("its trigger needs a segment")
     if (row.triggerEnumId === "AtrCartAbandoned" && !row.productStoreId) problems.push("its trigger needs a store")
+    if (row.triggerEnumId === "AtrFormSubmitted" && !row.formPublicationId) problems.push("its trigger needs a form publication")
     return problems
 }
 // MarketingApprovals.js targetKinds.automation delegates to this
@@ -486,7 +488,20 @@ function triggerFor(userScope, p, organizationPartyId) {
     const store = ["AtrOrderPlaced", "AtrCartAbandoned"].includes(triggerEnumId)
         ? storeFor(p.productStoreId, organizationPartyId)
         : null
-    return {triggerEnumId, triggerSegmentId: segmentId, productStoreId: store?.productStoreId || null}
+    // P12: a Marketing publication of the organization (RECORD_UNAVAILABLE otherwise)
+    let formPublicationId = null
+    if (triggerEnumId === "AtrFormSubmitted" && !blank(p.formPublicationId)) {
+        const publication = one("mantle.party.FormPublication", {publicationId: text(p.formPublicationId)})
+        const marketingForms = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingForms.js")
+        if (
+            !publication ||
+            publication.organizationPartyId !== organizationPartyId ||
+            !marketingForms.PUBLICATION_PURPOSES.includes(publication.purposeEnumId)
+        )
+            denied("RECORD_UNAVAILABLE", "Form publication " + p.formPublicationId + " is not available")
+        formPublicationId = publication.publicationId
+    }
+    return {triggerEnumId, triggerSegmentId: segmentId, productStoreId: store?.productStoreId || null, formPublicationId}
 }
 function createAutomation(p) {
     const userScope = editScope()
@@ -508,6 +523,7 @@ function createAutomation(p) {
         triggerEnumId: trigger.triggerEnumId,
         triggerSegmentId: trigger.triggerSegmentId,
         productStoreId: trigger.productStoreId,
+        formPublicationId: trigger.formPublicationId,
         reentryEnumId: "ArOnce",
         timeZone: zoneOf(p.timeZone),
         statusId: "MaDraft",
@@ -879,6 +895,37 @@ function collect(automation) {
         call("update#" + AUTOMATION, {
             marketingAutomationId: automation.marketingAutomationId,
             admissionCursorDate: new Date(Math.max(nowMs(), (ms(automation.activatedDate) ?? 0) + 1)),
+            lastAdmissionDate: ec.user.nowTimestamp,
+            admissionNote: null
+        })
+    } else if (trigger === "AtrFormSubmitted") {
+        // P12: the publication's submissions by a known party (an invitation's recipient or a signed-in account) after the cursor
+        if (!automation.formPublicationId) return 0
+        const since = automation.admissionCursorDate || automation.activatedDate || ec.user.nowTimestamp
+        const submitted = Array.from(
+            find("mantle.party.FormSubmission", {publicationId: automation.formPublicationId})
+                .condition("submittedDate", "greater-equals", since)
+                .orderBy("submittedDate")
+                .limit(limits.eventsPerRun)
+                .list()
+        )
+        let cursor = since
+        for (const submission of submitted) {
+            cursor = submission.submittedDate
+            if (!submission.partyId) continue
+            if (
+                fileEvent(automation, {
+                    sourceKey: "form:" + submission.formSubmissionId,
+                    sourceId: submission.formSubmissionId,
+                    partyId: submission.partyId,
+                    eventDate: submission.submittedDate
+                }).created
+            )
+                filed++
+        }
+        call("update#" + AUTOMATION, {
+            marketingAutomationId: automation.marketingAutomationId,
+            admissionCursorDate: cursor,
             lastAdmissionDate: ec.user.nowTimestamp,
             admissionNote: null
         })
@@ -1605,6 +1652,7 @@ function getAutomation(p) {
             triggerSegmentName: segmentName(row.triggerSegmentId),
             productStoreId: row.productStoreId || null,
             storeName: store ? store.storeName || store.productStoreId : "",
+            formPublicationId: row.formPublicationId || null,
             goalSegmentId: row.goalSegmentId || null,
             goalSegmentName: segmentName(row.goalSegmentId),
             reentryEnumId: row.reentryEnumId || "ArOnce",

@@ -128,9 +128,14 @@ const records = {
     // Support app's Feedback page takes for case feedback (CaseFeedback scope); an invitation of an internal organization to
     // an outside party while it is not withdrawn, expired or undeliverable (an answered one stays reachable, to show its
     // receipt). The links are made by the invitation's send job (CaseFeedback.js), never by a user.
+    // impl-marketing P12 (F80): Marketing's survey invitations, the scope MarketingSurvey, issued under Marketing's dispatch or
+    // content permission (an invitation send's build#CampaignDelivery makes one per attempt, never a user) and opening the
+    // organization's Marketing mount (SubmitForm); a case feedback link never opens a Marketing form, nor the reverse.
     FormInvitation: {
         permissions: ["SUPPORT_CASE_MANAGE"],
-        scopes: ["CaseFeedback"],
+        scopes: ["CaseFeedback", "MarketingSurvey"],
+        scopePermissions: {MarketingSurvey: ["MARKETING_DISPATCH", "MARKETING_CONTENT_EDIT"]},
+        scopePages: {MarketingSurvey: {app: "marketing", path: "/SubmitForm?token=", target: "organization"}},
         page: {app: "support", path: "/Feedback?token="},
         resolve(recordId) {
             const invitation = one("mantle.party.FormInvitation", {invitationId: recordId})
