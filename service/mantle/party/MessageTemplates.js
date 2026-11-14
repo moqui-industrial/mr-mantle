@@ -637,6 +637,15 @@ const operations = {
     render,
     currentOf,
     contentsOf,
+    // P8: a send's own content is checked, kept and rendered as a template's is (mantle.marketing.CampaignSendServices)
+    limits,
+    checkContent,
+    declaredVariables,
+    readText,
+    renderMap,
+    fill,
+    renderLocation,
+    variablesOf,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown message template operation " + op)
         return operations[op](parameters || {})

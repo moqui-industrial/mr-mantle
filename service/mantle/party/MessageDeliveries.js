@@ -22,6 +22,9 @@
  *   counted, then failed), so nothing goes out before its readiness. A delivery that names none is sent as before.
  * - Receipts (P6, F14): the later facts of a delivery (delivered, a soft or hard bounce, a complaint) are MessageDeliveryReceipt
  *   rows apart from its hand-off state (MessageDeliveryReports.js); record#DeliveryReceipt below stays the outcome of an attempt.
+ * - A source's own message (impl-sales P10, impl-marketing P6 and P8): its build may answer the subject (used as given, never
+ *   expanded), the body and the text alternative, handed to send#EmailTemplate over the template's; a send's test message is the
+ *   first promotional source that does (P8), and a promotional delivery never names a transactional-only profile.
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
@@ -66,6 +69,9 @@ function queue(p) {
         if (!profile) throw new Error("Unknown sending profile " + sendingProfileId)
         if (organizationPartyId && organizationPartyId !== profile.organizationPartyId)
             throw new Error("The sending profile " + sendingProfileId + " is another organization's")
+        // P8 (P6 review F172): a promotional delivery goes from a promotional profile or one for both, never a transactional one
+        if ((p.transactional === false || p.transactional === "N") && profile.purposeEnumId === "MtpTransactional")
+            throw new Error("PROFILE_PURPOSE: The sending profile " + sendingProfileId + " is for transactional messages only")
         organizationPartyId = profile.organizationPartyId
     }
     // the delivery is kept in a transaction of its own, so its attempts (each their own) see it; a source whose event does
@@ -141,9 +147,13 @@ function attemptNow(deliveryId) {
     }
 }
 // The consent snapshot at the hand-off: transactional, or the marketing purpose's state for the recipient.
+// P8: a send's test message (MdsrcCampaignSendTest, impl-marketing P8) is promotional, so every suppression refuses it, and goes only
+// to its policy's test allowlist, checked by test#Send: it asks no recipient's consent, and its snapshot says test.
+const testSources = ["MdsrcCampaignSendTest"]
 function consentOf(delivery) {
     const at = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd'T'HH:mm:ssZ")
     if (delivery.transactional !== "N") return {transactional: true, at}
+    if (testSources.includes(delivery.sourceEnumId)) return {transactional: false, test: true, granted: true, at}
     const queued = lib.json(delivery.consentJson, {}) || {}
     const purposeEnumId = queued.purposeEnumId || "PcpMarketingEmail"
     let granted = false

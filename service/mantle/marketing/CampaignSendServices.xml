@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.CampaignSendServices (D, IronStone Marketing design §14.2; impl-marketing P8): a campaign's sends, their content,
+    assets, preview, test, preparation and schedule (MarketingSends.js). The approval is CampaignServices request#MarketingApproval and
+    decide#MarketingApproval with targetKind send (MarketingApprovals.js); the release, dispatch, pause, cancel and recovery are P9's.
+    Each service checks its permission and the send's organization itself (mantle/marketing/MarketingAccess.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="Sends" allow-remote="false" read-only="true">
+        <description>The sends of the caller's scope (design §5 SendList), filtered in the query: text (id, name or subject, ignoring case), an organization of the scope, a campaign, status (one, open by default, or all), channel, mine (made by the caller) and a schedule range; paged (sendList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, campaign, organization, topic, profile, subject, status with its text and colour, schedule, revision, and the eligible count of a preparation at the current revision. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="statusId"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="mine"/>
+            <parameter name="rangeFrom" type="Timestamp"/>
+            <parameter name="rangeThru" type="Timestamp"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sendList" type="List"/>
+            <parameter name="sendListCount" type="Integer"/>
+            <parameter name="sendListPageIndex" type="Integer"/>
+            <parameter name="sendListPageSize" type="Integer"/>
+            <parameter name="sendListPageMaxIndex" type="Integer"/>
+            <parameter name="sendListPageRangeLow" type="Integer"/>
+            <parameter name="sendListPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('find', context))</script></actions>
+    </service>
+    <service verb="create" noun="Send" allow-remote="false">
+        <description>A draft send of a campaign (design §5 NewSend, QuickSend, a template's Use): its name, an open campaign of the scope (CAMPAIGN_CLOSED), a topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), an audience (listIds, segmentIds, excludeListIds, excludeSegmentIds of the organization, at most 20: TOO_MANY_SOURCES; none is the topic's members), a sending profile of the organization that is promotional or for both (PROFILE_PURPOSE, PROFILE_ENDED) and a template of the organization (P6 review R5) the caller reads, promotional, in use and with content in effect (TEMPLATE_UNAVAILABLE, TEMPLATE_PURPOSE, TEMPLATE_ENDED, NO_CONTENT), whose content is copied as the send's own. At revision 1, the caller its author. Needs MARKETING_SEND_EDIT (PERMISSION_DENIED); NAME_REQUIRED.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="sendName" required="true"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="messageTemplateId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendId"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('create', context))</script></actions>
+    </service>
+    <service verb="duplicate" noun="Send" allow-remote="false">
+        <description>A new draft from a send of the scope (design §5 Sends' duplicate): its topic, audience, profile and content (a copy of its files), named sendName or "Copy of" it, in its campaign while open (CAMPAIGN_CLOSED); never its recipients, approval, preparation or execution identity. Needs MARKETING_SEND_EDIT.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="sendName"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendId"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('duplicate', context))</script></actions>
+    </service>
+    <service verb="get" noun="Send" allow-remote="false" read-only="true">
+        <description>One send of the scope (design §5 SendDetail): its summary (campaign, topic, purpose, profile with its readiness, subject, schedule, state, revision; the preparation's revision, time, author, content and policy time, counts and preview identity), its draft content (subject, preheader, body, text and variables, for the composer), its prepared content (what was prepared: a later change of the content or the template leaves it), its audience (names of its lists and segments; the buckets counted at a preparation of the current revision), its attachments, its tests and the test allowlist (for an author), its decisions, what approval still needs, and the caller's actions (canEdit, canPrepare, canTest, canRequestApproval, canDecide: an approver who is no author, or an author under the one-person-team flag with fewer than 500 recipients). Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and a send outside the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="campaignSendId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="send" type="Map"/>
+            <parameter name="content" type="Map"/>
+            <parameter name="prepared" type="Map"/>
+            <parameter name="audience" type="Map"/>
+            <parameter name="assets" type="List"/>
+            <parameter name="tests" type="List"/>
+            <parameter name="testAddresses" type="List"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="approvalProblems" type="List"/>
+            <parameter name="awaitingApproval" type="Boolean"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('get', context))</script></actions>
+    </service>
+    <service verb="store" noun="Send" allow-remote="false">
+        <description>A send's header at the revision read (expectedRevision, its lastUpdatedStamp: REVISION_REQUIRED, STALE_REVISION): its name, topic, audience (listIds, segmentIds, excludeListIds, excludeSegmentIds, checked as create#Send), sending profile and reply-to, locale. A change of the topic, audience or sender raises its revision, ends its approval (approvalEnded) and returns it to draft. Refused once released (SEND_RELEASED: duplicate it). Needs MARKETING_SEND_EDIT on a send of the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="sendName"/>
+            <parameter name="contactListId"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="replyToAddress"/>
+            <parameter name="localeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignSendId"/>
+            <parameter name="approvalEnded" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('store', context))</script></actions>
+    </service>
+    <service verb="store" noun="SendContent" allow-remote="false">
+        <description>A send's content at the revision read (design §5 Compose MessageContent): subject, preheader, body (HTML), text alternative and declared variables (name, label, fallback, required), checked as a template's (MessageTemplates.js: UNDECLARED_VARIABLE, VARIABLE_EXPRESSION, TEMPLATE_DIRECTIVE, UNSAFE_HTML, VARIABLE_IN_LINK, VALUE_INVALID, VARIABLE_INVALID), and no link to a staff page or a stored file (PRIVATE_LINK); kept as files of its own. A change raises the revision, ends the approval (approvalEnded) and returns the send to draft; the body and subject changes are audit-logged. Refused once released (SEND_RELEASED). Needs MARKETING_SEND_EDIT on a send of the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="subject" allow-html="any"/>
+            <parameter name="preheader" allow-html="any"/>
+            <parameter name="body" allow-html="any"/>
+            <parameter name="bodyText" allow-html="any"/>
+            <parameter name="variables" type="List"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignSendId"/>
+            <parameter name="approvalEnded" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('storeContent', context))</script></actions>
+    </service>
+    <service verb="store" noun="SendAssets" allow-remote="false">
+        <description>A send's attachments at the revision read (design §5 Compose MessageAssets): action add a file of the send (its files) or of its campaign by contentLocation, with its label (ASSET_UNAVAILABLE for any other file: a file the caller does not see through the send or campaign is never sent); usage attachment only (USAGE_INVALID: a staff file is never made publicly retrievable); action end (campaignSendContentId) takes one out. Each is a content change: the revision raised and the approval ended. Refused once released (SEND_RELEASED). Needs MARKETING_SEND_EDIT on a send of the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="action"/>
+            <parameter name="contentLocation"/>
+            <parameter name="assetUsageEnumId"/>
+            <parameter name="assetLabel"/>
+            <parameter name="campaignSendContentId"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendContentId"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('storeAssets', context))</script></actions>
+    </service>
+    <service verb="schedule" noun="Send" allow-remote="false">
+        <description>A send's schedule at the revision read (design §5 SendSchedule): when it may go out once released (now or later: DATE_INVALID; empty: at its release) and the zone it was chosen in. A change raises the revision, ends the approval and returns the send to draft. Refused once released (SEND_RELEASED). Needs MARKETING_SEND_EDIT on a send of the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="scheduledDate" type="Timestamp"/>
+            <parameter name="scheduleTimeZone"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignSendId"/>
+            <parameter name="approvalEnded" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('schedule', context))</script></actions>
+    </service>
+    <service verb="preview" noun="Send" allow-remote="false" read-only="true">
+        <description>A send's content (the draft, or with prepared the prepared one) rendered for a sample (design §5 MessagePreview): a person on its topic for a holder of MARKETING_AUDIENCE_VIEW (samplePartyId: their first and last name only; PERMISSION_DENIED without it, RECORD_UNAVAILABLE for a person not on the topic), synthetic values otherwise; the body cleaned for display, the text, and the findings (an empty subject or body, no text alternative, a required variable that is no recipient's value or has none). Changes nothing. Refuses a caller who reads nothing of Marketing and a send outside the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="samplePartyId"/>
+            <parameter name="prepared"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="renderedSubject"/>
+            <parameter name="renderedPreheader"/>
+            <parameter name="safeBody"/>
+            <parameter name="renderedText"/>
+            <parameter name="missingVariables" type="List"/>
+            <parameter name="findings" type="List"/>
+            <parameter name="sampleText"/>
+            <parameter name="prepared" type="Boolean"/>
+            <parameter name="recipientFields" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('preview', context))</script></actions>
+    </service>
+    <service verb="test" noun="Send" allow-remote="false">
+        <description>A test message of a send (design §5 TestSend, §18 Test message) to one address of the organization's test allowlist (MarketingPolicy testAddresses: TEST_ADDRESS_NOT_ALLOWED for any other), at most 20 a day a send (TEST_LIMIT): a ledger delivery of its own source (MdsrcCampaignSendTest), promotional, naming the send's sending profile (PROFILE_REQUIRED, PROFILE_PURPOSE), so a suppressed address is refused as any other is; its subject marked [TEST] and its body headed TEST, with synthetic values; tried at once. It is no recipient, approval or count. Needs MARKETING_SEND_EDIT on a send of the scope that is not closed (STATUS_INVALID), with its subject and body (CONTENT_REQUIRED), by a user with a party (PARTY_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="toAddress" required="true"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="stateText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('test', context))</script></actions>
+    </service>
+    <service verb="build" noun="TestDelivery" allow-remote="false">
+        <description>The ledger's source MdsrcCampaignSendTest, before each attempt: the send's content as it is now with synthetic values, the subject marked [TEST] and a TEST line atop the body and text; suppressed when the send is gone or another organization's than the delivery. Internal.</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="subject"/>
+            <parameter name="body"/>
+            <parameter name="bodyText"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('buildTest', context))</script></actions>
+    </service>
+    <service verb="prepare" noun="Send" allow-remote="false">
+        <description>Prepares a draft send at the revision read (design §5 SendDetail; STATUS_INVALID, REVISION_REQUIRED, STALE_REVISION), as the user who prepares (who is "not available" is decided from them, P5 review): its content checked again, with its subject and body (SUBJECT_REQUIRED, BODY_REQUIRED) and every required variable a recipient's value (VARIABLE_UNKNOWN); its audience evaluated in pages over its topic's members (pageSize, 500 by default; the user's call of Nov 14: no 5,000 cap), each eligible person a CampaignRecipient (address, normalized key, tracking flag, execution key), the earlier preparation's replaced; the content kept as a resource of its own (what get#Send returns as prepared, whatever changes after); the content and policy time, the preview identity (previewKey, resultDigest) and the counts recorded. A resultDigest given (from the preview the author reviewed) that no longer matches is refused with the new count (PREVIEW_STALE); a count over the policy's audience limit AUDIENCE_LIMIT. An empty eligible audience is prepared and cannot be approved. Needs MARKETING_SEND_EDIT on a send of the scope.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="resultDigest"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignSendId"/>
+            <parameter name="preparedRevision" type="Integer"/>
+            <parameter name="eligibleCount" type="Integer"/>
+            <parameter name="untrackedCount" type="Integer"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="bucketCounts" type="Map"/>
+            <parameter name="resultDigest"/>
+            <parameter name="pages" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('prepare', context))</script></actions>
+    </service>
+
+    <!-- ===== the send as a Chatter and RecordFiles host (design §14.3; get#RecordLinkInfo) ===== -->
+    <service verb="check" noun="SendAccess" allow-remote="false" read-only="true">
+        <description>Whether the caller sees a send (a Marketing reader of its organization) and may change it (MARKETING_SEND_EDIT while its content may change): the record visibility of get#RecordLinkInfo and RecordFiles for the send and its files (CampaignSendContent). A call with no user sees none.</description>
+        <in-parameters><parameter name="campaignSendId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('access', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="organizationPartyId" from="found.organizationPartyId || null"/>
+        </actions>
+    </service>
+    <service verb="create" noun="CampaignSendContent">
+        <description>A file of a send (CampaignSendContent, the record files of get#RecordLinkInfo): the row, and the uploaded file saved through save#CampaignSendContentFile. Needs MARKETING_SEND_EDIT on a send the caller sees whose content may change (RECORD_UNAVAILABLE, PERMISSION_DENIED, SEND_RELEASED). A file is in the message only once store#SendAssets attaches it.</description>
+        <in-parameters>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="contentTypeEnumId"/>
+            <parameter name="description"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendContentId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('assetAccess', context)</script>
+            <service-call name="create#mantle.marketing.campaign.CampaignSendContent" out-map="context" disable-authz="true"
+                    in-map="{campaignSendId:campaignSendId, contentTypeEnumId:(contentTypeEnumId || 'CscDocument'), description:description}"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.marketing.CampaignSendServices.save#CampaignSendContentFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="CampaignSendContentFile" allow-remote="false">
+        <description>Internal to create#CampaignSendContent, which checks the caller: the file of a CampaignSendContent row of that send.</description>
+        <in-parameters>
+            <parameter name="campaignSendContentId" required="true"/>
+            <parameter name="campaignSendId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.marketing.campaign.CampaignSendContent" value-field="contentRow" disable-authz="true"/>
+            <if condition="contentRow == null || contentRow.campaignSendId != campaignSendId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${campaignSendContentId} is not of send ${campaignSendId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/campaignSend/${campaignSendId}/content_${campaignSendContentId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.marketing.campaign.CampaignSendContent" disable-authz="true"
+                    in-map="{campaignSendContentId:campaignSendContentId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+</services>

@@ -99,4 +99,15 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="MdsrcSubscriptionVerify" description="Subscription verification" sequenceNum="40"
             enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.MarketingPortalServices.build#VerificationDelivery"/>
     <!-- ===== end of Marketing P7 ===== -->
+
+    <!-- ===== Marketing P8: sends and the composer (impl-marketing P8; design-marketing §5 Compose TestSend, §18 Test message) ===== -->
+    <!-- The ledger's source of a send's test message (mantle.marketing.CampaignSendServices): its build gives the send's own subject
+        (marked TEST), body and text with sample values, and the EmailTemplate it goes out under, whose subject, body and sender each
+        call gives (the sending profile's). A test is a promotional delivery that names the send's profile, so a suppressed address is
+        refused as any other is; it asks no recipient's consent (the ledger's snapshot says test) and enters no count. -->
+    <moqui.basic.Enumeration enumId="MdsrcCampaignSendTest" description="Campaign send test" sequenceNum="41"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.CampaignSendServices.build#TestDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND_TEST" description="Campaign send test message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- ===== end of Marketing P8 ===== -->
 </entity-facade-xml>
