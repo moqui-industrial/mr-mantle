@@ -395,7 +395,7 @@ feature("adoption assigns each unowned record once, by reason code per record, a
     }
 })
 
-feature("Home answers each source by name, none built yet shown not available; a caller who reads nothing is refused", {
+feature("Home answers each source by name, those not built yet shown not available; a caller who reads nothing is refused", {
     when() {
         return {
             home: as(users.author, workspaceServices + "get#Home", {organizationPartyId: orgA}),
@@ -409,11 +409,18 @@ feature("Home answers each source by name, none built yet shown not available; a
         Array.from(home.cards)
             .map(card => card.cardKey)
             .join(",") == "campaigns,approvals,dueSends,failedDeliveries,registrations,audienceChanges"
-        Array.from(home.cards).every(card => card.state == "notAvailable" && card.value == null)
+        // P2 counts the running campaigns and pending approvals; the others are not built yet
+        Array.from(home.cards)
+            .filter(card => !["campaigns", "approvals"].includes(card.cardKey))
+            .every(card => card.state == "notAvailable" && card.value == null)
+        Array.from(home.cards)
+            .filter(card => ["campaigns", "approvals"].includes(card.cardKey))
+            .every(card => card.state == "available" && card.value == 0)
         home.failedSources.length == 0
+        // the approvals awaiting a decision are an approver's (P2): the administrator holds no approval
         Array.from(attention.sources)
             .map(source => source.sourceKey + ":" + source.state)
-            .join(",") == "adoption:available,approvals:notAvailable,deliveries:notAvailable"
+            .join(",") == "adoption:available,deliveries:notAvailable"
         other.refusal.includes("ORGANIZATION_DENIED")
         editor.refusal.includes("PERMISSION_DENIED")
     }
