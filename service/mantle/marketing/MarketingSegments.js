@@ -69,6 +69,14 @@ function rowsIn(entity, field, values, conditions = {}, configure = null) {
     }
     return found
 }
+// The rows of a read limited to universeCap + 1, refused past the cap (AUDIENCE_TOO_LARGE), never cut short: a list, an exclusion or
+// an audience is read whole or not at all (P5 review).
+function bounded(list, what) {
+    const all = Array.from(list)
+    if (all.length > universeCap)
+        denied("AUDIENCE_TOO_LARGE", what + " holds more than " + universeCap + " people; narrow it with a list or a segment")
+    return all
+}
 const groupBy = (list, key) => {
     const grouped = new Map()
     for (const row of list) {
@@ -156,11 +164,12 @@ function dealsOfParties(ctx, partyIds, typeEnumId) {
 }
 // The contacts of the organization's deals of a type the caller sees, bounded.
 function dealContacts(ctx, typeEnumId) {
-    const ids = Array.from(
+    const ids = bounded(
         find("mantle.sales.opportunity.SalesOpportunity", {organizationPartyId: ctx.organizationPartyId, typeEnumId})
             .selectField("salesOpportunityId")
-            .limit(universeCap)
-            .list()
+            .limit(universeCap + 1)
+            .list(),
+        "The organization's Sales pipeline"
     ).map(row => row.salesOpportunityId)
     const visible = visibleOpportunities(ctx, ids).map(deal => deal.salesOpportunityId)
     return unique(
@@ -168,6 +177,25 @@ function dealContacts(ctx, typeEnumId) {
             query.conditionDate("fromDate", "thruDate", ctx.asOf)
         ).map(row => row.partyId)
     )
+}
+// The organization's stores whose orders the caller reads in Commerce, read once a context: COMMERCE_VIEW and COMMERCE_ORDER_VIEW
+// within Commerce's store scope (StoreAdmin.js: the user's organizations, a store staff member's own stores), as Commerce's order
+// lists read them. An order with no store (a Sales order) is Sales' record and no purchase fact (P5 review).
+function purchaseStores(ctx) {
+    if (ctx.purchaseStoreIds === undefined) {
+        ctx.purchaseStoreIds = []
+        if (ec.user.userId && lib.access.has("COMMERCE_VIEW") && lib.access.has("COMMERCE_ORDER_VIEW")) {
+            const storeAdmin = ec.resource.script("component://mr-mantle/service/mantle/product/StoreAdmin.js")
+            ctx.purchaseStoreIds = Array.from(
+                storeAdmin
+                    .storeQuery(storeAdmin.scope("view"))
+                    .condition("organizationPartyId", ctx.organizationPartyId)
+                    .selectField("productStoreId")
+                    .list()
+            ).map(row => row.productStoreId)
+        }
+    }
+    return ctx.purchaseStoreIds
 }
 const sources = {
     party: {
@@ -234,7 +262,7 @@ const sources = {
     },
     purchase: {
         label: "Purchases",
-        readable: () => lib.access.has("COMMERCE_ORDER_VIEW"),
+        readable: ctx => purchaseStores(ctx).length > 0,
         fields: {
             orderCount: {type: "number", label: "Orders placed"},
             totalSpent: {type: "number", label: "Total spent, in the organization's currency"},
@@ -252,6 +280,7 @@ const sources = {
                 {vendorPartyId: ctx.organizationPartyId},
                 query =>
                     query
+                        .condition("productStoreId", "in", purchaseStores(ctx))
                         .condition("statusId", "in", placedStatuses)
                         .condition("placedDate", "less-equals", ctx.asOf)
                         .selectField("orderId,customerPartyId,placedDate,grandTotal,currencyUomId,orderPurposeEnumId")
@@ -268,13 +297,15 @@ const sources = {
         },
         discover(ctx) {
             return unique(
-                Array.from(
+                bounded(
                     find("mantle.order.OrderHeaderAndPart", {vendorPartyId: ctx.organizationPartyId})
+                        .condition("productStoreId", "in", purchaseStores(ctx))
                         .condition("statusId", "in", placedStatuses)
                         .selectField("customerPartyId")
                         .distinct(true)
                         .limit(universeCap + 1)
-                        .list()
+                        .list(),
+                    "The organization's store customers"
                 ).map(row => row.customerPartyId)
             )
         }
@@ -647,23 +678,29 @@ function universe(ctx, extraPartyIds, filterTree) {
     const ids = new Set(extraPartyIds)
     const listIds = organizationListIds(ctx.organizationPartyId)
     if (listIds.length)
-        for (const row of find(CLP)
-            .condition("contactListId", "in", listIds)
-            .conditionDate("fromDate", "thruDate", ctx.asOf)
-            .selectField("partyId")
-            .distinct(true)
-            .limit(universeCap + 1)
-            .list())
+        for (const row of bounded(
+            find(CLP)
+                .condition("contactListId", "in", listIds)
+                .conditionDate("fromDate", "thruDate", ctx.asOf)
+                .selectField("partyId")
+                .distinct(true)
+                .limit(universeCap + 1)
+                .list(),
+            "The organization's lists"
+        ))
             ids.add(row.partyId)
     const internal = new Set(
         Array.from(find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).selectField("partyId").list()).map(
             row => row.partyId
         )
     )
-    for (const row of find("mantle.party.Party", {ownerPartyId: ctx.organizationPartyId})
-        .selectField("partyId")
-        .limit(universeCap + 1)
-        .list())
+    for (const row of bounded(
+        find("mantle.party.Party", {ownerPartyId: ctx.organizationPartyId})
+            .selectField("partyId")
+            .limit(universeCap + 1)
+            .list(),
+        "The organization's own contacts"
+    ))
         if (!internal.has(row.partyId)) ids.add(row.partyId)
     for (const sourceKey of filterSources(filterTree))
         if (sources[sourceKey].discover) for (const id of sources[sourceKey].discover(ctx)) ids.add(id)
@@ -1050,6 +1087,9 @@ function archiveSegment(p) {
 function duplicateSegment(p) {
     const userScope = audienceScope("audienceEdit")
     const segment = segmentOfScope(userScope, p.marketSegmentId)
+    // the copy is stored by the caller, so its filter's sources must be theirs to read, as store#SegmentFilter asks (P5 review)
+    const filterRow = currentFilterRow(segment.marketSegmentId)
+    if (filterRow) parseFilter(filterRow.filterJson, context(userScope, segment.ownerPartyId))
     const made = call("create#" + SEGMENT, {
         marketSegmentTypeEnumId: segment.marketSegmentTypeEnumId || "MARKET_SEGMENT",
         segmentName: text(p.segmentName) || "Copy of " + segmentLabel(segment),
@@ -1078,7 +1118,6 @@ function duplicateSegment(p) {
             minValue: row.minValue,
             maxValue: row.maxValue
         })
-    const filterRow = currentFilterRow(segment.marketSegmentId)
     if (filterRow)
         call("create#" + FILTER, {
             marketSegmentId: id,
@@ -1286,6 +1325,7 @@ const operations = {
     describeSources,
     inScopeParties,
     rowsIn,
+    bounded,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown segment operation " + op)
         return operations[op](parameters || {})

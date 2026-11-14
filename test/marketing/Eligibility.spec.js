@@ -45,7 +45,9 @@ const people = {
         expect: "withdrawn:PURPOSE_WITHDRAWN"
     },
     Lou: {email: "door@eligibility.example", status: "CLPT_UNSUBSCRIBED", expect: "withdrawn:UNSUBSCRIBED"},
-    Max: {email: "door@eligibility.example", status: "CLPT_ACCEPTED", grant: true, expect: "withdrawn:DESTINATION_WITHDRAWN"}
+    Max: {email: "door@eligibility.example", status: "CLPT_ACCEPTED", grant: true, expect: "withdrawn:DESTINATION_WITHDRAWN"},
+    // a legacy member at the withdrawn address: the withdrawal comes before needing evidence (P5 review)
+    Ned: {email: "door@eligibility.example", status: "CLPT_ACCEPTED", expect: "withdrawn:DESTINATION_WITHDRAWN"}
 }
 const bucketsOf = out => Object.fromEntries(Array.from(out.bucketList || []).map(entry => [entry.bucket, entry.count]))
 
@@ -193,7 +195,7 @@ feature(
             out.membershipCount == Object.keys(people).length + 1
             Object.values(bucketsOf(out)).reduce((sum, count) => sum + count, 0) == out.matchedCount
             bucketsOf(out) ==
-                {unavailable: 1, destination: 1, suppressed: 1, withdrawn: 6, evidence: 1, duplicate: 1, eligible: 2}
+                {unavailable: 1, destination: 1, suppressed: 1, withdrawn: 7, evidence: 1, duplicate: 1, eligible: 2}
             // each person exactly once, in the bucket and reason expected; another user's personal contact a row with no name or address
             Array.from(out.recipientList).length == out.matchedCount
             Array.from(out.recipientList).filter(row => row.bucket == "unavailable" && !row.partyId && !row.addressText).length ==

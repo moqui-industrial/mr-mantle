@@ -234,15 +234,17 @@ function classify(o) {
         person.tracked = purposeState(person.consents, "PcpTracking", person.info.contactMechId, org).granted
         set("eligible", "ELIGIBLE")
     }
-    // 4 again, by destination: a withdrawal of anyone at an address blocks it for everyone there; then 6, the duplicates
+    // 4 again, by destination: a withdrawal of anyone at an address blocks it for everyone there, ahead of needing evidence (P5
+    // review); then 6, the duplicates
     const withdrawnKeys = new Set(people.filter(person => person.withdrew && person.key).map(person => person.key))
     const chosen = new Map()
     for (const person of people) {
-        if (person.bucket !== "eligible") continue
+        if (person.bucket !== "eligible" && person.bucket !== "evidence") continue
         if (withdrawnKeys.has(person.key)) {
             Object.assign(person, {bucket: "withdrawn", reasonCode: "DESTINATION_WITHDRAWN", tracked: false})
             continue
         }
+        if (person.bucket !== "eligible") continue
         // people are in party id order, so the first at an address is the lowest id: the one chosen
         if (chosen.has(person.key))
             Object.assign(person, {bucket: "duplicate", reasonCode: "DUPLICATE_DESTINATION", duplicateOf: chosen.get(person.key)})
@@ -316,16 +318,20 @@ function segmentOf(userScope, marketSegmentId, organizationPartyId) {
     if (segments.archived(row)) denied("SEGMENT_ARCHIVED", "Segment " + segments.segmentLabel(row) + " is archived")
     return row
 }
-// The members of a list in effect at the time, every state (the buckets tell them apart).
-const listMembers = (contactListId, asOf) =>
-    Array.from(
-        find(CLP, {contactListId})
-            .conditionDate("fromDate", "thruDate", asOf)
-            .selectField("partyId")
-            .distinct(true)
-            .limit(segments.universeCap + 1)
-            .list()
-    ).map(row => row.partyId)
+// The members of a list in effect at the time, every state (the buckets tell them apart); a list past the cap is refused, never cut
+// short, so an exclusion list is applied whole (P5 review).
+const listMembers = (list, asOf) =>
+    segments
+        .bounded(
+            find(CLP, {contactListId: list.contactListId})
+                .conditionDate("fromDate", "thruDate", asOf)
+                .selectField("partyId")
+                .distinct(true)
+                .limit(segments.universeCap + 1)
+                .list(),
+            "List " + (list.contactListName || list.contactListId)
+        )
+        .map(row => row.partyId)
 function previewAudience(p) {
     const userScope = previewScope()
     const caps = userScope.capabilities
@@ -363,7 +369,7 @@ function previewAudience(p) {
     }
     let memberships = 0
     for (const list of lists)
-        for (const partyId of listMembers(list.contactListId, asOf)) {
+        for (const partyId of listMembers(list, asOf)) {
             memberships += 1
             add(partyId, list.contactListName || list.contactListId)
         }
@@ -373,7 +379,7 @@ function previewAudience(p) {
             add(partyId, segments.segmentLabel(segment))
         }
     const excluded = new Set()
-    for (const list of excludeLists) for (const partyId of listMembers(list.contactListId, asOf)) excluded.add(partyId)
+    for (const list of excludeLists) for (const partyId of listMembers(list, asOf)) excluded.add(partyId)
     for (const segment of excludeSegments) for (const partyId of segments.matchesOf(ctx, segment)) excluded.add(partyId)
     let excludedCount = 0
     for (const partyId of excluded) if (sourcesOf.delete(partyId)) excludedCount += 1
@@ -451,7 +457,9 @@ function previewAudience(p) {
             .sort((a, b) => b.count - a.count),
         addressesShown: !!caps.audienceRead,
         previewKey: lib.hash(request),
-        resultDigest: lib.hash(eligibleRows.map(row => [row.partyId, row.destinationKey, row.tracked]))
+        // by the address's record, not its text: the digest is an unkeyed hash an author holds, and must not confirm a guessed
+        // address (an address changed is a new contact mech, so the digest still moves with it; P5 review)
+        resultDigest: lib.hash(eligibleRows.map(row => [row.partyId, row.contactMechId, row.tracked]))
     })
 }
 

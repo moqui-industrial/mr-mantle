@@ -54,6 +54,8 @@ spec({
             users.sales = user(prefix, "sales", [orgA], audience.concat(["SALES_VIEW", "SALES_TEAM_VIEW"]))
             users.editorB = user(prefix, "editorB", [orgB], audience)
             users.reader = user(prefix, "reader", [orgA], ["MARKETING_VIEW"])
+            // reads Commerce's orders, but works no store of A
+            users.storeless = user(prefix, "storeless", [orgA], audience.concat(["COMMERCE_VIEW", "COMMERCE_ORDER_VIEW"]))
             make("mantle.party.PartyClassification", {partyClassificationId: prefix + "_GARDENER", description: "Gardener"})
             // Ann, Ben, Cyd, Dee, Eve and Fay, people of A; Gil a person of B
             for (const name of ["Ann", "Ben", "Cyd", "Dee", "Eve", "Fay", "Gil"]) {
@@ -262,6 +264,15 @@ feature(
             out.salesEvaluation = as(users.sales, Q + "evaluate#Segment", {marketSegmentId: leads})
             out.editorEvaluation = as(users.editor, Q + "evaluate#Segment", {marketSegmentId: leads})
             out.editorSources = as(users.editor, Q + "get#Segment", {marketSegmentId: leads})
+            // a copy is the editor's own store of the filter: refused as the filter itself is (P5 review)
+            out.duplicated = as(users.editor, Q + "duplicate#Segment", {marketSegmentId: leads})
+            // purchases are read within Commerce's store scope: no store of A, no purchase source (P5 review)
+            out.storeless = as(users.storeless, Q + "store#SegmentFilter", {
+                marketSegmentId: leads,
+                expectedRevision: revision(leads),
+                action: "replace",
+                filter: {match: "all", conditions: [{source: "purchase", field: "orderCount", operator: "greater", value: 0}]}
+            })
             // not in California: a party with no address has no state, so it is not matched by the negation
             const elsewhere = made("Not Californian", {})
             out.negation = as(users.editor, Q + "store#SegmentFilter", {
@@ -284,7 +295,18 @@ feature(
             out.notCalifornian = as(users.editor, Q + "evaluate#Segment", {marketSegmentId: elsewhere})
             return out
         },
-        then({refused, stored, salesEvaluation, editorEvaluation, editorSources, negation, entity, notCalifornian}) {
+        then({
+            refused,
+            stored,
+            salesEvaluation,
+            editorEvaluation,
+            editorSources,
+            duplicated,
+            storeless,
+            negation,
+            entity,
+            notCalifornian
+        }) {
             refused.refusal.includes("SOURCE_UNAVAILABLE")
             stored.refusal == ""
             salesEvaluation.refusal == ""
@@ -293,6 +315,8 @@ feature(
             editorEvaluation.refusal.includes("SOURCE_UNAVAILABLE") && editorEvaluation.matchedCount == null
             !Array.from(editorSources.sources).some(source => source.source == "salesLead")
             editorSources.filter.readable == false
+            duplicated.refusal.includes("SOURCE_UNAVAILABLE")
+            storeless.refusal.includes("SOURCE_UNAVAILABLE")
             negation.refusal == ""
             entity.refusal.includes("FILTER_INVALID")
             notCalifornian.refusal == ""
