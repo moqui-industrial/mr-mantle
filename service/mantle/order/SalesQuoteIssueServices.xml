@@ -297,7 +297,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="orderRevision" from="out.orderRevision"/>
         </actions>
     </service>
-    <service verb="apply" noun="QuoteBatch" allow-remote="false" operation="sales.quote.batch">
+    <service verb="apply" noun="QuoteBatch" allow-remote="false" operation="sales.quote.batch" operation-ref="operationKey">
         <description>Quotes' QuoteBatch (design §5): send (the organization's mail to each quote's contact, else its customer) or
             withdraw (with the reason) the quotes chosen (quoteKeys "orderId@revision"), each on its own through send#Quote or
             withdraw#Quote in its own transaction with an operation key of its own (from the batch's); previewOnly Y answers each

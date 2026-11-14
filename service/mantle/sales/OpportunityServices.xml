@@ -889,7 +889,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="displayText" from="checked.displayText"/>
         </actions>
     </service>
-    <service verb="apply" noun="OpportunityImportRow" allow-remote="false">
+    <service verb="apply" noun="OpportunityImportRow" allow-remote="false" operation="sales.opportunity.import.row"
+            operation-ref="operationKey">
         <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
         <description>One validated row, checked again against the current state, through Sales' own guarded services as the
             importer: create#Opportunity for a new deal (its source key kept on it), or for a deal matched under the update

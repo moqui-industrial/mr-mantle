@@ -466,7 +466,85 @@ function transferAssignment(p) {
     unavailable()
 }
 
-const operations = {salesHome, pipelineRowFilter, findOwnedAssignments, transferAssignment}
+// ===== P19: get#SalesReports (impl-sales P19; design-sales §8 Reports SalesReportCatalogue; Insights' catalog contract, Z10) =====
+// Sales' reports, each in Insights' catalog contract (design-insights §6.1: a stable entry id, its owner, title, description, the
+// path under the app root, its parameters, whether it exports), for the reports the caller may read: the report reader's
+// (SALES_REPORT_VIEW) and Forecast, every Sales reader's. Answered for the app root Sales only; another root (Accounting mounts
+// Sales analysis with an entry of its own, under its own catalogue) is refused, as Accounting's catalogue refuses Sales (F59).
+const salesReportEntries = [
+    {
+        entryId: "Sales.SalesSummary",
+        title: "Sales summary",
+        description: "Orders placed and invoices issued by period in one currency, with top products and customer classes.",
+        path: "Reports/SalesSummary",
+        parameters: "organization, period, interval, currency, customer, product",
+        read: caps => caps.reportRead,
+        exports: true
+    },
+    {
+        entryId: "Sales.SalesAnalysis",
+        title: "Sales analysis",
+        description:
+            "Ordered, shipped, invoiced and returned, by product, customer or class; margin for a price and cost reader.",
+        path: "Reports/SalesAnalysis",
+        parameters: "organization, period, currency, grouping",
+        read: caps => caps.reportRead,
+        exports: true
+    },
+    {
+        entryId: "Sales.PipelineAnalysis",
+        title: "Pipeline analysis",
+        description:
+            "Open pipeline by stage, source, owner or age as of a time; stage durations, lead conversion and the funnel.",
+        path: "Reports/PipelineAnalysis",
+        parameters: "organization, team, owner, as of, close period, source, campaign, stage, currency, cohort",
+        read: caps => caps.reportRead,
+        exports: true
+    },
+    {
+        entryId: "Sales.WinLoss",
+        title: "Win/loss",
+        description:
+            "Won and lost deals of a close cohort, win rate, loss reasons, cycle time and reopenings; disqualified leads apart.",
+        path: "Reports/WinLoss",
+        parameters: "organization, period, team, owner, account, source, currency, reason, mode",
+        read: caps => caps.reportRead,
+        exports: true
+    },
+    {
+        entryId: "Sales.TargetAttainment",
+        title: "Target attainment",
+        description: "Each target's quota against the one basis it is measured on, with variance; unassigned amounts apart.",
+        path: "Reports/TargetAttainment",
+        parameters: "organization, period, currency, basis, as of",
+        read: caps => caps.reportRead,
+        exports: true
+    },
+    {
+        entryId: "Sales.Forecast",
+        title: "Forecast",
+        description:
+            "A forecast's quota, pipeline, weighted and won amounts and submitted judgement, with the deals behind them.",
+        path: "Pipeline/Forecast",
+        parameters: "organization, person or team, period, currency, as of",
+        read: caps => caps.anyRead,
+        exports: true
+    }
+]
+function salesReports(p) {
+    const appRoot = text(p.appRoot) || "Sales"
+    if (appRoot !== "Sales") denied("REPORTS_UNAVAILABLE", "Sales' reports are not available under " + appRoot)
+    const userScope = salesAccess.scope()
+    salesAccess.requireCapability(userScope, "anyRead")
+    return {
+        reports: salesReportEntries
+            .filter(entry => entry.read(userScope.capabilities))
+            .map(({read, ...entry}) => Object.assign({reportId: entry.path.split("/").pop(), ownerApp: "Sales"}, entry))
+    }
+}
+// ===== end of P19 =====
+
+const operations = {salesHome, pipelineRowFilter, findOwnedAssignments, transferAssignment, salesReports}
 ;({
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown sales workspace operation " + op)
