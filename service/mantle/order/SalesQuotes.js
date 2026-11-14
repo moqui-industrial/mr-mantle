@@ -868,10 +868,16 @@ function explainLine(p) {
 
 // ===== check#QuoteAccess =====
 // Whether the caller sees the quote and may change it (get#RecordLinkInfo and RecordFiles for a quote not placed); a call with no
-// user sees none.
+// user sees none. P12 review: a quote template too (SalesAccess.js templateOf: a Sales reader of its organization while it is current, a
+// template manager always), so no other app's record view, Chatter, files or product connections show it as an order.
 function quoteAccess(p) {
     if (!ec.user.userId) return {recordVisible: false, canEdit: false}
-    const found = salesAccess.quoteOf(salesAccess.scope(), text(p.orderId))
+    const orderId = text(p.orderId)
+    const userScope = salesAccess.scope()
+    const found =
+        orderId && one(ORDER, {orderId})?.orderPurposeEnumId === salesAccess.templatePurpose
+            ? salesAccess.templateOf(userScope, orderId)
+            : salesAccess.quoteOf(userScope, orderId)
     return {recordVisible: !!found, canEdit: !!found?.canEdit}
 }
 

@@ -230,8 +230,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="check" noun="QuoteAccess" allow-remote="false" read-only="true">
         <description>Whether the caller sees a quote (SalesAccess.js quoteOf: a seller of their sales scope, and the quote assigned
             to them or a team of theirs, or SALES_TEAM_VIEW) and may change it (SALES_QUOTE_EDIT): the record visibility of
-            get#RecordLinkInfo and RecordFiles for a quote not yet placed and its files, in every app. A call with no user sees
-            none.</description>
+            get#RecordLinkInfo and RecordFiles for a quote not yet placed and its files, in every app. P12 review: a quote template
+            the same way (SalesAccess.js templateOf: a Sales reader of its organization while it is current, a template manager
+            always; canEdit for a draft). A call with no user sees none.</description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="recordVisible" type="Boolean"/>

@@ -43,6 +43,25 @@ spec({
             const manager = ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_QUOTE_EDIT", "SALES_TEAM_MANAGE"]
             t.manager = fx.addUser(f, "manager", [f.orgA], manager)
             t.managerB = fx.addUser(f, "managerb", [f.orgB], manager)
+            // P12 review: a person of A with no Sales permission (another app's user of the organization)
+            t.clerk = fx.addUser(f, "clerk", [f.orgA], [])
+            // the record rule's service opened to the spec's users, filtered by their organizations (as an app's root grants it)
+            make("moqui.security.ArtifactGroup", {artifactGroupId: f.prefix + "_RLI", description: "Template record links"})
+            make("moqui.security.ArtifactGroupMember", {
+                artifactGroupId: f.prefix + "_RLI",
+                artifactTypeEnumId: "AT_SERVICE",
+                artifactName: "mantle.party.CommunicationServices.get#RecordLinkInfo",
+                nameIsPattern: "N",
+                inheritAuthz: "Y"
+            })
+            make("moqui.security.ArtifactAuthz", {
+                artifactAuthzId: f.prefix + "_RLI",
+                userGroupId: f.prefix + "_GRANT",
+                artifactGroupId: f.prefix + "_RLI",
+                authzTypeEnumId: "AUTHZT_ALLOW",
+                authzActionEnumId: "AUTHZA_ALL"
+            })
+            make("moqui.security.ArtifactAuthzFilter", {artifactAuthzId: f.prefix + "_RLI", entityFilterSetId: "MANTLE_USER_ORG"})
             // a product A sells at 50, which the template fixes at a contract rate
             t.fixed = f.prefix + "_FIXED"
             make("mantle.product.Product", {productId: t.fixed, productName: "Contract service", productTypeEnumId: "PtService"})
@@ -215,7 +234,7 @@ feature("a quote from the template is priced as of its own date; the fixed line 
         r.ownerPartyId == f.users.rep
         num(r.product.unitAmount) == 120 && num(r.product.calculatedUnitAmount) == 120 && r.product.priceSource != "manual"
         num(r.fixed.unitAmount) == 45 && num(r.fixed.calculatedUnitAmount) == 50 && r.fixed.priceSource == "manual"
-        r.fixed.priceOverrideReason == "Contract rate"
+        r.fixed.priceOverrideReason == "Contract rate" && r.fixed.priceOverrideUserId == f.users.rep
         num(r.shipping.unitAmount) == 25
         num(r.customerOnly.unitAmount) == 70
         num(r.templateProduct.unitAmount) == 100
@@ -286,6 +305,23 @@ feature("a template is never placed, reserved, counted as an order or offered as
             proposed: as(t.manager, Q + "propose#Quote", {orderId: t.second, orderRevision: revision(t.second)}).refused,
             placed: nativeRefusal("mantle.order.OrderServices.place#Order", {orderId: t.second, requireInventory: false}),
             statusId: status(t.second),
+            // P12 review: no other app's record view shows a template as an order (get#RecordLinkInfo, behind Chatter, files,
+            // product connections): a Sales reader of A sees the current one only, a template manager every one
+            visible: Object.fromEntries(
+                [
+                    ["clerkCurrent", t.clerk, t.second],
+                    ["repCurrent", f.users.rep, t.second],
+                    ["repEnded", f.users.rep, t.first],
+                    ["managerEnded", t.manager, t.first]
+                ].map(([name, user, orderId]) => [
+                    name,
+                    as(user, "mantle.party.CommunicationServices.get#RecordLinkInfo", {
+                        recordEntityName: "mantle.order.OrderHeader",
+                        recordId: orderId,
+                        checkOnly: true
+                    }).recordVisible
+                ])
+            ),
             reservations: system(() =>
                 ec.entity.find("mantle.product.issuance.AssetReservation").condition("orderId", "in", [t.first, t.second]).count()
             )
@@ -298,5 +334,7 @@ feature("a template is never placed, reserved, counted as an order or offered as
         r.proposed.includes("RECORD_UNAVAILABLE")
         r.placed.includes("QUOTE_TEMPLATE") && r.statusId == "OrderOpen"
         r.reservations == 0
+        r.visible.clerkCurrent == false && r.visible.repCurrent == true
+        r.visible.repEnded == false && r.visible.managerEnded == true
     }
 })

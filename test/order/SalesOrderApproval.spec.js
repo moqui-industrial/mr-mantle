@@ -177,7 +177,26 @@ feature(
                 call("mantle.order.OrderServices.place#Order", {orderId: created.orderId, requireInventory: false})
                 return created.orderId
             })
+            // P12 review (the user's call of Nov 14): approved through Sales with no order rule met, the approval is still
+            // recorded as the approver's decision (no rule), so they keep sight of it once approved (checked in the next feature)
+            f.viaSales = placedOrder(f.orgA, f.accounts.a)
+            const viaSales = as(users.salesApprover, orders + "approve#SalesOrder", {
+                orderId: f.viaSales,
+                orderRevision: revision(f.viaSales)
+            })
+            const viaSalesDecisions = system(() =>
+                Array.from(
+                    ec.entity
+                        .find("mantle.order.OrderDecision")
+                        .condition("orderId", f.viaSales)
+                        .condition("decisionPurposeEnumId", "SapOrder")
+                        .list()
+                )
+            )
             return {
+                viaSales,
+                viaSalesDecisions,
+                viaSalesStatus: status(f.viaSales),
                 gatedByOrderApprover: approve(users.orderApprover, gated),
                 gatedByOtherScope: approve(users.approverB, gated),
                 gatedBySalesApprover: approve(users.salesApprover, gated),
@@ -190,6 +209,10 @@ feature(
             }
         },
         then(r) {
+            r.viaSales.refused == "" && r.viaSales.decidedCount == 0 && r.viaSalesStatus == "OrderApproved"
+            r.viaSalesDecisions.length == 1 && r.viaSalesDecisions[0].salesApprovalPolicyId == null
+            r.viaSalesDecisions[0].decisionResultEnumId == "SdrApproved" &&
+                r.viaSalesDecisions[0].decisionByUserId == users.salesApprover
             r.gatedByOrderApprover.includes("PERMISSION_DENIED: SALES_ORDER_APPROVE")
             r.gatedByOtherScope.includes("ORGANIZATION_DENIED")
             r.gatedBySalesApprover == "" && r.gatedStatus == "OrderApproved"
@@ -259,6 +282,7 @@ feature(
             // of the organization's other approved orders (the first feature's, approved with no decision of theirs)
             const decided = as(users.salesApprover, orders + "get#SalesOrder", {orderId: store})
             const undecided = as(users.salesApprover, orders + "get#SalesOrder", {orderId: f.gated})
+            const approvedNoRule = as(users.salesApprover, orders + "get#SalesOrder", {orderId: f.viaSales})
             const listed = as(users.salesApprover, "mantle.sales.SalesWorkspaceServices.find#SalesOrders", {
                 list: "recent"
             }).orderList.map(row => row.orderId)
@@ -286,7 +310,8 @@ feature(
                 undecided,
                 listed,
                 store,
-                gatedStatus: status(f.gated)
+                gatedStatus: status(f.gated),
+                approvedNoRule
             }
         },
         then({
@@ -306,7 +331,8 @@ feature(
             undecided,
             listed,
             store,
-            gatedStatus
+            gatedStatus,
+            approvedNoRule
         }) {
             before.store == "OrderPlaced" && before.storeless == "OrderPlaced" && before.authorized == 2
             detail.orderFound && detail.order.approverOnly == true && detail.can.approve == true
@@ -326,6 +352,7 @@ feature(
             decided.orderFound && decided.order.approverOnly == true && decided.can.cancelRemainder == false
             gatedStatus == "OrderApproved" && undecided.orderFound == false
             listed.includes(store) && !listed.includes(f.gated)
+            approvedNoRule.orderFound && approvedNoRule.order.approverOnly == true && listed.includes(f.viaSales)
         }
     }
 )

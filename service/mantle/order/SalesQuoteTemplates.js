@@ -14,9 +14,9 @@
 //   price of the quote's own date, a fixed price entered with its reason (a free one under the quote's free-line rule), or a
 //   shipping charge. A quote is copied from a current template by create#Quote (templateOrderId) through clone#Order
 //   (copyPayment false, no notes, files or parties) and priced as of its own date: each product line at the seller's price for the
-//   quote's customer now, a fixed line keeping its price and reason with today's calculated basis beside it, a line with no price
-//   left for the rep to enter (propose#Quote refuses it until then). The quote's parentOrderId names the template; a successor
-//   changes no quote made from the template before it.
+//   quote's customer now, a fixed line keeping its price and reason (the quote's maker its author) with today's calculated basis
+//   beside it, a line with no price left for the rep to enter (propose#Quote refuses it until then). The quote's parentOrderId
+//   names the template; a successor changes no quote made from the template before it.
 // - Every reader that leaves out a recurring base (OrpRecurringTemplate, F7) leaves this purpose out too, so a template never
 //   reserves, invoices, counts as an order or credit, or is offered as a quote (SalesAccess.js quoteOf and orderOf read their own
 //   purposes). Cost is never read or answered here.
@@ -601,7 +601,10 @@ function priceCopy(quote) {
             salesOpportunityId: salesOpportunityId || null
         }
         if (fixedSources.includes(item.priceSource)) {
-            // the template's authorized fixed price, its reason and author kept (the quote's approval rules read them as entered)
+            // the template's authorized fixed price and its reason kept; its author on the quote is the one who quotes it (P12
+            // review), so the quote's approval rules separate the rep who put it on this quote, and the template's author, who
+            // decided no quote, may approve it
+            Object.assign(changes, {priceOverrideUserId: ec.user.userId, priceOverrideDate: ec.user.nowTimestamp})
         } else if (price.priceAvailable) {
             Object.assign(changes, {
                 unitAmount: price.price,
