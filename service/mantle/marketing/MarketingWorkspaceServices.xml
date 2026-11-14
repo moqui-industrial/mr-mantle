@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingWorkspaceServices (W, IronStone Marketing design §14.2): Marketing's scoped projections over
+    MarketingWorkspace.js. P1 (design §3 Home, §12 Settings): Home's cards, upcoming activity and attention, each answered by
+    source and "notAvailable" until the phase that builds its records; the settings index; the setup readiness. Each reads the
+    caller's scope (mantle/marketing/MarketingAccess.js), refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an
+    organization outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. Later phases add their
+    sources, entries and checks. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="ScopeParameters" type="interface">
+        <description>The scope Home's projections share: an organization of the caller's marketing scope, or none for each of them.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+    </service>
+
+    <!-- ===== P1: Home (design §3) ===== -->
+    <service verb="get" noun="Home" allow-remote="false" read-only="true">
+        <description>Home's MarketingCards for the organization named or each of the caller's: one card per source (running
+            campaigns, pending approvals, sends due, failed or uncertain deliveries, registrations against capacity, audience
+            changes), each with its cardKey, title, state (available with its value and linkPath; notAvailable until its phase
+            builds its records, never zero; failed when it could not be read) and message; failedSources names each that failed,
+            the others still answered. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an organization
+            outside the scope (ORGANIZATION_DENIED).</description>
+        <implements service="mantle.marketing.MarketingWorkspaceServices.define#ScopeParameters"/>
+        <out-parameters>
+            <parameter name="cards" type="List"/>
+            <parameter name="failedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('home', context)"/>
+            <set field="cards" from="found.cards"/>
+            <set field="failedSources" from="found.failedSources"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Upcoming" allow-remote="false" read-only="true">
+        <description>Home's Upcoming: the planned activity of the organization named or each of the caller's (campaign windows,
+            scheduled sends, events, publication dates), rows of kind, title, date, zone, state, owner and linkPath merged by date,
+            and each source's state (notAvailable until its phase, failed when it could not be read; failedSources names those).
+            Refuses as get#Home.</description>
+        <implements service="mantle.marketing.MarketingWorkspaceServices.define#ScopeParameters"/>
+        <out-parameters>
+            <parameter name="rows" type="List"/>
+            <parameter name="sources" type="List"/>
+            <parameter name="failedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('upcoming', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="sources" from="found.sources"/>
+            <set field="failedSources" from="found.failedSources"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Attention" allow-remote="false" read-only="true">
+        <description>Home's Attention: the exceptions to resolve, rows of sourceKey, recordKind, record, reason, age, action and its
+            place as a route key (route); P1's source is the campaigns, lists and segments awaiting adoption, a Marketing
+            administrator's (MARKETING_CONFIGURE), counted by kind; approvals (P2) and deliveries (P9) are notAvailable until
+            built. Each source's state as get#Upcoming. Refuses as get#Home.</description>
+        <implements service="mantle.marketing.MarketingWorkspaceServices.define#ScopeParameters"/>
+        <out-parameters>
+            <parameter name="rows" type="List"/>
+            <parameter name="sources" type="List"/>
+            <parameter name="failedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('attention', context)"/>
+            <set field="rows" from="found.rows"/>
+            <set field="sources" from="found.sources"/>
+            <set field="failedSources" from="found.failedSources"/>
+        </actions>
+    </service>
+
+    <!-- ===== P1: Settings and readiness (design §12, §14.3) ===== -->
+    <service verb="get" noun="Settings" allow-remote="false" read-only="true">
+        <description>The SettingsIndex: the Marketing settings built so far, each with entryKey, title, description, category,
+            owner, its place as a route key (route) and its readiness text; P1 the adoption of unowned records. Refuses a caller
+            without MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
+        <out-parameters>
+            <parameter name="entries" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="entries" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('settings', context).entries"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Readiness" allow-remote="false" read-only="true">
+        <description>Marketing's setup readiness, answering the framework's readiness contract (moqui.server.ReadinessProvider
+            marketing.setup) with no adapter: called with providerKey and an organizationPartyId of the caller's scope (or none),
+            returns checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, subject and
+            scope, and for a check that is not ready its place as a route key (fixRoute): P1 the campaigns, lists and segments that
+            belong to no organization and await adoption (marketingAdoption), which are no organization's and so checked once.
+            Later phases add theirs. One check that fails is unavailable by name and the others go on. Changes nothing. Refuses a
+            caller without MARKETING_CONFIGURE (PERMISSION_DENIED) and an organization outside their scope
+            (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="providerKey"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="checks" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="checks" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('readiness', context).checks"/>
+        </actions>
+    </service>
+</services>

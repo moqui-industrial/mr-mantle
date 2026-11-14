@@ -118,7 +118,7 @@ along with this software (see the LICENSE.md file). If not, see
                     ec.message.addError(`Contact information ${contactMechId} is not party ${partyId}'s`); return }
                 contactMech = ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechId', contactMechId).one()
             }
-            if (contactListId && ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one() == null) {
+            if (contactListId && ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one() == null) {
                 ec.message.addError(`Contact list ${contactListId} not found`); return }
 
             partyConsentId = ec.service.sync().name('create#mantle.party.PartyConsent').parameters({partyId: partyId,
@@ -248,13 +248,13 @@ along with this software (see the LICENSE.md file). If not, see
             if (listIds.length === 0) return
             let ownerFilter = undefined
             if (sameOwnerAsListId) {
-                const ownerList = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', sameOwnerAsListId).one()
+                const ownerList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', sameOwnerAsListId).one()
                 ownerFilter = ownerList?.ownerPartyId ?? null
             }
             // a mailbox is membership, not consent, until it has members by email
             const emailMembers = (contactListId) => ec.entity.find(CLP).condition('contactListId', contactListId)
                     .condition('preferredContactMechId', 'is-not-null', null).condition(currentDate).count() > 0
-            const lists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+            const lists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                     .orderBy('contactListName').list())
             for (const list of lists) {
                 if (list.contactListTypeEnumId === 'MAILBOX' && !emailMembers(list.contactListId)) continue
@@ -352,7 +352,7 @@ along with this software (see the LICENSE.md file). If not, see
             const listNames = new Map()
             const listName = (id) => {
                 if (!id) return null
-                if (!listNames.has(id)) listNames.set(id, ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', id).one()?.contactListName ?? id)
+                if (!listNames.has(id)) listNames.set(id, ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', id).one()?.contactListName ?? id)
                 return listNames.get(id)
             }
             const userNames = new Map()
@@ -441,7 +441,7 @@ along with this software (see the LICENSE.md file). If not, see
             const consentStatus = statusId && !listStatus ? statusId : null
 
             // the consent lists: every list but a mailbox without members by email
-            const allLists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').list())
+            const allLists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().list())
             const mailboxIds = allLists.filter((list) => list.contactListTypeEnumId === 'MAILBOX').map((list) => list.contactListId)
             const emailMailboxIds = new Set(mailboxIds.length ? Array.from(ec.entity.find(CLP).condition('contactListId', 'in', mailboxIds)
                     .condition('preferredContactMechId', 'is-not-null', null).condition(currentDate).selectField('contactListId')
@@ -659,7 +659,7 @@ along with this software (see the LICENSE.md file). If not, see
             const now = ec.user.nowTimestamp
             const nowMillis = toMillis(now)
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const listName = list.contactListName || contactListId
             if (list.contactListTypeEnumId === 'MAILBOX' && ec.entity.find(CLP).condition('contactListId', contactListId)
@@ -805,7 +805,7 @@ along with this software (see the LICENSE.md file). If not, see
             const cf = ec.entity.conditionFactory
             sent = false
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const listEmail = Array.from(ec.entity.find('mantle.marketing.contact.ContactListEmail').condition('contactListId', contactListId)
                     .condition('emailTypeEnumId', 'CONT_UNSUB_VER').condition(currentDate).orderBy('-fromDate').list()).find((row) => row.emailTemplateId)
@@ -989,7 +989,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const mailFrom = byMail && evidenceText ? ` from ${String(evidenceText).replace(/[<>]/g, '').trim().slice(0, 200)}` : ''
                 evidenceText = oneClick ? `One-click unsubscribe (RFC 8058)${ofMessage}`
                         : byMail ? `Unsubscribe by email (List-Unsubscribe mailto)${mailFrom}${ofMessage}` : `Unsubscribe link${ofMessage}`
-                tokenList = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+                tokenList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
                 if (tokenList == null) { ec.message.addError(invalid); return }
             } else {
                 const userId = ec.user.userId || null
@@ -1007,7 +1007,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const memberIds = Array.from(new Set(Array.from(ec.entity.find(CLP).condition('partyId', partyId)
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('contactListId').distinct(true).list())
                         .map((row) => row.contactListId)))
-                const lists = memberIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', memberIds)
+                const lists = memberIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', memberIds)
                         .orderBy('contactListName').list()) : []
                 listIds = lists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' && list.contactMechTypeEnumId !== 'CmtTelecomNumber' && sameOwner(list))
                         .map((list) => list.contactListId)
@@ -1016,7 +1016,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!targetId) { ec.message.addError('Unsubscribing needs a contactListId'); return }
                 if (tokenRow != null && targetId !== tokenRow.contactListId) {
                     // another of the party's lists of the token list's organization, as the preferences page offers
-                    const other = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', targetId).one()
+                    const other = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', targetId).one()
                     if (other == null || !sameOwner(other) || ec.entity.find(CLP).condition('contactListId', targetId).condition('partyId', partyId).count() === 0) {
                         ec.message.addError(invalid); return }
                 }
@@ -1206,7 +1206,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
             if (!contactListId || !partyId) { ec.message.addError('An unsubscribe token needs a contactListId and a partyId'); return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             if (ec.entity.find('mantle.party.Party').condition('partyId', partyId).one() == null) { ec.message.addError(`Party ${partyId} not found`); return }
             if (!contactMechId) contactMechId = Array.from(ec.entity.find('mantle.marketing.contact.ContactListParty').condition('contactListId', contactListId)
@@ -1278,7 +1278,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (tokenRow == null) return
             valid = true
             if (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(ec.user.nowTimestamp)) { routeContext = {expired: true}; return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
             if (list == null) { routeContext = {expired: true}; return }
             let organizationName = null
             if (list.ownerPartyId) {
@@ -1329,7 +1329,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (!/^[A-Za-z0-9_-]{16,128}$/.test(tokenText)) { ec.message.addError(invalid); return }
             const tokenRow = ec.entity.find('mantle.marketing.contact.ContactListToken').condition('tokenHash', ec.user.singleUseCodeHash(tokenText)).one()
             if (tokenRow == null || (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(ec.user.nowTimestamp))) { ec.message.addError(invalid); return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
             if (list == null) { ec.message.addError(invalid); return }
 
             if (list.ownerPartyId) {

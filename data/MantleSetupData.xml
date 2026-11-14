@@ -144,6 +144,60 @@ along with this software (see the LICENSE.md file). If not, see
         user's organizations, beside an editor of its calendar and the party's manager (impl-customer-service P4) -->
     <userPermissions userPermissionId="WORKING_HOURS_EDIT" description="Working Hours Edit"/>
     <userGroupPermissions userGroupId="ADMIN" userPermissionId="WORKING_HOURS_EDIT" fromDate="0"/>
+
+    <!-- ===== Marketing P1 (impl-marketing P1, §4; IronStone Marketing design §1.1) ===== -->
+    <!-- Marketing: MARKETING_VIEW reads the campaigns and summaries of the user's organizations; MARKETING_CAMPAIGN_EDIT,
+        MARKETING_SEND_EDIT and MARKETING_CONTENT_EDIT write draft campaigns, sends and content (preview and test to approved test
+        recipients); MARKETING_AUDIENCE_VIEW reads person-level lists, segments and members, MARKETING_AUDIENCE_EDIT changes them,
+        MARKETING_AUDIENCE_IMPORT runs the audience import (the app's own import permission, which the target names, §4),
+        MARKETING_AUDIENCE_EXPORT exports membership and MARKETING_CONSENT_EDIT records evidenced consent changes;
+        MARKETING_APPROVE approves campaigns, sends and sequences, MARKETING_DISPATCH releases what is approved (neither implies
+        the other); MARKETING_EVENT_MANAGE keeps registration setup, capacity and attendees; MARKETING_REPORT_VIEW reads aggregate
+        measures; MARKETING_CONFIGURE keeps the Marketing settings and adopts unowned records. MARKETING_ALL_ORGANIZATIONS is the
+        scope of a Marketing read in every internal organization, which reads nothing by itself (as SALES_ALL_ORGANIZATIONS: the
+        Marketing administrator's). The MESSAGE_* permissions are Comms' (design §1.1): templates read and edited, sending
+        profiles configured, suppressions reviewed, each an explicit grant. An edit permission alone reads nothing
+        (mantle/marketing/MarketingAccess.js). Granted to the Marketing groups by the app's setup data. -->
+    <userPermissions userPermissionId="MARKETING_VIEW" description="Marketing View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CAMPAIGN_EDIT" description="Marketing Campaign Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CAMPAIGN_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_SEND_EDIT" description="Marketing Send Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_SEND_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONTENT_EDIT" description="Marketing Content Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONTENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_VIEW" description="Marketing Audience View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_EDIT" description="Marketing Audience Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_IMPORT" description="Marketing Audience Import"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_IMPORT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_AUDIENCE_EXPORT" description="Marketing Audience Export"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_AUDIENCE_EXPORT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONSENT_EDIT" description="Marketing Consent Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONSENT_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_APPROVE" description="Marketing Approve"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_APPROVE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_DISPATCH" description="Marketing Dispatch"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_DISPATCH" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_EVENT_MANAGE" description="Marketing Event Manage"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_EVENT_MANAGE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_REPORT_VIEW" description="Marketing Report View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_REPORT_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_CONFIGURE" description="Marketing Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="MARKETING_ALL_ORGANIZATIONS" description="Marketing in every organization"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MARKETING_ALL_ORGANIZATIONS" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_TEMPLATE_VIEW" description="Message Template View"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_TEMPLATE_VIEW" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_TEMPLATE_EDIT" description="Message Template Edit"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_TEMPLATE_EDIT" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_SENDING_CONFIGURE" description="Message Sending Configure"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_SENDING_CONFIGURE" fromDate="0"/>
+    <userPermissions userPermissionId="MESSAGE_SUPPRESSION_REVIEW" description="Message Suppression Review"/>
+    <userGroupPermissions userGroupId="ADMIN" userPermissionId="MESSAGE_SUPPRESSION_REVIEW" fromDate="0"/>
+    <!-- ===== end of Marketing P1 ===== -->
+
     <!-- The stock, shipment, facility and quality permissions the warehouse services check (mantle.shipment
         WarehouseTaskServices and the other warehouse entry points). STOCK_RECEIVE is in AccountingAccessData.xml, with
         receive#ReturnItems; STOCK_POLICY_PLAN and STOCK_POLICY_MANAGE are in ProductAccessData.xml. -->
@@ -419,6 +473,20 @@ along with this software (see the LICENSE.md file). If not, see
                 filterMap="({organizationPartyId: filterOrgIds})"/>
         <filters entityFilterId="MANTLE_USER_ORG_AGR" entityName="mantle.party.agreement.Agreement"
                 filterMap="({organizationPartyId: filterOrgIds})"/>
+
+        <!-- Marketing (impl-marketing P1, X12; design-marketing §1.1): a campaign by its organization
+            (MarketingCampaign.organizationPartyId, the effective MarketingOrganization party row's copy), a segment and a list by
+            their owner (MarketSegment and ContactList ownerPartyId). An unowned (_NA_ or empty) campaign, segment or list is no
+            organization's, so only an administrator's grant (MANTLE_ACTIVE_ORG, with no organization active) finds it until it is
+            adopted. A mailbox (ContactList of type MAILBOX) is the internal Inbox's, not Marketing's, and is left to its own
+            visibility rules (ContactListServices get#ContactListAccess). Each Marketing service checks the organization again
+            (mantle/marketing/MarketingAccess.js). -->
+        <filters entityFilterId="MANTLE_USER_ORG_MCMP" entityName="mantle.marketing.campaign.MarketingCampaign"
+                filterMap="({organizationPartyId: filterOrgIds})"/>
+        <filters entityFilterId="MANTLE_USER_ORG_MSEG" entityName="mantle.marketing.segment.MarketSegment"
+                filterMap="({ownerPartyId: filterOrgIds})"/>
+        <filters entityFilterId="MANTLE_USER_ORG_CLST" entityName="mantle.marketing.contact.ContactList"
+                filterMap="({_join: 'or', _list: [{contactListTypeEnumId: 'MAILBOX'}, {ownerPartyId: filterOrgIds || [], _comp: 'in'}]})"/>
     </moqui.security.EntityFilterSet>
     <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_ACTIVE_ORG" description="Active Organization Filters" applyCond="activeOrgId" allowMissingAlias="Y">
         <filters entityFilterId="MANTLE_ACTIVE_ORG_1" entityName="mantle.account.invoice.Invoice" joinOr="Y"
@@ -468,6 +536,15 @@ along with this software (see the LICENSE.md file). If not, see
                 filterMap="({organizationPartyId: activeOrgId})"/>
         <filters entityFilterId="MANTLE_ACTIVE_ORG_AGR" entityName="mantle.party.agreement.Agreement"
                 filterMap="({organizationPartyId: activeOrgId})"/>
+
+        <!-- Marketing (impl-marketing P1, X12), as MANTLE_USER_ORG_MCMP, _MSEG and _CLST: the active organization's only, a
+            mailbox left to its own rules -->
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_MCMP" entityName="mantle.marketing.campaign.MarketingCampaign"
+                filterMap="({organizationPartyId: activeOrgId})"/>
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_MSEG" entityName="mantle.marketing.segment.MarketSegment"
+                filterMap="({ownerPartyId: activeOrgId})"/>
+        <filters entityFilterId="MANTLE_ACTIVE_ORG_CLST" entityName="mantle.marketing.contact.ContactList"
+                filterMap="({_join: 'or', _list: [{contactListTypeEnumId: 'MAILBOX'}, {ownerPartyId: activeOrgId}]})"/>
         <!-- allow these for 3rd party facilities regardless of active org:
         <filters entityFilterId="MANTLE_ACTIVE_ORG_F" entityName="mantle.facility.Facility"
                 filterMap="({ownerPartyId: (activeOrgId ? [activeOrgId, '_NA_'] : null)})"/> -->

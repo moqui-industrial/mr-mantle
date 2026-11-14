@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Marketing's fixed setup (impl-marketing P1 onward; IronStone Marketing design §1.1, §14.1): the values the marketing services
+    act on, so seed. The MARKETING_* and MESSAGE_* permissions and the organization filter rows are in MantleSetupData beside the
+    other apps'. Later phases append their blocks here. -->
+<entity-facade-xml type="seed">
+    <!-- ===== Marketing P1: foundation (impl-marketing P1, F3, F10) ===== -->
+    <!-- A campaign's owning organization (design §1.1): a dated MarketingCampaignParty row of this role, which
+        MarketingCampaign.organizationPartyId copies (CampaignServices keep them equal); managers and contributors have roles of
+        their own (P2) -->
+    <mantle.party.RoleType roleTypeId="MarketingOrganization" description="Marketing Organization"/>
+    <!-- The consent purpose of tracking (design §2 ground rules: tracking needs its own purpose; a recipient without it gets direct
+        links and no pixel) and the consent source of a checkout opt-in (Shop's store news choice, P7) -->
+    <moqui.basic.Enumeration enumId="PcpTracking" description="Tracking" sequenceNum="10" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="PcsCheckout" description="Checkout" sequenceNum="6" enumTypeId="PartyConsentSource"/>
+    <!-- Marketing's readiness (moqui.server.ReadinessProvider marketing.setup, registered by the app), called as the viewer by
+        Admin's registry: every user may call it, and it checks MARKETING_CONFIGURE and the organization itself, as Sales'
+        get#SalesReadiness is -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMarketingSetupServices" description="Marketing's readiness service"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMarketingSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.marketing.MarketingWorkspaceServices.get#Readiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMarketingSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <!-- ===== end of Marketing P1 ===== -->
+</entity-facade-xml>
