@@ -2517,11 +2517,18 @@ General Order Placement and eCommerce Usage
 
             <entity-find entity-name="mantle.order.OrderItem" list="valueList">
                 <econdition field-name="orderId" from="baseOrderId"/><order-by field-name="orderItemSeqId"/></entity-find>
+            <!-- every line copied (impl-sales follow-up 2): a child line (a discount, a tax line) keeps its own parent, whose id in the
+                copy differs from the source's where the source's ids have gaps (each retax deletes and adds tax lines) -->
+            <script>globalThis.copiedSeqIds = {}</script>
             <iterate list="valueList" entry="value">
                 <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.includes(value.itemTypeEnumId))"><continue/></if>
+                <set field="sourceSeqId" from="value.orderItemSeqId"/>
                 <set field="value.orderId" from="orderId"/>
                 <set field="value.orderItemSeqId" from="null"/>
+                <if condition="!productItemsOnly &amp;&amp; value.parentItemSeqId &amp;&amp; copiedSeqIds[value.parentItemSeqId]">
+                    <set field="value.parentItemSeqId" from="copiedSeqIds[value.parentItemSeqId]"/></if>
                 <entity-sequenced-id-secondary value-field="value"/>
+                <script>copiedSeqIds[sourceSeqId] = value.orderItemSeqId</script>
                 <if condition="clearDates"><set field="value.requiredByDate" from="requiredByDate"/></if>
                 <entity-create value-field="value"/>
             </iterate>
@@ -2659,7 +2666,12 @@ General Order Placement and eCommerce Usage
             it). One order for an occurrence (recurOccurrenceDate on the order), for the job and an operator alike: an occurrence
             already ordered answers that order. The order is a copy of the base with no payment copied (copyPayment=false: a
             renewal payment is Accounting's to make), no purpose, placed through place#Order, so the seller's approval setting
-            and every placement rule apply; auto-invoice bills only an approved part. A Shop-linked base is Shop's.</description>
+            and every placement rule apply. A Sales base (marked OrpRecurringTemplate) repeats every line, its charges and
+            discounts with its products, and the order is retaxed before it is placed by its own path (handle#OrderMajorChange: a
+            storeless seller's gateway, X1; a store's promotions, shipping and tax); a base not marked repeats its product lines as
+            before. Auto-invoice (recurAutoInvoice) bills the order when it is approved, at placement or later by a person
+            (SalesRecurrence.secas.xml, SalesRecurrenceServices.invoice#RecurringOrder; impl-sales follow-up 2). A Shop-linked base
+            is Shop's.</description>
         <in-parameters>
             <parameter name="baseOrderId" required="true"/>
         </in-parameters>
@@ -2693,27 +2705,27 @@ General Order Placement and eCommerce Usage
             <set field="agreementRefusal" from="recurrence.agreementRefusal(baseOrderHeader, occurrence.occurrenceDate)"/>
             <if condition="agreementRefusal"><return error="true" message="${agreementRefusal}"/></if>
 
-            <!-- clone the order: no payment copied (design-sales §7, X5), not a template, for this occurrence -->
+            <!-- clone the order: no payment copied (design-sales §7, X5), not a template, for this occurrence; a Sales base's every
+                line (impl-sales follow-up 2), another base's product lines as before -->
+            <set field="salesBase" from="baseOrderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"/>
             <service-call name="mantle.order.OrderServices.clone#Order" out-map="cloneOut"
-                    in-map="{baseOrderId:baseOrderId, copyPayment:false}"/>
+                    in-map="{baseOrderId:baseOrderId, copyPayment:false, productItemsOnly:!salesBase}"/>
             <set field="orderId" from="cloneOut.orderId"/>
             <service-call name="update#mantle.order.OrderHeader"
                     in-map="{orderId:orderId, orderPurposeEnumId:null, recurOccurrenceDate:occurrenceDate}"/>
-
-            <!-- Place the Order -->
-            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
-
-            <!-- if recurAutoInvoice == 'Y' AND Order was auto-approved then create Invoice -->
-            <if condition="baseOrderHeader.recurAutoInvoice == 'Y'">
+            <!-- a Sales base's order retaxed now by its own path (its seller's gateway, or its store's promotions, shipping and
+                tax), so the lines copied from the base are figured once, at this occurrence -->
+            <if condition="salesBase">
                 <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
                     <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
                 <iterate list="orderPartList" entry="orderPart">
-                    <if condition="orderPart?.statusId == 'OrderApproved'">
-                        <service-call name="mantle.account.InvoiceServices.create#EntireOrderPartInvoice"
-                                in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
-                    </if>
+                    <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
+                            in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </iterate>
             </if>
+
+            <!-- Place the Order; auto-invoice bills it once it is approved (SalesRecurrence.secas.xml), now or later -->
+            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
 
             <!-- set lastOrderedDate on recurring order; a run that made its order clears the last failure -->
             <set field="baseOrderHeader.lastOrderedDate" from="ec.user.nowTimestamp"/>

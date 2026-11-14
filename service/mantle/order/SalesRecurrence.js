@@ -5,8 +5,8 @@
 // - A recurring base is a native OrderHeader in OrderApproved marked OrpRecurringTemplate (Shop's marker, which every exclusion reads:
 //   credit, reservation, shipment, invoicing, store mail, the sales summaries, planning, Customer Service's and the customers' order
 //   lists), with no reservation, shipment or billing source of its own: store#SalesRecurrence makes it as a copy of an approved sales
-//   order (clone#Order with copyPayment=false, as Shop's base is made), so the order it came from is fulfilled and billed as before and
-//   the base only ever holds the schedule. Its cadence is recurCronExpression (a monthly, weekly or yearly day and hour, or a cron
+//   order (clone#Order with copyPayment=false, as Shop's base is made, and every line: its charges and discounts with its products), so
+//   the order it came from is fulfilled and billed as before and the base only ever holds the schedule. Its cadence is recurCronExpression (a monthly, weekly or yearly day and hour, or a cron
 //   expression), read in its own zone (recurTimeZone); it runs between recurFromDate and recurThruDate, may be paused, and may name the
 //   customer agreement it is kept under (recurAgreementId, entity/SalesRecurrenceEntities.xml). A base a Shop contract renews is Shop's
 //   (SalesAccess.js recurrenceOf) and is only dispatched to Shop, as before.
@@ -15,8 +15,11 @@
 //   its resumption, inside its dates and not paused; an agreement the base or a line's price names must still apply at that time
 //   (PriceResolver.js agreementApplies) or the occurrence fails, never repriced. Under the base's lock it makes one order for an
 //   occurrence (recurOccurrenceDate on the order, so the job and an operator's retry answer the same order), cloned with
-//   copyPayment=false and placed through place#Order, so the seller's approval setting and every placement rule apply; with no
-//   payment copied the order waits to be approved like any sales order, and auto-invoice bills only an approved part. A base that
+//   copyPayment=false with every line of the base, retaxed by its own path (a storeless seller's gateway, X1; a store's) and placed
+//   through place#Order, so the seller's approval setting and every placement rule apply; with no payment copied the order waits to
+//   be approved like any sales order. Auto-invoice (recurAutoInvoice) bills it once it is approved, at placement or later by a person
+//   (invoiceRecurringOrder, from SalesRecurrence.secas.xml, through Accounting's create#FulfillmentInvoice, Shop's renewals' path,
+//   once; impl-sales follow-up 2). A base that
 //   fails is named in the log and on the base (recurFailureDate, recurFailureMessage) and the next base runs (runOccurrence).
 // - Access (SalesAccess.js recurrenceOf): SALES_RECURRENCE_MANAGE keeps the bases of the scope's organizations, SALES_TEAM_VIEW reads
 //   them; another organization's answers as missing. Auto-invoice needs the finance right (RECEIVABLE_EDIT) when it is turned on.
@@ -476,8 +479,11 @@ function makeBase(userScope, sourceOrderId) {
         )
     if (source.parts.some(part => !salesAccess.covers(userScope, part.vendorPartyId)))
         denied("RECORD_UNAVAILABLE", "Order " + sourceOrderId + " is not available")
+    // every line of the order: its charges and discounts with its products (impl-sales follow-up 2; the tax lines too, figured again
+    // on each order made)
     const baseOrderId = call("mantle.order.OrderServices.clone#Order", {
         baseOrderId: source.order.orderId,
+        productItemsOnly: false,
         copyPayment: false,
         copyContent: false,
         copyNote: false,
@@ -817,8 +823,62 @@ function recurrenceSourceOptions(term, selected) {
     return options
 }
 
+// ===== auto-invoice on approval (impl-sales follow-up 2) =====
+// invoice#RecurringOrder, from the SalesRecurrenceApprovedInvoice SECA once an order's approval commits: an order the worker made for
+// an occurrence (recurOccurrenceDate) of a base that asks to bill it (recurAutoInvoice Y, which needed the finance right to turn on)
+// and is no Shop contract's (Shop bills its renewals itself) has each approved sale part with nothing billed yet invoiced through
+// Accounting's create#FulfillmentInvoice (the internal split of create#InvoiceFromSource that Shop's renewals use: the ordered
+// basis, a recurring base or template refused, one invoice for a source), each part in its own transaction. Any other order, or an
+// order billed already, is left as it is: so the job's automatic approval and a person's later one bill it the same way, once. A
+// part that cannot be billed is logged naming the order and never fails the approval.
+function invoiceRecurringOrder(p) {
+    const order = one(ORDER, {orderId: text(p.orderId)})
+    if (!order || !order.parentOrderId || order.recurOccurrenceDate == null || order.orderPurposeEnumId) return {invoiceIds: []}
+    const base = one(ORDER, {orderId: order.parentOrderId})
+    if (!base || base.recurAutoInvoice !== "Y" || !base.recurCronExpression) return {invoiceIds: []}
+    if (find(CONTRACT).condition("baseOrderId", base.orderId).count() > 0) return {invoiceIds: []}
+    const invoiceIds = []
+    for (const part of Array.from(find(PART).condition("orderId", order.orderId).orderBy("orderPartSeqId").list())) {
+        if (part.statusId !== "OrderApproved" || !salesAccess.isInternal(part.vendorPartyId)) continue
+        const billed = find("mantle.order.OrderItemBillingDetail", {
+            orderId: order.orderId,
+            orderPartSeqId: part.orderPartSeqId
+        }).count()
+        if (billed > 0) continue
+        ec.message.pushErrors()
+        try {
+            const made =
+                ec.service
+                    .sync()
+                    .name("mantle.account.InvoiceServices.create#FulfillmentInvoice")
+                    .parameters({orderId: order.orderId, orderPartSeqId: part.orderPartSeqId})
+                    .disableAuthz()
+                    .requireNewTransaction(true)
+                    .call() || {}
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            if (made.invoiceId) invoiceIds.push(made.invoiceId)
+        } catch (error) {
+            ec.logger.error(
+                "Recurring order " +
+                    base.orderId +
+                    ": order " +
+                    order.orderId +
+                    " part " +
+                    part.orderPartSeqId +
+                    " was not invoiced on approval: " +
+                    String(error.message || error).split("\n")[0]
+            )
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+    return {invoiceIds}
+}
+
 const services = {
     findRecurringSalesOrders,
+    invoiceRecurringOrder,
     storeSalesRecurrence,
     changeSalesRecurrence,
     findSalesSubscriptions,
