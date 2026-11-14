@@ -31,5 +31,9 @@
         servable); bounded, as each generation change leaves the earlier keys behind -->
     <cache-list>
         <cache name="mantle.product.feedServing" type="local" max-elements="2000" expire-time-live="86400"/>
+        <!-- Smithy DG7 (SmithySite.js): a docs or landing page rendered, by its blob id, and the component.xml of a commit,
+            by repository and commit id; bounded, as each change leaves the earlier keys behind -->
+        <cache name="smithy.docs.rendered" type="local" max-elements="2000" expire-time-live="86400"/>
+        <cache name="smithy.component" type="local" max-elements="5000" expire-time-live="86400"/>
     </cache-list>
 </moqui-conf>

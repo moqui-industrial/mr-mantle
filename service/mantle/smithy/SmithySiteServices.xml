@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Smithy's site (mr-pass plan/design-smithy.md §13, §15.8, DG7; SmithySite.js): a group's landing page, a repository's
+        Docs, releases and their assets, the component directory and a group's addons.xml, the one search box, and the
+        table of old paths. Each operation takes PASS's input map (its fields are SmithySchema.js's, siteId among them) and
+        answers result. What the caller may not view is Not Found, exactly as what is not there. Every path a result
+        gives is from the host's root, the app's mount included. resolve#Redirect is not an operation: PASS's resolver
+        calls it. -->
+    <service verb="get" noun="GroupLanding" authenticate="anonymous-all" allow-remote="false">
+        <description>A group's Overview: its landing text (html, the Markdown file landingPath of the repository
+            landingRepositoryId at its default branch, rendered and cleaned; null when there is none or the caller may
+            not view that repository, and the page shows the group's description), the file's repository and path and
+            its edit page, the pinned repositories, the latest published release of the group's repositories and those
+            below it, news (the latest topics of the group's news category, as the caller may read them) and activity
+            (pushes, merged merge requests and releases of the repositories the caller views, newest first, at most 10).
+            Relative links of the text are left as written: the page makes them links of the repository.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getGroupLanding", input)</script></actions>
+    </service>
+    <service verb="set" noun="GroupLanding" authenticate="anonymous-all" allow-remote="false">
+        <description>Set a group's landing text (landingRepositoryPath and landingPath: a Markdown file at that
+            repository's default branch; both empty clear it) and its news category (newsContactListId; empty clears it),
+            by an Owner with a confirmed address, with expectedRevision. Unprocessable when the file is not there, when
+            the repository is narrower than the group (a members-only landing for a public group) or hidden, and when the
+            category is not the site's or is narrower than the group.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setGroupLanding", input)</script></actions>
+    </service>
+    <service verb="get" noun="DocsPage" authenticate="anonymous-all" allow-remote="false">
+        <description>A page of a repository's docs (refPath: a branch, a tag or a commit id and a path in the docs
+            directory, SmithyRepository.docsPath, docs by default; empty: README.md of the directory at the default
+            branch; a directory: its README.md): the Markdown file rendered and cleaned, with stable heading anchors (the
+            lower-cased text joined with -), its title (the first heading, else the file's name), its headings, a table
+            of contents from the directory's tree (a directory's README.md is its index, a directory a section; at most
+            500 files, 5 levels), its edit page at a branch, and the branches and tags for a picker. Not Found for a
+            repository whose docs are off, a path outside the docs directory, a file that is not Markdown, and a
+            repository the caller may not view. The rendering is cached by the file's blob id.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getDocsPage", input)</script></actions>
+    </service>
+    <service verb="find" noun="Releases" authenticate="anonymous-all" allow-remote="false">
+        <description>The releases of a repository, or of the repositories of a group and those below it that the caller
+            views (repositoryId or groupId), newest first, paged: Mantle's releases (WetRelease) linked to a tag of the
+            repository, each with its notes rendered, its assets and the topic that announced it. A draft is listed only
+            to a Maintainer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findReleases", input)</script></actions>
+    </service>
+    <service verb="get" noun="Release" authenticate="anonymous-all" allow-remote="false">
+        <description>A release by its tag, with the source archives of the tag, the component its tag's component.xml
+            names, and canEdit for a Maintainer. Not Found for a draft but to a Maintainer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getRelease", input)</script></actions>
+    </service>
+    <service verb="store" noun="Release" authenticate="anonymous-all" allow-remote="false">
+        <description>Make the release of a tag (operationId) or change it (expectedRevision), by a Maintainer with a
+            confirmed address, in a repository that is not archived: name, notes (Markdown, through the gate), published.
+            A new release is a WetRelease of the repository's project named as the tag's version, linked to the tag.
+            Publishing copies the artifacts of the tag's latest successful pipeline run that the release lacks by name;
+            announce posts a topic in the news category of the nearest group that has one, linked to the release.
+            Unprocessable for a tag the repository does not have.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeRelease", input)</script></actions>
+    </service>
+    <service verb="delete" noun="Release" authenticate="anonymous-all" allow-remote="false">
+        <description>Withdraw a release (expectedRevision), by a Maintainer: the release is cancelled, its link to the tag
+            ends and its assets are removed. The tag stays; storeRelease makes its release again.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("deleteRelease", input)</script></actions>
+    </service>
+    <service verb="add" noun="ReleaseAsset" authenticate="anonymous-all" allow-remote="false">
+        <description>Add an asset to a release, by a Maintainer with a confirmed address: attachmentId (the caller's staged
+            repositoryFile upload that passed scanning), artifactId (an artifact of a pipeline run of the tag) or
+            imageName (a container image's name); name defaults to the file's. nameTaken for a name the release has;
+            quotaExceeded when the repository's assets would pass its namespace's Git LFS limit; Unprocessable for an
+            upload that has not passed scanning, an artifact of another run and a file over 256 MiB. The same operationId
+            answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("addReleaseAsset", input)</script></actions>
+    </service>
+    <service verb="remove" noun="ReleaseAsset" authenticate="anonymous-all" allow-remote="false">
+        <description>Remove an asset and its file, by a Maintainer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("removeReleaseAsset", input)</script></actions>
+    </service>
+    <service verb="download" noun="ReleaseAsset" authenticate="anonymous-all" allow-remote="false">
+        <description>An asset's file as a download (the facade streams file and location), for a caller who views the
+            release: anyone who views the repository for a published one, a Maintainer for a draft. Not Found for an
+            image's name, which has no file.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("downloadReleaseAsset", input)</script></actions>
+    </service>
+    <service verb="find" noun="Components" authenticate="anonymous-all" allow-remote="false">
+        <description>The component directory (Explore, design-smithy §13.4): the repositories the caller views whose root
+            has a component.xml at the default branch, of the site or below a group (groupId), searched by query in the
+            component's name and the repository's path, paged: name, version, dependsOn, repositoryPath, description and
+            the latest published release's tag.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findComponents", input)</script></actions>
+    </service>
+    <service verb="get" noun="Addons" authenticate="anonymous-all" allow-remote="false">
+        <description>A group's addons.xml in the format ./moq component-get reads: a repository element of this server's
+            clone and archive addresses, and a component element for each component of the group and those below it that
+            the caller views (public ones only for no user), with its group path, default branch, latest release tag as
+            its version, and its component.xml name where it differs from the repository's. At most 500.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getAddons", input)</script></actions>
+    </service>
+    <service verb="search" noun="Site" authenticate="anonymous-all" allow-remote="false">
+        <description>One box over the public projections (design-smithy §13.5): repositories, groups, components, issues,
+            merge requests, docs pages (the docs directory at the default branch) and forum topics (the forum's own
+            search), each kept by its own rule before a title, a snippet or a count is given: a confidential issue only
+            to who reads it, a held issue or merge request to nobody here, a private repository's items only to who views
+            it. types (comma separated) narrows the kinds; groupId or repositoryId narrows the place. Each kind gives at
+            most limit (10 when several kinds are asked) results; a search of one kind is paged. Unprocessable for a
+            query under 2 characters.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("searchSite", input)</script></actions>
+    </service>
+    <service verb="find" noun="Redirects" authenticate="anonymous-all" allow-remote="false">
+        <description>The site's table of old paths, for its owners and operators: searched by query in the old host and
+            path and the target, filtered by source (site, forum, github, manual), paged.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findRedirects", input)</script></actions>
+    </service>
+    <service verb="store" noun="Redirect" authenticate="anonymous-all" allow-remote="false">
+        <description>Make a redirect (operationId) or change one (redirectId), by a site owner or operator: oldHost
+            (empty: the site's own hosts), oldPath (a path starting with /, or a whole address whose host is taken as
+            oldHost), targetPath, note. nameTaken for an old path the table has; targetInvalid (Unprocessable) for a
+            target that is not a path of this site or an https address of one of its hosts, and one that is its own old
+            path.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeRedirect", input)</script></actions>
+    </service>
+    <service verb="delete" noun="Redirect" authenticate="anonymous-all" allow-remote="false">
+        <description>Remove a redirect, by a site owner or operator.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("deleteRedirect", input)</script></actions>
+    </service>
+    <service verb="import" noun="Redirects" authenticate="anonymous-all" allow-remote="false">
+        <description>Import a CSV of old addresses for a site's move, by a site owner or operator: one redirect a line,
+            old (a path, or a whole address whose host becomes oldHost), target and an optional note; a first line whose
+            first field is not a path or an address is a header. source names where they came from (site, forum,
+            github; manual by default). An old path the table has takes the new target, so an import runs twice safely.
+            Each line stands alone: one that fails is named in failedList with its reason, and the rest go on. At most
+            5,000 lines.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("importRedirects", input)</script></actions>
+    </service>
+
+    <!-- Not an operation: what PASS's resolver asks before it answers Not Found for a page request. -->
+    <service verb="resolve" noun="Redirect" authenticate="anonymous-all" allow-remote="false">
+        <description>The target of an old path of a site (SmithyRedirect): for the request's host first, then for the
+            site's own hosts (no oldHost); the path as it came, then without a trailing slash, then in lower case. No
+            targetPath out when there is none. status is 301.</description>
+        <in-parameters>
+            <parameter name="siteId" required="true"/>
+            <parameter name="host"/>
+            <parameter name="path" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="targetPath"/>
+            <parameter name="status" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const found = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").resolveRedirect({siteId, host, path})
+            if (found) { targetPath = found.targetPath; status = found.status }
+        ]]></script></actions>
+    </service>
+</services>

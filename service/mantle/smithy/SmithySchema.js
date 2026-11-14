@@ -562,5 +562,74 @@
     storePipelineSettings: {
         service: "mantle.smithy.SmithyPipelineServices.store#Settings",
         fields: ["siteId", "groupId", "runnerPoolId", "outsideRunnerPoolId", "outsideRunApproval", "expectedRevision"]
+    },
+    // DG7 (§15.8): the site
+    getGroupLanding: {
+        service: "mantle.smithy.SmithySiteServices.get#GroupLanding",
+        fields: ["siteId", "groupId"]
+    },
+    setGroupLanding: {
+        service: "mantle.smithy.SmithySiteServices.set#GroupLanding",
+        fields: ["siteId", "groupId", "landingRepositoryPath", "landingPath", "newsContactListId", "expectedRevision"]
+    },
+    getDocsPage: {
+        service: "mantle.smithy.SmithySiteServices.get#DocsPage",
+        fields: ["siteId", "repositoryId", "refPath"]
+    },
+    findReleases: {
+        service: "mantle.smithy.SmithySiteServices.find#Releases",
+        fields: ["siteId", "repositoryId", "groupId", "limit", "cursor"]
+    },
+    getRelease: {
+        service: "mantle.smithy.SmithySiteServices.get#Release",
+        fields: ["siteId", "repositoryId", "tag"]
+    },
+    storeRelease: {
+        service: "mantle.smithy.SmithySiteServices.store#Release",
+        fields: ["siteId", "repositoryId", "tag", "name", "notes", "sourceFormat", "published", "announce", "expectedRevision", "operationId"]
+    },
+    deleteRelease: {
+        service: "mantle.smithy.SmithySiteServices.delete#Release",
+        fields: ["siteId", "repositoryId", "tag", "expectedRevision"]
+    },
+    addReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.add#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "tag", "name", "attachmentId", "artifactId", "imageName", "operationId"]
+    },
+    removeReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.remove#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "assetId"]
+    },
+    downloadReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.download#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "assetId"]
+    },
+    findComponents: {
+        service: "mantle.smithy.SmithySiteServices.find#Components",
+        fields: ["siteId", "groupId", "query", "limit", "cursor"]
+    },
+    getAddons: {
+        service: "mantle.smithy.SmithySiteServices.get#Addons",
+        fields: ["siteId", "groupId"]
+    },
+    searchSite: {
+        service: "mantle.smithy.SmithySiteServices.search#Site",
+        fields: ["siteId", "query", "types", "groupId", "repositoryId", "limit", "cursor"]
+    },
+    findRedirects: {
+        service: "mantle.smithy.SmithySiteServices.find#Redirects",
+        fields: ["siteId", "query", "source", "limit", "cursor"]
+    },
+    storeRedirect: {
+        service: "mantle.smithy.SmithySiteServices.store#Redirect",
+        fields: ["siteId", "redirectId", "oldHost", "oldPath", "targetPath", "note", "operationId"]
+    },
+    deleteRedirect: {
+        service: "mantle.smithy.SmithySiteServices.delete#Redirect",
+        fields: ["siteId", "redirectId"]
+    },
+    importRedirects: {
+        service: "mantle.smithy.SmithySiteServices.import#Redirects",
+        fields: ["siteId", "csv", "source"]
     }
 })

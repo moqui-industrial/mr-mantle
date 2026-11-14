@@ -34,4 +34,10 @@
     <giteca rule-name="SmithyAgreementBrought" source="push,write" event="post-receive">
         <actions><service-call name="mantle.smithy.SmithyAgreementServices.check#Brought" in-map="context"/></actions>
     </giteca>
+    <!-- The component directory (design-smithy §13.4): when the default branch moves, by any source, the component.xml
+        at its root is read and kept on the repository's row. -->
+    <giteca rule-name="SmithyComponent" source="push,fetch,import,write" event="ref-update" ref-type="branch" default-branch-only="true">
+        <condition><expression>changeType != 'delete'</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyGitServices.read#Component" in-map="context"/></actions>
+    </giteca>
 </gitecas>

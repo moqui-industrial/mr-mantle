@@ -1146,6 +1146,12 @@ const kit = {
     commitViews,
     fileViews,
     boundedDiffs,
+    // DG7: what the site's lists share with the code's (a list's query, its scan, a typed search)
+    scopeOf,
+    narrowed,
+    scan,
+    likeOf,
+    contains,
     // DG5: when an outside pipeline run waits for a Maintainer's approval (SmithySite and SmithyGroup outsideRunApproval)
     OUTSIDE_APPROVALS: ["first", "always", "never"]
 }
@@ -1165,6 +1171,8 @@ kit.forumScope = forumScope
 // pipelines (§15.6): the operations, the engine's run check and run URL, and the merge box's runs
 const pipelines = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyPipelines.js")(kit)
 kit.pipelines = pipelines
+// the site (§15.8): landing, Docs, releases, the component directory, search and redirects
+const siteModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySite.js")(kit)
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1195,9 +1203,9 @@ const NUMBERS = [
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
 const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles", "postIds"]
-const TEXTS = ["body", "value"]
+const TEXTS = ["body", "value", "notes"]
 /* A file's text as a page's editor sends it: bounded here well above the site's maxEditBytes, which commitFile holds. */
-const FILE_TEXTS = ["content"]
+const FILE_TEXTS = ["content", "csv"]
 /* A review's pending line comments: at most 50 maps of a line comment's own fields. */
 const COMMENT_FIELDS = ["threadId", "commitId", "path", "oldLine", "newLine", "body", "sourceFormat"]
 const FLAGS = [
@@ -1230,7 +1238,9 @@ const FLAGS = [
     "enabled",
     "hidden",
     "watch",
-    "approvalRequired"
+    "approvalRequired",
+    "published",
+    "announce"
 ]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
@@ -1340,6 +1350,11 @@ function privileged(work) {
     // DG5: the engine's hooks (SmithyPipelineServices.xml, git-ci run-check-service and run-url-service)
     checkRun: p => privileged(() => core.withMemo(() => pipelines.checkRun(p || {}))),
     runUrl: p => privileged(() => core.withMemo(() => pipelines.runUrl(p || {}))),
+    // DG7: the component a default branch's move names (Smithy.gitecas.xml SmithyComponent), the redirect PASS's
+    // resolver asks for before Not Found, and the card of a forum topic that announced a release
+    readComponent: p => privileged(() => core.withMemo(() => siteModule.readComponent(p || {}))),
+    resolveRedirect: p => privileged(() => siteModule.resolveRedirect(p || {})),
+    releaseCard: link => privileged(() => core.withMemo(() => siteModule.releaseCard(link))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

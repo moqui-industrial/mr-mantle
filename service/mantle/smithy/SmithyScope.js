@@ -457,9 +457,13 @@ function heldScope(route) {
 const heldLink = (siteId, token) => publicApps().pageUrl(siteId, "smithy", "/-/held-report/" + encodeURIComponent(token))
 /* The service that files a message to a report address as its confirmed sender. */
 const mailReportService = route => (route.targetType === "issue" ? "mantle.smithy.SmithyIssueServices.file#MailReport" : null)
-/* linkCard: an issue or a merge request a forum topic is linked to (PublicDiscussionLink of the source types issue and
-   mergeRequest), when the caller may read it: its number, title and page. A release's (DG7) has none yet. */
+/* linkCard: an issue, a merge request or a release a forum topic is linked to (PublicDiscussionLink of the source types
+   issue, mergeRequest and release), when the caller may read it: its number or tag, title and page. */
 function linkCard(link) {
+    if (link.sourceType === "release") {
+        const card = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").releaseCard(link)
+        return card ? {sourceType: "release", title: card.title, path: card.path} : false
+    }
     if (!["issue", "mergeRequest"].includes(link.sourceType)) return null
     return privileged(() => {
         const record =

@@ -99,6 +99,8 @@ const DOWNLOADS = [
     'downloadArchive',
     // Smithy DG5 (§15.6): a run's artifact or report
     'downloadArtifact',
+    // Smithy DG7 (§15.8): a release's file
+    'downloadReleaseAsset',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's

@@ -50,4 +50,14 @@
             ]]></script>
         </actions>
     </service>
+    <service verb="read" noun="Component" authenticate="anonymous-all" allow-remote="false">
+        <description>After a repository's default branch moved (the ref-update gitECA rule SmithyComponent): reads the
+            component.xml at the root of its new commit and keeps the component's name, version and depends-on names on
+            the SmithyRepository row (design-smithy §13.4), or clears them when the commit has none. Returns at once for a
+            repository Smithy does not have and for a deleted branch. What it reads is cached by commit id.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").readComponent({repositoryId, newId, changeType})</script>
+        </actions>
+    </service>
 </services>
