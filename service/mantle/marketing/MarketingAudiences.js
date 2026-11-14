@@ -102,6 +102,27 @@ function requireRevision(row, expectedRevision, label) {
 function currentPolicy(contactListId) {
     return Array.from(find(POLICY, {contactListId}).orderBy("-fromDate").list()).find(row => lib.active(row)) || null
 }
+// P7: the PASS sites whose enabled Marketing mount targets an organization, which a list of it may be offered on.
+function offerSites(organizationPartyId) {
+    if (!organizationPartyId) return []
+    return Array.from(
+        find("mantle.public.PublicSiteApp", {app: "marketing", targetId: organizationPartyId, enabled: "Y"})
+            .orderBy("siteId")
+            .list()
+    ).map(mount => ({siteId: mount.siteId, name: one("mantle.public.PublicSite", {siteId: mount.siteId})?.name || mount.siteId}))
+}
+// P7: a policy's public offer: on its site while its interval is open ({offered, stateText}).
+function offerState(policy) {
+    if (policy?.publicOffer !== "Y") return {offered: false, stateText: "Not offered"}
+    // a P3 offer names no site: it is offered nowhere until one is chosen
+    if (!policy.publicSiteId) return {offered: false, stateText: "Offered on no site yet"}
+    const at = nowMs()
+    if (policy.offerFromDate != null && lib.ms(policy.offerFromDate) > at)
+        return {offered: false, stateText: "Opens " + lib.dateText(policy.offerFromDate)}
+    if (policy.offerThruDate != null && lib.ms(policy.offerThruDate) <= at)
+        return {offered: false, stateText: "Closed " + lib.dateText(policy.offerThruDate)}
+    return {offered: true, stateText: "Offered" + (policy.offerThruDate ? " until " + lib.dateText(policy.offerThruDate) : "")}
+}
 // A campaign a list may name: of the list's organization, else RECORD_UNAVAILABLE.
 function campaignFor(userScope, marketingCampaignId, organizationPartyId) {
     const id = text(marketingCampaignId)
@@ -286,7 +307,8 @@ function getList(p) {
             fromText: lib.dateText(row.fromDate),
             thruText: lib.dateText(row.thruDate),
             current: lib.active(row),
-            publicOfferText: row.publicOffer === "Y" ? "Offered" : "Not offered",
+            publicOfferText:
+                row.publicOffer === "Y" ? "Offered" + (row.publicSiteId ? " on " + row.publicSiteId : "") : "Not offered",
             confirmationText: row.confirmationRequired === "N" ? "Accepted with evidence" : "Confirmation required",
             purposeText: enumText(purposeOf(list, row)),
             evidenceText: row.evidenceText || "",
@@ -322,9 +344,15 @@ function getList(p) {
                   evidenceText: policy.evidenceText || "",
                   confirmEmailTemplateId: policy.confirmEmailTemplateId || null,
                   noticeEmailTemplateId: policy.noticeEmailTemplateId || null,
+                  publicSiteId: policy.publicSiteId || null,
+                  offerFromDate: policy.offerFromDate || null,
+                  offerThruDate: policy.offerThruDate || null,
+                  offerText: offerState(policy).stateText,
                   revision: lib.ms(policy.lastUpdatedStamp)
               }
             : null,
+        // P7: the sites a public offer may name
+        siteOptions: offerSites(list.ownerPartyId),
         policyHistory,
         templates,
         counts,
@@ -349,12 +377,24 @@ function storeSubscriptionPolicy(p) {
     for (const templateId of [p.confirmEmailTemplateId, p.noticeEmailTemplateId])
         if (text(templateId) && !one("moqui.basic.email.EmailTemplate", {emailTemplateId: text(templateId)}))
             denied("TEMPLATE_INVALID", "Unknown email template " + text(templateId))
+    // P7: the public offer's site (one whose Marketing mount targets the list's organization) and opening interval
+    const publicOffer = p.publicOffer === "Y" || p.publicOffer === true ? "Y" : "N"
+    const publicSiteId = text(p.publicSiteId) || null
+    if (publicSiteId && !offerSites(list.ownerPartyId).some(site => site.siteId === publicSiteId))
+        denied("SITE_INVALID", "Site " + publicSiteId + " has no Marketing mount of the list's organization")
+    const offerFromMs = blank(p.offerFromDate) ? null : lib.ms(p.offerFromDate)
+    const offerThruMs = blank(p.offerThruDate) ? null : lib.ms(p.offerThruDate)
+    if (offerThruMs != null && offerThruMs <= (offerFromMs ?? nowMs()))
+        denied("OFFER_INTERVAL_INVALID", "The offer closes after it opens")
     const now = ec.user.nowTimestamp
     if (policy) call("update#" + POLICY, {contactListId: list.contactListId, fromDate: policy.fromDate, thruDate: now})
     call("create#" + POLICY, {
         contactListId: list.contactListId,
         fromDate: now,
-        publicOffer: p.publicOffer === "Y" || p.publicOffer === true ? "Y" : "N",
+        publicOffer,
+        publicSiteId,
+        offerFromDate: offerFromMs == null ? null : new Date(offerFromMs),
+        offerThruDate: offerThruMs == null ? null : new Date(offerThruMs),
         confirmationRequired: p.confirmationRequired === "N" || p.confirmationRequired === false ? "N" : "Y",
         purposeEnumId,
         evidenceText: text(p.evidenceText) || null,
@@ -587,7 +627,12 @@ function salesContacts(kind, recordId) {
         .map(row => row.fromPartyId)
         .filter((partyId, index, all) => all.indexOf(partyId) === index && !!salesAccess.visibleParty(salesScope, partyId))
 }
-// One request, decided and recorded: {partyId, outcome (pending, accepted, existing, refused), reasonCode, suppressed}.
+// One request, decided and recorded: {partyId, outcome (pending, accepted, existing, refused), reasonCode, suppressed,
+// subscriptionRequestId}. P7 (MarketingPortal.js): request.extra adds a public request's fields (site, group, request key,
+// expiry) to the row; request.subscriptionRequestId decides that pending row (the recipient's confirmation) instead of recording a
+// new one; request.byPerson is the person's own act (a confirmation link, a checkout's verified account): a withdrawn purpose is
+// renewed by it (F120) and the consent is recorded by the internal record#PartyConsent, the link or account deciding, not whoever
+// is signed in (P3 review R1).
 function fileOne(list, policy, request, partyId) {
     const party = requestableParty(partyId)
     if (!party) return {partyId, outcome: "refused", reasonCode: "RECORD_UNAVAILABLE"}
@@ -607,15 +652,28 @@ function fileOne(list, policy, request, partyId) {
         requestedDate: ec.user.nowTimestamp,
         requestedByUserId: ec.user.userId || null
     }
-    const record = (statusEnumId, reasonCode, extra = {}) =>
-        call(
-            "create#" + REQUEST,
-            Object.assign({}, base, {statusEnumId, reasonCode: reasonCode || null, decidedDate: ec.user.nowTimestamp}, extra)
-        ).subscriptionRequestId
+    Object.assign(base, request.extra || {})
+    let recordedId = null
+    const record = (statusEnumId, reasonCode, extra = {}) => {
+        const values = {statusEnumId, reasonCode: reasonCode || null, decidedDate: ec.user.nowTimestamp}
+        if (request.subscriptionRequestId) {
+            recordedId = request.subscriptionRequestId
+            call(
+                "update#" + REQUEST,
+                Object.assign(
+                    {subscriptionRequestId: recordedId},
+                    values,
+                    statusEnumId === "SrsRefused" ? {} : {verifiedDate: ec.user.nowTimestamp},
+                    extra
+                )
+            )
+        } else recordedId = call("create#" + REQUEST, Object.assign({}, base, values, extra)).subscriptionRequestId
+        return recordedId
+    }
     const destination = destinationOf(partyId, channel, request.contactMechId)
     if (!destination) {
         record("SrsRefused", "MISSING_DESTINATION")
-        return {partyId, outcome: "refused", reasonCode: "MISSING_DESTINATION"}
+        return {partyId, outcome: "refused", reasonCode: "MISSING_DESTINATION", subscriptionRequestId: recordedId}
     }
     base.contactMechId = destination.contactMechId
     // the party's membership rows and consent, read locked through the membership
@@ -646,7 +704,7 @@ function fileOne(list, policy, request, partyId) {
     const suppressed = blocked.suppressed.length > 0
     if (latest && subscribed.includes(latest.statusId)) {
         record("SrsAccepted", "ALREADY_MEMBER")
-        return {partyId, outcome: "existing", reasonCode: "ALREADY_MEMBER", suppressed}
+        return {partyId, outcome: "existing", reasonCode: "ALREADY_MEMBER", suppressed, subscriptionRequestId: recordedId}
     }
     // a withdrawal of the list later than the evidence: a retry of an old request never regrants
     const listWithdrawnMs =
@@ -662,16 +720,16 @@ function fileOne(list, policy, request, partyId) {
         (purposeWithdrawnMs != null && evidenceMs <= purposeWithdrawnMs)
     ) {
         record("SrsRefused", "WITHDRAWN")
-        return {partyId, outcome: "refused", reasonCode: "WITHDRAWN", suppressed}
+        return {partyId, outcome: "refused", reasonCode: "WITHDRAWN", suppressed, subscriptionRequestId: recordedId}
     }
     // the purpose withdrawn (for every organization or the list's) is renewed by the person alone
-    if (request.accept && purposeWithdrawnMs != null) {
+    if (request.accept && purposeWithdrawnMs != null && !request.byPerson) {
         record("SrsRefused", "CONSENT_WITHDRAWN")
-        return {partyId, outcome: "refused", reasonCode: "CONSENT_WITHDRAWN", suppressed}
+        return {partyId, outcome: "refused", reasonCode: "CONSENT_WITHDRAWN", suppressed, subscriptionRequestId: recordedId}
     }
     if (latest && latest.statusId === "CLPT_PENDING" && !request.accept) {
         record("SrsPending", "ALREADY_PENDING")
-        return {partyId, outcome: "existing", reasonCode: "ALREADY_PENDING", suppressed}
+        return {partyId, outcome: "existing", reasonCode: "ALREADY_PENDING", suppressed, subscriptionRequestId: recordedId}
     }
     const target = request.accept ? "CLPT_ACCEPTED" : "CLPT_PENDING"
     // the membership: the latest current row moved to the target, else a new row (one that cannot move is ended first)
@@ -710,7 +768,7 @@ function fileOne(list, policy, request, partyId) {
     }
     let partyConsentId = null
     if (request.accept) {
-        partyConsentId = call("mantle.party.ConsentServices.store#PartyConsent", {
+        partyConsentId = call("mantle.party.ConsentServices." + (request.byPerson ? "record" : "store") + "#PartyConsent", {
             partyId,
             contactMechId: destination.contactMechId,
             contactListId: list.contactListId,
@@ -722,7 +780,13 @@ function fileOne(list, policy, request, partyId) {
         }).partyConsentId
     }
     record(request.accept ? "SrsAccepted" : "SrsPending", null, {partyConsentId})
-    return {partyId, outcome: request.accept ? "accepted" : "pending", reasonCode: null, suppressed}
+    return {
+        partyId,
+        outcome: request.accept ? "accepted" : "pending",
+        reasonCode: null,
+        suppressed,
+        subscriptionRequestId: recordedId
+    }
 }
 // One item in a transaction of its own: its result, or its failure named (RECORD_UNAVAILABLE and the like), the others going on.
 function fileApart(list, policy, request, partyId) {
@@ -936,6 +1000,10 @@ const operations = {
     // request#Subscriptions: the scope, the list, its policy and purpose, the evidence checks, the request's filing and the masks
     audience: {
         audienceScope,
+        offerState,
+        offerSites,
+        listTypes,
+        subscribed,
         listOfScope,
         requireOpen,
         currentPolicy,

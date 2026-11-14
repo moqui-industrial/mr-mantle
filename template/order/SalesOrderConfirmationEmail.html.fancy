@@ -12,9 +12,11 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <#-- The body of a storeless sales order's confirmation (mantle.order.SalesOrderServices build#OrderConfirmationMessage; impl-sales P11):
      the order, its seller and customer, the customer's reference, when it was placed and its total. The confirmation as placed is
-     attached (Customer Service's stored PDF). -->
+     attached (Customer Service's stored PDF). impl-sales P17: orderUrl, the recipient's own link to the order's PASS Sales page
+     (empty with no published Sales site). -->
 <div style="font:11pt Helvetica,Arial,sans-serif">
 <p>${customerName},</p>
 <p>${sellerName} confirms your order ${orderId}<#if reference> (your reference ${reference})</#if>, placed ${placedText}, for ${totalText}.
 The confirmation is attached.</p>
+<#if orderUrl><p>Follow its delivery and invoices online: <a href="${orderUrl}">${orderUrl}</a></p></#if>
 </div>

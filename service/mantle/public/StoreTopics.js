@@ -11,7 +11,7 @@
  *   three, news only with its list; "none": none). Each is unchecked until the buyer checks it, and says what it is and is
  *   not. The order's receipt and notices are transactional whatever is chosen.
  * - Recording, at placement: a signed-in buyer whose account email is verified and is the checkout's gets each choice granted
- *   (record#PartyConsent on a topic's list; set#ContactListPartySubscription on the news list). Anyone else's choice waits as
+ *   (record#PartyConsent on a topic's list; the news list's choice an accepted request of the audience, IronStone Marketing P7). Anyone else's choice waits as
  *   Mantle's pending membership (ContactListParty CLPT_PENDING on the list), never sent to, until it is confirmed: by the
  *   link in the order receipt (make#OptInConfirmLink: a code whose digest the checkout keeps; the page reads, its button
  *   confirms, so a mail scanner's fetch changes nothing) or, for a choice checked while signed in, by the account signing
@@ -240,6 +240,26 @@ function applyOptIn(p) {
         return {outcome: "already"}
     }
     const contactMechId = text(p.contactMechId) || null
+    // IronStone Marketing P7 (impl-shop §7, F26): the store-news choice is filed through the audience's evidenced path
+    // (MarketingPortalServices file#CheckoutSubscription: a SubscriptionRequest of kind checkout, source PcsCheckout), pending until
+    // the receipt's link or a verified sign-in confirms it, or accepted at once for a verified account; the topics stay as they are
+    if (optInId === "news" && (p.mode === "pend" || p.mode === "grant")) {
+        const filed = call("mantle.marketing.MarketingPortalServices.file#CheckoutSubscription", {
+            contactListId,
+            partyId,
+            contactMechId,
+            accept: p.mode === "grant",
+            evidenceText: text(p.evidenceText) || null
+        })
+        if (filed.outcome === "refused") {
+            ec.logger.warn(
+                "Checkout news choice of party " + partyId + " on list " + contactListId + " refused: " + filed.reasonCode
+            )
+            return {outcome: "failed"}
+        }
+        if (filed.reasonCode === "ALREADY_MEMBER") return {outcome: "already"}
+        return {outcome: p.mode === "grant" ? "granted" : "pending"}
+    }
     if (p.mode === "pend") {
         const current = currentRows(contactListId, partyId)
         if (current.some(row => row.statusId === "CLPT_PENDING")) return {outcome: "pending"}
@@ -257,17 +277,6 @@ function applyOptIn(p) {
         return {outcome: "pending"}
     }
     if (p.mode !== "grant") throw new Error("Unknown opt-in mode " + p.mode)
-    if (optInId === "news") {
-        call("mantle.party.ConsentServices.set#ContactListPartySubscription", {
-            contactListId,
-            partyId,
-            subscribe: true,
-            contactMechId,
-            sourceEnumId: p.sourceEnumId,
-            evidenceText: text(p.evidenceText) || null
-        })
-        return {outcome: "granted"}
-    }
     endPending(contactListId, partyId)
     // the caller's check decides (the buyer's own account, or the confirmation link's code), not whoever is signed in
     call("mantle.party.ConsentServices.record#PartyConsent", {
