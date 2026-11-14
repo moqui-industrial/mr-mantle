@@ -626,6 +626,45 @@ function requireAgreement(userScope, agreementId, edit = false) {
 }
 // ===== end of P15 =====
 
+// ===== P16: recurring bases (impl-sales P16; design-sales §7 RecurringOrders, §4 Q7) =====
+// A recurring base is a native order with a cadence (recurCronExpression) whose first part sells (its vendor an internal
+// organization of the scope, its customer not internal): an OrderApproved order marked OrpRecurringTemplate, or a base made before
+// Sales with no marker. A base a Shop contract renews (StoreRecurringContract.baseOrderId) is Shop's and never Sales' here. Inside an
+// organization of the scope a holder of SALES_RECURRENCE_MANAGE reads and keeps its bases and a holder of SALES_TEAM_VIEW reads them;
+// recurrence is the organization's schedule, not assigned work. One outside the scope, or for a caller without either, answers as
+// missing (RECORD_UNAVAILABLE).
+const recurringPurpose = "OrpRecurringTemplate"
+function recurrenceReader(userScope) {
+    return !!(userScope.capabilities.recurrenceManage || userScope.capabilities.teamRead)
+}
+function recurrenceOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead || !recurrenceReader(userScope)) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId: String(orderId)})
+    if (!order || !order.recurCronExpression) return null
+    if (order.orderPurposeEnumId && order.orderPurposeEnumId !== recurringPurpose) return null
+    const part = Array.from(
+        lib.find("mantle.order.OrderPart").condition("orderId", order.orderId).orderBy("orderPartSeqId").list()
+    )[0]
+    if (!part || !part.vendorPartyId || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    if (!part.customerPartyId || isInternal(part.customerPartyId)) return null
+    if (lib.find("mantle.product.subscription.StoreRecurringContract").condition("baseOrderId", order.orderId).count() > 0)
+        return null
+    return {
+        order,
+        part,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.recurrenceManage
+    }
+}
+function requireRecurrence(userScope, orderId, edit = false) {
+    const found = recurrenceOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Recurring order " + (orderId || "") + " is not available")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Sales recurrenceManage is required")
+    return found
+}
+// ===== end of P16 =====
+
 ;({
     permissions,
     reads,
@@ -688,5 +727,10 @@ function requireAgreement(userScope, agreementId, edit = false) {
     // P15: customer agreements
     agreementTypes,
     agreementOf,
-    requireAgreement
+    requireAgreement,
+    // P16: recurring bases
+    recurringPurpose,
+    recurrenceReader,
+    recurrenceOf,
+    requireRecurrence
 })

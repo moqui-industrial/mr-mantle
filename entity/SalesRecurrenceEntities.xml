@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' recurring orders (IronStone Sales design §7 RecurringOrders, §13.1 create_RecurringOrders, §17 SAL-RECURRENCE and CX-RECURRING,
+    review X5; impl-sales P16, F22, §4 Q7): a recurring base is a native OrderHeader in OrderApproved marked OrpRecurringTemplate (Shop's
+    marker, which every exclusion reads), with no reservation, shipment or billing source; recurCronExpression is its cadence and
+    lastOrderedDate its last occurrence, as before. Sales adds the zone the cadence is read in, the dates it runs between, a pause,
+    the agreement it is kept under, a revision every Sales change names, the last failure, and on each generated order the occurrence
+    it was made for. The worker (OrderServices.create#RecurringOrders, create#RecurringOrder) reads them; a base without them runs as
+    before. clone#Order clears them on a copy. Written by mantle.order.SalesRecurrenceServices (SalesRecurrence.js). -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="recurTimeZone" type="text-short" enable-audit-log="update"><description>The time zone (an IANA name) a recurring
+            base's cadence (recurCronExpression) is read in; the machine's, as the job's, when empty.</description></field>
+        <field name="recurFromDate" type="date-time" enable-audit-log="update"><description>A recurring base's first moment: no
+            occurrence before it is ordered.</description></field>
+        <field name="recurThruDate" type="date-time" enable-audit-log="update"><description>A recurring base's end: no occurrence at
+            or after it is ordered (an ended base).</description></field>
+        <field name="recurPausedDate" type="date-time" enable-audit-log="update"><description>Set while a recurring base is paused:
+            the worker orders nothing for it, and the occurrences that fall in the pause are skipped.</description></field>
+        <field name="recurResumedDate" type="date-time"><description>When a paused base was resumed: occurrences before it are not
+            ordered late.</description></field>
+        <field name="recurAgreementId" type="id" enable-audit-log="update"><description>The customer agreement (AgrSales or
+            AgrProduct) a recurring base is kept under: an occurrence is ordered only while it applies (active, in its dates, of the
+            seller with the customer).</description></field>
+        <field name="recurRevision" type="number-integer"><description>A recurring base's revision, counted by each change of its
+            recurrence in Sales and named by the next one.</description></field>
+        <field name="recurFailureDate" type="date-time"><description>When a recurring base's last occurrence failed; empty after one
+            succeeds.</description></field>
+        <field name="recurFailureMessage" type="text-medium"><description>Why a recurring base's last occurrence failed.</description></field>
+        <field name="recurOccurrenceDate" type="date-time"><description>On an order generated from a recurring base: the scheduled
+            occurrence it was made for (one order for an occurrence).</description></field>
+        <relationship type="one" title="Recurrence" related="mantle.party.agreement.Agreement" short-alias="recurAgreement">
+            <key-map field-name="recurAgreementId" related="agreementId"/></relationship>
+    </extend-entity>
+</entities>

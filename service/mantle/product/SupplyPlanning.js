@@ -162,6 +162,12 @@ function facilityTree(facility) {
 }
 
 // ===== demand and supply =====
+// A recurring base (OrpRecurringTemplate, impl-sales P16) or a quote template (OrpSalesQuoteTemplate) is no demand: only the orders
+// generated from a base are.
+const templatePurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
+function templateOrder(orderId) {
+    return templatePurposes.includes(one("mantle.order.OrderHeader", {orderId})?.orderPurposeEnumId)
+}
 // The open sales demand of the organization at a facility set, by product: what is ordered less what was cancelled, issued
 // and reserved (the reserved quantity is out of the available stock already, its unavailable part as a negative available
 // to promise). A kit's line is its kit components' demand.
@@ -171,7 +177,7 @@ function salesDemand(ctx, node) {
             .condition("facilityId", "in", node.facilityIds)
             .condition("statusId", "in", firmOrderStatuses)
             .list()
-    )
+    ).filter(part => !templateOrder(part.orderId))
     const byProduct = new Map()
     const add = (productId, line) => {
         if (!byProduct.has(productId)) byProduct.set(productId, [])

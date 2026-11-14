@@ -233,6 +233,14 @@ function accountRows(userScope, found, ids) {
             .condition("customerPartyId", "in", ids)
             .condition("vendorPartyId", "in", organizationIds(userScope))
             .condition("statusId", "in", ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"])
+            // P16: a recurring base or a quote template is no open order (OrderHeader.orderPurposeEnumId, null for most)
+            .condition(
+                factory().makeCondition(
+                    factory().makeCondition("orderPurposeEnumId", "is-null", null),
+                    "or",
+                    factory().makeCondition("orderPurposeEnumId", "not-in", salesAccess.orderExcludedPurposes)
+                )
+            )
             .selectField("customerPartyId")
             .selectField("orderId")
             .distinct(true)

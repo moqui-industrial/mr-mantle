@@ -17,6 +17,8 @@ const ORDER = "mantle.order.OrderHeader",
     REQUEST = "mantle.request.Request"
 const SUPPORT_CLAIM = "SupportCustomerClaim"
 const cancellableStatuses = ["OrderOpen", "OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
+// a recurring base (impl-sales P16) and a quote template are templates, never the customer's orders
+const templatePurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
 const customerStates = {
     requested: "Cancellation requested",
     needsInfo: "We need more information",
@@ -53,6 +55,7 @@ function orderFor(orderId, organizationPartyId, customers) {
     const customer = parts.length ? customers.find(row => row.partyId === parts[0].customerPartyId) : null
     if (
         !customer ||
+        templatePurposes.includes(order.orderPurposeEnumId) ||
         !parts.every(part => part.vendorPartyId === organizationPartyId && part.customerPartyId === customer.partyId)
     )
         portal().unavailable()
@@ -199,6 +202,8 @@ function customerOrders(organizationPartyId, customers, limit = 50) {
             if (out.some(row => row.orderId === part.orderId)) continue
             const order = one(ORDER, {orderId: part.orderId})
             if (!order || ["OrderOpen", "OrderCancelled", "OrderRejected"].includes(order.statusId)) continue
+            // a recurring base (impl-sales P16) or a quote template is no order of the customer's
+            if (templatePurposes.includes(order.orderPurposeEnumId)) continue
             out.push({
                 orderId: order.orderId,
                 orderName: order.orderName || "",
