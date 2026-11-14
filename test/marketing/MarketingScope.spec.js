@@ -409,18 +409,20 @@ feature("Home answers each source by name, those not built yet shown not availab
         Array.from(home.cards)
             .map(card => card.cardKey)
             .join(",") == "campaigns,approvals,dueSends,failedDeliveries,registrations,audienceChanges"
-        // P2 counts the running campaigns and pending approvals, P3 the audience changes; the others are not built yet
+        // P2 counts the running campaigns and pending approvals, P3 the audience changes, P9 the sends due and the failed or uncertain
+        // deliveries; registrations are not built yet
         Array.from(home.cards)
-            .filter(card => !["campaigns", "approvals", "audienceChanges"].includes(card.cardKey))
+            .filter(card => card.cardKey == "registrations")
             .every(card => card.state == "notAvailable" && card.value == null)
         Array.from(home.cards)
-            .filter(card => ["campaigns", "approvals", "audienceChanges"].includes(card.cardKey))
+            .filter(card => card.cardKey != "registrations")
             .every(card => card.state == "available" && card.value == 0)
         home.failedSources.length == 0
-        // the approvals awaiting a decision are an approver's (P2): the administrator holds no approval
+        // the approvals awaiting a decision are an approver's (P2) and the failed or uncertain deliveries a dispatcher's (P9): the
+        // administrator holds neither
         Array.from(attention.sources)
             .map(source => source.sourceKey + ":" + source.state)
-            .join(",") == "adoption:available,deliveries:notAvailable"
+            .join(",") == "adoption:available"
         other.refusal.includes("ORGANIZATION_DENIED")
         editor.refusal.includes("PERMISSION_DENIED")
     }

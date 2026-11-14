@@ -173,7 +173,12 @@ feature(
             // the policy's flag on
             as(users.configurer, C + "store#MarketingPolicy", {organizationPartyId: orgA, selfApprovalAllowed: "Y"})
             const self = decide(users.solo, id, "approve")
-            const selfRow = rows("mantle.marketing.campaign.MarketingDecision", {targetId: id, decisionEnumId: "MddApproved"})[0]
+            // by its kind too: a send of another spec may have the same id (P9)
+            const selfRow = rows("mantle.marketing.campaign.MarketingDecision", {
+                targetKindEnumId: "MdtCampaign",
+                targetId: id,
+                decisionEnumId: "MddApproved"
+            })[0]
             // a send's rule (P8 sends it): under 500 with the flag on, never at 500, never with the flag off
             const approvals = ec.resource.script(approvalsModule)
             const on = {selfApprovalAllowed: "Y"}
@@ -223,7 +228,11 @@ feature("the topic's handlers decide at the notice's revision; a notice with non
             otherRecord,
             refused,
             status: revisionOf(id).row.statusId,
-            last: rows("mantle.marketing.campaign.MarketingDecision", {targetId: id, decisionEnumId: "MddRefused"})
+            last: rows("mantle.marketing.campaign.MarketingDecision", {
+                targetKindEnumId: "MdtCampaign",
+                targetId: id,
+                decisionEnumId: "MddRefused"
+            })
         }
     },
     then({noRevision, otherRecord, refused, status, last}) {

@@ -31,8 +31,65 @@ const routes = {
     sendingProfiles: "marketingSendingProfiles",
     templates: "marketingTemplates",
     consent: "marketingConsent",
-    suppressions: "marketingSuppressions"
+    suppressions: "marketingSuppressions",
+    // P9: the sends and a send's delivery
+    sends: "marketingSends",
+    send: "marketingSend",
+    delivery: "marketingDelivery"
 }
+// ===== Marketing P9: the sends' cards, upcoming and attention rows =====
+const SEND = "mantle.marketing.campaign.CampaignSend"
+// The sends of the organizations released and waiting for their time or sending now, due within a day.
+function dueSends(context) {
+    if (!context.organizationPartyIds.length) return []
+    const until = new Date(lib.ms(ec.user.nowTimestamp) + dayMs)
+    const cf = ec.entity.conditionFactory
+    return Array.from(
+        find(SEND)
+            .condition("organizationPartyId", "in", context.organizationPartyIds)
+            .condition(
+                cf.makeCondition(
+                    [
+                        cf.makeCondition("statusId", "equals", "CsSending"),
+                        cf.makeCondition(
+                            [
+                                cf.makeCondition("statusId", "equals", "CsScheduled"),
+                                cf.makeCondition("scheduledDate", "<=", until)
+                            ],
+                            "and"
+                        )
+                    ],
+                    "or"
+                )
+            )
+            .orderBy("scheduledDate")
+            .limit(100)
+            .list()
+    )
+}
+// The released sends of the organizations with a failed or uncertain delivery: {row, failed, uncertain}, the most recent first.
+function troubledSends(context) {
+    if (!context.organizationPartyIds.length) return []
+    const found = []
+    for (const row of Array.from(
+        find(SEND)
+            .condition("organizationPartyId", "in", context.organizationPartyIds)
+            .condition("statusId", "in", ["CsSending", "CsPaused", "CsCompletedFailures"])
+            .orderBy("-releasedDate")
+            .limit(100)
+            .list()
+    )) {
+        const count = state =>
+            find("mantle.party.MessageDelivery", {sourceEnumId: "MdsrcCampaignSend", stateEnumId: state})
+                .condition("eventKey", "like", "CampaignSend:" + row.campaignSendId + ":%")
+                .count()
+        const failed = count("MdsFailed"),
+            uncertain = count("MdsUncertain")
+        if (failed || uncertain) found.push({row, failed, uncertain})
+    }
+    return found
+}
+// ===== end of Marketing P9 =====
 // loaded when the sending readiness runs (P6)
 const sendingProfiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
 const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
@@ -118,8 +175,22 @@ const cardSources = [
         phase: "P2",
         run: context => ({value: approvals.pendingRows(context.organizationPartyIds).length, linkPath: routes.approvals})
     },
-    {key: "dueSends", title: "Sends due", phase: "P8"},
-    {key: "failedDeliveries", title: "Failed or uncertain deliveries", phase: "P9"},
+    // P9: the sends released and due within a day or sending, and the sends with a failed or uncertain delivery (counts only)
+    {
+        key: "dueSends",
+        title: "Sends due",
+        phase: "P8",
+        run: context => ({value: dueSends(context).length, linkPath: routes.sends})
+    },
+    {
+        key: "failedDeliveries",
+        title: "Failed or uncertain deliveries",
+        phase: "P9",
+        run: context => ({
+            value: troubledSends(context).reduce((total, found) => total + found.failed + found.uncertain, 0),
+            linkPath: routes.sends
+        })
+    },
     {key: "registrations", title: "Registrations against capacity", phase: "P17"},
     // P3: the subscription requests of the last seven days for the organizations' lists (a count, no person)
     {
@@ -201,7 +272,35 @@ const upcomingSources = [
             return {rows: out}
         }
     },
-    {key: "sends", title: "Scheduled sends", phase: "P8"},
+    // P9 (the Today source of due sends): the approved and released sends with a schedule in the next 60 days
+    {
+        key: "sends",
+        title: "Scheduled sends",
+        phase: "P8",
+        run: context => {
+            if (!context.organizationPartyIds.length) return {rows: []}
+            const now = lib.ms(ec.user.nowTimestamp)
+            const found = find(SEND)
+                .condition("organizationPartyId", "in", context.organizationPartyIds)
+                .condition("statusId", "in", ["CsApproved", "CsScheduled", "CsSending", "CsPaused"])
+                .condition("scheduledDate", ">=", ec.user.nowTimestamp)
+                .condition("scheduledDate", "<=", new Date(now + upcomingDays * dayMs))
+                .orderBy("scheduledDate")
+                .limit(100)
+                .list()
+            return {
+                rows: Array.from(found).map(row => ({
+                    kind: "Send",
+                    title: row.sendName || row.campaignSendId,
+                    date: row.scheduledDate,
+                    state: one("moqui.basic.StatusItem", {statusId: row.statusId})?.description || row.statusId,
+                    recordId: row.campaignSendId,
+                    recordParameter: "campaignSendId",
+                    route: routes.send
+                }))
+            }
+        }
+    },
     {key: "events", title: "Events", phase: "P16"},
     {key: "publications", title: "Publication dates", phase: "P14"}
 ]
@@ -268,7 +367,31 @@ const attentionSources = [
             return {rows: rowsFound}
         }
     },
-    {key: "deliveries", title: "Failed or uncertain deliveries", phase: "P9"}
+    // P9: a send with a failed or uncertain delivery, for its dispatchers (a failure to retry, an uncertainty to reconcile)
+    {
+        key: "deliveries",
+        title: "Failed or uncertain deliveries",
+        phase: "P9",
+        admits: context => context.userScope.capabilities.dispatch,
+        run: context => ({
+            rows: troubledSends(context)
+                .slice(0, 50)
+                .map(({row, failed, uncertain}) => ({
+                    recordKind: "send",
+                    recordId: row.campaignSendId,
+                    recordParameter: "campaignSendId",
+                    record: "Send " + (row.sendName || row.campaignSendId),
+                    reason: [failed ? failed + " failed" : null, uncertain ? uncertain + " uncertain" : null]
+                        .filter(Boolean)
+                        .join(", "),
+                    age: row.releasedDate
+                        ? Math.max(0, Math.floor((lib.ms(ec.user.nowTimestamp) - lib.ms(row.releasedDate)) / dayMs)) + " days"
+                        : "",
+                    action: uncertain ? "Reconcile" : "Retry",
+                    route: routes.delivery
+                }))
+        })
+    }
 ]
 function attention(p) {
     const context = reader(p)

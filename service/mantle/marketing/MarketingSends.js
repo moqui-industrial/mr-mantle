@@ -37,6 +37,8 @@ const templates = ec.resource.script("component://mr-mantle/service/mantle/party
 const profiles = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
 const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
 const {find, one, rows, denied, call, ms} = lib
+// P9: the release and dispatch (loaded when a send is read, so it may load this module)
+const dispatch = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingDispatch.js")
 
 const SEND = "mantle.marketing.campaign.CampaignSend"
 const RECIPIENT = "mantle.marketing.campaign.CampaignRecipient"
@@ -764,7 +766,8 @@ function testAddressesOf(organizationPartyId) {
 }
 function testSend(p) {
     const userScope = editScope()
-    const row = sendOf(userScope, p.campaignSendId)
+    // the send read locked (P9, P8 review F203): two tests at once count the day's limit one after the other
+    const row = sendOf(userScope, p.campaignSendId, true)
     if (["CsCancelled", "CsCompleted", "CsCompletedFailures"].includes(row.statusId))
         denied("STATUS_INVALID", "Send " + row.campaignSendId + " is " + statusText(row.statusId).toLowerCase())
     const toAddress = suppressions.normalize("MdcEmail", text(p.toAddress))
@@ -913,21 +916,31 @@ function prepareSend(p) {
     // the earlier preparation's recipients replaced (none was handed off: a send is released only once approved, P9)
     find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId: "CrsSelected"}).updateAll({statusId: "CrsReplaced"})
     const revision = Number(row.sendRevision || 1)
-    for (const recipient of evaluated.rows)
-        call("create#" + RECIPIENT, {
-            campaignSendId: row.campaignSendId,
-            preparedRevision: revision,
-            partyId: recipient.partyId,
-            contactMechId: recipient.contactMechId,
-            destinationKey: recipient.destinationKey,
-            channelEnumId: row.channelEnumId,
-            selectedDate: asOf,
-            tracked: recipient.tracked ? "Y" : "N",
-            executionKey: ec.user.randomString(20).replace(/[^A-Za-z0-9]/g, "x"),
-            statusId: "CrsSelected"
-        })
+    // P9 (P8 review F205): the recipients made in one bulk create, not a service call each
+    ec.entity.createBulk(
+        evaluated.rows.map(recipient =>
+            ec.entity
+                .makeValue(RECIPIENT)
+                .setAll({
+                    campaignSendId: row.campaignSendId,
+                    preparedRevision: revision,
+                    partyId: recipient.partyId,
+                    contactMechId: recipient.contactMechId,
+                    destinationKey: recipient.destinationKey,
+                    channelEnumId: row.channelEnumId,
+                    selectedDate: asOf,
+                    tracked: recipient.tracked ? "Y" : "N",
+                    executionKey: ec.user.randomString(20).replace(/[^A-Za-z0-9]/g, "x"),
+                    statusId: "CrsSelected"
+                })
+                .setSequencedIdPrimary()
+        )
+    )
     // the content kept as a resource of its own: what a later read returns, whatever changes after
     const files = writeFiles(row.campaignSendId, "prepared-r" + revision, content.body, content.bodyText)
+    // P9 (P8 review F200): the attachments copied with it, so a campaign's file its editor changes after approval never reaches a
+    // message
+    const preparedAttachments = copyAttachments(row.campaignSendId, files.bodyLocation)
     const request = {
         organizationPartyId: org,
         topicListId: topic.contactListId,
@@ -952,6 +965,7 @@ function prepareSend(p) {
         preparedBodyLocation: files.bodyLocation,
         preparedTextLocation: files.bodyTextLocation,
         preparedVariablesJson: JSON.stringify(content.variables),
+        preparedAttachmentsJson: JSON.stringify(preparedAttachments),
         previewKey: lib.hash(request),
         resultDigest: evaluated.resultDigest,
         eligibleCount: evaluated.rows.length,
@@ -968,6 +982,37 @@ function prepareSend(p) {
         resultDigest: evaluated.resultDigest,
         pages: evaluated.pages
     }
+}
+
+// ===== Marketing P9: the attachments as prepared (P8 review F200) =====
+// Each attached file of the send (or its campaign) copied beside the prepared body: [{location, fileName, contentType}]. A file that is
+// gone refuses the preparation (ATTACHMENT_UNAVAILABLE), as does a total over attachmentLimitBytes (ATTACHMENT_TOO_LARGE).
+const attachmentLimitBytes = 10 * 1024 * 1024
+function copyAttachments(campaignSendId, preparedBodyLocation) {
+    const folder = preparedBodyLocation.slice(0, preparedBodyLocation.lastIndexOf("/") + 1) + "files/"
+    const copies = []
+    let total = 0
+    for (const asset of rows(SEND_CONTENT, {campaignSendId}).filter(asset => asset.assetUsageEnumId && asset.thruDate == null)) {
+        const source = ec.resource.getLocationReference(asset.contentLocation)
+        if (!asset.contentLocation || !source || !source.getExists())
+            denied("ATTACHMENT_UNAVAILABLE", "The attached file " + (asset.assetLabel || asset.contentLocation) + " is gone")
+        total += Number(source.getSize() || 0)
+        if (total > attachmentLimitBytes)
+            denied("ATTACHMENT_TOO_LARGE", "The attachments are over " + attachmentLimitBytes / (1024 * 1024) + " MB together")
+        const fileName =
+            String(asset.assetLabel || source.getFileName() || "attachment")
+                .replace(/[\\/\r\n]+/g, "-")
+                .slice(0, 120) || "attachment"
+        const location =
+            folder + asset.campaignSendContentId + "-" + String(source.getFileName() || "file").replace(/[\\/]+/g, "-")
+        ec.resource.getLocationReference(location).copyFrom(source)
+        copies.push({
+            location,
+            fileName,
+            contentType: ec.resource.getContentType(String(source.getFileName() || "")) || "application/octet-stream"
+        })
+    }
+    return copies
 }
 
 // ===== get#Send =====
@@ -994,7 +1039,11 @@ function getSend(p) {
     const content = contentOf(row)
     const prepared = preparedCurrent(row)
     const counts = prepared ? lib.json(row.bucketCountsJson, {}) || {} : {}
+    // P9: the dispatch's counts and the control's actions for the caller (MarketingDispatch.js)
+    const control = dispatch().controlOf(userScope, row)
     return {
+        delivery: control.delivery,
+        control: control.capabilities,
         send: sendRow(row, {
             replyToAddress: row.replyToAddress || "",
             purposeText: enumText(row.purposeEnumId),
@@ -1114,6 +1163,21 @@ const operations = {
     sendKind,
     recipientFields,
     testDailyLimit,
+    // P9: what the dispatch (MarketingDispatch.js) shares
+    forDispatch: {
+        readScope,
+        sendOf,
+        requireRevision,
+        sendProblems,
+        preparedContent,
+        render,
+        recipientValues,
+        label,
+        statusText,
+        statusColors,
+        preparedCurrent,
+        approvedCampaignStatuses
+    },
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown campaign send operation " + op)
         return operations[op](parameters || {})
