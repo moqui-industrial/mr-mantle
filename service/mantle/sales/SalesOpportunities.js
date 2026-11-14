@@ -1014,12 +1014,13 @@ function getOpportunity(p) {
         statusText: taskStatus[task.statusId] || task.statusId || "",
         done: doneTaskStatuses.includes(task.statusId)
     }))
-    // the linked quotes and orders: an organization reader's until the quote and order scope (P7, P11), of the scope's sellers
+    // the linked orders: an organization reader's until the order scope (P11), of the scope's sellers; a quote not placed is
+    // find#Quotes' (P7: the quotes the caller sees, salesOpportunityId), not repeated here; an accepted quote is an order
     const orders = []
     if (caps.teamRead)
         for (const link of rows(ORDER_LINK, {salesOpportunityId: row.salesOpportunityId})) {
             const order = one("mantle.order.OrderHeader", {orderId: link.orderId})
-            if (!order) continue
+            if (!order || (order.orderPurposeEnumId === salesAccess.quotePurpose && !order.placedDate)) continue
             const vendor = Array.from(
                 find("mantle.order.OrderPart").condition("orderId", link.orderId).selectField("vendorPartyId").list()
             )

@@ -430,7 +430,8 @@ function customerSales(p) {
         }
     }
 }
-// The account's orders with the organizations, newest first: no quote template or recurring base (F7).
+// The account's orders with the organizations, newest first: no quote template or recurring base (F7), and no quote that was never
+// placed (P7: Customer360's Quotes tab, find#Quotes; an accepted quote is an order).
 function ordersOf(customerPartyId, vendors) {
     if (!vendors.length) return []
     const found = Array.from(
@@ -442,6 +443,16 @@ function ordersOf(customerPartyId, vendors) {
                     [
                         factory().makeCondition("orderPurposeEnumId", "is-null", null),
                         factory().makeCondition("orderPurposeEnumId", "not-in", ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"])
+                    ],
+                    "or"
+                )
+            )
+            .condition(
+                factory().makeCondition(
+                    [
+                        factory().makeCondition("orderPurposeEnumId", "is-null", null),
+                        factory().makeCondition("orderPurposeEnumId", "not-equals", "OrpSalesQuote"),
+                        factory().makeCondition("placedDate", "is-not-null", null)
                     ],
                     "or"
                 )

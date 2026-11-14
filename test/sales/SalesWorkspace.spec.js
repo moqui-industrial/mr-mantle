@@ -1,7 +1,7 @@
 // Sales' workspace (impl-sales P6; design-sales §3 Home, design-admin §14; SalesWorkspaceServices get#SalesHome,
 // find#OwnedSalesAssignments, transfer#SalesAssignment; UserFactServices get#OrganizationFacts): each Home counter is its list's count
 // with the list's own filters, and the assigned work is the user's own open deals; the lifecycle participant lists a departing
-// rep's open deals and managed accounts to a holder of SALES_OWNER_CHANGE (another user without it is refused) and moves them to a
+// rep's open deals, open quotes (P7) and managed accounts to a holder of SALES_OWNER_CHANGE (another user without it is refused) and moves them to a
 // new owner who works for the organization (one who does not is NOT_EMPLOYED); Mantle's user facts name the user's organizations and
 // the active one. Standalone: spec-local organizations, team, users and deals.
 // Run: ./moq test mr-mantle --spec SalesWorkspace
@@ -13,6 +13,7 @@ const O = "mantle.sales.OpportunityServices."
 const users = {}
 const teams = {}
 const deals = {}
+const quotes = {}
 
 const make = (entity, values) => call("create#" + entity, values)
 function system(action) {
@@ -230,6 +231,34 @@ feature(
                     toRoleTypeId: "Account",
                     fromDate: 0
                 })
+                // P7: the rep's open quote and a cancelled one (made directly: the quote services are SalesQuoteDrafts')
+                for (const [kind, statusId] of [
+                    ["open", "OrderOpen"],
+                    ["cancelled", "OrderCancelled"]
+                ]) {
+                    const orderId = prefix + "_QUOTE_" + kind.toUpperCase()
+                    make("mantle.order.OrderHeader", {
+                        orderId,
+                        orderName: "Rep's " + kind + " quote",
+                        orderPurposeEnumId: "OrpSalesQuote",
+                        statusId,
+                        currencyUomId: "USD",
+                        entryDate: ec.user.nowTimestamp
+                    })
+                    make("mantle.order.OrderPart", {
+                        orderId,
+                        orderPartSeqId: "01",
+                        vendorPartyId: orgA,
+                        customerPartyId: users.account,
+                        statusId
+                    })
+                    for (const [partyId, roleTypeId] of [
+                        [users.rep, "SalesRepresentative"],
+                        [teams.east, "SalesTeam"]
+                    ])
+                        make("mantle.order.OrderPartParty", {orderId, orderPartSeqId: "01", partyId, roleTypeId})
+                    quotes[kind] = orderId
+                }
             })
             const lookup = username => as(username, () => invoke(W + "find#OwnedSalesAssignments", {userId: users.rep}))
             const owned = lookup(users.operator)
@@ -247,6 +276,15 @@ feature(
             const readerMove = move(users.reader, "deal:" + deals.open, users.mate)
             const moved = move(users.operator, "deal:" + deals.open, users.mate)
             const notOwned = move(users.operator, "deal:" + deals.mate, users.mate)
+            const quoteElsewhere = move(users.operator, "quote:" + quotes.open, users.repB)
+            const quote = move(users.operator, "quote:" + quotes.open, users.mate)
+            const closedQuote = move(users.operator, "quote:" + quotes.cancelled, users.mate)
+            const quoteParties = system(() =>
+                Array.from(ec.entity.find("mantle.order.OrderPartParty").condition({orderId: quotes.open}).list())
+                    .map(row => row.roleTypeId + ":" + row.partyId)
+                    .sort()
+                    .join(",")
+            )
             const account = move(users.operator, "account:" + users.account, users.mate)
             const managers = system(() =>
                 Array.from(
@@ -268,6 +306,10 @@ feature(
                 readerMove,
                 moved,
                 notOwned,
+                quoteElsewhere,
+                quote,
+                closedQuote,
+                quoteParties,
                 account,
                 openOwner: ownerOf(deals.open),
                 managers,
@@ -278,6 +320,9 @@ feature(
             r.ids.includes("deal:" + deals.open)
             r.ids.includes("deal:" + deals.lead)
             r.ids.includes("account:" + users.account)
+            r.ids.includes("quote:" + quotes.open)
+            !r.ids.includes("quote:" + quotes.cancelled)
+            r.names.includes("Quote Rep's open quote · Workspace A")
             !r.ids.includes("deal:" + deals.mate)
             r.names.includes("Rep's open deal · Workspace A")
             r.sharedRow != null
@@ -287,6 +332,11 @@ feature(
             r.readerMove.refused.includes("PERMISSION_DENIED")
             r.moved.transferred == true
             r.notOwned.refused.includes("RECORD_UNAVAILABLE")
+            r.quoteElsewhere.refused.includes("NOT_EMPLOYED")
+            r.quote.transferred == true
+            r.closedQuote.refused.includes("RECORD_CLOSED")
+            r.quoteParties == "SalesRepresentative:" + users.mate + ",SalesTeam:" + teams.east
+            !r.after.includes("quote:" + quotes.open)
             r.account.transferred == true
             r.openOwner == users.mate
             r.managers.join(",") == users.mate
