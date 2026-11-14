@@ -2122,6 +2122,11 @@ along with this software (see the LICENSE.md file). If not, see
             for every caller, authorization disabled or not; a call with no user sees none. Its activities are linked through
             SalesOpportunityWorkEffort.
 
+            A marketing campaign (mantle.marketing.campaign.MarketingCampaign, IronStone Marketing's Chatter and files host,
+            impl-marketing P2) and its files (CampaignAsset) are seen only by a Marketing reader of its organization, never an unowned
+            one (mantle.marketing.CampaignServices.check#CampaignAccess), for every caller, authorization disabled or not; a call with
+            no user sees none.
+
             A sales quote not yet placed (an OrderHeader of purpose OrpSalesQuote with no placedDate, IronStone Sales P7) and its files
             (OrderContent) are seen only by a Sales reader of its seller to whom it is assigned, or to a team of theirs, and by a
             reader of the organization's quotes (mantle.order.SalesQuoteServices.check#QuoteAccess), for every caller, authorization
@@ -2227,7 +2232,11 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId'),
                 // IronStone Sales' opportunity content host (impl-sales P4, F69): a lead's or opportunity's files, its Sales readers'
                 'mantle.sales.opportunity.SalesOpportunity': content('mantle.sales.opportunity.SalesOpportunityContent',
-                        'salesOpportunityId', 'contentTypeEnumId')}
+                        'salesOpportunityId', 'contentTypeEnumId'),
+                // IronStone Marketing's campaign files host (impl-marketing P2, design §14.3 CampaignAsset): a campaign's files,
+                // its Marketing readers'
+                'mantle.marketing.campaign.MarketingCampaign': content('mantle.marketing.campaign.CampaignAsset',
+                        'marketingCampaignId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2670,6 +2679,12 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.sales.opportunity.SalesOpportunity' || entityName === 'mantle.sales.opportunity.SalesOpportunityContent')
                     return !!ec.service.sync().name('mantle.sales.OpportunityServices.check#OpportunityAccess')
                             .parameter('salesOpportunityId', value.salesOpportunityId).disableAuthz().call()?.recordVisible
+                // IronStone Marketing's campaign and its files (impl-marketing P2): a Marketing reader of its organization, never
+                // an unowned campaign (mantle.marketing.CampaignServices.check#CampaignAccess), whatever the entity filters and
+                // authorization; a call with no user sees none
+                if (entityName === 'mantle.marketing.campaign.MarketingCampaign' || entityName === 'mantle.marketing.campaign.CampaignAsset')
+                    return !!ec.service.sync().name('mantle.marketing.CampaignServices.check#CampaignAccess')
+                            .parameter('marketingCampaignId', value.marketingCampaignId).disableAuthz().call()?.recordVisible
                 // IronStone Sales' quote not yet placed and its files (impl-sales P7 review): a Sales reader of its seller to whom it is
                 // assigned (or to a team of theirs), or a reader of the organization's quotes (SALES_TEAM_VIEW)
                 // (mantle.order.SalesQuoteServices.check#QuoteAccess), not every party of its organizations or its customer, whatever
