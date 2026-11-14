@@ -87,6 +87,8 @@
             "groupRunnerMinutes",
             "maxEditBytes",
             "repositoryKind",
+            "outsideRunApproval",
+            "outsideRunMaxJobs",
             "expectedRevision"
         ]
     },
@@ -488,5 +490,201 @@
     claimHeldReport: {
         service: "mantle.smithy.SmithyIssueServices.claim#HeldReport",
         fields: ["siteId", "token", "operationId"]
+    },
+    // DG5 (§15.6): pipelines
+    findPipelineRuns: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Runs",
+        fields: ["siteId", "repositoryId", "refName", "event", "state", "mergeRequestNum", "commitId", "pipelineName", "limit", "cursor"]
+    },
+    getPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.get#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    getJobRun: {
+        service: "mantle.smithy.SmithyPipelineServices.get#JobRun",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId"]
+    },
+    getJobLog: {
+        service: "mantle.smithy.SmithyPipelineServices.get#JobLog",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId", "afterChunkSeq", "offset", "limit", "watch"]
+    },
+    downloadArtifact: {
+        service: "mantle.smithy.SmithyPipelineServices.download#Artifact",
+        fields: ["siteId", "repositoryId", "artifactId"]
+    },
+    runPipeline: {
+        service: "mantle.smithy.SmithyPipelineServices.run#Pipeline",
+        fields: ["siteId", "repositoryId", "pipelineName", "refName", "operationId"]
+    },
+    rerunPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.rerun#Run",
+        fields: ["siteId", "repositoryId", "runNum", "operationId"]
+    },
+    cancelPipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.cancel#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    retryJobRun: {
+        service: "mantle.smithy.SmithyPipelineServices.retry#JobRun",
+        fields: ["siteId", "repositoryId", "runNum", "jobRunId", "operationId"]
+    },
+    approvePipelineRun: {
+        service: "mantle.smithy.SmithyPipelineServices.approve#Run",
+        fields: ["siteId", "repositoryId", "runNum"]
+    },
+    findCiSecrets: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Secrets",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeCiSecret: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Secret",
+        fields: ["siteId", "repositoryId", "secretId", "name", "value", "scope", "environmentId", "operationId"]
+    },
+    deleteCiSecret: {
+        service: "mantle.smithy.SmithyPipelineServices.delete#Secret",
+        fields: ["siteId", "repositoryId", "secretId"]
+    },
+    findCiEnvironments: {
+        service: "mantle.smithy.SmithyPipelineServices.find#Environments",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeCiEnvironment: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Environment",
+        fields: ["siteId", "repositoryId", "environmentId", "name", "allowedRefs", "approvalRequired", "operationId"]
+    },
+    deleteCiEnvironment: {
+        service: "mantle.smithy.SmithyPipelineServices.delete#Environment",
+        fields: ["siteId", "repositoryId", "environmentId"]
+    },
+    getPipelineSettings: {
+        service: "mantle.smithy.SmithyPipelineServices.get#Settings",
+        fields: ["siteId", "repositoryId", "groupId"]
+    },
+    storePipelineSettings: {
+        service: "mantle.smithy.SmithyPipelineServices.store#Settings",
+        fields: ["siteId", "groupId", "runnerPoolId", "outsideRunnerPoolId", "outsideRunApproval", "expectedRevision"]
+    },
+    // DG7 (§15.8): the site
+    getGroupLanding: {
+        service: "mantle.smithy.SmithySiteServices.get#GroupLanding",
+        fields: ["siteId", "groupId"]
+    },
+    setGroupLanding: {
+        service: "mantle.smithy.SmithySiteServices.set#GroupLanding",
+        fields: ["siteId", "groupId", "landingRepositoryPath", "landingPath", "newsContactListId", "expectedRevision"]
+    },
+    getDocsPage: {
+        service: "mantle.smithy.SmithySiteServices.get#DocsPage",
+        fields: ["siteId", "repositoryId", "refPath"]
+    },
+    findReleases: {
+        service: "mantle.smithy.SmithySiteServices.find#Releases",
+        fields: ["siteId", "repositoryId", "groupId", "limit", "cursor"]
+    },
+    getRelease: {
+        service: "mantle.smithy.SmithySiteServices.get#Release",
+        fields: ["siteId", "repositoryId", "tag"]
+    },
+    storeRelease: {
+        service: "mantle.smithy.SmithySiteServices.store#Release",
+        fields: ["siteId", "repositoryId", "tag", "name", "notes", "sourceFormat", "published", "announce", "expectedRevision", "operationId"]
+    },
+    deleteRelease: {
+        service: "mantle.smithy.SmithySiteServices.delete#Release",
+        fields: ["siteId", "repositoryId", "tag", "expectedRevision"]
+    },
+    addReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.add#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "tag", "name", "attachmentId", "artifactId", "imageName", "operationId"]
+    },
+    removeReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.remove#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "assetId"]
+    },
+    downloadReleaseAsset: {
+        service: "mantle.smithy.SmithySiteServices.download#ReleaseAsset",
+        fields: ["siteId", "repositoryId", "assetId"]
+    },
+    findComponents: {
+        service: "mantle.smithy.SmithySiteServices.find#Components",
+        fields: ["siteId", "groupId", "query", "limit", "cursor"]
+    },
+    getAddons: {
+        service: "mantle.smithy.SmithySiteServices.get#Addons",
+        fields: ["siteId", "groupId"]
+    },
+    searchSite: {
+        service: "mantle.smithy.SmithySiteServices.search#Site",
+        fields: ["siteId", "query", "types", "groupId", "repositoryId", "limit", "cursor"]
+    },
+    findRedirects: {
+        service: "mantle.smithy.SmithySiteServices.find#Redirects",
+        fields: ["siteId", "query", "source", "limit", "cursor"]
+    },
+    storeRedirect: {
+        service: "mantle.smithy.SmithySiteServices.store#Redirect",
+        fields: ["siteId", "redirectId", "oldHost", "oldPath", "targetPath", "note", "operationId"]
+    },
+    deleteRedirect: {
+        service: "mantle.smithy.SmithySiteServices.delete#Redirect",
+        fields: ["siteId", "redirectId"]
+    },
+    importRedirects: {
+        service: "mantle.smithy.SmithySiteServices.import#Redirects",
+        fields: ["siteId", "csv", "source"]
+    },
+    resolveRedirect: {
+        service: "mantle.smithy.SmithySiteServices.resolve#OldPath",
+        fields: ["siteId", "host", "path"]
+    },
+    // DG8 (§15.9): GitHub
+    startGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.start#Import",
+        fields: ["siteId", "groupId", "sourceRepository", "slug", "repositoryId", "token", "options", "operationId"]
+    },
+    getGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.get#ImportRun",
+        fields: ["siteId", "importId"]
+    },
+    findGitHubImports: {
+        service: "mantle.smithy.SmithyImportServices.find#ImportRuns",
+        fields: ["siteId", "groupId", "limit", "cursor"]
+    },
+    resumeGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.resume#Import",
+        fields: ["siteId", "importId", "token", "expectedRevision"]
+    },
+    cancelGitHubImport: {
+        service: "mantle.smithy.SmithyImportServices.cancel#Import",
+        fields: ["siteId", "importId", "expectedRevision"]
+    },
+    findMirrors: {
+        service: "mantle.smithy.SmithyImportServices.find#Mirrors",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeMirror: {
+        service: "mantle.smithy.SmithyImportServices.store#Mirror",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "mirrorId",
+            "url",
+            "username",
+            "secret",
+            "hostKeyFingerprint",
+            "refs",
+            "deleteRefs",
+            "enabled",
+            "removeCredential",
+            "operationId"
+        ]
+    },
+    deleteMirror: {
+        service: "mantle.smithy.SmithyImportServices.delete#Mirror",
+        fields: ["siteId", "repositoryId", "mirrorId"]
+    },
+    pushMirror: {
+        service: "mantle.smithy.SmithyImportServices.push#Mirror",
+        fields: ["siteId", "repositoryId", "mirrorId"]
     }
 })

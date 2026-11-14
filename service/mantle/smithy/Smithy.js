@@ -422,6 +422,8 @@ methods.getGroup = p => {
         myRole: core.roleCode(r.rank),
         // DG6: the group's forum (its category is the scope of the forum's reads) and, for its Owners, its report address
         forum: {...kit.forumScope.forumView(r, true), issueMailRoute: kit.forumScope.mailRouteView(r)},
+        // the group's news category, for its Owners' landing form (setGroupLanding)
+        newsContactListId: confirmed && r.rank >= RANK.SmrOwner ? r.group.newsContactListId || null : null,
         capabilities: {
             canCreateRepository: confirmed && r.rank >= RANK.SmrMaintainer,
             canCreateSubgroup: confirmed && r.rank >= RANK.SmrOwner && r.chain.length < core.MAX_GROUP_DEPTH,
@@ -685,12 +687,15 @@ methods.getBlame = p => {
 /* A tree at a ref as a zip or tar.gz: the framework writes the file and the transport streams it (PassAuthority.js
    DOWNLOADS). The framework has no cap by client, so until Smithy keeps one an archive is for a signed-in account. */
 methods.downloadArchive = p => {
-    core.repository(p.repositoryId, p.siteId)
+    const r = core.repository(p.repositoryId, p.siteId)
     if (!["zip", "tar.gz"].includes(p.format)) invalid("format must be zip or tar.gz")
     const ref = core.splitRefPath(p.repositoryId, p.refPath)
     if (ref.path) invalid("An archive is of a branch, a tag or a commit, with no path after it")
     if (ref.empty) missing()
-    requireUser()
+    // a public repository's archive of a branch or a tag is anyone's (design-smithy §15.2: need any), so addons.xml's
+    // current and release locations work for ./moq component-get; any other needs an account. The host has no cap of
+    // archive builds by client, so a visitor is not given one by commit id, which would build one for every commit
+    if (r.visibility !== 1 || r.hidden || ref.kind === "commit") requireUser()
     const made = gitOrRefuse("get#GitArchive", {repositoryId: p.repositoryId, revision: ref.commitId, format: p.format})
     if (!made.archiveLocation) missing()
     return {
@@ -1145,7 +1150,15 @@ const kit = {
     GIT_REPOSITORY,
     commitViews,
     fileViews,
-    boundedDiffs
+    boundedDiffs,
+    // DG7: what the site's lists share with the code's (a list's query, its scan, a typed search)
+    scopeOf,
+    narrowed,
+    scan,
+    likeOf,
+    contains,
+    // DG5: when an outside pipeline run waits for a Maintainer's approval (SmithySite and SmithyGroup outsideRunApproval)
+    OUTSIDE_APPROVALS: ["first", "always", "never"]
 }
 // issues (§15.4): its own module; what the other modules need of it is in the kit
 const issues = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyIssues.js")(kit)
@@ -1160,6 +1173,13 @@ kit.agreement = agreements
 // the forum inside Smithy, Report and Hide, the report address (§15.7); its views are read by getGroup and getRepository
 const forumScope = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyForum.js")(kit)
 kit.forumScope = forumScope
+// pipelines (§15.6): the operations, the engine's run check and run URL, and the merge box's runs
+const pipelines = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyPipelines.js")(kit)
+kit.pipelines = pipelines
+// the site (§15.8): landing, Docs, releases, the component directory, search and redirects
+const siteModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySite.js")(kit)
+// GitHub (§15.9): the import, the claim of its placeholders, and push mirrors
+const importModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyImport.js")(kit)
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1174,6 +1194,7 @@ const NUMBERS = [
     "groupLfsBytes",
     "groupRunnerMinutes",
     "maxEditBytes",
+    "outsideRunMaxJobs",
     "pinnedSequence",
     "requiredApprovals",
     "maxRepositories",
@@ -1184,13 +1205,15 @@ const NUMBERS = [
     "duplicateOfNumber",
     "mergeRequestNum",
     "oldLine",
-    "newLine"
+    "newLine",
+    "runNum",
+    "afterChunkSeq"
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
 const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles", "postIds"]
-const TEXTS = ["body"]
+const TEXTS = ["body", "value", "notes"]
 /* A file's text as a page's editor sends it: bounded here well above the site's maxEditBytes, which commitFile holds. */
-const FILE_TEXTS = ["content"]
+const FILE_TEXTS = ["content", "csv"]
 /* A review's pending line comments: at most 50 maps of a line comment's own fields. */
 const COMMENT_FIELDS = ["threadId", "commitId", "path", "oldLine", "newLine", "body", "sourceFormat"]
 const FLAGS = [
@@ -1221,8 +1244,15 @@ const FLAGS = [
     "resolved",
     "agent",
     "enabled",
-    "hidden"
+    "hidden",
+    "watch",
+    "approvalRequired",
+    "published",
+    "announce",
+    "deleteRefs"
 ]
+/* An import's options: a map of the two flags. */
+const OPTION_FLAGS = ["issues", "pullRequests"]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
     const fn = methods[operation]
@@ -1255,6 +1285,18 @@ function execute(operation, p) {
                         (entry == null || (["string", "number"].includes(typeof entry) && String(entry).length <= 200000))
                 )
             if (!Array.isArray(value) || value.length > 50 || !value.every(plain)) invalid("Invalid list field: " + field)
+            continue
+        }
+        if (field === "options") {
+            if (
+                kind !== "object" ||
+                Array.isArray(value) ||
+                !Object.entries(value).every(
+                    ([name, entry]) =>
+                        OPTION_FLAGS.includes(name) && (entry == null || ["boolean", "string"].includes(typeof entry))
+                )
+            )
+                invalid("Invalid field type: " + field)
             continue
         }
         if (
@@ -1328,6 +1370,27 @@ function privileged(work) {
     // DG6: a report by mail filed as its confirmed sender, and the day's limit of pipeline runs
     fileMailReport: p => privileged(() => core.withMemo(() => forumScope.fileMailReport(p || {}))),
     countPipelineRun: p => privileged(() => core.withMemo(() => forumScope.countPipelineRun(p || {}))),
+    // DG5: the engine's hooks (SmithyPipelineServices.xml, git-ci run-check-service and run-url-service)
+    checkRun: p => privileged(() => core.withMemo(() => pipelines.checkRun(p || {}))),
+    runUrl: p => privileged(() => core.withMemo(() => pipelines.runUrl(p || {}))),
+    // the git server's outbound check (SmithyGitServices.check#Outbound, git-server outbound-check-service)
+    checkOutbound: p => privileged(() => core.withMemo(() => pipelines.checkOutbound(p || {}))),
+    // DG7: the component a default branch's move names (Smithy.gitecas.xml SmithyComponent), the redirect PASS's
+    // resolver asks for before Not Found, and the card of a forum topic that announced a release
+    readComponent: p => privileged(() => core.withMemo(() => siteModule.readComponent(p || {}))),
+    resolveRedirect: p => privileged(() => siteModule.resolveRedirect(p || {})),
+    releaseCard: link => privileged(() => core.withMemo(() => siteModule.releaseCard(link))),
+    // DG8: a step of a GitHub import, the job that steps them, and the claim of an import's placeholders by a GitHub
+    // sign-in (SmithyImportServices.xml)
+    runImport: p => privileged(() => core.withMemo(() => importModule.runStep(p || {}))),
+    runImports: () => privileged(() => importModule.runImports()),
+    // what a push mirror's receipt is of (the input without its secret)
+    mirrorReceipt: p => kit.mirrorReceipt(p || {}),
+    claimGithub: userId => privileged(() => core.withMemo(() => importModule.claimGithub(userId, false))),
+    ssoLinked: p => privileged(() => core.withMemo(() => importModule.ssoLinked(p || {}))),
+    mirrorFailure: p => privileged(() => core.withMemo(() => importModule.mirrorFailure(p || {}))),
+    // the import's head fetch, apart from the fetch itself: what it asks for (headRefMap) and what it takes (takeFetchedHeads)
+    importHeads: (name, ctx, pulls, fetched) => privileged(() => core.withMemo(() => kit.importHeads[name](ctx, pulls, fetched))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

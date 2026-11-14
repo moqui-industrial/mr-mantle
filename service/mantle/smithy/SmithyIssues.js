@@ -241,7 +241,7 @@ kit => {
     /* An account by its profile, when the caller is shown that profile (SmithyCore.profileShown, as a member is). */
     function profileView(siteId, partyId) {
         const profile = partyId ? one(S + "PublicSiteProfile", {siteId, partyId}) : null
-        return profile && core.profileShown(profile, core.actor())
+        return profile && core.authorShown(profile, core.actor())
             ? {handle: profile.handle, displayName: profile.displayName || "", avatarUrl: null}
             : null
     }
@@ -280,7 +280,7 @@ kit => {
             state: item.state,
             stateReason: item.stateReason,
             confidential: access.confidential,
-            author: author ? {...author, imported: false} : null,
+            author: author ? {...author, imported: core.placeholder(siteId, issue.reporterPartyId)} : null,
             createdAt: issue.createdAt || null,
             updatedAt: topic?.lastActivity || issue.createdAt || null,
             closedAt: item.closedAt || null,

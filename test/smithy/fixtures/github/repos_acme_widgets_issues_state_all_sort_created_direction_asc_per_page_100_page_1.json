@@ -1,0 +1,72 @@
+{
+  "status": 200,
+  "headers": {
+    "Link": "<https://api.github.com/repositories/5550001/issues?state=all&sort=created&direction=asc&per_page=100&page=2>; rel=\"next\", <https://api.github.com/repositories/5550001/issues?state=all&sort=created&direction=asc&per_page=100&page=2>; rel=\"last\""
+  },
+  "body": [
+    {
+      "id": 8001,
+      "number": 1,
+      "title": "Widgets <b>break</b> on resize",
+      "user": {
+        "login": "bob",
+        "id": 1002,
+        "type": "User"
+      },
+      "state": "open",
+      "state_reason": null,
+      "labels": [
+        {
+          "id": 101,
+          "name": "bug"
+        }
+      ],
+      "milestone": {
+        "id": 201,
+        "number": 1,
+        "title": "v1.0"
+      },
+      "assignees": [
+        {
+          "login": "alice",
+          "id": 1001,
+          "type": "User"
+        },
+        {
+          "login": "dj",
+          "id": 1004,
+          "type": "User"
+        }
+      ],
+      "body": "Resize the window and the widget **breaks**.\n\n<script>alert(1)</script>\n\nSee #2.",
+      "created_at": "2025-01-10T09:00:00Z",
+      "updated_at": "2025-01-12T09:00:00Z",
+      "closed_at": null,
+      "reactions": {
+        "total_count": 2,
+        "+1": 1,
+        "rocket": 1
+      }
+    },
+    {
+      "id": 8002,
+      "number": 2,
+      "title": "Say hello",
+      "user": {
+        "login": "carol",
+        "id": 1003,
+        "type": "User"
+      },
+      "state": "closed",
+      "labels": [],
+      "assignees": [],
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme/widgets/pulls/2"
+      },
+      "created_at": "2025-01-15T09:00:00Z",
+      "reactions": {
+        "total_count": 0
+      }
+    }
+  ]
+}

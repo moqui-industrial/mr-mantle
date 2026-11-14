@@ -594,7 +594,7 @@
         </actions>
     </service>
     <service verb="count" noun="PipelineRun" authenticate="anonymous-all" allow-remote="false">
-        <description>The day's limit of pipeline runs an account asks for (by hand, or an outside run), by its trust level in the site (the post gate's kind pipelineRun, design-smithy §12.2): whether one more is allowed, and it is counted when it is. A Maintainer of the repository and the site's staff have no limit. For the CI's pre-queue hook (DG5); not an operation.</description>
+        <description>The day's limit of pipeline runs an account asks for (by hand, or an outside run), by its trust level in the site (the post gate's kind pipelineRun, design-smithy §12.2): whether one more is allowed, and it is counted when it is. A Maintainer of the repository and the site's staff have no limit. For the CI's run check (SmithyPipelineServices.check#Run); not an operation.</description>
         <in-parameters><parameter name="repositoryId" required="true"/><parameter name="userId" required="true"/></in-parameters>
         <out-parameters><parameter name="allowed" type="Boolean"/><parameter name="reason"/><parameter name="message"/></out-parameters>
         <actions>

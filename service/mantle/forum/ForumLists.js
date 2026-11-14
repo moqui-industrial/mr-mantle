@@ -76,8 +76,10 @@
         )
     }
     /* The headers of a list category's mail (RFC 2919, RFC 2369), by its address; null for a category that is no list.
-       forumUrl is the forum's base address, where the archive is the category's page. */
-    function listHeaders(siteId, contactListId, forumUrl) {
+       forumUrl is the address of the forum the category is read in (its group's or repository's forum when it is bound
+       to one, else the site's: core.forumUrl, the default), where the archive is the category's page; without one there
+       is no List-Archive. */
+    function listHeaders(siteId, contactListId, forumUrl = core.forumUrl(siteId, contactListId)) {
         const route = listRoute(siteId, contactListId)
         if (!route) return null
         const name = String(one(LIST + "ContactList", {contactListId})?.contactListName || "").replace(
@@ -87,7 +89,12 @@
         return {
             "List-Id": (name ? '"' + name + '" ' : "") + "<" + route.address.replace("@", ".") + ">",
             "List-Post": "<mailto:" + route.address + ">",
-            "List-Archive": "<" + forumUrl + "/Categories/CategoryDetail?contactListId=" + encodeURIComponent(contactListId) + ">"
+            ...(forumUrl
+                ? {
+                      "List-Archive":
+                          "<" + forumUrl + "/Categories/CategoryDetail?contactListId=" + encodeURIComponent(contactListId) + ">"
+                  }
+                : {})
         }
     }
     /* Who runs a list: the site's owners and operators, the category's own staff, and an Owner of the group or
@@ -377,35 +384,37 @@
         if (!dir) fail("Unavailable", "The import directory is not configured")
         return String(dir).replace(/\/$/, "")
     }
+    const smithyNames = () => ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
+    /* A free handle for an archive's author: from the name it shows, a handle's form (SmithyCore.HANDLE), and free in the
+       site's one name set (no reserved word, group path, handle or old path that still redirects: SmithyCore.nameFree);
+       else the same with a part of the address's hash, else list-member and that part. The site's row is locked by the
+       caller, so two authors do not take one handle. */
     function uniqueHandle(siteId, wanted, key) {
-        const base =
-            String(wanted || "")
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "")
-                .slice(0, 24) || "list-member"
-        const handle = base.length >= 3 ? base : "list-member"
-        if (!one(S + "PublicSiteProfile", {siteId, handle})) return handle
-        return (handle.slice(0, 22) + "-" + key.slice(0, 8)).slice(0, 32)
+        const names = smithyNames()
+        const base = String(wanted || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")
+            .slice(0, 24)
+        const tail = key.replace(/[^a-z0-9]/gi, "").toLowerCase()
+        const candidates = [
+            base,
+            base.slice(0, 22) + "-" + tail.slice(0, 8),
+            "list-member-" + tail.slice(0, 8),
+            "list-member-" + tail.slice(0, 16)
+        ]
+        const free = handle => names.HANDLE.test(handle) && names.nameFree(siteId, handle, null, "handle")
+        return candidates.find(free) || "list-member-" + id().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16)
     }
-    /* The author of an address in a site: the account that has verified it, else a profile with no account, made once
-       for the address and found again by the address's hash. The address itself is not kept. */
+    /* The author of an address in a site: always a profile with no account, made once for the address and found again by
+       the address's hash, whatever account has that address: a From field is not proof of who sent a message, so an
+       archive never puts posts on an account by it. The posts become the account's when it verifies the address
+       (claimAuthors, by claim#VerifiedAddress). The address itself is not kept. */
     function authorOf(siteId, emailAddress, name) {
         const sourceId = authorKey(emailAddress || "unknown")
         const old = one(MAP, {siteId, sourceType: "mbox-author", sourceId}, true)
         if (old?.targetId) return old.targetId
-        const account = emailAddress
-            ? Array.from(
-                  find("moqui.security.UserAccount", {})
-                      .condition(ec.entity.conditionFactory.makeCondition("emailAddress", "equals", emailAddress).ignoreCase())
-                      .limit(2)
-                      .list()
-              ).filter(row => row.disabled !== "Y")
-            : []
-        if (account.length === 1 && account[0].partyId && confirmed().verified(account[0].userId)) {
-            create(MAP, {siteId, sourceType: "mbox-author", sourceId, targetId: account[0].partyId, state: "claimed"})
-            return account[0].partyId
-        }
+        one(S + "PublicSite", {siteId}, true)
         const shown = name || "List member"
         const partyId = ec.service
             .sync()
@@ -433,6 +442,8 @@
     methods.importMbox = p => {
         site(p.siteId)
         listStaff(p)
+        if (one(F + "ForumCategory", {contactListId: p.contactListId})?.mode !== "list")
+            invalid("An archive is imported into a mailing list (a category in list mode)")
         const name = String(p.archiveName || "")
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/.test(name) || name.includes(".."))
             invalid("Name an mbox file in the import directory")
@@ -493,7 +504,7 @@
                 runId: imp.importRunId || null,
                 runState: run?.state || null,
                 // what was made and what could not be carried: messages, topics, replies, duplicates, attachments
-                // (files left out), unknownCharset, tooLong, empty, unreadable, failed
+                // (files left out), unknownCharset, tooLong, oversize (passed: over the byte cap), empty, unreadable, failed
                 report: json(imp.reconciliationJson, null) || live || {}
             }
         }
@@ -566,19 +577,77 @@
         })
         bump(counts, "messages")
     }
+    /* The most bytes a message of an archive may have (pass_mbox_max_message_bytes, 10 MB by default): a larger one is
+       passed and counted (oversize), so what a piece holds in memory is bounded by it and a window. */
+    function maxMessageBytes() {
+        const value = Number(System.getProperty("pass_mbox_max_message_bytes") || 0)
+        return Number.isFinite(value) && value > 0 ? value : 10 * 1024 * 1024
+    }
+    const sizeOf = lines => lines.reduce((total, line) => total + line.length + 1, 0)
+    /* A window of lines from a byte offset. A line longer than a window, which readLines refuses, does not end the run:
+       the window's lines are read one at a time up to it, and longLineAt is where it starts. */
+    function readWindow(location, at) {
+        try {
+            return ec.resource.readLines(location, at, WINDOW, WINDOW_BYTES)
+        } catch (error) {
+            if (!/-byte limit/.test(firstLine(error))) throw error
+            ec.message.clearErrors()
+        }
+        const lines = []
+        let offset = at
+        for (let k = 0; k < WINDOW; k++) {
+            let single
+            try {
+                single = ec.resource.readLines(location, offset, 1, WINDOW_BYTES)
+            } catch (error) {
+                ec.message.clearErrors()
+                return {lines, nextOffset: offset, done: false, longLineAt: offset}
+            }
+            lines.push(...Array.from(single.lines))
+            offset = single.nextOffset
+            if (single.done || !single.lines.length) return {lines, nextOffset: offset, done: true}
+        }
+        return {lines, nextOffset: offset, done: false}
+    }
+    /* Passes a line longer than a window from where it starts, a window of bytes at a time (at most 64 a call): the offset
+       after its line break; skipLine when the next item goes on passing it; done at the end of the file. */
+    function passLongLine(location, at) {
+        const stream = ec.resource.getLocationReference(location).openStream()
+        try {
+            let offset = at
+            for (let k = 0; k < 64; k++) {
+                const bytes = stream.read(offset, WINDOW_BYTES)
+                if (!bytes || !bytes.length) return {offset, done: true}
+                const lineEnd = bytes.indexOf(10)
+                if (lineEnd >= 0) return {offset: offset + lineEnd + 1}
+                offset += bytes.length
+            }
+            return {offset, skipLine: true}
+        } finally {
+            stream.close()
+        }
+    }
     /* A piece of the file from the run's offset, which is always the start of a message: every whole message in it is
        staged, and the offset moves to the start of the last one that is not whole yet. A message longer than
-       MAX_MESSAGE_LINES is cut there. */
+       MAX_MESSAGE_LINES is cut there; one over maxMessageBytes, or with a line longer than a window, is passed (oversize),
+       and reading goes on at the next "From " line. */
     function readPiece(run, config, from) {
+        if (config.skipLine) {
+            const passed = passLongLine(config.location, from)
+            if (passed.done) return {offset: passed.offset, phase: "thread", after: null, skipLine: false}
+            return {offset: passed.offset, skipLine: !!passed.skipLine}
+        }
         const counts = {}
+        const cap = maxMessageBytes()
         let lines = []
         let done = false
         let windowAt = from
         let read
+        let longLineAt = null
         const starts = []
-        // windows are read until the piece holds a whole message, or the file ends
+        // windows are read until the piece holds a whole message, the file ends, or the piece is over the cap
         for (;;) {
-            read = ec.resource.readLines(config.location, windowAt, WINDOW, WINDOW_BYTES)
+            read = readWindow(config.location, windowAt)
             const base = lines.length
             read.lines.forEach((line, index) => {
                 const text = line.endsWith("\r") ? line.slice(0, -1) : line
@@ -590,9 +659,19 @@
                     starts.push({at, windowAt, index})
                 lines.push(text)
             })
+            if (read.longLineAt != null) {
+                longLineAt = read.longLineAt
+                break
+            }
             // a read that gives nothing more ends the file
             done = !!read.done || !read.lines.length
-            if (done || starts.length > (starts[0]?.at === 0 ? 1 : 0) || lines.length >= MAX_MESSAGE_LINES) break
+            if (
+                done ||
+                starts.length > (starts[0]?.at === 0 ? 1 : 0) ||
+                lines.length >= MAX_MESSAGE_LINES ||
+                read.nextOffset - from > cap
+            )
+                break
             windowAt = read.nextOffset
         }
         // what is before the first "From " line of a piece is no message (the file's own start, or the rest of a cut one)
@@ -600,16 +679,27 @@
         for (let k = 0; k < whole; k++) {
             const from = starts[k].at + 1
             const to = k + 1 < starts.length ? starts[k + 1].at : lines.length
-            stageMessage(run, config, lines.slice(from, Math.min(to, from + MAX_MESSAGE_LINES)), counts)
+            const message = lines.slice(from, to)
+            if (sizeOf(message) > cap) bump(counts, "oversize")
+            else stageMessage(run, config, message.slice(0, MAX_MESSAGE_LINES), counts)
         }
         addCounts(run, counts)
         if (done) return {offset: read.nextOffset, phase: "thread", after: null}
         const last = starts[starts.length - 1]
-        if (!last || (whole <= 0 && lines.length >= MAX_MESSAGE_LINES)) {
-            // one message that is too long, or lines that are no message: what was read of it is staged, the rest is passed
+        if (longLineAt != null) {
+            // the message with a line longer than a window is passed; reading goes on after that line
+            addCounts(run, last ? {oversize: 1} : {})
+            return {offset: longLineAt, skipLine: true}
+        }
+        if (!last || (whole <= 0 && (lines.length >= MAX_MESSAGE_LINES || read.nextOffset - from > cap))) {
+            // one message that is too long (cut where MAX_MESSAGE_LINES ends it, or passed over the cap), or lines that are
+            // no message: the rest is passed
             const cut = {}
-            if (last) stageMessage(run, config, lines.slice(last.at + 1, last.at + 1 + MAX_MESSAGE_LINES), cut)
-            bump(cut, "tooLong", last ? 1 : 0)
+            if (last && sizeOf(lines.slice(last.at + 1)) > cap) bump(cut, "oversize")
+            else if (last) {
+                stageMessage(run, config, lines.slice(last.at + 1, last.at + 1 + MAX_MESSAGE_LINES), cut)
+                bump(cut, "tooLong")
+            }
             addCounts(run, cut)
             return {offset: read.nextOffset}
         }
@@ -730,7 +820,8 @@
         next(run, config) {
             const imp = one(F + "ForumImportRun", {importId: config.importId})
             if (!imp || imp.stage !== "mbox-importing") return null
-            if (config.phase === "read") return "r" + (config.offset || 0)
+            // r: a piece read from an offset; s: a line longer than a window passed from there
+            if (config.phase === "read") return (config.skipLine ? "s" : "r") + (config.offset || 0)
             // a retry (which clears the checkpoint's place) takes the rows that failed again
             const query = orderRows(run, config)
             const next = Array.from(
@@ -740,7 +831,7 @@
         },
         item(run, config, itemId) {
             // the item's id says where it is: an item does not see the checkpoint of the items before it in the same pass
-            if (itemId.startsWith("r")) return readPiece(run, config, Number(itemId.slice(1)) || 0)
+            if (/^[rs]/.test(itemId)) return readPiece(run, config, Number(itemId.slice(1)) || 0)
             const order = one(MAP, {siteId: run.siteId, sourceType: "mbox-order", sourceId: itemId.slice(1)}, true)
             const counts = {}
             if (order) {
@@ -754,7 +845,8 @@
             addCounts(run, {failed: 1})
             // a piece that cannot be read ends the reading (a retry starts from it); a message that cannot be made is
             // named on its row and passed
-            if (itemId.startsWith("r")) return {phase: "thread", after: null, readFailedAt: Number(itemId.slice(1)) || 0}
+            if (/^[rs]/.test(itemId))
+                return {phase: "thread", after: null, skipLine: false, readFailedAt: Number(itemId.slice(1)) || 0}
             const order = one(MAP, {siteId: run.siteId, sourceType: "mbox-order", sourceId: itemId.slice(1)}, true)
             if (order) update(order, {state: "failed", errorText: error})
             return {after: itemId.slice(1)}
@@ -817,8 +909,9 @@
     }
 
     // ===== invitations of a list's members =====
-    /* A plain notice by the site's mail settings: {sent}; never throws, and never fails the caller's work. */
-    function notify(siteId, toAddress, title, url) {
+    /* A plain notice by the site's mail settings: whether it was sent; never throws, and never fails the caller's work.
+       body: cleaned HTML for the template's body, when the notice has more to say than its title. */
+    function notify(siteId, toAddress, title, url, body) {
         const settings = one(F + "ForumMailSettings", {siteId})
         if (!settings) return false
         try {
@@ -831,7 +924,7 @@
                     emailTemplateId: settings.templateId,
                     toAddresses: toAddress,
                     extraHeaders: {"Auto-Submitted": "auto-replied"},
-                    bodyParameters: {title, siteId, unsubscribeUrl: "", postUrl: url || ""}
+                    bodyParameters: {title, siteId, unsubscribeUrl: "", postUrl: url || "", ...(body ? {body} : {})}
                 })
                 .call()
             return !!out?.messageId
@@ -842,17 +935,47 @@
         }
     }
     const INVITE_DAYS = 14
+    /* The day's invitations to a list, whoever sends them, by the inviter's trust level (listInvitation): a ForumImportMap
+       row by the list and the day, locked. {left, take(n)}. */
+    function listDaily(siteId, contactListId, inviterPartyId) {
+        const effects = core.TRUST_EFFECTS[core.trustLevel(siteId, inviterPartyId)] || core.TRUST_EFFECTS.new
+        const key = {siteId, sourceType: "list-invite-day", sourceId: (contactListId + "|" + core.dayKey()).slice(0, 60)}
+        const row = one(MAP, key, true)
+        const used = Number(json(row?.payload, {}).count || 0)
+        return {
+            left: Math.max(0, Number(effects.listInvitation || 0) - used),
+            take(n) {
+                if (!n) return
+                const payload = JSON.stringify({count: used + n})
+                row ? update(row, {payload}) : create(MAP, {...key, state: "index", payload})
+            }
+        }
+    }
     methods.inviteListMembers = p =>
         receipt(p, "inviteListMembers", () => {
             site(p.siteId)
-            listStaff(p)
+            const a = listStaff(p)
             const c = one(F + "ForumCategory", {contactListId: p.contactListId})
             if (c.mode !== "list") invalid("Only a mailing list's members are invited by their addresses")
             if (!Array.isArray(p.addresses) || !p.addresses.length || p.addresses.length > 500)
                 invalid("addresses is a list of 1 to 500 email addresses")
             if (!one(F + "ForumMailSettings", {siteId: p.siteId})) fail("Conflict", "Configure outbound mail first")
+            const inviter = requireUser()
             const listName = one(LIST + "ContactList", {contactListId: p.contactListId})?.contactListName || "the list"
-            const counts = {invited: 0, alreadyInvited: 0, invalidCount: 0, unsent: 0}
+            // a fixed subject, so an invitation cannot carry a text its sender chose; the list's name is in its body
+            const siteName = String(one(S + "PublicSite", {siteId: p.siteId})?.name || "").replace(/[\r\n]+/g, " ")
+            const title = (siteName ? siteName + ": " : "") + "an invitation to a mailing list"
+            const body =
+                "<p>You are invited to the mailing list <strong>" +
+                WebUtilities.encodeHtml(String(listName)) +
+                "</strong>" +
+                (siteName ? " of " + WebUtilities.encodeHtml(siteName) : "") +
+                ". Confirm to receive its mail; nothing is sent to you unless you do.</p>"
+            // the site's owners and operators run a list's cutover; anyone else invites a day's allowance by trust level,
+            // as the inviter and for the list
+            const unlimited = isOperator() || !!a.isOwner
+            const counts = {invited: 0, alreadyInvited: 0, invalidCount: 0, unsent: 0, limitedCount: 0}
+            const fresh = []
             const seen = new Set()
             for (const given of p.addresses) {
                 const emailAddress = lower(given)
@@ -875,10 +998,17 @@
                         millis(row.expiresAt) > millis(now()) &&
                         json(row.scopes, []).some(scope => scope?.list === p.contactListId)
                 )
-                if (open) {
-                    counts.alreadyInvited++
-                    continue
-                }
+                if (open) counts.alreadyInvited++
+                else fresh.push({emailAddress, emailHash})
+            }
+            let allowed = fresh.length
+            if (!unlimited && allowed) {
+                const forList = listDaily(p.siteId, p.contactListId, inviter)
+                allowed = core.takeDaily(p.siteId, inviter, "invitation", Math.min(allowed, forList.left))
+                forList.take(allowed)
+            }
+            counts.limitedCount = fresh.length - allowed
+            for (const {emailAddress, emailHash} of fresh.slice(0, allowed)) {
                 const token = id() + id()
                 create(S + "PublicSiteInvitation", {
                     invitationId: id(),
@@ -886,19 +1016,11 @@
                     tokenHash: hash(token),
                     emailHash,
                     scopes: JSON.stringify([{list: p.contactListId}]),
-                    inviterPartyId: requireUser(),
+                    inviterPartyId: inviter,
                     expiresAt: millis(now()) + INVITE_DAYS * 86400000
                 })
                 const url = publicApps().pageUrl(p.siteId, "account", "/Invitation?token=" + encodeURIComponent(token))
-                if (
-                    notify(
-                        p.siteId,
-                        emailAddress,
-                        "You are invited to the " + listName + " list: confirm to receive its mail",
-                        url
-                    )
-                )
-                    counts.invited++
+                if (notify(p.siteId, emailAddress, title, url, body)) counts.invited++
                 else counts.unsent++
             }
             audit(
@@ -907,7 +1029,7 @@
                 "category",
                 p.contactListId,
                 "invite-list-members",
-                counts.invited + counts.unsent + " addresses",
+                counts.invited + counts.unsent + " addresses" + (counts.limitedCount ? ", " + counts.limitedCount + " over the day's limit" : ""),
                 null,
                 null
             )
@@ -1001,9 +1123,11 @@
             expiresAt: millis(now()) + HELD_DAYS * 86400000
         })
         if (!answered) {
+            // a list's page is in the forum the list is read in: its group's or repository's, else the site's
+            const forumUrl = issue ? null : core.forumUrl(siteId, route.contactListId)
             const url = issue
                 ? core.scopeAnswer("heldLink", siteId, token)
-                : publicApps().pageUrl(siteId, "forum", "/held-mail/" + encodeURIComponent(token))
+                : forumUrl && forumUrl + "/held-mail/" + encodeURIComponent(token)
             notify(
                 siteId,
                 m.sender,
@@ -1077,9 +1201,8 @@
                 .list()
         ).filter(held => millis(held.expiresAt) > millis(now()))
         if (!waiting.length) return 0
-        const previous = ec.user.username
-        ec.user.internalLoginUser(account.username)
-        try {
+        // as the account, and then as who was signed in again: a request's own user is never signed out
+        const release = () => {
             for (const held of waiting)
                 try {
                     ec.service
@@ -1094,9 +1217,12 @@
                     ec.message.clearErrors()
                     ec.logger.info("Held mail " + held.heldId + " stays held: " + firstLine(error))
                 }
-        } finally {
-            ec.user.logoutUser()
-            if (previous) ec.user.internalLoginUser(previous)
+        }
+        try {
+            core.asUser(account.username, release)
+        } catch (error) {
+            ec.message.clearErrors()
+            ec.logger.info("Held mail of an account that cannot sign in stays held: " + firstLine(error))
         }
         return posted
     }
@@ -1114,16 +1240,43 @@
             return {posted: 0, claimed: 0}
         return {claimed: claimAuthors(account), posted: releaseHeld(account)}
     }
-    /* expire#HeldMail (a job): held messages past their time are dropped, text and review item with them. */
+    /* expire#HeldMail (a job): held messages past their time are dropped, text and review item with them; and a message
+       that was claimed or dropped keeps its sender's address, name and subject only until its time (30 days from when it
+       came), then loses them. The backlog is taken in batches until none is left or the time bound passes (the next run
+       goes on from there). */
+    const EXPIRE_BATCH = 500
+    const EXPIRE_SECONDS = 60
     function expireHeld() {
         let dropped = 0
-        for (const held of Array.from(
-            find(HELD, {state: "held"}).condition("expiresAt", "less-equals", now()).limit(500).forUpdate(true).list()
-        )) {
-            settle(held, "dropped", null, "Not claimed in " + HELD_DAYS + " days")
-            dropped++
+        let cleared = 0
+        const until = Date.now() + EXPIRE_SECONDS * 1000
+        for (;;) {
+            const batch = Array.from(
+                find(HELD, {state: "held"}).condition("expiresAt", "less-equals", now()).limit(EXPIRE_BATCH).forUpdate(true).list()
+            )
+            for (const held of batch) {
+                settle(held, "dropped", null, "Not claimed in " + HELD_DAYS + " days")
+                dropped++
+            }
+            if (batch.length < EXPIRE_BATCH || Date.now() > until) break
         }
-        return {dropped}
+        while (Date.now() <= until) {
+            const batch = Array.from(
+                find(HELD, {})
+                    .condition("state", "in", ["claimed", "dropped"])
+                    .condition("expiresAt", "less-equals", now())
+                    .condition("senderAddress", "is-not-null", null)
+                    .limit(EXPIRE_BATCH)
+                    .forUpdate(true)
+                    .list()
+            )
+            for (const held of batch) {
+                update(held, {senderAddress: null, senderName: null, subject: null, messageId: null, body: null})
+                cleared++
+            }
+            if (batch.length < EXPIRE_BATCH) break
+        }
+        return {dropped, cleared}
     }
     /* A moderator's decision on a held message: nothing is posted for an address that is no account's, so the only
        decisions are to leave it or to drop it. */

@@ -56,8 +56,9 @@ const destinationTypes = {
 // A menu's bounds, and the hops followed looking for a redirect loop.
 const menuLimits = {items: 200, depth: 3, label: 80}
 const loopHops = 20
-// What a redirect or a path destination may not start with: the reserved first segments of PublicApps.js and the API.
-const reservedRoots = publicApps.reservedPaths.concat(["api"]).map(segment => segment.toLowerCase())
+// What a redirect or a path destination may not take: the host's paths (PublicApps.js pagePathReserved: the segments it
+// reserves whole and the sub-paths it uses of ci and .well-known) and the API.
+const reservedPath = path => publicApps.pagePathReserved(path) || (path.split("/")[1] || "").toLowerCase() === "api"
 // Paths of BOSS's private screens and services, refused in any destination on any host.
 const privatePath = /^\/(?:apps|qapps|vapps|rest|rpc)(?:\/|$)/i
 const routePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
@@ -884,8 +885,7 @@ function sitePathOf(value, label) {
     if (path.length > 255 || !sitePathPattern.test(path) || path.split("/").some(part => part === "." || part === ".."))
         refuse("DESTINATION_INVALID", label + " " + path + " is not a plain path")
     if (privatePath.test(path)) refuse("PRIVATE_LINK", label + " " + path + " is a private BOSS address")
-    const first = (path.split("/")[1] || "").toLowerCase()
-    if (first && reservedRoots.includes(first)) refuse("PATH_RESERVED", label + " " + path + " is a reserved path of the site")
+    if (reservedPath(path)) refuse("PATH_RESERVED", label + " " + path + " is a reserved path of the site")
     return path.length > 1 ? path.replace(/\/$/, "") : path
 }
 // Check a typed destination; answers {url, label} or refuses it. A product must be public in the store, a page published,

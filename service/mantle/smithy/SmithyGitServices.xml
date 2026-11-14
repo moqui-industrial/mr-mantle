@@ -50,4 +50,78 @@
             ]]></script>
         </actions>
     </service>
+    <service verb="check" noun="Outbound" authenticate="anonymous-all" allow-remote="false">
+        <description>The git server's outbound check (git-server outbound-check-service, the framework's
+            check#GitOutbound contract): asked before a repository's webhook deliveries are queued and before its push
+            mirror pushes. For a repository Smithy has, holds them (allowed false, with the message) on a site that no
+            longer mounts Smithy, for a hidden repository (by itself, a group above it or the repository it was forked
+            from) and for a personal repository whose account is suspended on the site; what cannot be decided is held.
+            Any other repository is allowed. A cheap read: it is asked of each push.</description>
+        <implements service="org.moqui.git.GitServices.check#GitOutbound"/>
+        <actions>
+            <script><![CDATA[
+                const answer = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkOutbound({repositoryId, kind, event})
+                allowed = answer.allowed === true
+                message = answer.message ?? null
+            ]]></script>
+        </actions>
+    </service>
+    <!-- What the framework's hosting REST asks (mr-moqui docs/interfaces/Git-Hosting.md, REST; plans/design-dev-aide.md §21;
+        MoquiConf.xml git-server): who keeps a repository and whether a write may go through the framework's REST, what
+        the server offers a client, and whether an author signed a repository's agreement (SmithyHosting.js). -->
+    <service verb="check" noun="RestWrite" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server rest-write-check-service (the framework's check#GitRestWrite contract): for a repository
+            Smithy has, application smithy and restUrl Smithy's PASS REST of its site
+            (/rest/s1/pass/v1/sites/[siteId]/smithy, on the site's canonical host when it has one); every write
+            through the framework's REST is refused (allowed false, a message naming Smithy's REST and its operation for
+            it: rerunPipelineRun for pipeline.rerun, retryJobRun for job.retry, createReviewComment for
+            mergeRequest.comment, resolveReviewThread for mergeRequest.resolveThread...), since Smithy's own
+            operations keep its roles, confirmed address, gate and conversation; a read is allowed, and so is
+            commitStatus.create (an outside CI's status: the framework needs the push right and refuses the contexts
+            Smithy reserves, agreement/ and ci/). Any other repository is allowed, with no application.</description>
+        <implements service="org.moqui.git.GitServices.check#GitRestWrite"/>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").restWrite({repositoryId, operation}))
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="add" noun="HostingOffer" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server offer-service (the framework's add#GitHostingOffer contract): the framework's offer with
+            Smithy's REST for the site a client reaches (application: name smithy, restBase the site's
+            /rest/s1/pass/v1/sites/[siteId]/smithy, siteId, pageUrl), forks true, for the site of the host the request
+            came to, else of the server's own address, else the one published site that mounts Smithy; and Mantle's task
+            source (tasks: kind moqui-rest, path /rest/s1/mantle/my/tasks) when the offer has none. It adds to the
+            framework's offer and keeps the rest of it (gateway, signIn, rest...). Asked for callers with no credentials
+            too: it names no account.</description>
+        <implements service="org.moqui.git.GitServices.add#GitHostingOffer"/>
+        <actions>
+            <script>offer = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").hostingOffer({offer, userId})</script>
+        </actions>
+    </service>
+    <service verb="check" noun="AuthorSigned" authenticate="anonymous-all" allow-remote="false">
+        <description>git-server agreement-check-service (the framework's check#GitAuthorSigned contract), over
+            SmithyAgreementServices.get#AuthorSigned: for a repository Smithy has, whether the author (authorUserId or
+            authorEmail) has signed its agreement file at the default branch, whether the repository requires it, what is
+            missing (in message, only to the author asking of itself or a Maintainer of the repository: to anyone else
+            what is missing would tell whether an address is a member's confirmed one), and signUrl, the file's edit page
+            on the default branch, an absolute https page on the site's canonical host (none without one). known is
+            false for any other repository.</description>
+        <implements service="org.moqui.git.GitServices.check#GitAuthorSigned"/>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").authorSignedCheck({repositoryId, authorUserId, authorEmail}))
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="read" noun="Component" authenticate="anonymous-all" allow-remote="false">
+        <description>After a repository's default branch moved (the ref-update gitECA rule SmithyComponent): reads the
+            component.xml at the root of its new commit and keeps the component's name, version and depends-on names on
+            the SmithyRepository row (design-smithy §13.4), or clears them when the commit has none. Returns at once for a
+            repository Smithy does not have and for a deleted branch. What it reads is cached by commit id.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions>
+            <script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").readComponent({repositoryId, newId, changeType})</script>
+        </actions>
+    </service>
 </services>

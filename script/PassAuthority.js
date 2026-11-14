@@ -79,6 +79,35 @@ const TOKEN_WRITES = [
     'requestSubscription',
     'verifySubscription',
 ]
+/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
+   connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads
+   (getMergeRequestChanges answers them) and reviews, pipeline runs and their re-runs, and issues. A request whose user
+   came by any other login key (an access token, a session's key, a scoped key) calls no PASS operation (mr-pass
+   plan/design-smithy.md §5.5); the key's account has its normal rights, and a write is idempotent by its operationId as
+   a page's is. */
+const APP_KEY_OPERATIONS = [
+    'findMergeRequests',
+    'getMergeRequest',
+    'createMergeRequest',
+    'forkRepository',
+    'getAgreement',
+    'getMergeRequestChanges',
+    'createReviewComment',
+    'resolveReviewThread',
+    // §21.4 a review (approve, comment, request changes); merging stays on the server's page
+    'submitReview',
+    // §21.5 the checks: runs and their jobs read, a run re-run and a job retried by who may
+    'findPipelineRuns',
+    'getPipelineRun',
+    'getJobRun',
+    'getJobLog',
+    'rerunPipelineRun',
+    'retryJobRun',
+    // §21.6 the repository's issues: listed, read, and filed by Quick create
+    'findIssues',
+    'getIssue',
+    'createIssue',
+]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
 const CLIENT_READS = [
@@ -107,6 +136,10 @@ const DOWNLOADS = [
     'getSalesQuoteDocument',
     // IronStone Sales P17: an order's confirmation as placed
     'getSalesOrderDocument',
+    // Smithy DG5 (§15.6): a run's artifact or report
+    'downloadArtifact',
+    // Smithy DG7 (§15.8): a release's file
+    'downloadReleaseAsset',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
@@ -203,6 +236,14 @@ const REASONS = [
     // IronStone Sales P13: a quote above the seller's threshold is accepted signed in; a quote answered already
     'acceptanceSignInRequired',
     'responseRecorded',
+    // Smithy DG6: a repository a moderator hid is not forked (design-smithy §12.3)
+    'repositoryHidden',
+    // Smithy DG8: the GitHub import (design-smithy §15.9)
+    'sourceRefused',
+    'importActive',
+    'numbersTaken',
+    // Smithy F6: a push mirror's new address, username or host key without its secret again
+    'secretRequired',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or
@@ -247,6 +288,29 @@ function asSystem(work) {
         if (!was) ec.artifactExecution.enableAuthz()
     }
 }
+/* The kind of the current user's unexpired login key `key`: device (an installed app's: a UserLoginKey with a deviceName,
+   as /sso/appToken and a REST login with deviceName make it), token (an access token: a description), session (any other,
+   getLoginKey's), scoped (create#UserScopedKey's), or null when it is no such key of the current user. A key is found by
+   its stored form, the SHA-256 the conf's default login-key encrypt-hash-type gives: scripts are not told the conf's
+   type, so under another one no key is found and the request is refused (the framework is to tell the kind of the key
+   a request's header login used). */
+function keyKind(key) {
+    const userId = ec.user.userId
+    if (!key || !userId) return null
+    const row = asSystem(() =>
+        ec.entity
+            .find('moqui.security.UserLoginKey')
+            .condition({ loginKey: ec.resource.digestText(String(key), 'sha256') })
+            .one(),
+    )
+    if (!row || row.userId !== userId) return null
+    if (row.thruDate && ec.user.timestampMillis(row.thruDate) <= Date.now()) return null
+    // a scoped key opens its one service alone (the LLM gateway's): a device name does not make it an app's
+    if (row.scope) return 'scoped'
+    if (row.deviceName) return 'device'
+    if (row.description) return 'token'
+    return 'session'
+}
 const callService = (name, input) =>
     ec.service.sync().throwOnError(true).name(name).parameters({ input }).call()
         .result
@@ -285,8 +349,11 @@ function envelope(error) {
 }
 /* One operation. p: {operation, siteId, input, delegation (the bearer credential), clientId, clientSecret,
    clientVerified (the transport authenticated the client: the gRPC listener's secret or the edge link), visitorAddress
-   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token)}.
-   Answers {result} (with download: {location, contentType, filename, disposition} for a file) or {error}. */
+   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token, or the
+   request came with a login key), headerKey (the login key of the request's api_key or login_key header), headerLogin
+   (the session's user came by such a header)}.
+   Answers {result} (with download: {location, contentType, filename, disposition} for a file, or sent: true when the
+   operation sent the file as the response itself) or {error}. */
 function handle(p) {
     // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
     // limit key, and the client the transport authenticated (never a flag in a service's input)
@@ -307,6 +374,16 @@ function run(p) {
         clientId = String(p.clientId || ''),
         input = { ...(p.input || {}) }
     if (!siteId) fail('NotFound', 'Resource not found')
+    // A user who came by a login key calls only the installed app's operations, and only with a device's key: an access
+    // token is for git and the framework's REST (design-smithy §5.5), and a session a key made carries no more
+    if (
+        (p.headerKey || p.headerLogin) &&
+        (keyKind(p.headerKey) !== 'device' || !APP_KEY_OPERATIONS.includes(operation))
+    )
+        fail(
+            'Unauthorized',
+            "accessDenied: A login key calls only an installed app's operations, and an access token none; sign in to the site",
+        )
     const registered =
         !!clientId &&
         account().clientRegistered(
@@ -372,7 +449,9 @@ function run(p) {
     if (DOWNLOADS.includes(operation)) {
         const file = result.attachment || result.export || result.file
         // the file's place stays here; the transport streams it
-        const { location, range, ...shown } = result
+        const { location, range, sent, ...shown } = result
+        // Smithy DG5: a run's artifact the engine sent as this request's response (send#RunArtifact): nothing to stream
+        if (sent === true) return { result: shown, sent: true }
         return {
             result: shown,
             download: {
@@ -477,6 +556,9 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     SSO_ACTIONS,
     // Shop P4: the list PassApi.js and PASS's Transport.js keep equal
     TOKEN_WRITES,
+    // the Dev AIDE's operations by an installed app's key, and the kind of a key
+    APP_KEY_OPERATIONS,
+    keyKind,
     // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
     downloadCache,
 })

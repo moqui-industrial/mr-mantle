@@ -128,6 +128,8 @@ function respond(response, answer) {
         response.write(JSON.stringify(body))
         return
     }
+    // Smithy DG5: the authority's operation wrote the response itself (a run's artifact, send#RunArtifact)
+    if (answer.sent) return
     if (answer.download && answer.download.size != null) {
         // Shop P6: a granted download, streamed in pieces with its byte range (206, or 416 outside the file)
         streamRanged(response, answer.download)
@@ -205,6 +207,15 @@ function respond(response, answer) {
                 fail('AuthenticationRequired', 'Registered client required')
             // A write a bearer link's token authorizes (a payment, a supplier's bill) comes from the registered
             // deployment that served the link's page, with no session of its own.
+            // A login key in a header logged its user in for this request (the framework's api_key or login_key, as the
+            // Dev AIDE sends an installed app's key): it carries no ambient cookie authority, so it skips the session
+            // token, and the authority lets it call only an installed app's operations (APP_KEY_OPERATIONS). A session
+            // whose user came by such a header is held to the same, with no key to show.
+            const headerKey =
+                    request.getHeader('api_key') ||
+                    request.getHeader('login_key') ||
+                    '',
+                headerLogin = !!ec.web.sessionAttributes?.moquiHeaderLogin
             const tokenWrite =
                 registeredClient &&
                 routes.some(
@@ -225,6 +236,7 @@ function respond(response, answer) {
                 !(path.join('/') === 'opt-out' && method === 'POST') &&
                 !tokenWrite &&
                 !bearer &&
+                !headerKey &&
                 request.getHeader('x-csrf-token') !== ec.web.sessionToken
             )
                 fail('Unauthorized', 'Invalid session token')
@@ -243,11 +255,13 @@ function respond(response, answer) {
                 clientSecret,
                 visitorAddress: request.getHeader('x-pass-client-ip') || '',
                 sessionChecked: true,
+                headerKey,
+                headerLogin,
             }
             if (path[0] === 'account') {
                 if (['sso', 'sso-complete'].includes(path[1])) {
                     // The SSO front channel: the browser is redirected to the provider and back here.
-                    if (method !== 'GET')
+                    if (method !== 'GET' || headerKey || headerLogin)
                         fail(
                             'Unauthorized',
                             'Registered sign-in client required',

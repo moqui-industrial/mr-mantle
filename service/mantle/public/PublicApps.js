@@ -61,40 +61,39 @@ const apps = {
         scopeEntities: ['mantle.smithy.SmithyGroup', 'mantle.smithy.SmithyRepository'],
     },
 }
-/* The first path segments no app mount, site page route or redirect may take: the BOSS apps, REST and RPC, the framework's
- * routes (public_site.rs FRAMEWORK_ROUTES, so a root app never shadows them; Shop P1, F2) and its sign-in, token and
- * asset paths. Forum.js storeMounts checks mounts against it, SitePages.js redirects and navigation paths. */
-const reservedPaths = [
-    'apps',
-    'qapps',
-    'rest',
-    'rpc',
-    'status',
-    'error',
-    'health',
-    'metrics',
-    'fop',
-    'js',
-    'css',
-    'libs',
-    'images',
-    // the framework's routes (public_site.rs FRAMEWORK_ROUTES), so a root app never shadows them (Shop P1, F2)
-    'static',
-    'assets',
-    'Login',
-    'SecondFactor',
-    'PasswordReset',
-    'sso',
-    'notws',
-    'termws',
-    'PublicShell',
-    's',
-    'u',
-    'cal',
-    'r',
-    'sw.js',
-    'manifest.webmanifest',
-    'WebPush',
+/* The framework's reserved first path segments (ec.web.reservedPaths: the host's own routes, the framework's screens and
+ * its sign-in, token and asset paths), the one list of them; there with no request too. */
+function frameworkPaths() {
+    return Array.from(ec.web.reservedPaths, String)
+}
+/* The sub-paths the host uses of a segment it reserves only in part (ec.web.reservedSubPaths: ci/runner,
+ * .well-known/caldav...), as [segment, sub-path...] in lower case. */
+function subPaths() {
+    return Array.from(ec.web.reservedSubPaths || [], (path) => String(path).toLowerCase().split('/').filter(Boolean))
+}
+/* Whether a path of a site (a page's route, a redirect's old path or target, a path destination) is the host's: its first
+ * segment one the framework or an app reserves whole (reservedPaths without the segments reserved only in part, so a site
+ * serves /.well-known/security.txt and /ci), or a sub-path the host uses of one of those (/ci/runner, /.well-known/caldav). */
+function pagePathReserved(path) {
+    const segments = String(path || '')
+        .split(/[?#]/)[0]
+        .split('/')
+        .filter(Boolean)
+        .map((segment) => segment.toLowerCase())
+    if (!segments.length) return false
+    const parts = subPaths()
+    const partly = new Set(parts.map((sub) => sub[0]))
+    const whole = frameworkPaths()
+        .concat(APP_PATHS)
+        .map((segment) => segment.toLowerCase())
+        .filter((segment) => !partly.has(segment))
+    if (whole.includes(segments[0])) return true
+    return parts.some((sub) => sub.every((part, index) => segments[index] === part))
+}
+/* The first path segments no app mount, group, handle or other name that owns everything under it may take: the
+ * framework's (frameworkPaths, ci and .well-known whole among them), and the apps' own words below. Forum.js storeMounts
+ * checks mounts against it, SmithyCore.js the site's one name set. A page path is checked by pagePathReserved. */
+const APP_PATHS = [
     // Commerce P14: the Shop mount's feed path (feeds/{feedKey}.{extension}, mr-pass resolve#Route), so a Shop at '/' keeps
     // it from another app's mount, a page route or a redirect
     'feeds',
@@ -175,4 +174,16 @@ function sitesFor(app, targetId) {
                 ).some((host) => !isPreviewHost(host)),
         )
 }
-;({ apps, targets, mount, pageUrl, sitesFor, reservedPaths, isPreviewHost })
+;({
+    apps,
+    targets,
+    mount,
+    pageUrl,
+    sitesFor,
+    get reservedPaths() {
+        return frameworkPaths().concat(APP_PATHS)
+    },
+    frameworkPaths,
+    pagePathReserved,
+    isPreviewHost,
+})
