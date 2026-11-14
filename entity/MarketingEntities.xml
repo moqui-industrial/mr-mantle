@@ -708,8 +708,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="releasedCount" type="number-integer"><description>The recipients counted at the release</description></field>
         <field name="communicationEventId" type="id"><description>The send's CommunicationEvent (the approved subject and body), which
             each recipient's ContactListCommStatus and unsubscribe token name</description></field>
-        <field name="unsubscribeBaseUrl" type="text-medium"><description>The server's root at the release, for the /u/ page of a sending
-            profile that names no site</description></field>
+        <field name="unsubscribeBaseUrl" type="text-medium"><description>The conf webapp's root at the release (ec.web.getWebappRootUrl), for
+            the /u/ page when the sending profile has no site with Account and no configured root (its relay's web base URL, the send
+            template's)</description></field>
         <field name="pausedDate" type="date-time"/>
         <field name="cancelledDate" type="date-time"/>
         <field name="cancelReason" type="text-medium" enable-audit-log="update"/>

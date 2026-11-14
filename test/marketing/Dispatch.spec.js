@@ -23,11 +23,13 @@ const topic = prefix + "_TOPIC",
     single = prefix + "_SINGLE"
 const profile = prefix + "_PROFILE"
 const relay = prefix + "_RELAY"
+const linkRoot = "https://news.mkd.example.test"
 const users = {}
 const ids = {}
 const dayMs = 86400000
 const ago = days => new Date(Date.now() - days * dayMs)
 const members = ["Ann", "Bob", "Cal", "Dan", "Eve"]
+ids.Fay = prefix + "_FAY"
 const addressOf = name => name.toLowerCase() + "@dispatch.example.test"
 const settle = () => ec.factory.waitWorkerPoolEmpty(50)
 const revisionOf = campaignSendId => entityLib.ms(row(SEND, {campaignSendId}).lastUpdatedStamp)
@@ -122,6 +124,13 @@ spec({
             users.author = user(prefix, "author", [orgA], ["MARKETING_VIEW", "MARKETING_CAMPAIGN_EDIT", "MARKETING_SEND_EDIT"])
             users.approver = user(prefix, "approver", [orgA], ["MARKETING_VIEW", "MARKETING_APPROVE"])
             users.dispatcher = user(prefix, "dispatcher", [orgA], ["MARKETING_VIEW", "MARKETING_DISPATCH"])
+            // approves and dispatches: kept from releasing what they approved (release apart from approval, design §5)
+            users.approverDispatcher = user(
+                prefix,
+                "apprdisp",
+                [orgA],
+                ["MARKETING_VIEW", "MARKETING_APPROVE", "MARKETING_DISPATCH"]
+            )
             users.reviewer = user(prefix, "reviewer", [orgA], ["MARKETING_VIEW", "MARKETING_DISPATCH", "MESSAGE_DELIVERY_REVIEW"])
             users.reviewerB = user(
                 prefix,
@@ -184,7 +193,12 @@ spec({
                     })
                 }
             }
-            make("moqui.basic.email.EmailServer", {emailServerId: relay, smtpHost: "relay.mkd.example.test", smtpPort: "9"})
+            make("moqui.basic.email.EmailServer", {
+                emailServerId: relay,
+                smtpHost: "relay.mkd.example.test",
+                smtpPort: "9",
+                webBaseUrl: linkRoot
+            })
             make("moqui.basic.email.EmailAccount", {
                 emailAccountId: prefix + "_BOUNCES",
                 accountKindEnumId: "EakHosted",
@@ -229,12 +243,13 @@ feature("a release needs dispatch, approval and a ready profile; each message ca
     when() {
         const campaignSendId = (ids.first = approvedSend({replyToAddress: "send-reply@mkd.example.test"}, users.author, null))
         const unapproved = release(users.dispatcher, campaignSendId)
-        as(users.approver, C + "decide#MarketingApproval", {
+        as(users.approverDispatcher, C + "decide#MarketingApproval", {
             targetKind: "send",
             targetId: campaignSendId,
             targetRevision: Number(sendRow(campaignSendId).sendRevision),
             decision: "approve"
         })
+        const byApprover = release(users.approverDispatcher, campaignSendId)
         const byAuthor = release(users.author, campaignSendId)
         const byOtherOrganization = release(users.reviewerB, campaignSendId)
         system(() => run("update#moqui.basic.email.EmailServer", {emailServerId: relay, disabled: "Y"}))
@@ -260,6 +275,7 @@ feature("a release needs dispatch, approval and a ready profile; each message ca
         })
         return {
             unapproved,
+            byApprover,
             byAuthor,
             byOtherOrganization,
             notReady,
@@ -277,6 +293,7 @@ feature("a release needs dispatch, approval and a ready profile; each message ca
     },
     then({
         unapproved,
+        byApprover,
         byAuthor,
         byOtherOrganization,
         notReady,
@@ -291,6 +308,7 @@ feature("a release needs dispatch, approval and a ready profile; each message ca
         campaignSendId
     }) {
         unapproved.refusal.includes("STATUS_INVALID")
+        byApprover.refusal.includes("SELF_DISPATCH")
         byAuthor.refusal.includes("PERMISSION_DENIED")
         byOtherOrganization.refusal.includes("RECORD_UNAVAILABLE")
         notReady.refusal.includes("NOT_READY")
@@ -304,7 +322,9 @@ feature("a release needs dispatch, approval and a ready profile; each message ca
         deliveriesOf(campaignSendId).every(d => d.organizationPartyId == orgA && d.transactional == "N")
         sendRow(campaignSendId).statusId == "CsCompleted"
         annMail.subject == "News for Ann"
-        listUnsubscribe.includes("/u/")
+        // the link under the relay's configured root, not the root of the releasing request (P9 review)
+        listUnsubscribe.startsWith("<" + linkRoot + "/u/")
+        mail.body.includes(linkRoot + "/u/")
         listUnsubscribePost == "List-Unsubscribe=One-Click"
         mail.body.includes("Unsubscribe")
         mail.bodyText.includes("Unsubscribe: ")
@@ -325,7 +345,30 @@ feature(
         when() {
             const campaignSendId = approvedSend()
             system(() => {
-                // Bob withdraws from the topic, Cal's address is suppressed, Dan's address changes, Gus joins the topic
+                // Bob withdraws from the topic, Cal's address is suppressed, Dan's address changes, Gus joins the topic, and Fay, who
+                // is not on the topic, takes Eve's address (in capitals) and withdraws the purpose (P9 review: anyone's withdrawal at an
+                // address blocks it, checked again at dispatch)
+                make("mantle.party.Party", {partyId: ids.Fay, partyTypeEnumId: "PtyPerson", ownerPartyId: orgA})
+                make("mantle.party.Person", {partyId: ids.Fay, firstName: "Fay", lastName: "Dispatchspec"})
+                make("mantle.party.contact.ContactMech", {
+                    contactMechId: ids.Fay + "_EM",
+                    contactMechTypeEnumId: "CmtEmailAddress",
+                    infoString: addressOf("Eve").toUpperCase()
+                })
+                make("mantle.party.contact.PartyContactMech", {
+                    partyId: ids.Fay,
+                    contactMechId: ids.Fay + "_EM",
+                    contactMechPurposeId: "EmailPrimary",
+                    fromDate: ago(0.002)
+                })
+                make("mantle.party.PartyConsent", {
+                    partyId: ids.Fay,
+                    contactMechId: ids.Fay + "_EM",
+                    purposeEnumId: "PcpMarketingEmail",
+                    statusId: "PconWithdrawn",
+                    consentDate: ago(0.001),
+                    sourceEnumId: "PcsEmailLink"
+                })
                 make("mantle.party.PartyConsent", {
                     partyId: ids.Bob,
                     contactListId: topic,
@@ -382,6 +425,17 @@ feature(
             const released = release(users.dispatcher, campaignSendId)
             dispatchNow(campaignSendId)
             const skipped = Object.fromEntries(byStatus(campaignSendId, "CrsSkipped").map(r => [r.partyId, r.skipReasonCode]))
+            // Fay leaves Eve's address again, for the features after
+            system(() => {
+                const fay = row("mantle.party.contact.PartyContactMech", {partyId: ids.Fay, contactMechId: ids.Fay + "_EM"})
+                run("update#mantle.party.contact.PartyContactMech", {
+                    partyId: ids.Fay,
+                    contactMechId: ids.Fay + "_EM",
+                    contactMechPurposeId: "EmailPrimary",
+                    fromDate: fay.fromDate,
+                    thruDate: ago(0.0001)
+                })
+            })
             return {campaignSendId, released, skipped}
         },
         then({campaignSendId, released, skipped}) {
@@ -389,8 +443,10 @@ feature(
             byStatus(campaignSendId, "CrsHandedOff")
                 .map(r => r.partyId)
                 .sort()
-                .join() == [ids.Ann, ids.Eve].sort().join()
+                .join() == [ids.Ann].join()
             skipped[ids.Bob] == "LIST_WITHDRAWN"
+            skipped[ids.Eve] == "DESTINATION_WITHDRAWN"
+            mailTo(addressOf("Eve")).length == 0
             skipped[ids.Cal] == "SUPPRESSED"
             skipped[ids.Dan] == "DESTINATION_CHANGED"
             recipientsOf(campaignSendId).every(r => r.partyId != ids.Gus)

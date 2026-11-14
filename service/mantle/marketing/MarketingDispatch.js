@@ -13,7 +13,8 @@
 //   a release, under the same rule.
 // - Dispatch (run#DueSends, the run_MarketingDueSends job, and dispatch#Send for one send): a page of recipients at a time is claimed
 //   under a lease (claimKey, leaseUntilDate) in a transaction of its own; the page is checked again together (the topic's membership,
-//   consent and suppression by MarketingEligibility.js's rule, the address against the one prepared, the policy's frequency cap), then
+//   consent and suppression by MarketingEligibility.js's rule, the address against the one prepared, a withdrawal by anyone who holds
+//   the address now, the policy's frequency cap; a page that cannot be checked waits for a later run), then
 //   each recipient is handed to the ledger in a transaction of its own as a promotional delivery of source MdsrcCampaignSend, keyed by
 //   the send and the recipient's execution key, naming the organization, the profile and the topic's consent within the organization,
 //   or skipped with its reason. One recipient's failure never stops the next. A page claimed again after a lease ends hands each
@@ -21,8 +22,8 @@
 //   campaign no longer approved or a profile no longer ready stops the run (the send stays Sending, dispatchNote says why).
 // - The message (build#CampaignDelivery, the ledger's build before each attempt): the prepared content with the recipient's own values,
 //   a List-Unsubscribe header and link from a token made for the sending profile's site (its Account Email preferences page, F56, F75;
-//   the server's /u/ page when it names none), the attachments copied at preparation, the send's reply-to; suppressed when the
-//   recipient left the topic or the address changed.
+//   else the server's /u/ page under a configured root, unsubscribeLink), the attachments copied at preparation, the send's reply-to;
+//   suppressed when the recipient left the topic, the address changed or the link has no address.
 // - Completion: once no recipient waits and no handed-off delivery is queued, retrying or uncertain, the send is Completed (with
 //   failures when a delivery failed); a single-use list is then consumed. ContactListCommStatus rows follow the deliveries' Message-IDs.
 // - Pause and cancel (pause#Send, cancel#Send): new claims stop; what the ledger holds already may finish (inFlightCount says how much).
@@ -82,6 +83,24 @@ const eventKeyOf = recipient => eventPrefix(recipient.campaignSendId) + recipien
 // a remote server's diagnostic often names the address: never in an answer
 const noAddress = value => String(value || "").replace(/[^\s<>()\[\];:,"']+@[^\s<>()\[\];:,"']+/g, "[address]")
 const reasonText = code => (code ? skipTexts[code] || eligibility.reasonTexts[code] || code : "")
+// The unsubscribe link (P9 review): a sending profile's site that mounts Account gives its Email preferences page; else the server's
+// /u/ page under a configured root, never a request's Host: the profile's relay's web base URL, else the send template's web host or
+// its relay's web base URL, else the conf webapp's root kept at the release (ec.web.getWebappRootUrl, which takes a request's Host
+// only when a root-screen pattern of the deployment names it). Every token is made with that root, so create#UnsubscribeToken never
+// falls back to a site the recipient belongs to (another organization's, F75).
+const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+function unsubscribeLink(row, profile, releaseRoot) {
+    const serverBase = emailServerId =>
+        emailServerId ? text(one("moqui.basic.email.EmailServer", {emailServerId})?.webBaseUrl) : ""
+    let root = serverBase(profile?.emailServerId)
+    if (!root) {
+        const template = one("moqui.basic.email.EmailTemplate", {emailTemplateId: TEMPLATE_KEY})
+        root = template?.webHostName ? "https://" + text(template.webHostName) : serverBase(template?.emailServerId)
+    }
+    if (!root) root = text(releaseRoot)
+    const siteId = profile?.siteId && publicApps().mount(profile.siteId, "account") ? profile.siteId : null
+    return {siteId, baseUrl: root.replace(/\/+$/, "") || null, ready: !!siteId || !!root}
+}
 
 // ===== the send of the scope, the control =====
 function dispatchScope() {
@@ -248,6 +267,21 @@ function releaseSend(p) {
                     (reserved.reasonCode === "LIST_USED" ? "used already" : "held by another send")
             )
     }
+    // each message's unsubscribe link needs an address of its own: a site that mounts Account or a configured root (P9 review)
+    let root = ""
+    try {
+        root = ec.web ? String(ec.web.getWebappRootUrl(true, null) || "") : ""
+    } catch (error) {
+        root = ""
+    }
+    const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
+    if (!unsubscribeLink(row, profile, root).ready)
+        denied(
+            "NOT_READY",
+            "Send " +
+                row.campaignSendId +
+                " cannot be released: its unsubscribe link has no address (give the sending profile a site with Account, or its relay a web base URL)"
+        )
     // the send's communication event: the approved subject and body, which each recipient's row and token name (F8)
     const prepared = sends().preparedContent(row)
     const communicationEventId = call("create#mantle.party.communication.CommunicationEvent", {
@@ -262,12 +296,6 @@ function releaseSend(p) {
         entryDate: ec.user.nowTimestamp,
         datetimeStarted: ec.user.nowTimestamp
     }).communicationEventId
-    let root = ""
-    try {
-        root = ec.web ? String(ec.web.getWebappRootUrl(true, null) || "") : ""
-    } catch (error) {
-        root = ""
-    }
     const later = row.scheduledDate != null && ms(row.scheduledDate) > nowMs()
     const statusId = later ? "CsScheduled" : "CsSending"
     call("update#" + SEND, {
@@ -417,6 +445,11 @@ function dispatchSend(p) {
         const ids = Array.from(claim.campaignRecipientIdList || [])
         if (!ids.length) break
         const verdicts = checkPage(campaignSendId, ids)
+        // a page that could not be checked waits for its lease to end and a later run (P9 review)
+        if (!verdicts) {
+            totals.stopped = true
+            break
+        }
         const created = []
         for (const campaignRecipientId of ids) {
             try {
@@ -510,11 +543,47 @@ function claimPage(p) {
     call("update#" + SEND, {campaignSendId: row.campaignSendId, lastDispatchDate: now, dispatchNote: null})
     return {claimKey, campaignRecipientIdList: waiting.map(recipient => recipient.campaignRecipientId)}
 }
+// The addresses (keys) a withdrawal blocks for a page: a recipient's own, or another person's who holds one of the page's addresses
+// now (an email by its text in any case, or the same contact mech), classified for the topic as the recipients are (P5's rule:
+// anyone's withdrawal at an address blocks it for everyone there; settle's, over the people at the address rather than the selection).
+function sharedWithdrawals(row, people, classifyOf) {
+    const withdrawn = new Set(people.filter(person => person.withdrew && person.key).map(person => person.key))
+    const keys = new Map()
+    for (const person of people) if (person.key && !person.withdrew) keys.set(person.key, person.contactMechId)
+    if (!keys.size) return withdrawn
+    const sms = row.channelEnumId === "MdcSms"
+    const own = new Set(people.map(person => person.partyId))
+    const factory = ec.entity.conditionFactory
+    const others = new Set()
+    const entries = Array.from(keys.entries())
+    for (let start = 0; start < entries.length; start += 200) {
+        const batch = entries.slice(start, start + 200)
+        const byAddress = sms ? [] : batch.map(([key]) => factory.makeCondition("infoString", "equals", key).ignoreCase())
+        const byMech = batch.map(([, contactMechId]) => contactMechId).filter(Boolean)
+        if (byMech.length) byAddress.push(factory.makeCondition("contactMechId", "in", byMech))
+        if (!byAddress.length) continue
+        for (const info of Array.from(
+            find("mantle.party.contact.PartyContactMechInfo")
+                .condition("contactMechTypeEnumId", sms ? "CmtTelecomNumber" : "CmtEmailAddress")
+                .condition(factory.makeCondition(byAddress, "or"))
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .selectField("partyId")
+                .list()
+        ))
+            if (!own.has(info.partyId)) others.add(info.partyId)
+    }
+    if (others.size)
+        for (const person of classifyOf(Array.from(others)).people)
+            if (person.withdrew && person.key && keys.has(person.key)) withdrawn.add(person.key)
+    return withdrawn
+}
 // The page checked together, just before its hand-offs: each recipient's verdict {eligible, reasonCode, address}. The topic's
 // membership, consent, suppression and solicitation by MarketingEligibility.js's rule as of now (disabled and merged parties not
 // available; whom the preparer could see was settled at preparation), the address the one prepared (DESTINATION_CHANGED), and the
 // policy's frequency cap (FREQUENCY_CAP: the organization's promotional deliveries to the person in its days). A new segment match is
-// never added: only the prepared recipients are read.
+// never added: only the prepared recipients are read. A withdrawal by another person who holds the address now (P5's
+// DESTINATION_WITHDRAWN, settled at preparation over the selection) is checked again over everyone at it, the stricter way (P9 review).
+// null when the page could not be checked: nothing is skipped, its lease ends and a later run checks it again.
 function checkPage(campaignSendId, ids) {
     const row = one(SEND, {campaignSendId})
     const recipients = Array.from(find(RECIPIENT).condition("campaignRecipientId", "in", ids).list())
@@ -524,24 +593,28 @@ function checkPage(campaignSendId, ids) {
         for (const recipient of recipients) verdicts[recipient.campaignRecipientId] = {reasonCode: "NOT_SUBSCRIBED"}
         return verdicts
     }
-    let classified
+    let classified, withdrawnKeys
     try {
-        classified = eligibility.classifyPeople({
-            organizationPartyId: row.organizationPartyId,
-            list: topic,
-            purposeEnumId: row.purposeEnumId,
-            channelEnumId: row.channelEnumId,
-            partyIds: recipients.map(recipient => recipient.partyId),
-            availableOf: partyIds => {
-                const found = new Map()
-                for (const party of Array.from(find("mantle.party.Party").condition("partyId", "in", partyIds).list()))
-                    if (party.disabled !== "Y" && !party.mergedToPartyId) found.set(party.partyId, party)
-                return found
-            }
-        })
+        const classifyOf = partyIds =>
+            eligibility.classifyPeople({
+                organizationPartyId: row.organizationPartyId,
+                list: topic,
+                purposeEnumId: row.purposeEnumId,
+                channelEnumId: row.channelEnumId,
+                partyIds,
+                availableOf: partyIds => {
+                    const found = new Map()
+                    for (const party of Array.from(find("mantle.party.Party").condition("partyId", "in", partyIds).list()))
+                        if (party.disabled !== "Y" && !party.mergedToPartyId) found.set(party.partyId, party)
+                    return found
+                }
+            })
+        classified = classifyOf(recipients.map(recipient => recipient.partyId))
+        withdrawnKeys = sharedWithdrawals(row, classified.people, classifyOf)
     } catch (error) {
+        // nothing is skipped on an error: the page's lease ends and a later run checks it again
         ec.logger.error("Send " + campaignSendId + ": a page could not be checked: " + String(error.message).split("\n")[0])
-        return verdicts
+        return null
     }
     const people = new Map(classified.people.map(person => [person.partyId, person]))
     const policy = approvals.policyOf(row.organizationPartyId)
@@ -572,6 +645,8 @@ function checkPage(campaignSendId, ids) {
         // the address chosen now is not the one approved: skipped for review, never sent to a substitute (design §5)
         else if (person.contactMechId !== recipient.contactMechId || person.key !== recipient.destinationKey)
             verdict = {reasonCode: "DESTINATION_CHANGED"}
+        // another person at the address withdrew (P5's rule, settled at preparation, checked again: P9 review)
+        else if (withdrawnKeys.has(person.key)) verdict = {reasonCode: "DESTINATION_WITHDRAWN"}
         else if (person.bucket !== "eligible" && person.bucket !== "duplicate") verdict = {reasonCode: person.reasonCode}
         else if (capped.has(recipient.partyId) && capped.get(recipient.partyId) >= Number(policy.frequencyCapCount))
             verdict = {reasonCode: "FREQUENCY_CAP"}
@@ -977,12 +1052,13 @@ function retryRecipients(p) {
         const delivery = deliveries.get(recipient.messageDeliveryId)
         return delivery && lastOutcome(delivery) === "retryable"
     })
-    const verdicts = candidates.length
-        ? checkPage(
-              row.campaignSendId,
-              candidates.map(recipient => recipient.campaignRecipientId)
-          )
-        : {}
+    const verdicts =
+        (candidates.length
+            ? checkPage(
+                  row.campaignSendId,
+                  candidates.map(recipient => recipient.campaignRecipientId)
+              )
+            : {}) || {}
     const results = []
     const requeued = []
     for (const recipient of candidates) {
@@ -991,7 +1067,7 @@ function retryRecipients(p) {
             results.push({
                 campaignRecipientId: recipient.campaignRecipientId,
                 retried: false,
-                reasonText: reasonText(verdict.reasonCode)
+                reasonText: verdict.reasonCode ? reasonText(verdict.reasonCode) : "Could not be checked"
             })
             continue
         }
@@ -1126,13 +1202,16 @@ function buildDelivery(p) {
     const s = sends()
     const rendered = s.render(s.preparedContent(row), s.recipientValues(recipient.partyId))
     const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
+    const where = unsubscribeLink(row, profile, row.unsubscribeBaseUrl)
+    if (!where.ready) return {suppress: "The unsubscribe link has no address"}
     const link = call("mantle.party.ConsentServices.create#UnsubscribeToken", {
         contactListId: row.contactListId,
         partyId: recipient.partyId,
         contactMechId: recipient.contactMechId,
         communicationEventId: row.communicationEventId || null,
         purposeEnumId: row.purposeEnumId || null,
-        ...(profile?.siteId ? {siteId: profile.siteId} : row.unsubscribeBaseUrl ? {baseUrl: row.unsubscribeBaseUrl} : {})
+        siteId: where.siteId,
+        baseUrl: where.baseUrl
     })
     const url = link.unsubscribeUrl
     const topicName = one(LIST, {contactListId: row.contactListId})?.contactListName || "this list"
