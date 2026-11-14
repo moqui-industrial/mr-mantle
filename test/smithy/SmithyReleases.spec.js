@@ -113,6 +113,7 @@ feature("a Maintainer makes a tag's release; a draft is the Maintainer's; publis
         !read.release.notesHtml.includes("<script")
         read.release.assetList.map(asset => asset.name + ":" + asset.sizeBytes + ":" + asset.sha256).join() ==
             "dist.tar.gz:" + ARTIFACT_TEXT.length + ":" + ids.sha256
+        read.release.assetList[0].path != null
         read.archiveList.map(archive => archive.path).join() ==
             "/code/sstgroup/site/-/archive/v1.2.0.zip,/code/sstgroup/site/-/archive/v1.2.0.tar.gz"
         read.component.name == "sst-site"
@@ -150,20 +151,97 @@ feature("an asset downloads for who views the release, and is Not Found to a str
             open,
             closed,
             maintainer,
-            copied: lib.privileged(() => ec.resource.digest(asset.contentLocation, "sha256"))
+            artifact: lib.row("moqui.resource.GitRunArtifact", {artifactId: "SST_ARTIFACT"})
         }
     },
-    then({asset, image, taken, open, closed, maintainer, copied}) {
-        // the row keeps the file's place, never a blob
-        asset.contentLocation.includes("/smithy/" + lib.SITE7 + "/release-assets/")
+    then({asset, image, taken, open, closed, maintainer, artifact}) {
+        // the asset names the run's artifact, not a copy, and the artifact is kept past its expiry while it does
+        asset.contentLocation == null
+        asset.artifactId == "SST_ARTIFACT"
         asset.pipelineRunId == "SST_RUN"
-        // the file was copied whole
-        copied == ids.sha256
+        asset.sha256 == ids.sha256
+        artifact.keep == "Y"
         image.assetId != null
         taken.reason == "nameTaken"
         open.file.filename == "dist.tar.gz"
         open.sha256 == ids.sha256
         closed.kind == "NotFound"
         maintainer.file.filename == "dist.tar.gz"
+    }
+})
+
+feature("notes keep the site's rules, an artifact of another commit is not a release's, and a private repository's release is not announced to a wider category", {
+    when() {
+        const revision = () => op("SST_MAINT", "getRelease", {tag: "v1.2.0"}).release.revision
+        lib.make("mantle.forum.ForumRule", {
+            ruleId: "SST_CENSOR",
+            siteId: lib.SITE7,
+            ruleType: "word",
+            pattern: "frobnicate",
+            action: "censor",
+            enabled: "Y",
+            priority: 1
+        })
+        let censored
+        try {
+            op("SST_MAINT", "storeRelease", {tag: "v1.2.0", notes: "We frobnicate less now.", expectedRevision: revision()})
+            censored = op(null, "getRelease", {tag: "v1.2.0"}).release.notesHtml
+        } finally {
+            lib.set("mantle.forum.ForumRule", {ruleId: "SST_CENSOR"}, {enabled: "N"})
+        }
+        // a successful run of another commit, with an artifact
+        const at = ec.user.nowTimestamp
+        lib.make("moqui.resource.GitPipelineRun", {
+            pipelineRunId: "SST_RUN_OLD",
+            repositoryId: ids.repositoryId,
+            runNum: 2,
+            pipelineName: "release",
+            event: "tag",
+            refName: "refs/tags/v1.2.0",
+            commitId: "c".repeat(40),
+            trusted: "Y",
+            statusId: "success",
+            createdDate: at,
+            finishedDate: at
+        })
+        lib.make("moqui.resource.GitJobRun", {
+            jobRunId: "SST_JOB_OLD",
+            pipelineRunId: "SST_RUN_OLD",
+            repositoryId: ids.repositoryId,
+            jobName: "build",
+            attempt: 1,
+            statusId: "success"
+        })
+        lib.make("moqui.resource.GitRunArtifact", {
+            artifactId: "SST_ARTIFACT_OLD",
+            jobRunId: "SST_JOB_OLD",
+            pipelineRunId: "SST_RUN_OLD",
+            repositoryId: ids.repositoryId,
+            artifactKind: "artifact",
+            name: "old",
+            blobId: ids.sha256,
+            sizeBytes: ARTIFACT_TEXT.length,
+            sha256: ids.sha256,
+            createdDate: at
+        })
+        const otherCommit = op("SST_MAINT", "addReleaseAsset", {tag: "v1.2.0", artifactId: "SST_ARTIFACT_OLD", operationId: "sst-asset-old"})
+        // the group's news is a public category; the repository is private
+        lib.set("mantle.smithy.SmithyGroup", {groupId: ids.groupId}, {newsContactListId: ids.newsId})
+        lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {visibilityEnumId: "SmvPrivate"})
+        let announced
+        try {
+            announced = op("SST_MAINT", "storeRelease", {tag: "v1.2.0", announce: true, expectedRevision: revision()})
+        } finally {
+            lib.set("mantle.smithy.SmithyRepository", {repositoryId: ids.repositoryId}, {visibilityEnumId: "SmvPublic"})
+            lib.set("mantle.smithy.SmithyGroup", {groupId: ids.groupId}, {newsContactListId: null})
+        }
+        return {censored, otherCommit, announced}
+    },
+    then({censored, otherCommit, announced}) {
+        censored.includes("less now")
+        !censored.includes("frobnicate")
+        otherCommit.kind == "Unprocessable"
+        announced.reason == "notAvailable"
+        announced.message.includes("more people")
     }
 })

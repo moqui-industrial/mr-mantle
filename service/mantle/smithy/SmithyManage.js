@@ -233,7 +233,8 @@ kit => {
         "groupRepositoryBytes",
         "groupLfsBytes",
         "groupRunnerMinutes",
-        "maxEditBytes"
+        "maxEditBytes",
+        "outsideRunMaxJobs"
     ]
     /* Whether the site's policy lets an account make something: its owners always, anyone with a confirmed address by
        the verified policy. request is a group's: the request is the making. */

@@ -279,7 +279,8 @@ function envelope(error) {
 /* One operation. p: {operation, siteId, input, delegation (the bearer credential), clientId, clientSecret,
    clientVerified (the transport authenticated the client: the gRPC listener's secret or the edge link), visitorAddress
    (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token)}.
-   Answers {result} (with download: {location, contentType, filename, disposition} for a file) or {error}. */
+   Answers {result} (with download: {location, contentType, filename, disposition} for a file, or sent: true when the
+   operation sent the file as the response itself) or {error}. */
 function handle(p) {
     // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
     // limit key, and the client the transport authenticated (never a flag in a service's input)
@@ -365,7 +366,9 @@ function run(p) {
     if (DOWNLOADS.includes(operation)) {
         const file = result.attachment || result.export || result.file
         // the file's place stays here; the transport streams it
-        const { location, range, ...shown } = result
+        const { location, range, sent, ...shown } = result
+        // Smithy DG5: a run's artifact the engine sent as this request's response (send#RunArtifact): nothing to stream
+        if (sent === true) return { result: shown, sent: true }
         return {
             result: shown,
             download: {

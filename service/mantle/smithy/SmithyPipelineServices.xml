@@ -8,7 +8,7 @@
         merge request's to all but its author and its moderators. The two hooks at the end are the engine's (MoquiConf.xml
         git-ci run-check-service and run-url-service), not operations. -->
     <service verb="find" noun="Runs" authenticate="anonymous-all" allow-remote="false">
-        <description>The runs of a repository the caller views, newest first, paged (limit, cursor), with filters refName (a branch name or a full ref), event, state (waiting, queued, running, success, failure, error, cancelled), mergeRequestNum, commitId, pipelineName: each run's projection with its jobCount and failedTestCount and its page path. A run of a merge request is listed for who reads that merge request (a held one's for its author and its moderators only). Also pipelineList (the pipelines of the default branch's ci.xml that run by hand), pipelinesEnabled and canRun. Not Found for a repository the caller may not view, and for a merge request it may not read.</description>
+        <description>The runs of a repository the caller views, newest first, paged (limit, cursor), with filters refName (a branch name or a full ref), event, state (waiting, queued, running, success, failure, error, cancelled), mergeRequestNum, commitId, pipelineName: each run's projection with its jobCount and failedTestCount and its page path. A run of a merge request is listed for who reads that merge request (a held one's for its author and its moderators only). Also pipelineList (the pipelines of the default branch that run by hand, as the engine reads them: get#PipelineDefinitions), pipelinesEnabled and canRun. A page scans at most ten of the engine's batches of 100 runs; past them it ends with a nextCursor that goes on. Not Found for a repository the caller may not view, and for a merge request it may not read.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findPipelineRuns", input)</script></actions>
@@ -26,13 +26,13 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getJobRun", input)</script></actions>
     </service>
     <service verb="get" noun="JobLog" authenticate="anonymous-all" allow-remote="false">
-        <description>A piece of a job's log: while it runs the chunks after afterChunkSeq (limit, at most 500), once it has ended the stored log from offset as text; a page passes back nextChunkSeq and nextOffset each time. A signed-in reader is told of new lines on the notification topic GitCiJobLog (sub-topic the job run's id, named in notification) for a few minutes after each read (watch false: not); pollSeconds is how often a page polls besides. Not Found as for the job.</description>
+        <description>A piece of a job's log: while it runs the chunks after afterChunkSeq (limit, at most 500, of which at most 100 and 256 KiB are answered: nextChunkSeq goes on from the last), once it has ended the stored log from offset as text; a page passes back nextChunkSeq and nextOffset each time. A signed-in reader is told of new lines on the notification topic GitCiJobLog (sub-topic the job run's id, named in notification) for a few minutes after each read (watch false: not); pollSeconds is how often a page polls besides. Not Found as for the job, and in a repository whose pipelines are off.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getJobLog", input)</script></actions>
     </service>
     <service verb="download" noun="Artifact" authenticate="anonymous-all" allow-remote="false">
-        <description>An artifact (a tar.gz) or a JUnit report of a run as a download (the facade streams file and location), for a caller who reads its run; a cache is Not Found, as is another repository's upload. One over 256 MiB is refused here (notAvailable).</description>
+        <description>An artifact (a tar.gz) or a JUnit report of a run as a download, for a caller who reads its run, in a repository whose pipelines are on: the engine sends it as this request's response (send#RunArtifact, streamed with Range, ETag and If-Range), and the result says so (sent true, file: filename, mimeType, size; sha256), so the transport writes nothing more. Who may read it is decided from the rows alone first; a cache is Not Found, as is another repository's upload.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("downloadArtifact", input)</script></actions>
@@ -62,7 +62,7 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("retryJobRun", input)</script></actions>
     </service>
     <service verb="approve" noun="Run" authenticate="anonymous-all" allow-remote="false">
-        <description>Approve a run that waits (an outside run: a fork's or a pushed-for-review merge request, an account below Developer, a first contribution), by a Maintainer: it starts, still untrusted (no secrets, no cache writes, an outside pool). A held merge request's run is approved only by a Maintainer who reads it. Conflict when it does not wait.</description>
+        <description>Approve a run that waits (an outside run: a fork's or a pushed-for-review merge request, an account below Developer, a head of an account with no merge request merged here), by a Maintainer, in a repository whose pipelines are on (notAvailable) and with the owner's minutes covering its jobs (quotaExceeded): it starts, still untrusted (no secrets, no cache writes, an outside pool). A held merge request's run is approved only by a Maintainer who reads it. Conflict when it does not wait.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("approvePipelineRun", input)</script></actions>
@@ -92,7 +92,7 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findCiEnvironments", input)</script></actions>
     </service>
     <service verb="store" noun="Environment" authenticate="anonymous-all" allow-remote="false">
-        <description>Make an environment (name) or change one (environmentId), by a Maintainer: allowedRefs (branch patterns whose runs get its secrets besides a protected ref's) and approvalRequired (its secrets only to an approved run); the target, its token and the required pipeline are DG10's. nameTaken for a name the repository has. A new one takes operationId.</description>
+        <description>Make an environment (name) or change one (environmentId), by a Maintainer: allowedRefs (branch patterns whose runs get its secrets besides a protected ref's) and approvalRequired (its secrets only to an approved run); the target, its token and the required pipeline are DG10's. allowedRefs names branches or tags: a pattern of only wildcards (*, refs/heads/*) is refused. nameTaken for a name the repository has. A new one takes operationId.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeCiEnvironment", input)</script></actions>
@@ -104,13 +104,13 @@
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("deleteCiEnvironment", input)</script></actions>
     </service>
     <service verb="get" noun="Settings" authenticate="anonymous-all" allow-remote="false">
-        <description>A repository's (repositoryId) or a group's (groupId) pipeline settings, for its Maintainer: the runner pools an operator allowed its owner (the shared pools and the top-level group's own, or the account's for a personal repository), the pools chosen for trusted (runnerPoolId) and outside runs (outsideRunnerPoolId) and when an outside run waits for approval (outsideRunApproval: first, always, never), each inherited from the nearest group that sets it (inheritedFromPath), this month's runner minutes and the limit, the manual pipelines of a repository's default branch, canStore (the group's Owner) and the group's revision.</description>
+        <description>A repository's (repositoryId) or a group's (groupId) pipeline settings, for its Maintainer: the runner pools an operator allowed its owner (the shared pools and the top-level group's own, or the account's for a personal repository), the pools chosen for trusted (runnerPoolId) and outside runs (outsideRunnerPoolId) and when an outside run waits for approval (outsideRunApproval: first, always, never), each inherited from the nearest group that sets it (inheritedFromPath), the group's own values apart (own: null where it inherits) and where each value in effect comes from (inheritedFrom: a group path, site, or null for its own), canSetNever (an Owner of the top-level group), this month's runner minutes and the limit, the manual pipelines of a repository's default branch, canStore (the group's Owner) and the group's revision.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getPipelineSettings", input)</script></actions>
     </service>
     <service verb="store" noun="Settings" authenticate="anonymous-all" allow-remote="false">
-        <description>Store a group's pipeline settings, by its Owner: runnerPoolId and outsideRunnerPoolId (each one of the pools an operator allowed, of the right trust; Unprocessable otherwise; empty inherits) and outsideRunApproval (first, always, never; empty inherits). staleRevision.</description>
+        <description>Store a group's pipeline settings, by its Owner: runnerPoolId and outsideRunnerPoolId (each one of the pools an operator allowed, of the right trust; Unprocessable otherwise; empty inherits) and outsideRunApproval (first, always, never; never only by an Owner of the top-level group, accessDenied otherwise). A field sent as null or empty is cleared and inherited again; one left out stays. staleRevision.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storePipelineSettings", input)</script></actions>
@@ -120,19 +120,27 @@
     <service verb="check" noun="Run" authenticate="anonymous-all" allow-remote="false">
         <implements service="org.moqui.git.GitCiServices.check#PipelineRun"/>
         <description>Smithy's run check (git-ci run-check-service), asked by the engine before a run is queued, for a
-            repository Smithy has (none else: the engine's own rule). Refused: a site that no longer mounts Smithy; a
-            hidden repository (by itself, a group above it or the repository it was forked from); pipelines off; a
-            personal repository whose account has no runner minutes (policyRefused: an operator gives them by setQuota,
-            the site's default being 0); an owner whose minutes this month are used up (quotaExceeded; the owner is the
-            top-level group, else the account, and its usage is the engine's); a run an account asks for by hand, or an
-            outside run, past the day's limit of its trust level (limitReached). Untrusted: a fork's, a pushed-for-review
-            or a detached merge request's run, and a run caused by, or of a merge request written by, an account below
-            Developer. An untrusted run waits for a Maintainer's approval by the site's or the nearest group's
-            outsideRunApproval: first (the default; not when its author has a merged merge request in the repository,
-            or a run of the same merge request was approved), always, or never; a Maintainer's own request does not
-            wait. ownerId is the owner's key (smithy:group:[groupId], smithy:account:[siteId]:[partyId]), so the
-            engine's usage and pools are per owner; runnerPoolId the pool the group's pipeline settings name for the
-            run's trust while an operator allows it. What cannot be decided (a read that fails) is refused.</description>
+            repository Smithy has (none else: the engine's own rule). Skipped (no run, no status): pipelines off.
+            Refused: a site that no longer mounts Smithy; a hidden repository (by itself, a group above it or the
+            repository it was forked from); an archived repository; a personal repository whose account is suspended on
+            the site; an outside run of more jobs than the site's outsideRunMaxJobs (10; policyRefused); a personal
+            repository whose account has no runner minutes (policyRefused: an operator gives them by setQuota, the
+            site's default being 0); an owner whose minutes this month, with what its queued and running runs hold back
+            (each job not ended its timeout, at most 60 minutes a run), do not cover the run's own share
+            (quotaExceeded; the owner is the top-level group, else the account, and its usage is the engine's); a run
+            an account asks for by hand, or an outside run, past the day's limit of its trust level (limitReached).
+            Untrusted: a fork's, a pushed-for-review or a detached merge request's run, and a run caused by, or of a
+            merge request written or whose head was pushed by, an account below Developer. An untrusted run waits for
+            a Maintainer's approval by the site's or the nearest group's outsideRunApproval: first (the default: each
+            new head waits, until every account whose code runs, the merge request's author and its head's pusher,
+            has had a merge request merged in the repository by another account through a merge that changed the
+            target; a head a Maintainer approved does not wait again, SmithyRunApproval), always, or never; a
+            Maintainer's run by hand (event manual) does not wait, and no other run of a Maintainer's (a re-run, a
+            reopening) approves anything. ownerId is the owner's key (smithy:group:[groupId],
+            smithy:account:[siteId]:[partyId]), so the engine's usage and pools are per owner; runnerPoolId the pool
+            the group's pipeline settings name for the run's trust while an operator allows it. The ask before the
+            error run of a ci.xml that is not valid (jobCount 0) is allowed with no minutes or day's runs counted. What
+            cannot be decided (a read that fails) is refused.</description>
         <actions><script><![CDATA[
             const answer = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkRun({repositoryId, pipelineName,
                     event, refName, commitId, mergeRequestId, sourceRepositoryId, pushedForReview, triggeredByUserId, trusted, jobCount})

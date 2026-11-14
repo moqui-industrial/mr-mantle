@@ -15,7 +15,10 @@
         opened event has passed its text through the post gate (SmithyReviewServices.handle#MergeRequestEvent); and the
         answer to a push names the merge request's page under a root Smithy mount (a path: the host is the server's
         public URL) -->
+    <!-- A hidden repository (or one of a site without Smithy) sends no webhook and pushes to no mirror
+        (SmithyGitServices.check#Outbound) -->
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
+            outbound-check-service="mantle.smithy.SmithyGitServices.check#Outbound"
             reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
             merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
     <!-- Smithy decides whether a pipeline run may start, waits or is refused, its trust, owner and pool (design-smithy §10,
@@ -34,6 +37,9 @@
         <!-- Smithy DG7 (SmithySite.js): a docs or landing page rendered, by its blob id, and the component.xml of a commit,
             by repository and commit id; bounded, as each change leaves the earlier keys behind -->
         <cache name="smithy.docs.rendered" type="local" max-elements="2000" expire-time-live="86400"/>
+        <!-- the docs files of a repository at a commit (repositoryId|commitId|root), a list of at most 500 entries; a
+            rendering over 64 KB is not kept, so the renders hold at most about 128 MB -->
+        <cache name="smithy.docs.files" type="local" max-elements="1000" expire-time-live="86400"/>
         <cache name="smithy.component" type="local" max-elements="5000" expire-time-live="86400"/>
     </cache-list>
 </moqui-conf>

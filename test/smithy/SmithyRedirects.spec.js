@@ -29,17 +29,27 @@ feature("a site owner keeps the table; a target off the site is refused", {
                 {oldPath: "https://forum.old.test/t/hello/12", targetPath: "https://" + lib.SITE7_HOST + "/forum"},
                 "6"
             ),
+            // what the site answers before a redirect is looked up is not redirected: a live repository's path, the
+            // server's own paths; a site's /.well-known/security.txt may be
+            repository: store("SST_OWNER", {oldPath: "/code/sstgroup/site/-/docs/old", targetPath: "/forum"}, "7"),
+            runner: store("SST_OWNER", {oldPath: "/ci/runner/old", targetPath: "/forum"}, "8"),
+            toServer: store("SST_OWNER", {oldPath: "/m/old-git", targetPath: "/git/sstgroup/site.git"}, "9"),
+            securityTxt: store("SST_OWNER", {oldPath: "/.well-known/security.txt", targetPath: "/forum"}, "10"),
             listed: op("SST_OWNER", "findRedirects", {query: "docs"}),
             stranger: op("SST_STRANGER", "findRedirects", {}).reason
         }
     },
-    then({byMaintainer, offSite, relative, stored, taken, ownHost, listed, stranger}) {
+    then({byMaintainer, offSite, relative, stored, taken, ownHost, repository, runner, toServer, securityTxt, listed, stranger}) {
         byMaintainer.reason == "accessDenied"
         offSite.reason == "targetInvalid"
         relative.reason == "targetInvalid"
         stored.redirectId != null
         taken.reason == "nameTaken"
         ownHost.redirectId != null
+        repository.reason == "nameTaken"
+        runner.reason == "nameInvalid"
+        toServer.reason == "targetInvalid"
+        securityTxt.redirectId != null
         listed.redirectList.map(row => row.oldPath + ">" + row.targetPath + ":" + row.source).join() ==
             "/m/docs/old>/code/sstgroup/site/-/docs:manual"
         stranger == "accessDenied"

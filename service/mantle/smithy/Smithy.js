@@ -685,12 +685,14 @@ methods.getBlame = p => {
 /* A tree at a ref as a zip or tar.gz: the framework writes the file and the transport streams it (PassAuthority.js
    DOWNLOADS). The framework has no cap by client, so until Smithy keeps one an archive is for a signed-in account. */
 methods.downloadArchive = p => {
-    core.repository(p.repositoryId, p.siteId)
+    const r = core.repository(p.repositoryId, p.siteId)
     if (!["zip", "tar.gz"].includes(p.format)) invalid("format must be zip or tar.gz")
     const ref = core.splitRefPath(p.repositoryId, p.refPath)
     if (ref.path) invalid("An archive is of a branch, a tag or a commit, with no path after it")
     if (ref.empty) missing()
-    requireUser()
+    // a public repository's archive is anyone's (design-smithy §15.2: need any; the host caps anonymous archives per
+    // client), so addons.xml's current and release locations work for ./moq component-get; any other needs an account
+    if (r.visibility !== 1 || r.hidden) requireUser()
     const made = gitOrRefuse("get#GitArchive", {repositoryId: p.repositoryId, revision: ref.commitId, format: p.format})
     if (!made.archiveLocation) missing()
     return {
@@ -1187,6 +1189,7 @@ const NUMBERS = [
     "groupLfsBytes",
     "groupRunnerMinutes",
     "maxEditBytes",
+    "outsideRunMaxJobs",
     "pinnedSequence",
     "requiredApprovals",
     "maxRepositories",
@@ -1350,6 +1353,8 @@ function privileged(work) {
     // DG5: the engine's hooks (SmithyPipelineServices.xml, git-ci run-check-service and run-url-service)
     checkRun: p => privileged(() => core.withMemo(() => pipelines.checkRun(p || {}))),
     runUrl: p => privileged(() => core.withMemo(() => pipelines.runUrl(p || {}))),
+    // the git server's outbound check (SmithyGitServices.check#Outbound, git-server outbound-check-service)
+    checkOutbound: p => privileged(() => core.withMemo(() => pipelines.checkOutbound(p || {}))),
     // DG7: the component a default branch's move names (Smithy.gitecas.xml SmithyComponent), the redirect PASS's
     // resolver asks for before Not Found, and the card of a forum topic that announced a release
     readComponent: p => privileged(() => core.withMemo(() => siteModule.readComponent(p || {}))),

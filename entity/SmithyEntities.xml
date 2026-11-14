@@ -25,7 +25,9 @@
         <field name="repositoryKind" type="text-short"><description>The kind of a new repository, a GitRepository.repositoryKind: db when empty, or local</description></field>
         <field name="outsideRunApproval" type="text-short"><description>When an outside pipeline run (untrusted: a fork's or a
             pushed-for-review merge request, an account below Developer) waits for a Maintainer's approval: first (the
-            default: until its author has a merged merge request in the repository), always, or never. A group may set its own</description></field>
+            default: each new head waits until its author and pusher have had a merge request merged in the repository
+            by another account), always, or never (only a top-level group's Owner sets never for a group). A group may set its own</description></field>
+        <field name="outsideRunMaxJobs" type="number-integer"><description>The most jobs an outside run may have; 10 when empty</description></field>
         <field name="revision" type="number-integer"/>
         <relationship type="one" related="mantle.public.PublicSite"/>
         <relationship type="one-nofk" title="Home" related="mantle.smithy.SmithyGroup">
@@ -391,5 +393,20 @@
         <relationship type="one-nofk" title="SmithyRedirectSource" related="moqui.basic.Enumeration">
             <key-map field-name="sourceEnumId" related="enumId"/></relationship>
         <index name="SMITHY_REDIRECT_OLD"><index-field name="siteId"/><index-field name="oldPath"/></index>
+    </entity>
+    <entity entity-name="SmithyRunApproval" package="mantle.smithy">
+        <description>A Maintainer's approval of an outside pipeline run of a merge request (design-smithy §10, DG5): the
+            head it was given for, as its pusher brought it. With outsideRunApproval first, later runs of that head run
+            without waiting; a new head waits again until its author has had a merge request merged here by another
+            account (SmithyPipelines.js).</description>
+        <field name="mergeRequestId" type="id" is-pk="true"/>
+        <field name="commitId" type="text-short" is-pk="true"/>
+        <field name="pusherUserId" type="id" is-pk="true"><description>The account of the first push that brought the
+            head (moqui.resource.GitCommitPush), _NA_ when none is recorded</description></field>
+        <field name="repositoryId" type="id"/>
+        <field name="approvedByUserId" type="id"/>
+        <field name="pipelineRunId" type="id"/>
+        <field name="approvedDate" type="date-time"/>
+        <relationship type="one-nofk" related="moqui.resource.GitMergeRequest"/>
     </entity>
 </entities>

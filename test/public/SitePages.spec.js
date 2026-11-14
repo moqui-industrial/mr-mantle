@@ -465,6 +465,9 @@ feature(
             const fromReserved = redirect("/static/x", "SdtPath", "/pages/returns")
             const offSite = redirect("/partner", "SdtExternal", "https://partner.example.com/")
             const intoAccount = redirect("/account/old", "SdtPath", "/pages/returns")
+            // ci and .well-known are the host's only in the sub-paths it uses: /ci/runner is, /.well-known/security.txt is not
+            const intoRunner = redirect("/ci/runner/jobs", "SdtPath", "/pages/returns")
+            const securityTxt = redirect("/.well-known/security.txt", "SdtPath", "/pages/returns")
             const first = redirect("/old-a", "SdtPath", "/old-b")
             const loop = redirect("/old-b", "SdtPath", "/old-a")
             const self = redirect("/old-c", "SdtPath", "/old-c")
@@ -486,6 +489,8 @@ feature(
                 fromReserved,
                 offSite,
                 intoAccount,
+                intoRunner,
+                securityTxt,
                 first,
                 loop,
                 self
@@ -507,6 +512,8 @@ feature(
             code(r.fromReserved) == "PATH_RESERVED"
             code(r.offSite) == "REDIRECT_OFF_SITE"
             code(r.intoAccount) == "PATH_RESERVED"
+            code(r.intoRunner) == "PATH_RESERVED"
+            r.securityTxt.error == ""
             r.first.error == ""
             code(r.loop) == "REDIRECT_LOOP"
             code(r.self) == "REDIRECT_LOOP"

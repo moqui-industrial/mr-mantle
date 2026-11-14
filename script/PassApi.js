@@ -122,6 +122,8 @@ function respond(response, answer) {
         response.write(JSON.stringify(body))
         return
     }
+    // Smithy DG5: the authority's operation wrote the response itself (a run's artifact, send#RunArtifact)
+    if (answer.sent) return
     if (answer.download && answer.download.size != null) {
         // Shop P6: a granted download, streamed in pieces with its byte range (206, or 416 outside the file)
         streamRanged(response, answer.download)

@@ -184,7 +184,8 @@ feature("a tree and a file are the repository's own, a README is rendered and cl
                 })
             ),
             archives: [
-                read("downloadArchive", {refPath: "main", format: "zip"}).kind,
+                // a public repository's archive is anyone's (addons.xml's current and release locations)
+                read("downloadArchive", {refPath: "main", format: "zip"}).kind || "file",
                 read("downloadArchive", {refPath: "main/src", format: "zip"}, "SMP_MEMBER").kind,
                 read("downloadArchive", {refPath: "main", format: "rar"}, "SMP_MEMBER").kind
             ],
@@ -221,8 +222,8 @@ feature("a tree and a file are the repository's own, a README is rendered and cl
         archive.result.location == null
         archive.download.location.includes("git-archive")
         archive.download.disposition == "attachment"
-        // for a signed-in account, of a whole tree, as a zip or a tar.gz
-        archives == ["AuthenticationRequired", "Unprocessable", "Unprocessable"]
+        // of a whole tree, as a zip or a tar.gz; anyone's for a public repository
+        archives == ["file", "Unprocessable", "Unprocessable"]
         secret.kind == "NotFound"
     }
 })

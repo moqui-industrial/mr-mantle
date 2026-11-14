@@ -253,7 +253,9 @@ kit => {
         const missingList = Array.from(out.missingList || [])
         if (view.required && view.state !== "signed") missingList.push("The contributor agreement is not signed")
         if (checks.ciFileChanged)
-            missingList.push("It changes ci.xml, whose jobs the required checks ran: a Maintainer merges it")
+            missingList.push(
+                "Its ci.xml is not the target branch's (or could not be compared), and the required ci/ checks ran the jobs it defines: a Maintainer merges it"
+            )
         const capable = capabilities(r, held, rules)
         if (checks.requiredRole && r.rank < RANK[checks.requiredRole]) capable.canMerge = false
         return {

@@ -25,9 +25,9 @@ feature("a docs page at a branch and at a tag: the page cleaned, its anchors, th
         page.title == "Getting started"
         page.path == "guide/intro.md"
         page.ref.kind == "branch"
-        page.html.includes('<h1 id="getting-started">')
+        page.html.includes('<h1 id="h-getting-started">')
         // a second heading of the same text has its own anchor
-        page.headingList.map(heading => heading.anchor).join() == "getting-started,getting-started-1"
+        page.headingList.map(heading => heading.anchor).join() == "h-getting-started,h-getting-started-1"
         !page.html.includes("<script")
         page.tocList.map(entry => entry.path + ":" + entry.depth).join() == "README.md:0,null:1,guide/intro.md:2"
         page.editPath == "/code/sstgroup/site/-/edit/main/docs/guide/intro.md"

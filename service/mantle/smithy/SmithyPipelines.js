@@ -9,15 +9,18 @@
  * - Moves are Smithy's roles: Developer to run, re-run, cancel (or the account that asked for the run) and retry;
  *   Maintainer to approve an outside run and to manage secrets and environments; a group's Owner for its pipeline
  *   settings.
- * - checkRun is the engine's run check (git-ci run-check-service): allow, wait or refuse, the trust, the owner the run's
- *   usage counts under (the top-level group, or the account of a personal repository) and the pool. It fails closed.
+ * - checkRun is the engine's run check (git-ci run-check-service): allow, wait, refuse or skip (pipelines off), the
+ *   trust, the owner the run's usage counts under (the top-level group, or the account of a personal repository) and
+ *   the pool. It fails closed.
  * - runUrl is the engine's run URL (git-ci run-url-service): the run's page on the site's canonical host.
+ * - checkOutbound is the git server's outbound check (git-server outbound-check-service): a hidden repository's, or one
+ *   of a site that no longer mounts Smithy, sends no webhook and pushes to no mirror.
  * Entity access is privileged here; every operation passes the evaluator first.
  */
 kit => {
     const {core, methods, flag, text, writer} = kit
     const {M, forum, RANK} = core
-    const {me, find, one, update, fail, missing, invalid, page, receipt, audit} = forum
+    const {me, find, one, create, update, fail, missing, invalid, page, receipt, audit} = forum
     const CI = "org.moqui.git.GitCiServices."
     const GIT = core.GIT
     const GMR = "moqui.resource.GitMergeRequest"
@@ -28,10 +31,17 @@ kit => {
     const archived = () => fail("Conflict", "repositoryArchived: This repository is archived")
     const given = value => value !== undefined && value !== null
     const number = value => (value == null || value === "" ? null : Number(value))
-    /* What the engine says of the largest download Smithy copies for the facade to stream (a framework need: a location
-       the facade streams a run's upload from, without a copy). */
-    const DOWNLOAD_LIMIT = 268435456
-    const DOWNLOAD_PIECE = 8388608
+    /* The minutes a run that has not ended holds back of its owner's month: each of its jobs that has not ended its
+       timeout (the engine's default-timeout-minutes when it names none), and a run at most RUN_RESERVE_MINUTES. A run
+       about to be queued holds as much for its jobCount. */
+    const JOB_MINUTES = 60
+    const RUN_RESERVE_MINUTES = 60
+    /* The engine's batches findPipelineRuns reads for one page of runs the caller may read, at most. */
+    const MAX_SCAN_BATCHES = 10
+    /* What one read of a job's log answers at most: chunks (each up to the engine's batch size), and their bytes, or the
+       bytes of an ended job's stored log. */
+    const LOG_CHUNK_LIMIT = 100
+    const LOG_MAX_BYTES = 262144
 
     /* A service of the engine after Smithy's own check: {out, problem}, the problem its first error line, nothing in the
        message facade after it. */
@@ -60,22 +70,6 @@ kit => {
         if (/ended|does not wait|still runs|running/i.test(problem)) fail("Conflict", problem.slice(0, 200))
         invalid(problem.slice(0, 200))
     }
-    /* A quiet read of the git host: its answer, or {} for one it has nothing for (a file the commit does not have). */
-    function quiet(name, parameters) {
-        ec.message.pushErrors()
-        try {
-            const out = ec.service
-                .sync()
-                .name(GIT + name)
-                .parameters(parameters)
-                .call()
-            return ec.message.hasError() ? {} : out || {}
-        } finally {
-            ec.message.clearErrors()
-            ec.message.popErrors()
-        }
-    }
-
     // ===== owners, minutes and pools (Dogfood §5.1, §8.4) =====
     /* The owner of a group's runs: its top-level group, which every repository below it counts under. */
     const groupKey = groupId => "smithy:group:" + groupId
@@ -123,26 +117,60 @@ kit => {
         const top = chain[chain.length - 1]
         return {kind: "group", ownerId: groupKey(top.groupId), label: top.groupPath, limit: groupMinutesLimit(top, s), chain}
     }
-    /* Whether an owner may start a run now: null, or the refusal's text (a code and its words; plain, as a status's
-       description is). A usage that cannot be read refuses. */
-    function quotaProblem(owner) {
+    /* The minutes a run of jobCount jobs holds back while it has not ended. */
+    const runNeed = jobCount => (jobCount > 0 ? Math.min(jobCount * JOB_MINUTES, RUN_RESERVE_MINUTES) : 0)
+    /* The minutes an owner's runs that have not ended (queued or running) hold back of its month; a run that waits for
+       approval holds none until it is approved. */
+    function reservedMinutes(ownerId) {
+        const runIds = Array.from(
+            find("moqui.resource.GitPipelineRun", {ownerId})
+                .condition("statusId", "in", ["queued", "running"])
+                .selectField("pipelineRunId")
+                .limit(500)
+                .list()
+        ).map(run => run.pipelineRunId)
+        if (!runIds.length) return 0
+        const byRun = new Map()
+        for (const job of find("moqui.resource.GitJobRun")
+            .condition("pipelineRunId", "in", runIds)
+            .condition("statusId", "in", ["waiting", "queued", "running"])
+            .selectField("pipelineRunId,superseded,timeoutMinutes")
+            .limit(5000)
+            .list()) {
+            if (job.superseded === "Y") continue
+            byRun.set(job.pipelineRunId, (byRun.get(job.pipelineRunId) || 0) + (Number(job.timeoutMinutes) || JOB_MINUTES))
+        }
+        let total = 0
+        for (const minutes of byRun.values()) total += Math.min(minutes, RUN_RESERVE_MINUTES)
+        return total
+    }
+    /* Whether an owner may start a run of jobCount jobs now: null, or the refusal's text (a code and its words; plain,
+       as a status's description is). What the month has used, with what the runs not ended hold back, must leave the
+       run's own share (runNeed). A usage that cannot be read refuses. */
+    function quotaProblem(owner, jobCount = 1) {
         if (!(owner.limit > 0))
             return owner.kind === "account"
                 ? "policyRefused: A personal repository runs pipelines only with runner minutes the site's operators gave its account"
                 : "quotaExceeded: The group " + owner.label + " has no runner minutes"
         const used = usageOf(owner.ownerId)
         if (!used) return "The runner minutes used could not be read now, so the run did not start; try again"
+        const of = " of " + owner.label + " for " + used.periodKey
         if (used.minutesUsed >= owner.limit)
+            return "quotaExceeded: The runner minutes" + of + " are used up (" + used.minutesUsed + " of " + owner.limit + ")"
+        const need = runNeed(jobCount)
+        if (!need) return null
+        const reserved = reservedMinutes(owner.ownerId)
+        const left = owner.limit - used.minutesUsed - reserved
+        if (left < need)
             return (
-                "quotaExceeded: The runner minutes of " +
-                owner.label +
-                " for " +
-                used.periodKey +
-                " are used up (" +
-                used.minutesUsed +
-                " of " +
-                owner.limit +
-                ")"
+                "quotaExceeded: The runner minutes left" +
+                of +
+                " (" +
+                Math.max(left, 0) +
+                ", with " +
+                reserved +
+                " held for runs that have not ended) do not cover this run's " +
+                need
             )
         return null
     }
@@ -179,30 +207,73 @@ kit => {
 
     // ===== the run check (git-ci run-check-service) =====
     const refuse = message => ({decision: "refuse", trusted: false, message})
-    /* Whether an account has had a merge request merged in a repository: its contributions are not its first. */
-    const contributed = (repositoryId, userId) =>
-        !!userId && find(GMR, {repositoryId, authorUserId: userId, statusId: "GmrMerged"}).count() > 0
-    /* Whether a Maintainer approved a run of this merge request before: the approval covers its later heads. */
-    const approvedBefore = mergeRequestId =>
-        !!mergeRequestId && find("moqui.resource.GitPipelineRun", {mergeRequestId, approvalState: "approved"}).count() > 0
+    const APPROVAL = M + "SmithyRunApproval"
+    /* Whether an account has had a merge request merged in a repository by another account, through merge#MergeRequest
+       (mergedByUserId) and so with a change (a merge commit or new commits): its contributions are no longer outside
+       ones. A merge request the git host marked merged because the target already held its head counts for nothing. */
+    function contributed(repositoryId, a) {
+        if (!a?.userId) return false
+        return Array.from(
+            find(GMR, {repositoryId, authorUserId: a.userId, statusId: "GmrMerged"})
+                .condition("mergedByUserId", "not-equals", a.userId)
+                .selectField("mergedByUserId,mergeCommitId")
+                .limit(20)
+                .list()
+        ).some(
+            mr =>
+                !!mr.mergedByUserId &&
+                !!mr.mergeCommitId &&
+                (!a.partyId || reviews().partyOfUser(mr.mergedByUserId) !== a.partyId)
+        )
+    }
+    /* Who brought a merge request's head commit: the account of the first push or write that reached it in its source
+       repository (a fork's), else in the target; null when none is recorded. */
+    function headPusher(mr, commitId) {
+        if (!commitId) return null
+        for (const repositoryId of [mr.sourceRepositoryId, mr.repositoryId]) {
+            if (!repositoryId) continue
+            const row = one("moqui.resource.GitCommitPush", {repositoryId, commitId})
+            if (row?.userId) return row.userId
+        }
+        return null
+    }
+    const pusherKey = userId => userId || "_NA_"
+    /* Whether a Maintainer approved a run of this merge request at this head, brought by this pusher: an approval
+       covers the head it was given for, until a new head comes. */
+    const approvedHead = (mr, commitId, pusherUserId) =>
+        !!mr && !!commitId && !!one(APPROVAL, {mergeRequestId: mr.mergeRequestId, commitId, pusherUserId: pusherKey(pusherUserId)})
+    /* Whether a personal repository's account is suspended on its site. */
+    const ownerSuspended = repo =>
+        !!repo.ownerPartyId && core.siteAccess(repo.siteId, core.actorOfParty(repo.ownerPartyId)).suspended
     /* The run check, in the engine's terms (GitCiServices.check#PipelineRun): {} for a repository Smithy does not have
        (the engine's own rule), else {decision, trusted, message, ownerId, runnerPoolId}. */
     function decide(p) {
         const repo = p.repositoryId ? one(M + "SmithyRepository", {repositoryId: p.repositoryId}) : null
         if (!repo) return {}
+        // pipelines off: nothing at all, no run and no status
+        if (repo.pipelinesEnabled !== "Y")
+            return {decision: "skip", trusted: false, message: "notAvailable: Pipelines are off in this repository"}
         if (!core.mounted(repo.siteId)) return refuse("This site no longer runs pipelines")
         if (core.repositoryRights(repo, core.actor(null)).hidden)
             return refuse("This repository is hidden by a moderator: its pipelines do not run")
-        if (repo.pipelinesEnabled !== "Y") return refuse("notAvailable: Pipelines are off in this repository")
+        if (one("moqui.resource.GitRepository", {repositoryId: repo.repositoryId})?.archivedDate)
+            return refuse("repositoryArchived: This repository is archived: its pipelines do not run")
+        if (ownerSuspended(repo)) return refuse("accessDenied: This repository's account is suspended on this site")
         const s = core.settings(repo.siteId)
         const owner = ownerOf(repo, s)
         if (!owner) return refuse("This repository's group could not be read, so its pipelines do not run")
         const rankOf = a => (a.userId ? core.repositoryRights(repo, a).rank : 0)
         const user = core.actor(p.triggeredByUserId || null)
         const mr = p.mergeRequestId ? one(GMR, {mergeRequestId: p.mergeRequestId}) : null
-        const author = mr ? core.actor(mr.authorUserId || null) : user
+        const commitId = p.commitId || mr?.headCommitId || null
+        const pusherId = mr ? headPusher(mr, commitId) : null
+        // whose code runs: a merge request's author and its head's pusher (the account that caused the run when no
+        // pusher is recorded), else the account that caused the run
+        const coders = []
+        for (const a of mr ? [core.actor(mr.authorUserId || null), pusherId ? core.actor(pusherId) : user] : [user])
+            if (!coders.some(known => known.userId === a.userId)) coders.push(a)
         // untrusted: commits from elsewhere (a fork's, a pushed-for-review or a detached merge request), or an account
-        // below Developer that caused the run or wrote the merge request
+        // below Developer that caused the run or whose code runs
         let trusted = flag(p.trusted)
         const elsewhere =
             !!p.sourceRepositoryId ||
@@ -210,24 +281,38 @@ kit => {
             (!!mr && (!!mr.sourceRepositoryId || mr.pushedForReview === "Y" || !!mr.sourceDetachedDate))
         if (elsewhere) trusted = false
         if (user.userId && rankOf(user) < RANK.SmrDeveloper) trusted = false
-        if (mr && rankOf(author) < RANK.SmrDeveloper) trusted = false
-        // minutes: the owner's month, read before anything is counted
-        const overQuota = quotaProblem(owner)
+        if (coders.some(a => a.userId && rankOf(a) < RANK.SmrDeveloper)) trusted = false
+        // the error run of a pipeline file that is not valid (pipelineName ci.xml, no jobs): nothing runs, so nothing
+        // waits and no minutes or day's runs are counted
+        const jobCount = p.jobCount == null || p.jobCount === "" ? 1 : Number(p.jobCount)
+        if (jobCount === 0)
+            return {decision: "allow", trusted, message: null, ownerId: owner.ownerId, runnerPoolId: poolOf(owner, trusted)}
+        if (!trusted && jobCount > Number(s.outsideRunMaxJobs))
+            return refuse(
+                "policyRefused: An outside run has at most " + s.outsideRunMaxJobs + " jobs here; this one has " + jobCount
+            )
+        // minutes: the owner's month with what its runs not ended hold back, read before anything is counted
+        const overQuota = quotaProblem(owner, jobCount)
         if (overQuota) return refuse(overQuota)
         let decision = "allow"
         let message = null
         if (!trusted) {
             const policy = approvalPolicy(owner.chain, s)
-            // a Maintainer who asks for an outside run (a re-run, a run by hand) approves it by asking
-            const byMaintainer = !!user.userId && rankOf(user) >= RANK.SmrMaintainer
+            // a Maintainer who runs a pipeline by hand approves it by asking; any other run of theirs (a re-run, the
+            // reopening of a merge request) is judged by whose code runs
+            const byMaintainer = p.event === "manual" && !!user.userId && rankOf(user) >= RANK.SmrMaintainer
+            // first: until each account whose code runs has had a merge request merged by another account here, each
+            // new head waits for a Maintainer again
             const known =
-                policy === "first" && (contributed(repo.repositoryId, author.userId) || approvedBefore(p.mergeRequestId))
+                policy === "first" &&
+                (approvedHead(mr, commitId, pusherId) ||
+                    (coders.length > 0 && coders.every(a => contributed(repo.repositoryId, a))))
             if (!byMaintainer && policy !== "never" && !known) {
                 decision = "wait"
                 message =
                     policy === "always"
                         ? "Waiting for a Maintainer's approval: outside runs wait for one here"
-                        : "Waiting for a Maintainer's approval: a first contribution's runs wait for one"
+                        : "Waiting for a Maintainer's approval: each new head of an outside contribution waits for one"
             }
         }
         // the day's limit of the account's trust level: runs it asks for by hand, and its outside runs (counted last,
@@ -237,6 +322,21 @@ kit => {
             if (!counted.allowed) return refuse("limitReached: " + (counted.message || "The day's pipeline runs are used up"))
         }
         return {decision, trusted, message, ownerId: owner.ownerId, runnerPoolId: poolOf(owner, trusted)}
+    }
+    /* Record a Maintainer's approval of a merge request's run: its head, as brought by its pusher, runs without waiting
+       again. */
+    function recordApproval(run) {
+        const mr = run.mergeRequestId ? one(GMR, {mergeRequestId: run.mergeRequestId}) : null
+        if (!mr || !run.commitId) return
+        const key = {mergeRequestId: mr.mergeRequestId, commitId: run.commitId, pusherUserId: pusherKey(headPusher(mr, run.commitId))}
+        if (one(APPROVAL, key)) return
+        create(APPROVAL, {
+            ...key,
+            repositoryId: mr.repositoryId,
+            approvedByUserId: ec.user.userId || null,
+            pipelineRunId: run.pipelineRunId,
+            approvedDate: ec.user.nowTimestamp
+        })
     }
     /* The pool the pipeline settings name for a run's trust, while an operator still allows it; null leaves the engine's
        choice (a pool of the job's pool name that takes the run's trust, the owner's before a shared one). */
@@ -273,6 +373,27 @@ kit => {
             runNum = number(one("moqui.resource.GitPipelineRun", {pipelineRunId: p.pipelineRunId})?.runNum)
         if (!Number.isInteger(runNum)) return null
         return publicApps().pageUrl(repo.siteId, "smithy", runPath(repo, runNum, p.jobRunId || null))
+    }
+
+    // ===== what a repository sends out (git-server outbound-check-service) =====
+    /* Whether a repository may send its webhooks and push to its push mirror now: {allowed, message}. Allowed for a
+       repository Smithy does not have; held for one of a site that no longer mounts Smithy, a hidden one (by itself, a
+       group above it or the repository it was forked from) and a personal one whose account is suspended. It fails
+       closed. */
+    function checkOutbound(p) {
+        try {
+            const repo = p?.repositoryId ? one(M + "SmithyRepository", {repositoryId: p.repositoryId}) : null
+            if (!repo) return {allowed: true, message: null}
+            if (!core.mounted(repo.siteId)) return {allowed: false, message: "This site no longer runs Smithy"}
+            if (core.repositoryRights(repo, core.actor(null)).hidden)
+                return {allowed: false, message: "This repository is hidden by a moderator"}
+            if (ownerSuspended(repo)) return {allowed: false, message: "This repository's account is suspended on this site"}
+            return {allowed: true, message: null}
+        } catch (error) {
+            ec.logger.error("Smithy's outbound check of repository " + p?.repositoryId + " failed: " + (error?.message || error))
+            ec.message.clearErrors()
+            return {allowed: false, message: "What this repository sends out could not be checked now"}
+        }
     }
 
     // ===== reading runs =====
@@ -355,21 +476,15 @@ kit => {
     }
     /* A full ref from a branch name or a full ref. */
     const fullRef = name => (!name ? null : text(name).startsWith("refs/") ? text(name) : "refs/heads/" + text(name))
-    /* The pipelines of a commit's ci.xml that have the manual event, by name (at most 50). A framework read of a
-       commit's pipelines would replace this reading of the file's tags. */
+    /* The pipelines of a commit that have the manual event, by name (at most 50), as the engine reads its ci.xml
+       (get#PipelineDefinitions); none for a commit it cannot read. */
     function manualPipelines(repositoryId, revision) {
-        const blob = quiet("get#GitBlob", {repositoryId, revision, path: "ci.xml"})
-        if (typeof blob.text !== "string") return []
+        const {out, problem} = engine("get#PipelineDefinitions", {repositoryId, revision})
+        if (problem != null) return []
         const names = []
-        const source = blob.text.replace(/<!--[\s\S]*?-->/g, "")
-        for (const tag of source.match(/<pipeline\b[^>]*>/g) || []) {
-            const attribute = name => {
-                const found = new RegExp("\\s" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')").exec(tag)
-                return found ? (found[1] ?? found[2]) : ""
-            }
-            const name = attribute("name")
-            if (/^[A-Za-z0-9._-]{1,64}$/.test(name) && attribute("on").split(/\s+/).includes("manual") && !names.includes(name))
-                names.push(name)
+        for (const pipeline of Array.from(out.pipelineList || [])) {
+            const name = text(pipeline.pipelineName)
+            if (name && flag(pipeline.manual) && !names.includes(name)) names.push(name)
         }
         return names.slice(0, 50)
     }
@@ -420,6 +535,9 @@ kit => {
         const kept = []
         let nextCursor = null
         let from = pg.offset
+        // at most MAX_SCAN_BATCHES of the engine's batches for one page: past them the page ends where the scan stopped
+        // and its cursor goes on from there
+        let batches = 0
         scanning: for (;;) {
             const {out, problem} = engine("find#PipelineRuns", {...filters, pageIndex: Math.floor(from / BATCH), pageSize: BATCH})
             if (problem != null) invalid(problem.slice(0, 200))
@@ -435,6 +553,10 @@ kit => {
             }
             if (batch.length < BATCH) break
             from = (Math.floor(from / BATCH) + 1) * BATCH
+            if (++batches >= MAX_SCAN_BATCHES) {
+                nextCursor = pg.next(from)
+                break
+            }
         }
         const counts = jobCounts(kept.map(run => run.pipelineRunId))
         return {
@@ -509,30 +631,59 @@ kit => {
        passes back both nextChunkSeq and nextOffset). A signed-in reader is told of new lines on the notification topic
        GitCiJobLog (sub-topic the job run's id) for a few minutes after each read, on the server that took the read; a
        page polls as well, every pollSeconds, and on a cluster that is what it has. */
+    /* The UTF-8 bytes of a text. */
+    function utf8Bytes(value) {
+        let bytes = 0
+        for (const ch of String(value || "")) {
+            const code = ch.codePointAt(0)
+            bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4
+        }
+        return bytes
+    }
+    /* A repository whose pipelines are off has no runs to show: its runs' logs and uploads are Not Found. */
+    function pipelinesShown(r) {
+        if (r.repo.pipelinesEnabled !== "Y") missing()
+    }
     methods.getJobLog = p => {
         const r = viewed(p)
+        pipelinesShown(r)
         const {job} = jobOf(r, p)
-        const limit = p.limit == null || p.limit === "" ? 100 : Number(p.limit)
-        if (!Number.isInteger(limit) || limit < 1 || limit > 500) invalid("limit must be from 1 through 500")
+        const asked = p.limit == null || p.limit === "" ? LOG_CHUNK_LIMIT : Number(p.limit)
+        if (!Number.isInteger(asked) || asked < 1 || asked > 500) invalid("limit must be from 1 through 500")
+        const limit = Math.min(asked, LOG_CHUNK_LIMIT)
         const watch = !!ec.user.userId && p.watch !== false && p.watch !== "false"
         const {out, problem} = engine("get#JobLog", {
             jobRunId: job.jobRunId,
             afterChunkSeq: number(p.afterChunkSeq) || 0,
             offset: number(p.offset) || 0,
             limit,
+            maxBytes: LOG_MAX_BYTES,
             watch,
             includeHidden: true
         })
         if (problem != null) missing()
+        // at most LOG_MAX_BYTES of chunks in one answer (always the first): the rest is the next read's
+        const all = Array.from(out.chunkList || [])
+        const chunks = []
+        let bytes = 0
+        let nextChunkSeq = number(out.nextChunkSeq)
+        let nextOffset = number(out.nextOffset)
+        for (const chunk of all) {
+            const size = utf8Bytes(chunk.text)
+            if (chunks.length && bytes + size > LOG_MAX_BYTES) {
+                const dropped = all.slice(chunks.length)
+                nextChunkSeq = Number(chunk.chunkSeq)
+                if (nextOffset != null) nextOffset -= dropped.reduce((sum, one) => sum + utf8Bytes(one.text), 0)
+                break
+            }
+            bytes += size
+            chunks.push({chunkSeq: Number(chunk.chunkSeq), stepSeq: number(chunk.stepSeq), text: chunk.text || ""})
+        }
         return {
-            chunkList: Array.from(out.chunkList || []).map(chunk => ({
-                chunkSeq: Number(chunk.chunkSeq),
-                stepSeq: number(chunk.stepSeq),
-                text: chunk.text || ""
-            })),
-            nextChunkSeq: number(out.nextChunkSeq),
+            chunkList: chunks,
+            nextChunkSeq,
             text: out.text ?? null,
-            nextOffset: number(out.nextOffset),
+            nextOffset,
             logBytes: number(out.logBytes),
             finished: !!out.finished,
             state: out.statusId || job.statusId,
@@ -540,63 +691,36 @@ kit => {
             pollSeconds: 2
         }
     }
-    /* An artifact or a report as a download: copied once to a file the facade streams (at most DOWNLOAD_LIMIT bytes). */
+    /* An artifact or a report as a download, sent as this request's response by the engine (send#RunArtifact: streamed
+       from its content with Range, ETag and If-Range, nothing copied). Who may read it is decided first from the rows
+       alone: the upload's run must be of this repository, its job of that run, and the run one the caller reads; a
+       cache, another repository's upload and a repository whose pipelines are off are Not Found. Answers {sent, file,
+       sha256}: the response is written, so the transport writes nothing more. */
     methods.downloadArtifact = p => {
         const r = viewed(p)
+        pipelinesShown(r)
         const a = core.actor()
         if (!text(p.artifactId)) missing()
-        const first = engine("get#RunArtifact", {
-            artifactId: text(p.artifactId),
-            offset: 0,
-            maxBytes: DOWNLOAD_PIECE,
-            includeHidden: true
-        })
-        const artifact = first.out.artifact
-        if (first.problem != null || !artifact || !["artifact", "report"].includes(artifact.artifactKind)) missing()
-        const owning = engine("get#JobRun", {jobRunId: artifact.jobRunId, includeHidden: true}).out.run
-        if (!owning || owning.repositoryId !== r.repo.repositoryId || !visible(r, owning, a)) missing()
-        const size = Number(artifact.sizeBytes || 0)
-        if (size > DOWNLOAD_LIMIT) invalid("notAvailable: This upload is too large to download here")
+        const artifact = one("moqui.resource.GitRunArtifact", {artifactId: text(p.artifactId)})
+        if (!artifact || !["artifact", "report"].includes(artifact.artifactKind)) missing()
+        if (artifact.repositoryId !== r.repo.repositoryId) missing()
+        const owning = artifact.pipelineRunId ? one("moqui.resource.GitPipelineRun", {pipelineRunId: artifact.pipelineRunId}) : null
+        const job = artifact.jobRunId ? one("moqui.resource.GitJobRun", {jobRunId: artifact.jobRunId}) : null
+        if (!owning || owning.repositoryId !== r.repo.repositoryId || job?.pipelineRunId !== owning.pipelineRunId) missing()
+        if (!visible(r, owning, a)) missing()
         const report = artifact.artifactKind === "report"
-        const fileName = text(artifact.fileName || artifact.name).replace(/[^A-Za-z0-9._-]/g, "_") || "artifact"
-        const location =
-            "runtime://tmp/ci-artifact/" + artifact.artifactId + "-" + text(artifact.sha256 || "x").slice(0, 16) + "-" + fileName
-        const stored = ec.resource.getLocationReference(location)
-        if (!stored.getExists() || Number(stored.getSize()) !== size) {
-            const pieces = []
-            let piece = first.out
-            let total = 0
-            for (;;) {
-                const bytes = piece.bytes ? new Uint8Array(piece.bytes) : new Uint8Array(0)
-                pieces.push(bytes)
-                total += bytes.length
-                if (piece.done || !bytes.length || total >= size) break
-                const next = engine("get#RunArtifact", {
-                    artifactId: artifact.artifactId,
-                    offset: total,
-                    maxBytes: DOWNLOAD_PIECE,
-                    includeHidden: true
-                })
-                if (next.problem != null) missing()
-                piece = next.out
-            }
-            const whole = new Uint8Array(total)
-            let at = 0
-            for (const bytes of pieces) {
-                whole.set(bytes, at)
-                at += bytes.length
-            }
-            stored.putBytes(whole)
-        }
+        const fileName = text(artifact.name) + (report ? "" : ".tar.gz")
+        const {problem} = engine("send#RunArtifact", {artifactId: artifact.artifactId, inline: false, includeHidden: true})
+        if (problem != null) missing()
         return {
+            sent: true,
             file: {
-                filename: fileName,
+                filename: fileName.replace(/[^A-Za-z0-9._-]/g, "_") || "artifact",
                 mimeType: report ? "application/xml" : "application/gzip",
-                size,
+                size: number(artifact.sizeBytes),
                 inline: false
             },
-            sha256: artifact.sha256 || null,
-            location
+            sha256: artifact.sha256 || null
         }
     }
 
@@ -613,9 +737,9 @@ kit => {
         if (r.repo.pipelinesEnabled !== "Y") invalid("notAvailable: Pipelines are off in this repository")
     }
     /* A move that would start jobs is refused before it reaches the engine when the owner's minutes are used up. */
-    function requireMinutes(r) {
+    function requireMinutes(r, jobCount = 1) {
         const owner = ownerOf(r.repo)
-        const problem = owner ? quotaProblem(owner) : "This repository's group could not be read"
+        const problem = owner ? quotaProblem(owner, jobCount) : "This repository's group could not be read"
         if (problem) invalid(problem)
     }
     /* What a move that queued a run answers: its number and state, and a refused run's reason. */
@@ -674,11 +798,17 @@ kit => {
             return {jobRunId: out.jobRunId || null, state: out.statusId || null}
         })
     }
+    /* Approve a run that waits: checked again as the run check does at queue time (pipelines on, and the owner's minutes
+       with what its runs not ended hold back covering this run's jobs). A merge request's approval is recorded for its
+       head and the head's pusher, so later runs of that head do not wait (SmithyRunApproval). */
     methods.approvePipelineRun = p => {
         const {r} = mover(p, "SmrMaintainer")
-        const {run} = runOf(r, p)
+        pipelinesOn(r)
+        const {run, jobList} = runOf(r, p)
         if (run.approvalState !== "waiting" || run.statusId !== "waiting") fail("Conflict", "The run does not wait for approval")
+        requireMinutes(r, Math.max(jobList.filter(job => !ENDED.includes(job.statusId)).length, 1))
         const out = engineMove("approve#PipelineRun", {pipelineRunId: run.pipelineRunId, includeHidden: true})
+        recordApproval(run)
         return {state: out.statusId || null, approvalState: out.approvalState || null}
     }
 
@@ -804,6 +934,10 @@ kit => {
             : undefined
         if (allowedRefs && !allowedRefs.split(" ").every(ref => /^[A-Za-z0-9._\/*-]{1,200}$/.test(ref)))
             invalid("allowedRefs must be branch patterns separated by spaces")
+        // a pattern names branches or tags: none takes every ref (*, **, refs/heads/*...), which would give the
+        // environment's secrets to any branch a Developer pushes
+        if (allowedRefs && allowedRefs.split(" ").some(ref => /^[*\/]*$/.test(ref.replace(/^refs\/(?:heads\/|tags\/)?/, ""))))
+            invalid("allowedRefs must name branches or tags: a pattern of only wildcards takes every one")
         const store = () =>
             engineMove("store#CiEnvironment", {
                 repositoryId,
@@ -859,13 +993,30 @@ kit => {
         const approval = pick("outsideRunApproval")
         const used = usageOf(owner.ownerId)
         const ownerRank = group ? core.groupRights(group, core.actor()).rank : 0
+        const top = owner.chain[owner.chain.length - 1] || null
+        const ownOf = field => (group && group[field] != null && group[field] !== "" ? group[field] : null)
         return {
             owner: {kind: owner.kind, label: owner.label},
             poolList: poolsFor(owner) || [],
+            // the values in effect, each from the group itself or the nearest group above that sets it
             runnerPoolId: trusted.value,
             outsideRunnerPoolId: outside.value,
             outsideRunApproval: approval.value || s.outsideRunApproval,
             inheritedFromPath: trusted.from || outside.from || approval.from || null,
+            // the group's own values (null where it inherits), and where each value in effect comes from: a group path
+            // above, "site" for the site's setting, null for the group's own
+            own: {
+                runnerPoolId: ownOf("runnerPoolId"),
+                outsideRunnerPoolId: ownOf("outsideRunnerPoolId"),
+                outsideRunApproval: ownOf("outsideRunApproval")
+            },
+            inheritedFrom: {
+                runnerPoolId: trusted.from,
+                outsideRunnerPoolId: outside.from,
+                outsideRunApproval: approval.value ? approval.from : "site"
+            },
+            // never (outside runs that never wait) is set only by the top-level group's Owner
+            canSetNever: !!top && core.groupRights(top, core.actor()).rank >= RANK.SmrOwner,
             usage: {
                 minutesUsed: used ? used.minutesUsed : null,
                 runnerMinutesMonthly: owner.limit,
@@ -887,22 +1038,28 @@ kit => {
             fail("Conflict", "staleRevision: This changed since you read it; reload and try again")
         const owner = groupOwner(r.chain, core.settings(p.siteId))
         const fields = {}
+        // a field sent is set; one sent as null or empty is cleared, so the group inherits it again; one left out stays
+        const sent = field => p[field] !== undefined
         const pools = given(p.runnerPoolId) || given(p.outsideRunnerPoolId) ? poolsFor(owner) : []
         if (pools == null) fail("Unavailable", "The runner pools could not be read now; try again")
         for (const [field, trusted] of [
             ["runnerPoolId", true],
             ["outsideRunnerPoolId", false]
         ]) {
-            if (!given(p[field])) continue
+            if (!sent(field)) continue
             const poolId = text(p[field]) || null
             if (poolId && !pools.some(pool => pool.runnerPoolId === poolId && pool.trusted === trusted))
                 invalid(field + " names no pool this group may use for " + (trusted ? "trusted" : "outside") + " runs")
             fields[field] = poolId
         }
-        if (given(p.outsideRunApproval)) {
-            if (p.outsideRunApproval && !OUTSIDE_APPROVALS.includes(p.outsideRunApproval))
-                invalid("outsideRunApproval must be first, always or never")
-            fields.outsideRunApproval = p.outsideRunApproval || null
+        if (sent("outsideRunApproval")) {
+            const policy = text(p.outsideRunApproval) || null
+            if (policy && !OUTSIDE_APPROVALS.includes(policy)) invalid("outsideRunApproval must be first, always or never")
+            // outside runs that never wait are the top-level group's Owner's word, for every group below it
+            const top = r.chain[r.chain.length - 1]
+            if (policy === "never" && core.groupRights(top, core.actor()).rank < RANK.SmrOwner)
+                fail("Unauthorized", "accessDenied: Only an Owner of the top-level group lets outside runs start without approval")
+            fields.outsideRunApproval = policy
         }
         update(group, {...fields, revision: before + 1})
         audit(p.siteId, null, "group", group.groupId, "storePipelineSettings", Object.keys(fields).join(" "), before, before + 1)
@@ -949,13 +1106,45 @@ kit => {
             requiredRole: changed ? "SmrMaintainer" : null
         }
     }
-    /* Whether a merge request's head has another ci.xml than its target branch (a file of its own, or none). */
+    /* Whether a merge request's head has another ci.xml at its root than its target branch (a file of its own, or none
+       where the target has one). Only ci.xml is compared. It fails closed: a read that fails, or a file that is not
+       text, counts as changed. */
     function ciFileChanged(r, mr) {
         if (!mr.headCommitId) return false
-        const fileAt = (revision, includeHidden) =>
-            quiet("get#GitBlob", {repositoryId: r.repo.repositoryId, revision, path: "ci.xml", includeHidden}).text ?? null
-        return fileAt(mr.headCommitId, true) !== fileAt(text(mr.targetRef).replace(/^refs\/heads\//, ""), false)
+        const fileAt = (revision, includeHidden) => {
+            ec.message.pushErrors()
+            try {
+                const out =
+                    ec.service
+                        .sync()
+                        .name(GIT + "get#GitBlob")
+                        .parameters({repositoryId: r.repo.repositoryId, revision, path: "ci.xml", includeHidden})
+                        .call() || {}
+                if (ec.message.hasError()) return {failed: true}
+                // no size: no file there
+                if (out.size == null) return {text: null}
+                return typeof out.text === "string" ? {text: out.text} : {failed: true}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        const head = fileAt(mr.headCommitId, true)
+        const target = fileAt(text(mr.targetRef).replace(/^refs\/heads\//, ""), false)
+        if (head.failed || target.failed) return true
+        return head.text !== target.text
     }
 
-    return {checkRun, runUrl, groupMinutes, accountMinutes, mergeChecks, ciFileChanged, ownerOf, groupKey, accountKey}
+    return {
+        checkRun,
+        runUrl,
+        checkOutbound,
+        groupMinutes,
+        accountMinutes,
+        mergeChecks,
+        ciFileChanged,
+        ownerOf,
+        groupKey,
+        accountKey
+    }
 }

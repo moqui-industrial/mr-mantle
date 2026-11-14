@@ -35,7 +35,7 @@ feature("component.xml is read when the default branch moves; the directory list
     }
 })
 
-feature("a group's addons.xml names this server's addresses and only the public components for no user", {
+feature("a group's addons.xml names this server's addresses and only the public components, for any caller", {
     when() {
         return {
             anonymous: op(null, "getAddons", {groupId: ids.groupId}).xml,
@@ -56,6 +56,7 @@ feature("a group's addons.xml names this server's addresses and only the public 
                 '" component-name="sst-site"/>'
         ).test(anonymous)
         !anonymous.includes("secret")
-        operator.includes('component-name="sst-secret"')
+        // what component-get fetches anonymously: never a private component, for any caller
+        !operator.includes("sst-secret")
     }
 })

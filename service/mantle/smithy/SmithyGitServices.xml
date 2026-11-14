@@ -50,6 +50,22 @@
             ]]></script>
         </actions>
     </service>
+    <service verb="check" noun="Outbound" authenticate="anonymous-all" allow-remote="false">
+        <description>The git server's outbound check (git-server outbound-check-service, the framework's
+            check#GitOutbound contract): asked before a repository's webhook deliveries are queued and before its push
+            mirror pushes. For a repository Smithy has, holds them (allowed false, with the message) on a site that no
+            longer mounts Smithy, for a hidden repository (by itself, a group above it or the repository it was forked
+            from) and for a personal repository whose account is suspended on the site; what cannot be decided is held.
+            Any other repository is allowed. A cheap read: it is asked of each push.</description>
+        <implements service="org.moqui.git.GitServices.check#GitOutbound"/>
+        <actions>
+            <script><![CDATA[
+                const answer = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkOutbound({repositoryId, kind, event})
+                allowed = answer.allowed === true
+                message = answer.message ?? null
+            ]]></script>
+        </actions>
+    </service>
     <service verb="read" noun="Component" authenticate="anonymous-all" allow-remote="false">
         <description>After a repository's default branch moved (the ref-update gitECA rule SmithyComponent): reads the
             component.xml at the root of its new commit and keeps the component's name, version and depends-on names on

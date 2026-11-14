@@ -36,12 +36,16 @@ kit => {
     const RENDER_LIMIT = 524288
     const DOCS_FILES = 500
     const DOCS_DEPTH = 5
-    const DOCS_SEARCH_FILES = 100
-    const DOCS_SEARCH_BYTES = 2097152
-    const DOCS_SEARCH_REPOSITORIES = 10
+    const DOCS_DIRECTORIES = 100
+    const DOCS_SEARCH_FILES = 50
+    const DOCS_SEARCH_BYTES = 262144
+    const DOCS_SEARCH_QUERY_BYTES = 1048576
+    const DOCS_SEARCH_REPOSITORIES = 5
+    /* A rendering larger than this is not kept in the cache (smithy.docs.rendered holds a count of entries, so their
+       size is bounded here). */
+    const RENDER_CACHE_LIMIT = 65536
     const COMPONENT_BYTES = 65536
     const ASSET_LIMIT = 268435456
-    const ASSET_PIECE = 8388608
     const ASSETS_PER_RELEASE = 50
     const GROUP_REPOSITORIES = 200
     const ADDONS_LIMIT = 500
@@ -79,6 +83,24 @@ kit => {
                 .parameters(parameters)
                 .call()
             return ec.message.hasError() ? {} : out || {}
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+    /* A framework git read that tells a failure from what is not there: {out} ({} when there is nothing), or {failed}
+       with the error logged. */
+    function gitRead(name, parameters) {
+        ec.message.pushErrors()
+        try {
+            const out = ec.service
+                .sync()
+                .name(core.GIT + name)
+                .parameters(parameters)
+                .call()
+            if (!ec.message.hasError()) return {out: out || {}, failed: false}
+            ec.logger.warn("Smithy read " + name + " of " + parameters.repositoryId + " failed: " + ec.message.getErrorsString())
+            return {out: {}, failed: true}
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
@@ -137,8 +159,10 @@ kit => {
         !entry.lfs &&
         /\.(md|markdown)$/i.test(entry.name) &&
         Number(entry.size || 0) <= RENDER_LIMIT
-    /* A heading's anchor: its text lower-cased, letters, digits, _ and -, spaces joined with -. */
+    /* A heading's anchor: h- and its text lower-cased, letters, digits, _ and -, spaces joined with - (the prefix keeps it
+       off the page's own ids). */
     const anchorOf = label =>
+        "h-" +
         text(label)
             .toLowerCase()
             .trim()
@@ -161,7 +185,7 @@ kit => {
             /<h([1-6])>([\s\S]*?)<\/h\1>/g,
             (whole, level, inner) => {
                 const label = unescape(inner.replace(/<[^>]*>/g, "")).trim()
-                const first = anchorOf(label) || "section"
+                const first = anchorOf(label).replace(/^h-$/, "") || "h-section"
                 const count = used.get(first) || 0
                 used.set(first, count + 1)
                 const anchor = count ? first + "-" + count : first
@@ -180,7 +204,8 @@ kit => {
         const blob = quietGit("get#GitBlob", {repositoryId, revision: commitId, path: entry.path})
         if (blob.text == null) return null
         const out = rendered(blob.text)
-        if (key) cache.put(key, JSON.stringify(out))
+        const keptText = JSON.stringify(out)
+        if (key && keptText.length <= RENDER_CACHE_LIMIT) cache.put(key, keptText)
         return out
     }
     /* A file name as a title: without its extension, - and _ as spaces. */
@@ -189,11 +214,17 @@ kit => {
             .replace(/\.(md|markdown)$/i, "")
             .replace(/[-_]+/g, " ")
             .trim() || text(name)
-    /* The repositories of a group and those below it that the caller views, by path (at most 200). */
+    /* The repositories of a group and those below it that the caller views, by path (at most 200): narrowed by the
+       caller's access in the query (kit.narrowed), then each by the evaluator. */
     function groupRepositories(g, a) {
+        const query = find(M + "SmithyRepository", {siteId: g.group.siteId}).condition(
+            "repositoryPath",
+            "like",
+            g.group.groupPath + "/%"
+        )
         return Array.from(
-            find(M + "SmithyRepository", {siteId: g.group.siteId})
-                .condition("repositoryPath", "like", g.group.groupPath + "/%")
+            kit
+                .narrowed(query, kit.scopeOf(g.group.siteId, a), "repository")
                 .orderBy("repositoryPath")
                 .limit(GROUP_REPOSITORIES)
                 .list()
@@ -265,6 +296,8 @@ kit => {
             find("moqui.resource.GitUpdate")
                 .condition("repositoryId", "in", ids)
                 .condition("source", "push")
+                // a push for review is a merge request's, not the repository's
+                .condition(any([equals("reviewPush", null), equals("reviewPush", "N")]))
                 .orderBy("-updateDate")
                 .limit(10)
                 .list()
@@ -371,11 +404,17 @@ kit => {
         return r
     }
     /* The Markdown files under the docs directory at a commit, breadth first: {path (in the directory), name, objectId,
-       size}, at most DOCS_FILES files and DOCS_DEPTH levels. */
+       size}, at most DOCS_FILES files, DOCS_DIRECTORIES directories read and DOCS_DEPTH levels. Kept by repository,
+       commit and root (smithy.docs.files): a commit's tree does not change. */
     function docsFiles(repositoryId, commitId, root) {
+        const cache = ec.cache.getCache("smithy.docs.files")
+        const key = repositoryId + "|" + commitId + "|" + root
+        const kept = cache.get(key)
+        if (kept) return JSON.parse(kept)
         const files = []
         const queue = [{path: root, depth: 0}]
-        while (queue.length && files.length < DOCS_FILES) {
+        let directories = 0
+        while (queue.length && files.length < DOCS_FILES && directories++ < DOCS_DIRECTORIES) {
             const {path, depth} = queue.shift()
             const tree = quietGit("get#GitTree", {repositoryId, revision: commitId, path})
             if (tree.isFile) continue
@@ -383,9 +422,22 @@ kit => {
                 if (entry.type === "dir") {
                     if (depth + 1 < DOCS_DEPTH) queue.push({path: entry.path, depth: depth + 1})
                 } else if (isMarkdownEntry(entry) && files.length < DOCS_FILES)
-                    files.push({path: entry.path.slice(root.length + 1), name: entry.name, objectId: entry.objectId, entry})
+                    files.push({
+                        path: entry.path.slice(root.length + 1),
+                        name: entry.name,
+                        objectId: entry.objectId,
+                        entry: {
+                            path: entry.path,
+                            name: entry.name,
+                            type: entry.type,
+                            objectId: entry.objectId || null,
+                            size: Number(entry.size || 0),
+                            lfs: !!entry.lfs
+                        }
+                    })
             }
         }
+        cache.put(key, JSON.stringify(files))
         return files
     }
     /* The table of contents: each directory's README.md first (its index, titled by the directory), its other files, then
@@ -449,8 +501,9 @@ kit => {
         }
     }
     /* The docs pages of a repository at its default branch that match a query, in their titles first, then in their
-       text (at most DOCS_SEARCH_FILES files and DOCS_SEARCH_BYTES read): {title, snippet, path, date}. */
-    function searchDocs(r, query, limit) {
+       text (at most DOCS_SEARCH_FILES files and DOCS_SEARCH_BYTES read, and what is left of the query's budget):
+       {title, snippet, path, date}. */
+    function searchDocs(r, query, limit, budget = {bytes: DOCS_SEARCH_QUERY_BYTES}) {
         const repositoryId = r.repo.repositoryId
         const head = headOf(repositoryId)
         if (!head.commitId) return []
@@ -471,11 +524,13 @@ kit => {
             .map(result)
         let read = 0
         for (const file of files.slice(0, DOCS_SEARCH_FILES)) {
-            if (out.length >= limit || read >= DOCS_SEARCH_BYTES) break
+            if (out.length >= limit || read >= DOCS_SEARCH_BYTES || budget.bytes <= 0) break
             if (file.path.toLowerCase().includes(wanted)) continue
+            if (file.entry.size > DOCS_SEARCH_BYTES - read || file.entry.size > budget.bytes) continue
             const blob = quietGit("get#GitBlob", {repositoryId, revision: head.commitId, path: file.entry.path})
             if (blob.text == null) continue
             read += blob.text.length
+            budget.bytes -= blob.text.length
             const at = blob.text.toLowerCase().indexOf(wanted)
             if (at < 0) continue
             const heading = /^#\s+(.+)$/m.exec(blob.text)
@@ -543,7 +598,8 @@ kit => {
             imageName: asset.imageName || null,
             sizeBytes: asset.sizeBytes == null ? null : Number(asset.sizeBytes),
             sha256: asset.sha256 || null,
-            path: asset.contentLocation
+            path:
+                asset.contentLocation || asset.artifactId
                 ? repoPath(repo, "/-/release-assets/" + encodeURIComponent(asset.assetId) + "/" + encodeURIComponent(asset.name))
                 : null
         }
@@ -667,29 +723,39 @@ kit => {
         if (!ref) invalid("tag: The repository has no tag " + name)
         return ref
     }
-    /* Notes through the gate as a Maintainer's text in the repository's scope: refused or held text is not kept. */
+    /* Notes through the gate as the caller's text in the repository's scope: refused or held text is not kept, the
+       trust level's limits on links, images and mentions hold unless the caller moderates the scope (an Owner, the
+       site's staff), and what is kept is the notes as the site's rules leave them (a censor rule's words replaced).
+       Gives the notes to store. */
     function gateNotes(r, notes, sourceFormat) {
         const format = forum.sourceFormatOf(sourceFormat || "markdown")
+        const contactListId = core.scopeCategory(r.repo)
         const gated = forum.gateRefuse(
             forum.gate({
                 siteId: r.repo.siteId,
-                contactListId: core.scopeCategory(r.repo),
+                contactListId,
                 kind: "release",
                 body: forum.renderSource(format, notes),
                 source: notes,
                 sourceFormat: format,
-                canModerate: true,
+                canModerate: r.rank >= RANK.SmrOwner || !!r.access.staff,
                 confirmed: true,
                 edit: true
             })
         )
         if (gated.decision === "hold") invalid("reviewRequired: These notes need a moderator's review; change them and try again")
+        return text(forum.applyRules(r.repo.siteId, contactListId || null, notes).body)
     }
     /* A new release of a tag: a WetRelease of the repository's project named as the tag's version (or the tag, when the
        project has a release of that version from another of its repositories), linked to the tag. A release of the tag
        that was withdrawn is made again. */
     function makeRelease(r, ref, name) {
         const locked = one(M + "SmithyRepository", {repositoryId: r.repo.repositoryId}, true)
+        // a release is of the repository's project: with issues off, only one the repository or its group has already;
+        // no Projects project is made for it
+        const groupProject = locked.groupId ? one(M + "SmithyGroup", {groupId: locked.groupId})?.workEffortId : null
+        if (locked.issuesEnabled !== "Y" && !locked.workEffortId && !groupProject)
+            invalid("notAvailable: A release belongs to the repository's project; turn its issues on first")
         const projectId = kit.issues.issueProject(locked)
         const version = ref.shortName.replace(/^[vV](?=\d)/, "")
         const withdrawn = Array.from(
@@ -738,7 +804,7 @@ kit => {
     methods.storeRelease = p => {
         const {r, partyId} = maintainer(p)
         const ref = tagRef(r.repo.repositoryId, p.tag)
-        if (given(p.notes)) gateNotes(r, text(p.notes), p.sourceFormat)
+        const notes = given(p.notes) ? gateNotes(r, text(p.notes), p.sourceFormat) : null
         const existing = releaseOf(r.repo.repositoryId, ref.shortName)
         const work = () => {
             const release = existing
@@ -752,10 +818,10 @@ kit => {
             if (!publish && wasPublished) Object.assign(fields, {statusId: "WeInPlanning", actualCompletionDate: null})
             if (existing) fields.revisionNumber = Number(release.revisionNumber || 1) + 1
             if (Object.keys(fields).length) update(release, fields)
-            if (given(p.notes))
+            if (notes != null)
                 call("mantle.work.ProjectServices.store#ReleaseNotes", {
                     workEffortId: release.workEffortId,
-                    notesText: text(p.notes)
+                    notesText: notes
                 })
             // what a pipeline uploaded for the tag becomes the release's when it is published
             if (publish && !wasPublished) attachRunArtifacts(r, release, ref, partyId)
@@ -778,6 +844,18 @@ kit => {
     function announce(r, release, ref, partyId) {
         const contactListId = r.chain.map(g => g.newsContactListId).find(id => !!id)
         if (!contactListId) invalid("notAvailable: No group above this repository has a news category")
+        // the topic is read by the category's readers: none of them may learn of a repository they may not view
+        const category = one(F + "ForumCategory", {contactListId})
+        const audience =
+            category?.publicationState === "published"
+                ? category.visibility === "public"
+                    ? 1
+                    : category.visibility === "members"
+                      ? 2
+                      : 3
+                : 3
+        if (r.hidden || r.visibility > audience)
+            invalid("notAvailable: The news category is read by more people than may view this repository; publish without announcing")
         const notes = notesOf(release.workEffortId)
         const posted = forumOps().execute("publishPost", {
             siteId: r.repo.siteId,
@@ -863,64 +941,47 @@ kit => {
         })
         return one(M + "SmithyReleaseAsset", {assetId})
     }
-    /* A run's artifact copied to a release's file: its pieces read from the engine, written once. */
-    function copyArtifact(artifactId, location) {
-        const pieces = []
-        let total = 0
-        let artifact = null
-        for (;;) {
-            const piece = engine("get#RunArtifact", {artifactId, offset: total, maxBytes: ASSET_PIECE, includeHidden: true})
-            if (!piece || !piece.artifact) return null
-            artifact = piece.artifact
-            const bytes = piece.bytes ? new Uint8Array(piece.bytes) : new Uint8Array(0)
-            pieces.push(bytes)
-            total += bytes.length
-            if (piece.done || !bytes.length) break
-        }
-        const whole = new Uint8Array(total)
-        let at = 0
-        for (const bytes of pieces) {
-            whole.set(bytes, at)
-            at += bytes.length
-        }
-        ec.resource.getLocationReference(location).putBytes(whole)
-        return {artifact, size: total}
-    }
-    /* An artifact of a run of the release's tag (its ref, or its commit outside a merge request), with the run; null
-       for one of another run or repository. */
+    /* The commit a tag names now. */
+    const tagCommit = ref => ref.commitId || ref.objectId || null
+    /* Whether a run's uploads may become a release's: a successful, trusted run of the repository, not of a merge
+       request, at the commit the tag names now. */
+    const releasable = (r, ref, run) =>
+        !!run &&
+        run.repositoryId === r.repo.repositoryId &&
+        !run.mergeRequestId &&
+        run.statusId === "success" &&
+        flag(run.trusted) &&
+        !!run.commitId &&
+        run.commitId === tagCommit(ref)
+    /* An artifact of a run of the release's tag (releasable), with the run; null for one of another run, commit or
+       repository. */
     function tagArtifact(r, ref, artifactId) {
-        const first = engine("get#RunArtifact", {artifactId, offset: 0, maxBytes: 1, includeHidden: true})
-        const artifact = first?.artifact
-        if (!artifact || artifact.artifactKind !== "artifact") return null
-        const run = engine("get#JobRun", {jobRunId: artifact.jobRunId, includeHidden: true})?.run
-        const ofTag =
-            !!run &&
-            run.repositoryId === r.repo.repositoryId &&
-            !run.mergeRequestId &&
-            (run.refName === ref.refName || (!!run.commitId && run.commitId === (ref.commitId || ref.objectId)))
-        return ofTag ? {artifact, run} : null
+        const artifact = one("moqui.resource.GitRunArtifact", {artifactId})
+        if (!artifact || artifact.artifactKind !== "artifact" || artifact.repositoryId !== r.repo.repositoryId) return null
+        const run = artifact.pipelineRunId ? one("moqui.resource.GitPipelineRun", {pipelineRunId: artifact.pipelineRunId}) : null
+        if (!releasable(r, ref, run)) return null
+        return {artifact: {...artifact, fileName: text(artifact.name) + ".tar.gz"}, run}
     }
+    /* A run's artifact as a release's file. The file is not copied: the asset names the artifact, which is kept past its
+       expiry while an asset names it (GitRunArtifact.keep), and is sent from the engine's content when downloaded
+       (send#RunArtifact). */
     function addArtifact(r, release, ref, artifact, run, name, partyId) {
         const size = Number(artifact.sizeBytes || 0)
         if (size > ASSET_LIMIT) invalid("notAvailable: A file over " + ASSET_LIMIT + " bytes is not a release's")
         nameFree(r.repo.repositoryId, release.workEffortId, name)
         roomFor(r.repo, size)
-        const asset = makeAsset(r, release, ref, {
+        const row = one("moqui.resource.GitRunArtifact", {artifactId: artifact.artifactId}, true)
+        if (!row || !row.blobId) invalid("notAvailable: The run's file is no longer there")
+        if (row.keep !== "Y") update(row, {keep: "Y"})
+        return makeAsset(r, release, ref, {
             name,
             assetKindEnumId: "SakFile",
             pipelineRunId: run.pipelineRunId,
             artifactId: artifact.artifactId,
-            uploadedByPartyId: partyId
+            uploadedByPartyId: partyId,
+            sizeBytes: size,
+            sha256: row.sha256 || null
         })
-        const location = assetRoot(r.repo.siteId) + "/" + asset.assetId + "/" + fileNameOf(name)
-        const copied = copyArtifact(artifact.artifactId, location)
-        if (!copied) invalid("notAvailable: The run's file is no longer there")
-        update(asset, {
-            contentLocation: location,
-            sizeBytes: copied.size,
-            sha256: artifact.sha256 || ec.resource.digest(location, "sha256")
-        })
-        return asset
     }
     /* The artifacts of the tag's latest successful run that the release lacks by name, each on its own: one that cannot
        be copied is logged, and the rest go on. */
@@ -933,7 +994,8 @@ kit => {
             pageSize: 5,
             includeHidden: true
         })
-        const run = Array.from(runs?.runList || []).find(row => !row.mergeRequestId)
+        // the latest successful trusted run at the commit the tag names now: a run of the tag before it was moved is not
+        const run = Array.from(runs?.runList || []).find(row => releasable(r, ref, row))
         if (!run) return
         const jobs = Array.from(engine("get#PipelineRun", {pipelineRunId: run.pipelineRunId, includeHidden: true})?.jobList || [])
         for (const job of jobs.slice(0, 50)) {
@@ -1025,6 +1087,14 @@ kit => {
         })
     }
     function dropAsset(asset) {
+        // an artifact no other asset names is left to the engine's retention again
+        if (asset.artifactId && !asset.contentLocation) {
+            const others = find(M + "SmithyReleaseAsset", {artifactId: asset.artifactId})
+                .condition("assetId", "not-equals", asset.assetId)
+                .count()
+            const artifact = others ? null : one("moqui.resource.GitRunArtifact", {artifactId: asset.artifactId})
+            if (artifact && artifact.keep === "Y") update(artifact, {keep: "N"})
+        }
         if (asset.contentLocation)
             try {
                 ec.resource.getLocationReference(asset.contentLocation).delete()
@@ -1049,6 +1119,18 @@ kit => {
     methods.downloadReleaseAsset = p => {
         const r = core.repository(p.repositoryId, p.siteId)
         const asset = assetOf(r, p.assetId)
+        const file = {
+            filename: asset.name,
+            mimeType: ec.resource.getContentType(asset.name) || "application/octet-stream",
+            size: Number(asset.sizeBytes || 0),
+            inline: false
+        }
+        // a run's artifact: sent from the engine's content as this request's response (send#RunArtifact)
+        if (!asset.contentLocation && asset.artifactId) {
+            const sent = engine("send#RunArtifact", {artifactId: asset.artifactId, inline: false, includeHidden: true})
+            if (!sent) missing()
+            return {sent: true, file, sha256: asset.sha256 || null}
+        }
         if (!asset.contentLocation) missing()
         return {
             file: {
@@ -1078,26 +1160,38 @@ kit => {
             .slice(0, 50)
         return {name, version: version ? version.slice(0, 60) : null, dependsOn}
     }
-    /* The component at a commit of a repository, or null; kept by the commit's id. */
-    function componentAt(repositoryId, commitId) {
+    /* The component at a commit of a repository: {component} (null for a commit with none), or {failed} when the
+       commit could not be read (logged; nothing is kept). Kept by the commit's id. */
+    function componentRead(repositoryId, commitId) {
         const cache = ec.cache.getCache("smithy.component")
         const key = repositoryId + ":" + commitId
         const kept = cache.get(key)
-        if (kept != null) return JSON.parse(kept)
-        const entry = entryAt(repositoryId, commitId, "component.xml")
+        if (kept != null) return {component: JSON.parse(kept), failed: false}
+        const tree = gitRead("get#GitTree", {repositoryId, revision: commitId, path: ""})
+        if (tree.failed) return {component: null, failed: true}
+        const entry = Array.from(tree.out.entryList || []).find(row => row.path === "component.xml") || null
         let component = null
         if (entry && entry.type === "file" && !entry.lfs && Number(entry.size || 0) <= COMPONENT_BYTES) {
-            const blob = quietGit("get#GitBlob", {repositoryId, revision: commitId, path: "component.xml"})
-            component = blob.text == null ? null : parseComponent(blob.text)
+            const blob = gitRead("get#GitBlob", {repositoryId, revision: commitId, path: "component.xml"})
+            if (blob.failed) return {component: null, failed: true}
+            component = blob.out.text == null ? null : parseComponent(blob.out.text)
         }
         cache.put(key, JSON.stringify(component))
-        return component
+        return {component, failed: false}
     }
-    /* The gitECA rule's: the component at the default branch's new commit, kept on the repository's row. */
+    /* The component at a commit, or null (also for a commit that could not be read now). */
+    const componentAt = (repositoryId, commitId) => componentRead(repositoryId, commitId).component
+    /* The gitECA rule's: the component at the default branch's new commit, kept on the repository's row. A commit that
+       cannot be read leaves the row as it was (the next move reads again). */
     function readComponent(p) {
         const repo = p.repositoryId ? one(M + "SmithyRepository", {repositoryId: p.repositoryId}) : null
         if (!repo || !p.newId || p.changeType === "delete" || repo.componentCommitId === p.newId) return
-        const component = componentAt(repo.repositoryId, p.newId)
+        const read = componentRead(repo.repositoryId, p.newId)
+        if (read.failed) {
+            ec.logger.error("Smithy: the component of " + repo.repositoryId + " at " + p.newId + " was not read; its row is left as it was")
+            return
+        }
+        const component = read.component
         update(one(M + "SmithyRepository", {repositoryId: repo.repositoryId}, true), {
             componentName: component?.name || null,
             componentVersion: component?.version || null,
@@ -1161,7 +1255,6 @@ kit => {
     const xmlText = value => text(value).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c])
     methods.getAddons = p => {
         const g = core.group(p.groupId, p.siteId)
-        const a = core.actor()
         const repositories = Array.from(
             find(M + "SmithyRepository", {siteId: p.siteId})
                 .condition("repositoryPath", "like", g.group.groupPath + "/%")
@@ -1169,7 +1262,12 @@ kit => {
                 .orderBy("repositoryPath")
                 .limit(ADDONS_LIMIT)
                 .list()
-        ).filter(repo => text(repo.repositoryPath).startsWith(g.group.groupPath + "/") && core.repositoryViewable(repo, a))
+        ).filter(repo => {
+            if (!text(repo.repositoryPath).startsWith(g.group.groupPath + "/")) return false
+            // only public components that are not hidden: the file is for ./moq component-get, which fetches anonymously
+            const anyone = core.repositoryRights(repo, core.actor(null))
+            return anyone.canView && anyone.visibility === 1 && !anyone.hidden
+        })
         // the addresses: the site's canonical host, where the page's address clones only under a mount at /; else the
         // framework's own clone addresses, without archives
         const smithyBase = mountBase(p.siteId)
@@ -1378,8 +1476,9 @@ kit => {
         },
         docs: place => {
             const out = []
+            const budget = {bytes: DOCS_SEARCH_QUERY_BYTES}
             for (const r of placeRepositories(place, repo => repo.docsEnabled === "Y").slice(0, DOCS_SEARCH_REPOSITORIES)) {
-                out.push(...searchDocs(r, place.query, place.offset + place.limit - out.length))
+                out.push(...searchDocs(r, place.query, place.offset + place.limit - out.length, budget))
                 if (out.length >= place.offset + place.limit) break
             }
             return out.slice(place.offset)
@@ -1468,6 +1567,9 @@ kit => {
         const path = local ? pathOf(target) : ownHost ? pathOf(whole[2] || "/") : null
         if (path == null || path.split("/").some(segment => segment === "." || segment === ".."))
             invalid("targetInvalid[targetPath]: A redirect leads to a path of this site or an https address of one of its hosts")
+        // not to the host's own paths (the framework's screens, git, /ci/runner...), which are no page of the site
+        if (publicApps().pagePathReserved(path))
+            invalid("targetInvalid[targetPath]: A redirect leads to a page of the site, not to the server's own paths")
         return target
     }
     function redirectView(row) {
@@ -1512,9 +1614,47 @@ kit => {
             nextCursor: found.length > pg.limit ? pg.next(pg.offset + pg.limit) : null
         }
     }
+    /* Why an old path cannot be redirected, or null: the host's own paths (PublicApps.pagePathReserved, so
+       /.well-known/security.txt may be, /ci/runner may not), the root of an app the site mounts, and a path under the
+       Smithy mount whose first name a live group or account holds (its repositories with it). Such a path is answered
+       before a redirect is looked up, so a row there would only shadow it later. */
+    function oldPathTaken(siteId, oldHost, oldPath) {
+        // the root of a host the site replaces may lead somewhere; the site's own home is its home
+        if (oldPath === "/") return oldHost ? null : "nameTaken[oldPath]: The site's home is not redirected"
+        if (publicApps().pagePathReserved(oldPath)) return "nameInvalid[oldPath]: That path is the server's own"
+        const lower = oldPath.toLowerCase()
+        for (const row of Array.from(
+            find(S + "PublicSiteApp", {siteId, enabled: "Y"})
+                .limit(50)
+                .list()
+        ))
+            if (row.pathPrefix && row.pathPrefix !== "/" && text(row.pathPrefix).toLowerCase() === lower)
+                return "nameTaken[oldPath]: An app of the site is mounted at that path"
+        const smithy = publicApps().mount(siteId, "smithy")
+        if (smithy && (smithy.base === "" || lower.startsWith(smithy.base.toLowerCase() + "/"))) {
+            // the names before a /-/ part: a group's or an account's page is its exact path, a repository's is all below it
+            const all = lower.slice(smithy.base.length).split("/").filter(Boolean)
+            const names = all.indexOf("-") >= 0 ? all.slice(0, all.indexOf("-")) : all
+            const whole = names.join("/")
+            const takenBy = "nameTaken[oldPath]: A group, a repository or an account of the site has that path"
+            if (names.length === 1 && core.nameHeld(siteId, names[0], true)) return takenBy
+            if (
+                names.length > 1 &&
+                find(M + "SmithyGroup", {siteId, groupPath: whole})
+                    .condition("statusId", "not-equals", "SmgRefused")
+                    .count() > 0
+            )
+                return takenBy
+            for (let length = Math.min(names.length, 9); length > 1; length--)
+                if (one(M + "SmithyRepository", {siteId, repositoryPath: names.slice(0, length).join("/")})) return takenBy
+        }
+        return null
+    }
     /* Writes one redirect: a new one, or the one at the same old address (replace) or of redirectId (an edit). */
     function putRedirect(siteId, partyId, fields, existing, replace) {
         const {oldHost, oldPath} = oldAddress(fields.oldHost, fields.oldPath)
+        const taken = oldPathTaken(siteId, oldHost, oldPath)
+        if (taken) invalid(taken)
         const targetPath = siteTarget(siteId, fields.targetPath)
         if (targetPath === oldPath && !oldHost) invalid("targetInvalid[targetPath]: A redirect does not lead to its own old path")
         const holder = redirectAt(siteId, oldHost, oldPath)

@@ -88,6 +88,7 @@
             "maxEditBytes",
             "repositoryKind",
             "outsideRunApproval",
+            "outsideRunMaxJobs",
             "expectedRevision"
         ]
     },
