@@ -156,6 +156,11 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.order.OrderHeaderAndPart" list="orderList" limit="200" disable-authz="true">
                 <econdition field-name="vendorPartyId" from="organizationPartyId"/>
                 <econdition field-name="customerPartyId"/>
+                <!-- a recurring base or a quote template is no order of the customer's (impl-sales P16 review) -->
+                <econditions combine="or">
+                    <econdition field-name="orderPurposeEnumId" operator="is-null"/>
+                    <econdition field-name="orderPurposeEnumId" operator="not-in" from="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate']"/>
+                </econditions>
                 <order-by field-name="-orderDate"/><order-by field-name="orderId"/><order-by field-name="orderPartSeqId"/>
             </entity-find>
             <set field="orders" from="Array.from(orderList).map((row) => ({orderId:row.orderId, orderPartSeqId:row.orderPartSeqId,

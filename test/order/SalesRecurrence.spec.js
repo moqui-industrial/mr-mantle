@@ -89,6 +89,14 @@ spec({
             users.keeperB = user("keeperb", [f.orgB], ["SALES_VIEW", "SALES_RECURRENCE_MANAGE", "SALES_ACCOUNT_EDIT"])
             users.reader = user("reader", [f.orgA], ["SALES_VIEW", "SALES_TEAM_VIEW"])
             users.finance = user("finance", [f.orgA], ["SALES_VIEW", "SALES_RECURRENCE_MANAGE", "RECEIVABLE_EDIT"])
+            // a finance reader of A (the review's check that a customer's finance lists no base as an order)
+            users.receivables = user("receivables", [f.orgA], ["RECEIVABLE_VIEW"])
+            make("moqui.security.ArtifactGroupMember", {
+                artifactGroupId: f.prefix + "_SERVICES",
+                artifactName: "mantle.account.CustomerFinanceServices.get#CustomerFinance",
+                artifactTypeEnumId: "AT_SERVICE",
+                nameIsPattern: "N"
+            })
             // a store of A whose contract renews a base of its own (Shop's)
             make("mantle.product.store.ProductStore", {
                 productStoreId: f.prefix + "_STORE",
@@ -168,9 +176,57 @@ feature("an approved order becomes a monthly base: a template every reader leave
         const accounts =
             as(users.reader, "mantle.sales.SalesWorkspaceServices.find#Accounts", {organizationPartyId: f.orgA}).accountList || []
         const openOrders = accounts.find(row => row.partyId == f.accounts.a)?.openOrderCount
-        return {reader, other, invoiced, stored, stale, edited, back, invoice, shipment, listed, listedB, orders, openOrders}
+        // the review's readers: a customer's finance lists the order and not its base; a bulk part status change passes the base by
+        const finance = as(users.receivables, "mantle.account.CustomerFinanceServices.get#CustomerFinance", {
+            organizationPartyId: f.orgA,
+            customerPartyId: f.accounts.a
+        })
+        const financeRefused = finance.refused
+        const financeOrderIds = JSON.parse(JSON.stringify(finance.orders || [])).map(row => row.orderId)
+        system(() =>
+            call("mantle.order.OrderBulkServices.change#OrderPartsStatus", {
+                toStatusId: "OrderCancelled",
+                inputFieldsMap: {orderId: ids.base}
+            })
+        )
+        return {
+            reader,
+            other,
+            invoiced,
+            stored,
+            stale,
+            edited,
+            back,
+            invoice,
+            shipment,
+            listed,
+            listedB,
+            orders,
+            openOrders,
+            financeRefused,
+            financeOrderIds
+        }
     },
-    then({reader, other, invoiced, stored, stale, edited, back, invoice, shipment, listed, listedB, orders, openOrders}) {
+    then({
+        reader,
+        other,
+        invoiced,
+        stored,
+        stale,
+        edited,
+        back,
+        invoice,
+        shipment,
+        listed,
+        listedB,
+        orders,
+        openOrders,
+        financeRefused,
+        financeOrderIds
+    }) {
+        financeRefused == ""
+        financeOrderIds.includes(ids.source)
+        !financeOrderIds.includes(ids.base)
         // the account's open orders count the order and not its base
         openOrders == 1
         code(reader.refused) == "PERMISSION_DENIED"
@@ -180,6 +236,7 @@ feature("an approved order becomes a monthly base: a template every reader leave
         stored.created == true
         header(ids.base).orderPurposeEnumId == "OrpRecurringTemplate"
         header(ids.base).statusId == "OrderApproved"
+        system(() => one("mantle.order.OrderPart", {orderId: ids.base, orderPartSeqId: "01"}).statusId) == "OrderApproved"
         header(ids.base).recurTimeZone == zone
         header(ids.base).recurAgreementId == f.prefix + "_AGR"
         header(ids.base).placedDate == null
@@ -238,6 +295,10 @@ feature("a paused base and an ended one make none; a resumed base skips the paus
         system(() =>
             call("update#mantle.order.OrderHeader", {orderId: ids.base, lastOrderedDate: new Date(Date.now() - 45 * dayMs)})
         )
+        // the occurrence ordered already (feature 2's) answers its order, not a second one (recurOccurrenceDate, not lastOrderedDate)
+        const firstOrderId = children(ids.base)[0].orderId
+        const again = run(ids.base)
+        const againCount = children(ids.base).length
         const noReason = as(users.keeper, svc + "change#SalesRecurrence", {
             baseOrderId: ids.base,
             recurRevision: revisionOf(ids.base),
@@ -277,9 +338,39 @@ feature("a paused base and an ended one make none; a resumed base skips the paus
             reason: "Contract not renewed"
         })
         const afterEnd = run(ids.ended)
-        return {noReason, paused, whilePaused, pausedCount, stale, resumed, afterResume, resumedCount, ended, afterEnd}
+        return {
+            firstOrderId,
+            again,
+            againCount,
+            noReason,
+            paused,
+            whilePaused,
+            pausedCount,
+            stale,
+            resumed,
+            afterResume,
+            resumedCount,
+            ended,
+            afterEnd
+        }
     },
-    then({noReason, paused, whilePaused, pausedCount, stale, resumed, afterResume, resumedCount, ended, afterEnd}) {
+    then({
+        firstOrderId,
+        again,
+        againCount,
+        noReason,
+        paused,
+        whilePaused,
+        pausedCount,
+        stale,
+        resumed,
+        afterResume,
+        resumedCount,
+        ended,
+        afterEnd
+    }) {
+        again == firstOrderId
+        againCount == 1
         code(noReason.refused) == "REASON_REQUIRED"
         paused.refused == ""
         whilePaused == null
