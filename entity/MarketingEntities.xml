@@ -268,6 +268,90 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P2 ===== -->
 
+    <!-- ===== Marketing P3: lists, consent and suppressions (impl-marketing P3, F6, F9, F43; design-marketing §4, §14.1) ===== -->
+    <!-- A list's subscription policy (design §4 ListDetail SubscriptionPolicy; F6): dated rows, the one in effect ended when the next
+        starts, never deleted (mantle.marketing.AudienceServices store#SubscriptionPolicy). The public offer is the list's offer to
+        subscribe from a published page (PASS Subscribe, P7), apart from the legacy isPublic flag; confirmation required asks a pending
+        request to be confirmed by the recipient (double opt-in) before it is accepted; the purpose is the consent purpose a membership
+        records; the evidence text is the wording the offer shows, which a request's evidence repeats. -->
+    <entity entity-name="ContactListPolicy" package="mantle.marketing.contact" cache="never">
+        <field name="contactListId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="publicOffer" type="text-indicator"><description>Y: offered for subscription on a published page (P7)</description></field>
+        <field name="confirmationRequired" type="text-indicator"><description>Y: a request waits for the recipient's confirmation;
+            empty is Y</description></field>
+        <field name="purposeEnumId" type="id"><description>PartyConsentPurpose; empty is the list's channel's (marketing email, or SMS
+            for a list of phone numbers)</description></field>
+        <field name="evidenceText" type="text-long"><description>The wording of the offer, repeated in each request's evidence</description></field>
+        <field name="confirmEmailTemplateId" type="id"><description>The confirmation message of a pending request (P7)</description></field>
+        <field name="noticeEmailTemplateId" type="id"><description>The notice of an accepted subscription</description></field>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" title="PartyConsentPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId"/></relationship>
+        <relationship type="one" title="Confirm" related="moqui.basic.email.EmailTemplate">
+            <key-map field-name="confirmEmailTemplateId" related="emailTemplateId"/></relationship>
+        <relationship type="one" title="Notice" related="moqui.basic.email.EmailTemplate">
+            <key-map field-name="noticeEmailTemplateId" related="emailTemplateId"/></relationship>
+        <relationship type="one" title="ChangedBy" related="moqui.security.UserAccount">
+            <key-map field-name="changedByUserId" related="userId"/></relationship>
+    </entity>
+    <!-- A request to subscribe a party to a list (design §14.1 SubscriptionRequest; §4 AddMembers, the Sales bulk action): the one
+        evidenced path to membership (request#Subscriptions). Who asked, for whom, with what evidence (source, date, text, the record
+        it came from), and the outcome: pending until the recipient confirms (the membership CLPT_PENDING), accepted by the audited
+        evidence path (CLPT_ACCEPTED with a list consent grant), or refused by its reason (withdrawn, suppressed, no address). A request
+        never clears a withdrawal or a suppression. P7 adds the public request's site, token digest and request key. -->
+    <entity entity-name="SubscriptionRequest" package="mantle.marketing.contact" cache="never">
+        <field name="subscriptionRequestId" type="id" is-pk="true"/>
+        <field name="contactListId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"><description>The address the membership sends to</description></field>
+        <field name="organizationPartyId" type="id"><description>The list's organization when it was asked</description></field>
+        <field name="purposeEnumId" type="id"/>
+        <field name="requestKindEnumId" type="id"><description>SubscriptionRequestKind: staff, a Sales lead or account, an import,
+            the public page</description></field>
+        <field name="sourceEnumId" type="id"><description>PartyConsentSource of the evidence</description></field>
+        <field name="evidenceDate" type="date-time"><description>When the evidence was given (the form, the call, the event)</description></field>
+        <field name="evidenceText" type="text-long"/>
+        <field name="sourceRecordId" type="id"><description>The record the request was filed from (a lead, an account)</description></field>
+        <field name="statusEnumId" type="id"><description>SubscriptionRequestStatus: pending, accepted, refused</description></field>
+        <field name="reasonCode" type="text-short"><description>A refusal's reason (WITHDRAWN, CONSENT_WITHDRAWN, MISSING_DESTINATION,
+            RECORD_UNAVAILABLE), or the outcome of an existing membership (ALREADY_MEMBER)</description></field>
+        <field name="requestedDate" type="date-time"/>
+        <field name="requestedByUserId" type="id"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="partyConsentId" type="id"><description>The list consent an accepted request recorded</description></field>
+        <relationship type="one" related="mantle.marketing.contact.ContactList"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SubscriptionRequestKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="requestKindEnumId"/></relationship>
+        <relationship type="one" title="SubscriptionRequestStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId"/></relationship>
+        <relationship type="one" title="PartyConsentSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="sourceEnumId"/></relationship>
+        <relationship type="one" title="RequestedBy" related="moqui.security.UserAccount">
+            <key-map field-name="requestedByUserId" related="userId"/></relationship>
+        <relationship type="one" related="mantle.party.PartyConsent"/>
+        <index name="SUBSCR_REQ_LIST_PARTY"><index-field name="contactListId"/><index-field name="partyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Subscription request kind" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkStaff" description="Staff" sequenceNum="1" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkSalesLead" description="Sales lead" sequenceNum="2" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkSalesAccount" description="Sales account" sequenceNum="3" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkImport" description="Import" sequenceNum="4" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.Enumeration enumId="SrkPublic" description="Public page" sequenceNum="5" enumTypeId="SubscriptionRequestKind"/>
+            <moqui.basic.EnumerationType description="Subscription request status" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsPending" description="Pending confirmation" sequenceNum="1" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsAccepted" description="Accepted" sequenceNum="2" enumTypeId="SubscriptionRequestStatus"/>
+            <moqui.basic.Enumeration enumId="SrsRefused" description="Refused" sequenceNum="3" enumTypeId="SubscriptionRequestStatus"/>
+        </seed-data>
+    </entity>
+    <!-- ===== end of Marketing P3 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
@@ -299,6 +383,14 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="defaultDeliveryEnumId" type="id"><description>A new member's delivery of a mailbox's posts (empty
             is the Inbox)</description></field>
         <field name="archivedDate" type="date-time"><description>An archived list takes no posts or members</description></field>
+        <!-- impl-marketing P3 (design-marketing §4 ListDetail): a single-use list is reserved atomically by the first released send,
+            which keeps it while any hand-off is accepted or uncertain; a cancellation before any hand-off releases it, and the send's
+            completion consumes it (mantle.marketing.AudienceServices reserve#SingleUseList, release#SingleUseList; the send is P9's) -->
+        <field name="reservedBySendId" type="id" enable-audit-log="update"><description>The send that holds a single-use list (a
+            CampaignSend id, P9)</description></field>
+        <field name="reservedDate" type="date-time"/>
+        <field name="consumedDate" type="date-time"><description>When the send that held a single-use list completed: it is used
+            and takes no other send</description></field>
         <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
         <relationship type="one" title="ContactListType" related="moqui.basic.Enumeration">
             <key-map field-name="contactListTypeEnumId"/></relationship>

@@ -539,6 +539,8 @@ function sendLedger(quote, issue, recipient, emailTemplateId, subject, note) {
         sourceEnumId: sources.quote,
         recipientPartyId: recipient.partyId,
         templateKey: emailTemplateId,
+        // the seller: the delivery meets its suppressions (a hard bounce) beside every organization's
+        organizationPartyId: issue.organizationPartyId,
         transactional: true,
         bodyParameters: {subject, note: text(note)}
     })
@@ -781,6 +783,7 @@ function sendReminders(p) {
                 sourceEnumId: sources.reminder,
                 recipientPartyId,
                 templateKey: emailTemplateId,
+                organizationPartyId: issue.organizationPartyId,
                 transactional: true
             })
             if (out.created) count++

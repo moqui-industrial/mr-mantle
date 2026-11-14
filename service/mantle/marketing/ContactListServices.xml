@@ -191,8 +191,11 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="create" noun="ContactList">
         <description>
-            A contact list. The current user's party becomes its owner (a current CLPT_ACCEPTED row with role ListOwner),
-            and memberPartyIdList its first members. A mailbox (type MAILBOX) needs a user with a party, is private unless
+            A contact list. For a mailbox the current user's party becomes its owner (a current CLPT_ACCEPTED row with role
+            ListOwner), and memberPartyIdList its first members. A list of another type subscribes no one (impl-marketing P3,
+            design-marketing §4 Lists): neither its creator nor staff are made recipients, memberPartyIdList is refused
+            (MEMBERS_NEED_EVIDENCE), and its members come by evidenced requests (mantle.marketing.AudienceServices
+            request#Subscriptions). A mailbox (type MAILBOX) needs a user with a party, is private unless
             isPublic=Y, and its posting policy defaults to ClpMembers and its default delivery to CldInbox. A list of another
             type belongs to ownerPartyId, an organization the caller works for (or any internal organization for a holder of
             MARKETING_ALL_ORGANIZATIONS), refused otherwise and when none is named (ORGANIZATION_DENIED); a contact
@@ -229,6 +232,10 @@ along with this software (see the LICENSE.md file). If not, see
                 try {
                     ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js').requireListOwner(ownerPartyId)
                 } catch (error) { ec.message.addError(String(error.message)); return }
+                // a list that sends outside: membership is evidenced intent, never a list of staff (impl-marketing P3)
+                const named = memberPartyIdList == null ? [] : (typeof memberPartyIdList === 'string' ? memberPartyIdList.split(',') : Array.from(memberPartyIdList))
+                if (named.some((id) => String(id).trim())) {
+                    ec.message.addError('MEMBERS_NEED_EVIDENCE: A list is joined by an evidenced subscription request, not at its creation'); return }
             }
 
             contactListId = ec.service.sync().name('create#mantle.marketing.contact.ContactList').parameters({
@@ -237,6 +244,7 @@ along with this software (see the LICENSE.md file). If not, see
                 ownerPartyId: ownerPartyId, contactMechTypeEnumId: contactMechTypeEnumId, marketingCampaignId: marketingCampaignId}).call()?.contactListId
             if (ec.message.hasError()) return
 
+            if (!isMailbox) return
             const now = ec.user.nowTimestamp
             const addRow = (partyId, roleTypeId) => ec.service.sync().name('create#mantle.marketing.contact.ContactListParty').parameters({
                 contactListId: contactListId, partyId: partyId, fromDate: now, statusId: 'CLPT_ACCEPTED', roleTypeId: roleTypeId}).call()

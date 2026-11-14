@@ -22,6 +22,9 @@
 // - Refusals carry reason codes (EntityLib.js denied): an organization outside the scope ORGANIZATION_DENIED, a missing
 //   permission PERMISSION_DENIED, a record that is missing or outside the scope RECORD_UNAVAILABLE.
 //
+// - Consent (P3): another party's consent or list subscription is changed by a contact administrator, or by a holder of
+//   MARKETING_CONSENT_EDIT for a list or organization of their scope (consentChangeAllowed), whoever calls.
+//
 // P1 builds the capabilities, the organizations and the list rule; later phases add their record checks (a campaign P2, a
 // list's policy P3, a segment P5, a send P8, an event P16), and this module grants nothing by itself.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -144,6 +147,27 @@ function requireListOwner(ownerPartyId) {
     return ownerPartyId
 }
 
+// ===== consent (impl-marketing P3, F50; design-marketing §4 Consent: the same extensions protect direct service calls) =====
+// Whether the current user may record or change another party's consent or list subscription: the party's own user, a contact
+// administrator (every list and purpose, Comms' Consent), and a holder of MARKETING_CONSENT_EDIT for a list whose owner, or a scoped
+// purpose whose organization, is of their Marketing scope; with no user (a run as the system, the anonymous token services, which
+// check their token) as before. A global purpose (no list, no organization) of another party is the contact administrator's.
+function consentChangeAllowed(partyId, ownerPartyId) {
+    if (!ec.user.userId) return true
+    const own = ec.user.userAccount?.partyId || null
+    if (own && own === partyId) return true
+    if (contactAdministrator()) return true
+    if (!ownerPartyId || !access.has("MARKETING_CONSENT_EDIT")) return false
+    return covers(scope(), ownerPartyId)
+}
+function requireConsentChange(partyId, ownerPartyId) {
+    if (!consentChangeAllowed(partyId, ownerPartyId))
+        denied(
+            "PERMISSION_DENIED",
+            "Changing another person's consent needs a contact administrator, or Marketing's consent permission for the organization"
+        )
+}
+
 ;({
     permissions,
     reads,
@@ -158,5 +182,7 @@ function requireListOwner(ownerPartyId) {
     organizationIds,
     contactAdministrator,
     listReachable,
-    requireListOwner
+    requireListOwner,
+    consentChangeAllowed,
+    requireConsentChange
 })
