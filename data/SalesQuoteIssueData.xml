@@ -28,6 +28,13 @@ along with this software (see the LICENSE.md file). If not, see
             fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
     <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_QUOTE_REMINDER" description="Sales quote reminder to the customer"
             emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <!-- Sales P20 review (design-sales §16; impl-sales §4 Nov 14, the user's call): the acknowledgement of a request for quote made
+        from mail, a delivery of the intake's organization built fresh at each attempt (its text a stored .html.fancy-locked resource
+        with an explicit map, F70); off until the organization's SalesPolicy turns it on (rfqAcknowledge) -->
+    <moqui.basic.Enumeration enumId="MdsrcSalesRfqAck" description="Sales request for quote acknowledgement" sequenceNum="22"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesQuoteServices.build#QuoteRequestAcknowledgement"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_RFQ_ACK" description="Sales request for quote acknowledgement"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
     <moqui.service.job.ServiceJob jobName="send_SalesQuoteReminders" description="Send reminders of issued sales quotes"
             serviceName="mantle.order.SalesQuoteIssueServices.send#QuoteReminders" cronExpression="0 0 8 * * ?" paused="N"
             errorHistoryOnly="Y" transactionTimeout="1800"/>

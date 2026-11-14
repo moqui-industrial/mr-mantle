@@ -213,6 +213,22 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="filter" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('pipelineRowFilter', context).filter"/>
         </actions>
     </service>
+    <service verb="get" noun="QuoteRowFilter" allow-remote="false" read-only="true">
+        <description>The report engine's row filter of the quote dataset (report/mantle-sales-quotes.json; the ReportScopePolicy
+            MantleSalesQuoteScope, data/SalesWorkspaceData.xml; impl-sales P20): Sales' quote scope, as the quote lists read it: Sales
+            quotes (never a template) not placed, of the organizations of the signed-in viewer's sales scope and, without
+            SALES_TEAM_VIEW, of those only the quotes assigned to the viewer or a team of theirs. Nothing for a viewer who reads
+            nothing of Sales; a userId of another user is refused.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="filter" type="Map"/></out-parameters>
+        <actions>
+            <set field="filter" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('quoteRowFilter', context).filter"/>
+        </actions>
+    </service>
     <service verb="find" noun="OwnedSalesAssignments" allow-remote="false">
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
         <description>Sales' lifecycle participant's lookup (design-admin §14; impl-sales P6, F54): what userId owns of Sales, for an

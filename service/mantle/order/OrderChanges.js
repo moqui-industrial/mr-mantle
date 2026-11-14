@@ -1104,10 +1104,14 @@ const appliedContentOf = ch =>
     ) || null
 
 // ===== the confirmation email =====
+// impl-sales P20 (design-sales §16 Change confirmation): Sales' change operator, who applies a commercial change of an order of their
+// sales scope (SalesOrderChanges.js mayApply: SALES_ORDER_CHANGE), sends its confirmation too, as Customer Service's applier does.
+const mayConfirm = ch => hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]) || (!!ch && sales().mayApply(ch))
 function confirm(p) {
-    if (!hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]))
-        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY or SUPPORT_CASE_EDIT is required")
+    if (!hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT", "SALES_ORDER_CHANGE"]))
+        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY, SUPPORT_CASE_EDIT or SALES_ORDER_CHANGE is required")
     const ch = changeOf(p.requestId)
+    if (!mayConfirm(ch)) denied("RECORD_UNAVAILABLE", "Order change " + (p.requestId || "") + " is not available")
     const recipient = String(p.toAddress || "")
         .trim()
         .toLowerCase()
@@ -1253,10 +1257,7 @@ function actionsOf(ch, state, revision) {
             open && (ch.own || has(kindPermission)),
             open ? "Only who filed it or an approver" : "The change is closed"
         ),
-        confirm: why(
-            ch.request.statusId === "ReqCompleted" && hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]),
-            "Only an applied change is confirmed"
-        )
+        confirm: why(ch.request.statusId === "ReqCompleted" && mayConfirm(ch), "Only an applied change is confirmed")
     }
 }
 function get(p) {
