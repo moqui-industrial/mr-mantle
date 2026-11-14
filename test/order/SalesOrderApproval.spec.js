@@ -237,6 +237,23 @@ feature(
                 orderId: storeless,
                 orderRevision: revision(storeless)
             })
+            // no self-approval (Sales P11 review): an approver who owns, entered and placed the order may not decide its rule
+            const ownerApprover = system(() =>
+                user("ownerapprover", [f.orgA], ["SALES_VIEW", "SALES_ORDER_EDIT", "SALES_ORDER_APPROVE"])
+            )
+            const own = as(ownerApprover, orders + "create#SalesOrder", {
+                organizationPartyId: f.orgA,
+                customerPartyId: f.accounts.a
+            }).orderId
+            as(ownerApprover, orders + "store#SalesOrderLine", {
+                orderId: own,
+                orderRevision: revision(own),
+                productId: f.product,
+                quantity: 1
+            })
+            as(ownerApprover, orders + "place#SalesOrder", {orderId: own, orderRevision: revision(own)})
+            const self = as(ownerApprover, orders + "approve#SalesOrder", {orderId: own, orderRevision: revision(own)}).refused
+            const selfStatus = status(own)
             // with it off a store order auto-approves as before
             const offStore = paidOrder(f.orgB, f.accounts.b2, f.orgB + "_STORE")
             const offWarnings = system(() =>
@@ -254,10 +271,25 @@ feature(
                 second,
                 offStatus: status(offStore),
                 offWarnings,
-                storeStatus: status(store)
+                storeStatus: status(store),
+                self,
+                selfStatus
             }
         },
-        then({before, detail, nativeRefusal, approved, again, stale, second, offStatus, offWarnings, storeStatus}) {
+        then({
+            before,
+            detail,
+            nativeRefusal,
+            approved,
+            again,
+            stale,
+            second,
+            offStatus,
+            offWarnings,
+            storeStatus,
+            self,
+            selfStatus
+        }) {
             before.store == "OrderPlaced" && before.storeless == "OrderPlaced" && before.authorized == 2
             detail.orderFound && detail.order.approverOnly == true && detail.can.approve == true
             detail.approval.gateOn == true && detail.approval.requirements[0].ruleTypeEnumId == "SarAmount"
@@ -272,6 +304,7 @@ feature(
             stale.includes("REVISION_CHANGED")
             second.refused == "" && second.outcome == "approved"
             offWarnings.length == 0 && offStatus == "OrderApproved"
+            self.includes("SELF_APPROVAL") && selfStatus == "OrderPlaced"
         }
     }
 )
@@ -326,6 +359,10 @@ feature(
             return {within, over, results, batch, held, nativeRelease, salesRelease, creditRelease, released}
         },
         then({within, over, results, batch, held, nativeRelease, salesRelease, creditRelease, released}) {
+            Array.from(batch.results || [])
+                .filter(row => !row.ok)
+                .map(row => row.reasonCode + " " + row.message)
+                .join("; ") == ""
             batch.successCount == 2
             results[within].outcome == "approved"
             results[over].outcome == "held"
@@ -362,11 +399,14 @@ feature("an accepted net-terms quote under the seller's option is approved throu
         const holds = system(() =>
             ec.entity.find("mantle.order.OrderHoldReason").condition({orderId, holdTypeEnumId: "OhtCredit"}).count()
         )
-        return {sent, accepted, holds, statusId: status(orderId)}
+        // the system claim is the one order's, cleared once its approval returns (Sales P11 review)
+        const claimLeft = "SalesSystemApproval" in ec.context.sharedMap
+        return {sent, accepted, holds, statusId: status(orderId), claimLeft}
     },
-    then({sent, accepted, holds, statusId}) {
+    then({sent, accepted, holds, statusId, claimLeft}) {
         sent.refused == ""
         accepted.refused == "" && accepted.outcome == "held"
         holds == 1 && statusId == "OrderHold"
+        claimLeft == false
     }
 })

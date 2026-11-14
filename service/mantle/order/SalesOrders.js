@@ -825,6 +825,8 @@ function sendConfirmation(p) {
             sourceEnumId: confirmationSource,
             recipientPartyId,
             templateKey,
+            // the seller (Marketing P3): the delivery meets its suppressions (a hard bounce) beside every organization's
+            organizationPartyId: part.vendorPartyId,
             transactional: true,
             sendNow: true
         })

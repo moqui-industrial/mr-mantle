@@ -92,6 +92,8 @@ feature("a storeless order's placement sends one confirmation; its approval and 
     },
     then({placed, mails, after, stored, statusId, storeDeliveries}) {
         placed.length == 1 && placed[0].recipientPartyId == f.accounts.c
+        // from the seller, whose suppressions it meets (Marketing P3's delivery organization)
+        placed[0].organizationPartyId == f.orgC
         placed[0].stateEnumId + ":" + placed[0].lastError == "MdsSent:null"
         mails.length == 1
         mails[0].toList.includes("buyer@account-c.example.test")
