@@ -1154,7 +1154,9 @@ along with this software (see the LICENSE.md file). If not, see
             thread on a line or a reply, parentCommEventId the threadId) and resolve#ReviewThread (resolve: the thread's
             communicationEventId), each with its own checks of the caller (who may view the repository; a client contact
             reads no threads). Threads come back with threadId (their first comment's communicationEventId) and each
-            comment's commentId; a comment answers threadId (the new thread's, or the one answered) and held. For a
+            comment's commentId; a comment answers threadId (the new thread's, or the one answered) and held. A threadId
+            (resolve, a reply) not anchored on this merge request is not found, and so is a hidden merge request to anyone
+            but its author. For a
             repository Smithy keeps the REST refuses comment and resolve first (check#RestWrite: Smithy's own operations
             write threads through its post gate), and find reads both shapes.</description>
         <implements service="org.moqui.git.GitServices.handle#GitReviewThread"/>
@@ -1165,6 +1167,22 @@ along with this software (see the LICENSE.md file). If not, see
             }
             threadList = null
             held = false
+            const notFound = () => ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId}))
+            // a hidden merge request is its author's alone (its text waits for a moderator)
+            const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
+            if (!mr || (mr.hiddenDate && mr.authorUserId !== ec.user.userId)) { notFound(); return }
+            // a thread named by the path is one of this merge request's: its first comment (the one with the anchor; of a
+            // post, itself or the post it answers; of a Comment event, its root) is anchored on it
+            const threadOfThis = (id) => {
+                const event = id ? ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', id).disableAuthz().one() : null
+                if (!event) return false
+                const anchorOf = (commId) => commId ? ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor')
+                        .condition('communicationEventId', commId).disableAuthz().one() : null
+                const anchor = anchorOf(event.communicationEventId) || anchorOf(event.parentCommEventId) || anchorOf(event.rootCommEventId)
+                return !!anchor && anchor.mergeRequestId === mergeRequestId
+            }
+            if ((operation === 'resolve' || (operation === 'comment' && threadId)) && !threadOfThis(threadId)) {
+                ec.message.addError(ec.resource.expand('Review thread ${threadId} not found', '', {threadId})); return }
             if (operation === 'find') {
                 const out = call('get#ReviewThreads', {mergeRequestId, path: path || null})
                 if (!out) return

@@ -292,9 +292,40 @@ feature("the framework's review threads are Mantle's: found, commented, answered
         const opened = thread("comment", {path: "plain.txt", newLine: 1, body: "Why one?"})
         const answered = thread("comment", {threadId: opened.threadId, body: "Because."})
         const resolvedOut = thread("resolve", {threadId: opened.threadId, resolved: true})
-        return {opened, answered, resolvedOut, found: thread("find", {}).threadList}
+        // another merge request named by the path: its threads are not this one's, to resolve or to answer
+        lib.run("org.moqui.git.GitServices.commit#GitFiles", {
+            repositoryId: "sda_plain",
+            message: "Another line",
+            fileMap: {"other.txt": "two\n"},
+            branch: "main",
+            newBranch: "other"
+        })
+        const otherId = lib.run("org.moqui.git.GitReviewServices.create#MergeRequest", {repositoryId: "sda_plain", sourceRef: "other", title: "Other"})
+            .mergeRequestId
+        const refused = (operation, more) =>
+            lib.service(lib.OPERATOR, "mantle.work.GitServices.handle#GitReviewThread", {
+                operation,
+                repositoryId: "sda_plain",
+                mergeRequestId: otherId,
+                threadId: opened.threadId,
+                ...more
+            })
+        const crossResolve = refused("resolve", {resolved: false})
+        const crossReply = refused("comment", {body: "Sneaky"})
+        // a hidden merge request is its author's alone
+        lib.set("moqui.resource.GitMergeRequest", {mergeRequestId: otherId}, {hiddenDate: ec.user.nowTimestamp, authorUserId: "SDA_DEV"})
+        const hiddenFind = lib.service(lib.OPERATOR, "mantle.work.GitServices.handle#GitReviewThread", {
+            operation: "find",
+            repositoryId: "sda_plain",
+            mergeRequestId: otherId
+        })
+        return {opened, answered, resolvedOut, crossResolve, crossReply, hiddenFind, found: thread("find", {}).threadList}
     },
-    then({opened, answered, resolvedOut, found}) {
+    then({opened, answered, resolvedOut, crossResolve, crossReply, hiddenFind, found}) {
+        crossResolve.refused == true
+        crossResolve.message.includes("not found")
+        crossReply.refused == true
+        hiddenFind.refused == true
         opened.threadId != null
         opened.held == false
         answered.threadId == opened.threadId
