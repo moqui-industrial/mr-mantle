@@ -9,11 +9,24 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
 const adoption = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAdoption.js")
-const {one, denied} = lib
+const approvals = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingApprovals.js")
+const {find, one, rows, denied} = lib
 
 // The places a finding or a row names, as route keys of the app that shows them (Admin's mount: Admin.js settingsRoutes; the
 // Marketing root resolves the same keys to its own paths).
-const routes = {settings: "marketingSettings", adoption: "marketingAdoption"}
+const routes = {
+    settings: "marketingSettings",
+    adoption: "marketingAdoption",
+    // P2
+    campaigns: "marketingCampaigns",
+    approvals: "marketingApprovals",
+    campaign: "marketingCampaign",
+    campaignDefaults: "marketingCampaignDefaults",
+    vocabularies: "marketingVocabularies"
+}
+const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
+const upcomingDays = 60
+const dayMs = 24 * 60 * 60 * 1000
 
 function reader(p) {
     const userScope = marketingAccess.scope()
@@ -74,8 +87,26 @@ function answerSources(sources, context, answer) {
 // MarketingCards: each card's count, by its phase. None is built in P1: running campaigns and approvals P2, audience changes P3,
 // sends due P8, failed and uncertain deliveries P9, registration capacity P17.
 const cardSources = [
-    {key: "campaigns", title: "Running campaigns", phase: "P2"},
-    {key: "approvals", title: "Pending approvals", phase: "P2"},
+    {
+        key: "campaigns",
+        title: "Running campaigns",
+        phase: "P2",
+        run: context => ({
+            value: context.organizationPartyIds.length
+                ? find(CAMPAIGN)
+                      .condition("organizationPartyId", "in", context.organizationPartyIds)
+                      .condition("statusId", "MKTG_CAMP_INPROGRESS")
+                      .count()
+                : 0,
+            linkPath: routes.campaigns
+        })
+    },
+    {
+        key: "approvals",
+        title: "Pending approvals",
+        phase: "P2",
+        run: context => ({value: approvals.pendingRows(context.organizationPartyIds).length, linkPath: routes.approvals})
+    },
     {key: "dueSends", title: "Sends due", phase: "P8"},
     {key: "failedDeliveries", title: "Failed or uncertain deliveries", phase: "P9"},
     {key: "registrations", title: "Registrations against capacity", phase: "P17"},
@@ -93,7 +124,66 @@ function home(p) {
 }
 // Upcoming: campaign windows P2, sends P8, events P16, approved publication dates P14; each source's rows merged by date.
 const upcomingSources = [
-    {key: "campaignWindows", title: "Campaign windows", phase: "P2"},
+    {
+        key: "campaignWindows",
+        title: "Campaign windows",
+        phase: "P2",
+        // the open campaigns starting or ending in the next 60 days, each date a row
+        run: context => {
+            if (!context.organizationPartyIds.length) return {rows: []}
+            const now = lib.ms(ec.user.nowTimestamp)
+            const until = new Date(now + upcomingDays * dayMs)
+            const cf = ec.entity.conditionFactory
+            const found = find(CAMPAIGN)
+                .condition("organizationPartyId", "in", context.organizationPartyIds)
+                .condition("statusId", "in", ["MKTG_CAMP_PLANNED", "MKTG_CAMP_APPROVED", "MKTG_CAMP_INPROGRESS"])
+                .condition(
+                    cf.makeCondition(
+                        [
+                            cf.makeCondition(
+                                [
+                                    cf.makeCondition("fromDate", ">=", ec.user.nowTimestamp),
+                                    cf.makeCondition("fromDate", "<=", until)
+                                ],
+                                "and"
+                            ),
+                            cf.makeCondition(
+                                [
+                                    cf.makeCondition("thruDate", ">=", ec.user.nowTimestamp),
+                                    cf.makeCondition("thruDate", "<=", until)
+                                ],
+                                "and"
+                            )
+                        ],
+                        "or"
+                    )
+                )
+                .limit(100)
+                .list()
+            const out = []
+            for (const row of Array.from(found))
+                for (const [field, kind] of [
+                    ["fromDate", "Campaign starts"],
+                    ["thruDate", "Campaign ends"]
+                ]) {
+                    const at = lib.ms(row[field])
+                    if (at == null || at < now || at > lib.ms(until)) continue
+                    out.push({
+                        kind,
+                        title: row.campaignName || row.marketingCampaignId,
+                        date: row[field],
+                        state: {
+                            MKTG_CAMP_PLANNED: "Planned",
+                            MKTG_CAMP_APPROVED: "Approved",
+                            MKTG_CAMP_INPROGRESS: "In progress"
+                        }[row.statusId],
+                        recordId: row.marketingCampaignId,
+                        route: routes.campaign
+                    })
+                }
+            return {rows: out}
+        }
+    },
     {key: "sends", title: "Scheduled sends", phase: "P8"},
     {key: "events", title: "Events", phase: "P16"},
     {key: "publications", title: "Publication dates", phase: "P14"}
@@ -130,7 +220,37 @@ const attentionSources = [
             return {rows}
         }
     },
-    {key: "approvals", title: "Approvals awaiting a decision", phase: "P2"},
+    {
+        key: "approvals",
+        title: "Approvals awaiting a decision",
+        phase: "P2",
+        // an approver's: the requests awaiting a decision, each its campaign
+        admits: context => context.userScope.capabilities.approve,
+        run: context => {
+            const kinds = approvals.targetKinds
+            const rowsFound = approvals
+                .pendingRows(context.organizationPartyIds)
+                .slice(0, 50)
+                .map(request => {
+                    const kindKey = approvals.kindByEnum(request.targetKindEnumId)
+                    const target = kindKey ? kinds[kindKey].read(request.targetId) : null
+                    return {
+                        recordKind: kindKey,
+                        recordId: request.targetId,
+                        record:
+                            (kindKey ? kinds[kindKey].name + " " : "") +
+                            (target ? kinds[kindKey].label(target) : request.targetId),
+                        reason: "Awaits approval at revision " + request.targetRevision,
+                        age:
+                            Math.max(0, Math.floor((lib.ms(ec.user.nowTimestamp) - lib.ms(request.decisionDate)) / dayMs)) +
+                            " days",
+                        action: "Review",
+                        route: routes.approvals
+                    }
+                })
+            return {rows: rowsFound}
+        }
+    },
     {key: "deliveries", title: "Failed or uncertain deliveries", phase: "P9"}
 ]
 function attention(p) {
@@ -148,6 +268,29 @@ function attention(p) {
 // The entries built so far, each with its route key, owner and readiness: P1 the adoption of unowned records. Later phases add
 // CampaignDefaults and Vocabularies (P2), Consent and Suppressions (P3), LeadSources (P13), SendingProfiles and Templates (P6).
 const settingsEntries = [
+    // P2: the organization's campaign defaults (design §12 CampaignDefaults) and the values it offers (Vocabularies)
+    {
+        entryKey: "campaignDefaults",
+        title: "Campaign defaults",
+        description: "Currency, approval and the one-person team's self-approval, audience limit, frequency cap and retention",
+        category: "Campaigns",
+        owner: "Marketing",
+        route: routes.campaignDefaults,
+        readiness: userScope => {
+            const ids = marketingAccess.organizationIds(userScope)
+            const missing = ids.filter(partyId => !approvals.policyOf(partyId)).length
+            return missing ? missing + " organizations use the defaults" : "Every organization has its policy"
+        }
+    },
+    {
+        entryKey: "vocabularies",
+        title: "Vocabularies",
+        description: "The list types, tracking code types and UTM sources, media and content offered",
+        category: "Campaigns",
+        owner: "Marketing",
+        route: routes.vocabularies,
+        readiness: () => "Dated values by organization"
+    },
     {
         entryKey: "adoption",
         title: "Adoption of existing records",
@@ -162,12 +305,12 @@ const settingsEntries = [
     }
 ]
 function settings() {
-    configurer()
+    const userScope = configurer()
     const entries = []
     for (const entry of settingsEntries) {
         let readiness
         try {
-            readiness = entry.readiness()
+            readiness = entry.readiness(userScope)
         } catch (error) {
             ec.logger.error("Marketing settings entry " + entry.entryKey + " failed: " + error.message)
             readiness = "Could not be checked"
@@ -183,6 +326,22 @@ function settings() {
 // phases add theirs (no policy P2, no ready sending profile P6, a mount with nothing published P7, failed jobs and captures
 // P9–P17), per organization.
 const readinessChecks = [
+    // P2: the organization's campaign policy (none: no self-approval and a manager required, a new campaign's currency from its
+    // accounting); asked per organization
+    {
+        checkKey: "marketing.policy",
+        title: "Campaign defaults",
+        run: organizationPartyId => {
+            if (!organizationPartyId) return {state: "ready", message: "Asked per organization"}
+            if (approvals.policyOf(organizationPartyId)) return {state: "ready", message: "Its campaign defaults are set"}
+            return {
+                state: "warning",
+                reasonCode: "NO_POLICY",
+                message: "No campaign defaults: campaigns use the default approval rules and the accounting currency",
+                fixRoute: routes.campaignDefaults
+            }
+        }
+    },
     {
         checkKey: "marketing.adoption",
         title: "Records awaiting adoption",

@@ -34,4 +34,62 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingSetupServicesALL" userGroupId="ALL_USERS"
             artifactGroupId="MantleMarketingSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
     <!-- ===== end of Marketing P1 ===== -->
+
+    <!-- ===== Marketing P2: campaigns and approvals (impl-marketing P2, F42, F59; design-marketing §3, §14.3) ===== -->
+    <!-- A campaign's responsible people (design §3 CampaignParties): dated MarketingCampaignParty rows of these roles; the lifecycle
+        participant marketing.campaigns moves a departing user's rows on open campaigns -->
+    <mantle.party.RoleType roleTypeId="MarketingCampaignManager" description="Campaign Manager"/>
+    <mantle.party.RoleType roleTypeId="MarketingCampaignContributor" description="Campaign Contributor"/>
+    <!-- An approved campaign that changes materially returns to review (Planned) before it starts: its approval ends with the
+        revision it approved (CampaignServices) -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MKTG_CAMP_APPROVED" toStatusId="MKTG_CAMP_PLANNED"
+            transitionName="Return Marketing Campaign to Review"/>
+    <!-- The approval topics (design §3 Approvals, F42): Marketing's, seeded here with their decision services, which the framework's
+        approve#NotificationMessage and refuse#NotificationMessage call as the user (CampaignServices approve#MarketingTarget and
+        refuse#MarketingTarget, deciding at the revision the notice names). Sent to the holders of MARKETING_APPROVE who work for the
+        target's organization, the author left out where they may not decide; a title names the campaign or send only, never an
+        audience or an address. MarketingSendApproval (P8) and MarketingAutomationApproval (P11) are seeded now, sent by those phases.
+        The BOSS links are Marketing's setup (mr-boss BossSetupMarketingData). -->
+    <moqui.security.user.NotificationTopic topic="MarketingCampaignApproval" inboxEnumId="NinNotifications"
+            description="Marketing campaign to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve campaign ${targetName} (revision ${targetRevision})"/>
+    <moqui.security.user.NotificationTopic topic="MarketingSendApproval" inboxEnumId="NinNotifications"
+            description="Marketing send to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve send ${targetName} (revision ${targetRevision})"/>
+    <moqui.security.user.NotificationTopic topic="MarketingAutomationApproval" inboxEnumId="NinNotifications"
+            description="Marketing automation to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve automation ${targetName} (revision ${targetRevision})"/>
+    <!-- Their delivery settings, delegated by Admin to a holder of MARKETING_APPROVE (the framework's TopicRegistration, as
+        AdminConfigurationData's and Maintenance's rows); the decision services and the title are never editable there -->
+    <moqui.server.TopicRegistration topic="MarketingCampaignApproval" ownerApp="Marketing" purpose="A marketing campaign waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="40"/>
+    <moqui.server.TopicRegistration topic="MarketingSendApproval" ownerApp="Marketing" purpose="A marketing send waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="41"/>
+    <moqui.server.TopicRegistration topic="MarketingAutomationApproval" ownerApp="Marketing" purpose="A marketing automation waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="42"/>
+    <!-- MARKETING_OWNER_CHANGE (as SALES_OWNER_CHANGE, impl-sales P6): moves another user's campaign manager and contributor rows, the
+        permission of the lifecycle participant marketing.campaigns (mr-boss grants it to Admin's identity operators); in this file,
+        not MantleSetupData's Marketing block, to keep Marketing's track out of the shared file -->
+    <moqui.security.UserPermission userPermissionId="MARKETING_OWNER_CHANGE" description="Marketing Owner Change (another user's campaign roles)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MARKETING_OWNER_CHANGE" fromDate="0"/>
+    <!-- The lifecycle services, called by Admin's registry as the operator: every user may call them, and each checks
+        MARKETING_OWNER_CHANGE itself (as Sales' MantleSalesWorkspaceServices) -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMarketingLifecycleServices" description="Marketing's lifecycle services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMarketingLifecycleServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.marketing\.CampaignServices\.(find#OwnedCampaignRoles|transfer#CampaignRole)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingLifecycleServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMarketingLifecycleServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <!-- ===== end of Marketing P2 ===== -->
 </entity-facade-xml>

@@ -2122,6 +2122,11 @@ along with this software (see the LICENSE.md file). If not, see
             for every caller, authorization disabled or not; a call with no user sees none. Its activities are linked through
             SalesOpportunityWorkEffort.
 
+            A marketing campaign (mantle.marketing.campaign.MarketingCampaign, IronStone Marketing's Chatter and files host,
+            impl-marketing P2) and its files (CampaignAsset) are seen only by a Marketing reader of its organization, never an unowned
+            one (mantle.marketing.CampaignServices.check#CampaignAccess), for every caller, authorization disabled or not; a call with
+            no user sees none.
+
             A payslip (mantle.humanres.payroll.Payslip, IronStone People's payslip content host, P26) and its files (PayslipContent)
             are seen only by a payroll reader of its employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person
             reads their own issued slip through get#MyPayslip), for every caller, authorization disabled or not; a call with no user
@@ -2217,7 +2222,11 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId'),
                 // IronStone Sales' opportunity content host (impl-sales P4, F69): a lead's or opportunity's files, its Sales readers'
                 'mantle.sales.opportunity.SalesOpportunity': content('mantle.sales.opportunity.SalesOpportunityContent',
-                        'salesOpportunityId', 'contentTypeEnumId')}
+                        'salesOpportunityId', 'contentTypeEnumId'),
+                // IronStone Marketing's campaign files host (impl-marketing P2, design §14.3 CampaignAsset): a campaign's files,
+                // its Marketing readers'
+                'mantle.marketing.campaign.MarketingCampaign': content('mantle.marketing.campaign.CampaignAsset',
+                        'marketingCampaignId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2660,6 +2669,12 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.sales.opportunity.SalesOpportunity' || entityName === 'mantle.sales.opportunity.SalesOpportunityContent')
                     return !!ec.service.sync().name('mantle.sales.OpportunityServices.check#OpportunityAccess')
                             .parameter('salesOpportunityId', value.salesOpportunityId).disableAuthz().call()?.recordVisible
+                // IronStone Marketing's campaign and its files (impl-marketing P2): a Marketing reader of its organization, never
+                // an unowned campaign (mantle.marketing.CampaignServices.check#CampaignAccess), whatever the entity filters and
+                // authorization; a call with no user sees none
+                if (entityName === 'mantle.marketing.campaign.MarketingCampaign' || entityName === 'mantle.marketing.campaign.CampaignAsset')
+                    return !!ec.service.sync().name('mantle.marketing.CampaignServices.check#CampaignAccess')
+                            .parameter('marketingCampaignId', value.marketingCampaignId).disableAuthz().call()?.recordVisible
                 // an agreement: of one of the user's organizations, with a party the user may see
                 if (entityName === 'mantle.party.agreement.Agreement') {
                     const orgIds = userOrganizationIds()
