@@ -40,11 +40,23 @@ const unsafePatterns = [
         /<\s*\/?\s*(script|iframe|frame|frameset|object|embed|applet|form|input|button|textarea|select|meta|link|base|svg|math)\b/i,
         "a script, frame, form or embedded object"
     ],
-    [/\son[a-z]+\s*=/i, "an event handler attribute"],
+    // an attribute starts after white space, a slash or a quote (<img/onerror=...>, <p title="x"onclick=...>)
+    [/[\s/"'`]on[a-z]+\s*=/i, "an event handler attribute"],
     [/(java|vb|live)script\s*:/i, "a script link"],
     [/data\s*:\s*text\/html/i, "an HTML data link"],
     [/expression\s*\(/i, "a style expression"]
 ]
+// An attribute value as a browser reads it, for the link check: character references decoded (&#106;avascript:,
+// &#x6A;, &colon;, &Tab;) and the white space and control characters a browser drops inside a scheme removed (P6 review).
+function decodedForLinks(value) {
+    const named = {colon: ":", tab: "", newline: "", lpar: "(", rpar: ")", sol: "/", nbsp: ""}
+    const code = number => (Number.isFinite(number) && number > 0 && number <= 0x10ffff ? String.fromCodePoint(number) : "")
+    return String(value)
+        .replace(/&#x([0-9a-f]{1,8});?/gi, (all, hex) => code(parseInt(hex, 16)))
+        .replace(/&#([0-9]{1,8});?/g, (all, decimal) => code(parseInt(decimal, 10)))
+        .replace(/&(colon|tab|newline|lpar|rpar|sol|nbsp);/gi, (all, name) => named[name.toLowerCase()])
+        .replace(/[\u0000-\u0020\u007f-\u00a0\u200b-\u200d\ufeff]+/g, "")
+}
 const text = value => (value == null ? "" : String(value).trim())
 const blank = value => text(value) === ""
 const nowMs = () => ms(ec.user.nowTimestamp)
@@ -139,6 +151,10 @@ function namesIn(value, label) {
 function checkHtml(value) {
     for (const [pattern, what] of unsafePatterns)
         if (pattern.test(value)) denied("UNSAFE_HTML", "The body has " + what + ", which a message may not carry")
+    // each attribute's value as a browser reads it
+    for (const [, attribute] of String(value).matchAll(/=\s*("[^"]*"|'[^']*'|[^\s"'>]+)/g))
+        if (/^(java|vb|live)script:|^data:text\/html/i.test(decodedForLinks(attribute.replace(/^["']|["']$/g, ""))))
+            denied("UNSAFE_HTML", "The body has a script link written with character references, which a message may not carry")
     if (/(href|src|action|background)\s*=\s*["']?\s*[^"'\s>]*\$\{/i.test(value.replace(/\\\$\{/g, "")))
         denied("VARIABLE_IN_LINK", "A variable may not make a link's address: write the address in the body")
 }
@@ -582,13 +598,16 @@ function endTemplate(p) {
 
 // ===== the ledger's template source (MdsrcMessageTemplate) =====
 // build#TemplateDelivery: a delivery of a template's EmailTemplate rendered from the content in effect at the attempt, with the
-// delivery's queued values for its declared variables (nothing else reaches the renderer); suppressed when the template has ended
-// or has no content in effect, or a required variable has neither a value nor a fallback.
+// delivery's queued values for its declared variables (nothing else reaches the renderer); suppressed when the template has ended,
+// is not the delivery's organization's, has no content in effect, or a required variable has neither a value nor a fallback.
 function buildDelivery(p) {
     const delivery = one("mantle.party.MessageDelivery", {deliveryId: text(p.deliveryId)})
     if (!delivery) return {suppress: "The delivery is gone"}
     const template = one(T, {emailTemplateId: delivery.templateKey})
     if (!template || ended(template)) return {suppress: "The template is not in use"}
+    // a template is its organization's: a delivery of another organization (or of none) never sends it (P6 review)
+    if (!delivery.organizationPartyId || delivery.organizationPartyId !== template.organizationPartyId)
+        return {suppress: "The template is another organization's"}
     const content = currentOf(contentsOf(template.messageTemplateId))
     if (!content) return {suppress: "The template has no published content"}
     const rendered = render(content, lib.json(delivery.parametersJson, {}) || {})

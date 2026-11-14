@@ -16,7 +16,8 @@
  *   block (a complaint, a staff block) a promotional one only (transactional N), never a transactional notice (the user's call,
  *   Nov 14).
  * - Sending profiles (impl-marketing P6, F13): a delivery that names one goes out through its relay, from its sender and reply-to,
- *   with the bounce address bounces+(deliveryId)@ its bounce domain (VERP: the bounce intake finds the delivery by it), within its
+ *   with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce domain (VERP: the bounce intake finds the delivery by it,
+ *   and only with its random key, so a forged report cannot name a delivery by a guessed id; P6 review), within its
  *   throttle and quiet hours (the delivery waits, no try counted); a profile that is not ready is a retryable outcome (its tries
  *   counted, then failed), so nothing goes out before its readiness. A delivery that names none is sent as before.
  * - Receipts (P6, F14): the later facts of a delivery (delivered, a soft or hard bounce, a complaint) are MessageDeliveryReceipt
@@ -30,6 +31,12 @@ const {find, one, rows, call, ms} = lib
 const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
 // loaded when a delivery names a sending profile, so the built sources do not depend on it
 const profiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
+// The random key of a delivery's VERP bounce address (P6 review): letters and digits only, so it never meets the address's dot.
+const newBounceKey = () =>
+    ec.user
+        .randomString(24)
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 16) || ec.user.randomCode(16)
 const D = "mantle.party.MessageDelivery"
 const ATTEMPT = "mantle.party.MessageDeliveryAttempt"
 const limits = {tries: 5, batch: 200, maxBackoffMinutes: 60}
@@ -72,6 +79,7 @@ function queue(p) {
             productStoreId: p.productStoreId || null,
             organizationPartyId,
             sendingProfileId,
+            bounceKey: sendingProfileId ? newBounceKey() : null,
             transactional: p.transactional === false || p.transactional === "N" ? "N" : "Y",
             consentJson: p.marketingPurposeEnumId
                 ? JSON.stringify(
@@ -212,7 +220,13 @@ function attemptStep(p) {
     // and a profile that is not ready is a retryable outcome (nothing goes out before its readiness)
     let profileSend = {}
     if (delivery.sendingProfileId) {
-        const decided = profiles().forDelivery(delivery.sendingProfileId, delivery.deliveryId)
+        // a delivery queued before it had a key (none is sent without one)
+        let bounceKey = text(delivery.bounceKey)
+        if (!bounceKey) {
+            bounceKey = newBounceKey()
+            call("update#" + D, {deliveryId: delivery.deliveryId, bounceKey})
+        }
+        const decided = profiles().forDelivery(delivery.sendingProfileId, delivery.deliveryId, bounceKey)
         if (decided.wait) {
             call("update#" + D, {
                 deliveryId: delivery.deliveryId,

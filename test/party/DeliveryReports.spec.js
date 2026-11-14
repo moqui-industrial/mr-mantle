@@ -6,7 +6,7 @@
 // (a sent message turning ES_BOUNCED) is matched by the attempt that sent it.
 // Standalone: spec-local organizations, profile, bounce account, deliveries and reports. Run: ./moq test mr-mantle --spec DeliveryReports
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
-const {make, row, rows, system, organization, user} = lib
+const {make, row, rows, system, organization, user, as} = lib
 const M = "mantle.party.MessageServices."
 const capture = ec.factory.getTool("MailCapture")
 const prefix = "MDR"
@@ -19,12 +19,12 @@ const blocks = address => rows(S, {destinationKey: address})
 let messageSeq = 0
 
 // A report as the bounce account stores it: the message, its trace field, and its parts as files.
-function received(deliveredTo, parts) {
+function received(deliveredTo, parts, emailAccountId = ids.account) {
     const emailMessageId = prefix + "_MSG" + ++messageSeq
     system(() => {
         make("moqui.basic.email.EmailMessage", {
             emailMessageId,
-            emailAccountId: ids.account,
+            emailAccountId,
             statusId: "ES_RECEIVED",
             subject: "Report " + messageSeq,
             fromAddress: "mailer-daemon@mx.example.net",
@@ -56,13 +56,17 @@ const dsn = (recipient, action, status) => [
         status +
         "\r\nDiagnostic-Code: smtp; " +
         status +
-        " spec\r\n"
+        " <" +
+        recipient +
+        "> spec\r\n"
 ]
 const arf = mailFrom => [
     "message/feedback-report",
     "Feedback-Type: abuse\r\nVersion: 1\r\nOriginal-Mail-From: <" + mailFrom + ">\r\nOriginal-Rcpt-To: <x@example.net>\r\n"
 ]
-const verp = name => "bounces+" + deliveries[name] + "@" + domain
+// a delivery's VERP address carries its random key (P6 review)
+const keyOf = name => row("mantle.party.MessageDelivery", {deliveryId: deliveries[name]}).bounceKey
+const verp = name => "bounces+" + deliveries[name] + "." + keyOf(name) + "@" + domain
 const processReport = emailMessageId => system(() => lib.run(M + "process#DeliveryReport", {emailMessageId}))
 
 spec({
@@ -70,6 +74,10 @@ spec({
         capture.enable()
         system(() => {
             organization(orgA, "Reports A")
+            organization(prefix + "_ORG_B", "Reports B")
+            // suppression reviewers of each organization, for the receipts (P6 review)
+            user(prefix, "reviewerA", [orgA], ["MESSAGE_SUPPRESSION_REVIEW"])
+            user(prefix, "reviewerB", [prefix + "_ORG_B"], ["MESSAGE_SUPPRESSION_REVIEW"])
             make("moqui.basic.Enumeration", {
                 enumId: ids.source,
                 enumTypeId: "MessageDeliverySource",
@@ -94,6 +102,13 @@ spec({
                 emailAddress: "bounces@" + domain,
                 statusId: "EasActive"
             })
+            // a person's mailbox, which gets bounces of its own mail
+            make("moqui.basic.email.EmailAccount", {
+                emailAccountId: prefix + "_PERSONAL",
+                accountKindEnumId: "EakHosted",
+                emailAddress: "someone@" + domain,
+                statusId: "EasActive"
+            })
             const profile = lib.run(M + "store#SendingProfile", {
                 organizationPartyId: orgA,
                 profileName: "Reports",
@@ -101,7 +116,7 @@ spec({
                 fromAddress: "news@reports.example.test",
                 bounceDomain: domain
             })
-            for (const name of ["hard", "complaint", "soft", "edge", "later"]) {
+            for (const name of ["hard", "complaint", "soft", "edge", "later", "forged"]) {
                 const partyId = prefix + "_" + name.toUpperCase()
                 make("mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
                 deliveries[name] = lib.run(M + "queue#Delivery", {
@@ -201,3 +216,45 @@ feature(
         }
     }
 )
+
+// P6 review: anyone can mail the bounce address and delivery ids are a sequence, so a forged report must name the delivery's random
+// key; a DSN about another address says nothing of the delivery; a report in another mailbox is its owner's mail, never read
+feature("a forged report suppresses nothing: no key, a wrong key, another recipient, another mailbox", {
+    when() {
+        const forged = name => "bounces+" + deliveries[name] + "@" + domain
+        const noKey = processReport(received(forged("forged"), [dsn("forged@reports.example.test", "failed", "5.1.1")]))
+        const wrongKey = processReport(
+            received("bounces+" + deliveries.forged + ".AAAAAAAAAAAAAAAA@" + domain, [
+                dsn("forged@reports.example.test", "failed", "5.1.1")
+            ])
+        )
+        const arfNoKey = processReport(received("abuse-desk@" + domain, [arf(forged("forged"))]))
+        const another = processReport(received(verp("forged"), [dsn("victim@reports.example.test", "failed", "5.1.1")]))
+        const personalId = received(verp("forged"), [dsn("forged@reports.example.test", "failed", "5.1.1")], prefix + "_PERSONAL")
+        const personal = processReport(personalId)
+        return {noKey, wrongKey, arfNoKey, another, personal, personalId}
+    },
+    then({noKey, wrongKey, arfNoKey, another, personal, personalId}) {
+        noKey.statusEnumId == "MrsUnknownKey" &&
+            wrongKey.statusEnumId == "MrsUnknownKey" &&
+            arfNoKey.statusEnumId == "MrsUnknownKey"
+        another.statusEnumId == "MrsIgnored" && another.deliveryId == deliveries.forged
+        personal.notBounceAccount == true && row("mantle.party.MessageDeliveryReport", {emailMessageId: personalId}) == null
+        blocks("forged@reports.example.test").length == 0 && blocks("victim@reports.example.test").length == 0
+        rows("mantle.party.MessageDeliveryReceipt", {deliveryId: deliveries.forged}).length == 0
+    }
+})
+
+// P6 review: the receipts of a delivery are read within the reader's organizations, and a diagnostic's address never shows
+feature("a delivery's receipts are its organization's readers', without an address", {
+    when() {
+        const own = as(prefix + "_REVIEWERA", M + "find#DeliveryReceipts", {deliveryId: deliveries.hard})
+        const other = as(prefix + "_REVIEWERB", M + "find#DeliveryReceipts", {deliveryId: deliveries.hard})
+        return {own, other}
+    },
+    then({own, other}) {
+        own.refusal == "" && own.receiptList.length == 2
+        own.receiptList.every(receipt => !String(receipt.detail).includes("@"))
+        other.refusal.includes("RECORD_UNAVAILABLE")
+    }
+})

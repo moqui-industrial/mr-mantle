@@ -74,6 +74,9 @@ feature("an editor writes a template's content with declared variables; what the
             script: store({body: "<p>Hi</p><script>alert(1)</script>"}),
             handler: store({body: '<img src="x.png" onerror="alert(1)">'}),
             scriptLink: store({body: '<a href="javascript:alert(1)">x</a>'}),
+            // P6 review: an attribute after a slash, and a script link written with character references
+            slashHandler: store({body: "<img/src=x.png/onerror=alert(1)>"}),
+            encodedLink: store({body: '<a href="&#106;ava&#x09;script&colon;alert(1)">x</a>'}),
             inLink: store({body: '<a href="https://shop.example/${offer}">Shop</a>'}),
             reserved: store({variables: [{name: "raw"}]}),
             reader: store({}, users.reader),
@@ -100,6 +103,8 @@ feature("an editor writes a template's content with declared variables; what the
         script,
         handler,
         scriptLink,
+        slashHandler,
+        encodedLink,
         inLink,
         reserved,
         reader,
@@ -116,7 +121,9 @@ feature("an editor writes a template's content with declared variables; what the
         directive.refusal.includes("TEMPLATE_DIRECTIVE")
         script.refusal.includes("UNSAFE_HTML") &&
             handler.refusal.includes("UNSAFE_HTML") &&
-            scriptLink.refusal.includes("UNSAFE_HTML")
+            scriptLink.refusal.includes("UNSAFE_HTML") &&
+            slashHandler.refusal.includes("UNSAFE_HTML") &&
+            encodedLink.refusal.includes("UNSAFE_HTML")
         inLink.refusal.includes("VARIABLE_IN_LINK")
         reserved.refusal.includes("VARIABLE_INVALID")
         reader.refusal.includes("PERMISSION_DENIED") && readerCreate.refusal.includes("PERMISSION_DENIED")
@@ -208,7 +215,7 @@ feature("the ledger's template source sends the content in effect with the deliv
                 fromAddress: "news@templates.example.test"
             })
         )
-        const queue = (eventKey, bodyParameters) =>
+        const queue = (eventKey, bodyParameters, organizationPartyId = orgA) =>
             system(() =>
                 lib.run(M + "queue#Delivery", {
                     eventKey,
@@ -216,7 +223,7 @@ feature("the ledger's template source sends the content in effect with the deliv
                     recipientPartyId: ids.buyer,
                     toAddress: "buyer@templates.example.test",
                     templateKey: emailTemplateId,
-                    organizationPartyId: orgA,
+                    organizationPartyId,
                     bodyParameters,
                     sendNow: true
                 })
@@ -225,20 +232,23 @@ feature("the ledger's template source sends the content in effect with the deliv
         const sent = queue("spec:template-1", {firstName: "Ana", offer: "Free <shipping>", password: "never"})
         const mail = capture.last()
         const needs = queue("spec:template-2", {firstName: "Ben"})
+        // P6 review: another organization's delivery never sends this organization's template
+        const otherOrg = queue("spec:template-other", {firstName: "Di", offer: "x"}, orgB)
         const ended = as(users.editor, M + "end#Template", {
             messageTemplateId: templateId,
             expectedRevision: revisionOf("mantle.party.MessageTemplate", {messageTemplateId: templateId}),
             reason: "Season over"
         })
         const after = queue("spec:template-3", {firstName: "Cy", offer: "x"})
-        return {sent, mail, needs, ended, after}
+        return {sent, mail, needs, otherOrg, ended, after}
     },
-    then({sent, mail, needs, ended, after}) {
+    then({sent, mail, needs, otherOrg, ended, after}) {
         sent.stateEnumId == "MdsSent"
         mail.subject == "Last days, Ana"
         mail.body.includes("Free &lt;shipping&gt;") && !mail.body.includes("never")
         mail.bodyText.includes("Dear Ana")
         needs.stateEnumId == "MdsSuppressed"
+        otherOrg.stateEnumId == "MdsSuppressed"
         ended.refusal == ""
         after.stateEnumId == "MdsSuppressed"
     }

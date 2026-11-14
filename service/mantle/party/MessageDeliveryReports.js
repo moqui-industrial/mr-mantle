@@ -3,9 +3,12 @@
  * ECA DeliveryReportIntake and the EmailMessage ECA DeliveryReportEdgeBounce; design-marketing §15.1, §15.2; impl-marketing P6,
  * F14, F18, F76; Comms' owner contract, because every source of the ledger can bounce).
  *
- * - Two paths: a report (a DSN, RFC 3464, or an abuse report, ARF RFC 5965) a bounce account received, read with the framework's
- *   read#DeliveryReport (its report part and returned message, never its body text), whose VERP key bounces+(delivery)@ (the
- *   address it came to, or an ARF's Original-Mail-From) finds the delivery, else the returned message's Message-ID; and a sent
+ * - Two paths: a report (a DSN, RFC 3464, or an abuse report, ARF RFC 5965) a bounce account received (another mailbox's message is
+ *   never read or recorded), read with the framework's read#DeliveryReport (its report part and returned message, never its body
+ *   text), whose VERP address bounces+(delivery).(key)@ (the address it came to, or an ARF's Original-Mail-From) finds the delivery
+ *   only with the delivery's random key (anyone can mail the bounce address and delivery ids are a sequence, so a forged report
+ *   must not suppress an address by a guessed id; P6 review), else the returned message's random Message-ID; a DSN counts only
+ *   the recipients that are the delivery's own address (an ARF's Original-Rcpt-To is often redacted, so its key binds it); and a sent
  *   message an edge relay marked ES_BOUNCED (the edge replaces the envelope sender with its own, so the VERP key is lost there,
  *   F76), matched to its delivery by the attempt that sent it.
  * - What it records: a failed recipient with a permanent status (5.x.x) or the edge's bounce is a hard bounce; a failed one with a
@@ -32,22 +35,39 @@ const limits = {tries: 5, batch: 200, days: 30}
 const text = value => (value == null ? "" : String(value).trim())
 const nowMs = () => ms(ec.user.nowTimestamp)
 
-// The delivery id of a VERP address bounces+(id)@ any domain, or null.
+// The delivery id and random key of a VERP address bounces+(id).(key)@ any domain, or null.
 function verpKey(address) {
-    const match = /^bounces\+([A-Za-z0-9_-]{1,40})@[^@\s]+$/i.exec(text(address).replace(/^.*<|>.*$/g, ""))
-    return match ? match[1] : null
+    const match = /^bounces\+([A-Za-z0-9_-]{1,40})\.([A-Za-z0-9]{8,40})@[^@\s]+$/i.exec(text(address).replace(/^.*<|>.*$/g, ""))
+    return match ? {deliveryId: match[1], bounceKey: match[2]} : null
 }
-// The delivery a report names: by its VERP key, else by the returned message's Message-ID.
+// The delivery a report names: by its VERP address with the delivery's own random key (anyone can mail the bounce address, so an
+// id alone, which is a sequence, names nothing; P6 review), else by the returned message's Message-ID (random, known only to who
+// saw the message).
 function deliveryOf(addresses, originalMessageId) {
     for (const address of addresses) {
         const key = verpKey(address)
         if (!key) continue
-        const delivery = one(D, {deliveryId: key})
-        if (delivery) return delivery
+        const delivery = one(D, {deliveryId: key.deliveryId})
+        if (delivery && text(delivery.bounceKey) && delivery.bounceKey === key.bounceKey) return delivery
     }
     if (text(originalMessageId)) return find(D, {providerMessageId: text(originalMessageId)}).one() || null
     return null
 }
+// The address of a delivery or of a report's recipient field, as compared: lower case, without its type and angle brackets.
+const addressKey = value =>
+    text(value)
+        .replace(/^[^;]*;/, "")
+        .replace(/^.*<|>.*$/g, "")
+        .trim()
+        .toLowerCase()
+// A DSN's recipients that are the delivery's own address (Final- or Original-Recipient): a report about another address says
+// nothing of this delivery, so it never suppresses the delivery's address (P6 review).
+const recipientsOf = (recipients, delivery) =>
+    recipients.filter(recipient =>
+        [recipient.finalRecipient, recipient.originalRecipient].some(
+            value => addressKey(value) && addressKey(value) === addressKey(delivery.toAddress)
+        )
+    )
 // What a DSN says of the delivery: the worst of its recipients' facts, with the detail.
 function dsnFact(recipients) {
     let fact = null
@@ -158,6 +178,11 @@ function process(p) {
         }
     // the edge's path: a sent message of a template the edge relay marked bounced, matched by the attempt that sent it (F76)
     const edge = message.statusId === "ES_BOUNCED" && !message.emailAccountId
+    // a received report is read only from a bounce account: another mailbox's message is left alone and nothing is recorded of it
+    if (!edge && !(message.emailAccountId && bounceAccountIds().includes(message.emailAccountId))) {
+        ec.logger.info("Delivery report intake: email message " + emailMessageId + " is no bounce account's; left")
+        return {statusEnumId: "MrsIgnored", notBounceAccount: true}
+    }
     const row = reportRow(emailMessageId, edge ? "MrkEdge" : "MrkDsn", message.receivedDate || message.sentDate)
     if (edge) {
         const attempt = find(ATTEMPT, {emailMessageId}).orderBy("-attemptSeqId").one()
@@ -203,7 +228,16 @@ function process(p) {
             })
         return apply(row, delivery, kindEnumId, "MdrComplaint", ("Abuse report: " + (feedbackType || "abuse")).slice(0, 255))
     }
-    const {fact, detail} = dsnFact(Array.from(read.recipientList || []))
+    const recipients = Array.from(read.recipientList || [])
+    const own = recipientsOf(recipients, delivery)
+    if (recipients.length && !own.length)
+        return finish(row, {
+            reportKindEnumId: kindEnumId,
+            deliveryId: delivery.deliveryId,
+            statusEnumId: "MrsIgnored",
+            reasonText: "The report is about another recipient"
+        })
+    const {fact, detail} = dsnFact(own)
     if (!fact)
         return finish(row, {
             reportKindEnumId: kindEnumId,
@@ -261,7 +295,8 @@ function processApart(emailMessageId) {
         ec.message.popErrors()
     }
 }
-// The bounce accounts: the hosted and shared mail accounts bounces@ a sending profile's bounce domain.
+// The bounce accounts: the hosted and shared mail accounts bounces@ a sending profile's bounce domain. Only their messages are
+// read as reports: a report in anyone else's mailbox is their own mail, never read or recorded here (P6 review).
 function bounceAccountIds() {
     const profiles = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
     const domains = new Set(
@@ -345,7 +380,21 @@ function receipts(p) {
     )
         lib.denied("PERMISSION_DENIED", "Reading delivery receipts needs MESSAGE_DELIVERY_REVIEW")
     const delivery = one(D, {deliveryId: text(p.deliveryId)})
-    if (!delivery) lib.denied("RECORD_UNAVAILABLE", "Delivery " + text(p.deliveryId) + " is not available")
+    // a reader other than the ledger's reviewer reads the deliveries of the organizations they work for (every internal one with
+    // MARKETING_ALL_ORGANIZATIONS); another's answers as missing (P6 review)
+    const everyOrganization =
+        access.systemAdmin() || access.has("MESSAGE_DELIVERY_REVIEW") || access.has("MARKETING_ALL_ORGANIZATIONS")
+    const reachable =
+        !!delivery &&
+        (everyOrganization ||
+            (!!organizationOf(delivery) &&
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
+                    .memberOrganizations()
+                    .memberPartyIds.includes(organizationOf(delivery))))
+    if (!reachable) lib.denied("RECORD_UNAVAILABLE", "Delivery " + text(p.deliveryId) + " is not available")
+    // a remote server's diagnostic often names the address: never in this answer
+    const noAddress = value => String(value || "").replace(/[^\s<>()\[\];:,"']+@[^\s<>()\[\];:,"']+/g, "[address]")
     const enumText = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.description || enumId : "")
     return {
         deliveryId: delivery.deliveryId,
@@ -356,7 +405,7 @@ function receipts(p) {
             receiptEnumId: row.receiptEnumId,
             receiptText: enumText(row.receiptEnumId),
             receiptDate: row.receiptDate,
-            detail: row.detail || ""
+            detail: noAddress(row.detail)
         })),
         reportList: Array.from(find(REPORT, {deliveryId: delivery.deliveryId}).orderBy("receivedDate").list()).map(row => ({
             reportId: row.reportId,

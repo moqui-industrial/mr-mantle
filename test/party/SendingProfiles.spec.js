@@ -3,7 +3,7 @@
 // says why and where it is fixed, ready once the hosted account bounces@ its domain exists; no answer carries a host or credential;
 // the relay is one Admin approved, never a mail account's server; a reader of Marketing's sending reads it, a holder of neither is
 // refused and another organization's answers as missing; a delivery naming the profile goes out through its relay, from its sender
-// and reply-to, with the bounce address bounces+(delivery)@ its domain, and one naming none as before; its quiet hours make a delivery
+// and reply-to, with the bounce address bounces+(delivery).(key)@ its domain, and one naming none as before; its quiet hours make a delivery
 // wait, untried. Standalone: spec-local organizations, users, relays, template and source. Run: ./moq test mr-mantle --spec SendingProfiles
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
 const {make, row, rows, system, organization, user, as} = lib
@@ -169,7 +169,9 @@ feature("a delivery naming the profile goes out with its relay, sender and bounc
         delivery.sendingProfileId == profileId && delivery.organizationPartyId == orgA
         viaProfile.fromAddress == "news@profiles.example.test" && viaProfile.fromName == "Retail news"
         Array.from(viaProfile.replyToList) == ["reply@profiles.example.test"]
-        viaProfile.bounceAddress == "bounces+" + profiled.deliveryId + "@" + domain
+        // VERP with the delivery's random key (P6 review)
+        delivery.bounceKey.length >= 8 &&
+            viaProfile.bounceAddress == "bounces+" + profiled.deliveryId + "." + delivery.bounceKey + "@" + domain
         row("moqui.basic.email.EmailMessage", {emailMessageId: attempt.emailMessageId}).emailServerId == ids.relay
         plain.stateEnumId == "MdsSent"
         viaTemplate.fromAddress == "template@profiles.example.test" && viaTemplate.bounceAddress == ""

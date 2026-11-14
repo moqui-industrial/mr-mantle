@@ -28,8 +28,11 @@
       a campaign's, Marketing P9), whose suppressions it meets beside every organization's; empty: its store's organization, when
       it names a store (impl-marketing P3 review).</description></field>
     <field name="sendingProfileId" type="id"><description>The sending profile it goes out from (impl-marketing P6, F13): its
-      relay, sender and reply-to, within its throttle and quiet hours, with the bounce address bounces+(deliveryId)@ its bounce
+      relay, sender and reply-to, within its throttle and quiet hours, with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce
       domain; empty: as the template says.</description></field>
+    <field name="bounceKey" type="text-short"><description>The random key of its VERP bounce address,
+      bounces+(deliveryId).(bounceKey)@ the profile's bounce domain (P6 review): anyone can mail the bounce address, so the intake
+      takes a report for this delivery only with this key, never by the delivery id alone.</description></field>
     <field name="receiptEnumId" type="id"><description>The strongest later fact of the delivery (MessageDeliveryReceipt, P6, F14):
       delivered, soft bounce, hard bounce or complaint; apart from the hand-off's state, and never moved back by a weaker
       one.</description></field>

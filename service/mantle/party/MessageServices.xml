@@ -481,7 +481,7 @@
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('store', context))</script></actions>
     </service>
     <service verb="check" noun="SendingProfile" allow-remote="false">
-        <description>The readiness of one sending profile now (design §12 SenderReadiness): in effect; the transport (the relay there, not a mail account's, not disabled, with a host, its last Admin test not failed); the sender and its domain (one this server signs, or a relay that passed its test); the bounce account (a hosted or shared mail account bounces@ the bounce domain, which receives bounces+(delivery)@ it); the unsubscribe page (the site's Account Email preferences, else the server's own). Each check: checkKey, title, state (ready, warning, blocked), message and the place that fixes it (fixRoute: marketingSendingProfiles, adminMailRelay, mailAccount); ready when none is blocked, with the reasons. With refresh, a configurer's check is kept as the profile's last. No host or credential is told.</description>
+        <description>The readiness of one sending profile now (design §12 SenderReadiness): in effect; the transport (the relay there, not a mail account's, not disabled, with a host, its last Admin test not failed); the sender and its domain (one this server signs, or a relay that passed its test); the bounce account (a hosted or shared mail account bounces@ the bounce domain, which receives bounces+(delivery).(key)@ it); the unsubscribe page (the site's Account Email preferences, else the server's own). Each check: checkKey, title, state (ready, warning, blocked), message and the place that fixes it (fixRoute: marketingSendingProfiles, adminMailRelay, mailAccount); ready when none is blocked, with the reasons. With refresh, a configurer's check is kept as the profile's last. No host or credential is told.</description>
         <in-parameters>
             <parameter name="sendingProfileId" required="true"/>
             <parameter name="refresh" type="Boolean"/>
@@ -497,7 +497,7 @@
     <!-- the bounce intake (MessageDeliveryReports.js): the email ECA DeliveryReportIntake (MantleConsent.emecas.xml) and the
         EmailMessage ECA DeliveryReportEdgeBounce call it; the poll job run_DeliveryReports reads what they did not -->
     <service verb="process" noun="DeliveryReport" authenticate="anonymous-all" allow-remote="false" operation="message.report.process" operation-ref="emailMessageId">
-        <description>One message read as a delivery report and applied once (design §15.1): a DSN or an abuse report (ARF) a bounce account received, read with the framework's read#DeliveryReport, its delivery found by the VERP key bounces+(deliveryId)@ (the address it came to, an ARF's Original-Mail-From) or the returned message's Message-ID; or a template's sent message the edge relay marked ES_BOUNCED, by the attempt that sent it (F76). A permanent failure or the edge's bounce is a hard bounce, a transient failure or a delay a soft bounce, a delivery a delivered fact, an abuse report a complaint: each a receipt fact of the delivery once (MessageDeliveryReceipt), the delivery's strongest fact never moved back. A hard bounce adds one suppression of the address for every organization, a complaint one for the delivery's organization, never doubled; a soft bounce suppresses nothing. Each message once (MessageDeliveryReport): read again it changes nothing (duplicate). An unknown key or an unreadable report is recorded, logged and left in its mailbox. Internal.</description>
+        <description>One message read as a delivery report and applied once (design §15.1): a DSN or an abuse report (ARF) a bounce account received (another mailbox's message is left alone, nothing recorded: notBounceAccount), read with the framework's read#DeliveryReport, its delivery found by the VERP address bounces+(deliveryId).(bounceKey)@ (the address it came to, an ARF's Original-Mail-From) only with the delivery's random key, or the returned message's Message-ID; a DSN counts only the recipients that are the delivery's address (another's is ignored); or a template's sent message the edge relay marked ES_BOUNCED, by the attempt that sent it (F76). A permanent failure or the edge's bounce is a hard bounce, a transient failure or a delay a soft bounce, a delivery a delivered fact, an abuse report a complaint: each a receipt fact of the delivery once (MessageDeliveryReceipt), the delivery's strongest fact never moved back. A hard bounce adds one suppression of the address for every organization, a complaint one for the delivery's organization, never doubled; a soft bounce suppresses nothing. Each message once (MessageDeliveryReport): read again it changes nothing (duplicate). An unknown key or an unreadable report is recorded, logged and left in its mailbox. Internal.</description>
         <in-parameters>
             <parameter name="emailMessageId" required="true"/>
         </in-parameters>
@@ -507,6 +507,7 @@
             <parameter name="deliveryId"/>
             <parameter name="receiptEnumId"/>
             <parameter name="duplicate" type="Boolean"/>
+            <parameter name="notBounceAccount" type="Boolean"><description>True for a message no bounce account received: left alone, nothing recorded</description></parameter>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('process', context))</script></actions>
     </service>
@@ -533,7 +534,7 @@
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveryReports.js').execute('handleBounced', context))</script></actions>
     </service>
     <service verb="find" noun="DeliveryReceipts" allow-remote="false" read-only="true">
-        <description>A delivery's receipt facts (delivered, soft bounce, hard bounce, complaint, each once, with its date and detail) and the reports read for it, beside its hand-off state, for MESSAGE_DELIVERY_REVIEW, MESSAGE_SUPPRESSION_REVIEW or a contact administrator; no address.</description>
+        <description>A delivery's receipt facts (delivered, soft bounce, hard bounce, complaint, each once, with its date and detail) and the reports read for it, beside its hand-off state, for MESSAGE_DELIVERY_REVIEW (every delivery), MESSAGE_SUPPRESSION_REVIEW or a contact administrator (the deliveries of the organizations they work for, every internal one with MARKETING_ALL_ORGANIZATIONS; another's RECORD_UNAVAILABLE); no address (one in a diagnostic shows as [address]).</description>
         <in-parameters>
             <parameter name="deliveryId" required="true"/>
         </in-parameters>

@@ -3,11 +3,12 @@
 <emecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/email-eca-3.xsd">
     <!-- Comms' bounce intake (impl-marketing P6, F18, F76; design-marketing §15.1 DeliveryReportIntake): a stored message that is a
         delivery status notification or an abuse report (a multipart/report of report-type delivery-status or feedback-report), or
-        one that came to a VERP bounce address bounces+(delivery)@ a domain, is read by mantle.party.MessageServices
-        process#DeliveryReport, once; any other message is left alone. The poll job run_DeliveryReports reads what this did not. -->
+        one that came to a VERP bounce address bounces+(delivery).(key)@ a domain, is read by mantle.party.MessageServices
+        process#DeliveryReport, once, when it is a bounce account's (any other mailbox's report is its owner's mail, left alone);
+        any other message is left alone. The poll job run_DeliveryReports reads what this did not. -->
     <emeca rule-name="DeliveryReportIntake">
         <condition><expression>!!emailMessageId &amp;&amp; (/report-type\s*=\s*"?(delivery-status|feedback-report)/i.test(String((headers &amp;&amp; headers['content-type']) || ''))
-            || [].concat((fields &amp;&amp; fields.toList) || [], (headers &amp;&amp; headers['delivered-to']) || []).some(address => /(^|[\s&lt;])bounces\+[A-Za-z0-9_-]+@/i.test(String(address))))</expression></condition>
+            || [].concat((fields &amp;&amp; fields.toList) || [], (headers &amp;&amp; headers['delivered-to']) || []).some(address => /(^|[\s&lt;])bounces\+[A-Za-z0-9._-]+@/i.test(String(address))))</expression></condition>
         <actions>
             <service-call name="mantle.party.MessageServices.process#DeliveryReport" in-map="{emailMessageId:emailMessageId}"/>
         </actions>

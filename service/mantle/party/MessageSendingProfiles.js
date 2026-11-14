@@ -467,8 +467,9 @@ function quietMinutes(profile, atMs) {
     return (thru - now + 1440) % 1440 || 1440
 }
 // What a delivery naming the profile sends with: {wait: {minutes, reason}} while it waits (quiet hours, the throttle), {refuse}
-// when it cannot go (the profile gone, ended or not ready), else {send: the send#EmailTemplate parameters}.
-function forDelivery(sendingProfileId, deliveryId) {
+// when it cannot go (the profile gone, ended or not ready), else {send: the send#EmailTemplate parameters}, its bounce address
+// bounces+(deliveryId).(bounceKey)@ the profile's bounce domain.
+function forDelivery(sendingProfileId, deliveryId, bounceKey) {
     const profile = one(P, {sendingProfileId})
     if (!profile) return {refuse: "The sending profile is gone"}
     const readiness = readinessOf(profile)
@@ -488,7 +489,8 @@ function forDelivery(sendingProfileId, deliveryId) {
             fromAddress: profile.fromAddress,
             ...(profile.fromName ? {fromName: profile.fromName} : {}),
             ...(profile.replyToAddress ? {replyToAddresses: profile.replyToAddress} : {}),
-            bounceAddress: bounceLocal + "+" + deliveryId + "@" + text(profile.bounceDomain).toLowerCase()
+            // VERP with the delivery's random key (P6 review): bounces+(delivery).(key)@ the bounce domain
+            bounceAddress: bounceLocal + "+" + deliveryId + "." + bounceKey + "@" + text(profile.bounceDomain).toLowerCase()
         },
         organizationPartyId: profile.organizationPartyId
     }
