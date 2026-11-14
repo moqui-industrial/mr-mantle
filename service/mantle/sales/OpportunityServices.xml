@@ -724,7 +724,9 @@ along with this software (see the LICENSE.md file). If not, see
             name and address as submitted, its subject the lead's name, its text the description, the team's SalesIntakeSource as
             the default source, and the message filed on the lead as evidence. The message's Message-ID is the source identity, so
             the same mail delivered twice makes one lead. A team is taken only when the rule's owner works for its organization
-            (TEAM_UNAVAILABLE otherwise, the rule's failure). Mail from anyone makes an intake, never a party.</description>
+            (TEAM_UNAVAILABLE otherwise, the rule's failure) and, the user's call of Nov 13 (impl-sales P6), holds
+            SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, nothing filed): check#LeadRuleOwner refuses such a rule when it is
+            saved too. Mail from anyone makes an intake, never a party.</description>
         <in-parameters>
             <parameter name="emailMessageId" required="true"/>
             <parameter name="emailAccountId"/>
@@ -825,20 +827,91 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="purge" noun="LeadIntakes" allow-remote="false">
         <description>The purge of design §3 Leads (X15): the submitted name, organization, email and phone of each unverified
-            intake received more than retentionDays ago (30 until Sales' defaults set them, P9) whose lead never qualified,
+            intake received more than retentionDays ago (when not given, its organization's SalesPolicy intakeRetentionDays, 30
+            when none; impl-sales P9) whose lead never qualified,
             blanked with its purgedDate; a qualified or verified one is kept. The intake row, its source identity and key stay, so
-            a retry still answers one lead. The ServiceJob purge_SalesLeadIntakes runs it nightly for every organization; a user
-            needs SALES_CONFIGURE and purges the organizations of their scope. Each intake on its own: one that fails is logged and
-            the rest go on.</description>
+            a retry still answers one lead. The lead it made goes too when it is still an unqualified open lead untouched since
+            its intake (the user's call of Nov 13, impl-sales P6): its name and description blanked, the mail filed on it unlinked,
+            and it closed Lost with the reason SlrIntakePurged; a lead someone worked on (changed, assigned again, given an
+            activity, a note or a file, qualified or joined by a later inquiry) is kept whole. The ServiceJob
+            purge_SalesLeadIntakes runs it nightly for every organization; a user needs SALES_CONFIGURE and purges the
+            organizations of their scope. Each intake, with its lead, in a transaction of its own: one that fails is logged and the
+            rest go on.</description>
         <in-parameters><parameter name="retentionDays" type="Integer"/></in-parameters>
         <out-parameters>
             <parameter name="purgedCount" type="Integer"/>
             <parameter name="keptCount" type="Integer"/>
+            <parameter name="leadsClosedCount" type="Integer"/>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('purgeLeadIntakes', context)"/>
             <set field="purgedCount" from="found.purgedCount"/>
             <set field="keptCount" from="found.keptCount"/>
+            <set field="leadsClosedCount" from="found.leadsClosedCount"/>
+        </actions>
+    </service>
+    <!-- P6 (the user's call of Nov 13, impl-sales §4): a mail rule's createLead action is saved only by an owner who holds
+        SALES_OPPORTUNITY_EDIT; Sales.secas.xml calls this before the framework's create#EmailRule and update#EmailRule -->
+    <service verb="check" noun="LeadRuleOwner" allow-remote="false">
+        <description>Whether the mail rule being saved may carry the createLead action (ErActCreateLead): when the save gives the
+            actions (actionList or actionsJson) and they name createLead, the rule's owner (the caller on create, the stored rule's
+            owner on update) must hold SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, and the save is not made). A rule without
+            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at. P8: a
+            createQuoteRequest action (ErActCreateQuoteRequest) likewise needs the owner to hold SALES_QUOTE_EDIT.</description>
+        <in-parameters>
+            <parameter name="emailRuleId"/>
+            <parameter name="actionList" type="List"/>
+            <parameter name="actionsJson" allow-html="any"/>
+        </in-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('checkLeadRuleOwner', context)</script>
+        </actions>
+    </service>
+
+    <!-- ========== P6: the opportunity import (design §3 OpportunityImport, §16; impl-sales §4, F24, F44) ========== -->
+    <service verb="validate" noun="OpportunityImportRow" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.validate#TargetRow"/>
+        <description>Whether a row of the `opportunities` import would make or change one lead or opportunity of the batch's
+            organization (scopeKey), changing nothing (SalesImport.js): the source key (or the deal's ID), the deal it names (by
+            ID or by key, one the importer sees, of the organization), the type (lead or opportunity), a new one's name, a stage of
+            the pipeline the organization uses (by ID or name), the currency, the account, contact, owner, team and lead source of
+            the organization, the amount, probability and expected close. Each unknown or unavailable one is a named error; a deal
+            already there is skipped under the batch's duplicateStrategy skip (the default) and changed only under update. A
+            holder of SALES_IMPORT and SALES_OPPORTUNITY_EDIT (PERMISSION_DENIED); refuses an organization outside their sales scope
+            (ORGANIZATION_DENIED).</description>
+        <actions>
+            <set field="checked" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesImport.js').execute('validateRow', context)"/>
+            <set field="valid" from="checked.valid"/>
+            <set field="skip" from="!!checked.skip"/>
+            <set field="errors" from="checked.errors"/>
+            <set field="warnings" from="checked.warnings"/>
+            <set field="normalizedValues" from="checked.normalizedValues"/>
+            <set field="displayText" from="checked.displayText"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="OpportunityImportRow" allow-remote="false" operation="sales.opportunity.import.row"
+            operation-ref="operationKey">
+        <implements service="org.moqui.admin.DataTransferServices.apply#TargetRow"/>
+        <description>One validated row, checked again against the current state, through Sales' own guarded services as the
+            importer: create#Opportunity for a new deal (its source key kept on it), or for a deal matched under the update
+            strategy qualify#Lead (a lead given an opportunity's row), update#Opportunity, move#Opportunity and
+            store#OpportunityParty (a new owner); one row a transaction. A repeat under the row's operation key answers the first
+            result (resultRef: the salesOpportunityId), never a second deal. No account is made.</description>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesImport.js').execute('applyRow', context)"/>
+            <set field="applied" from="done.applied"/>
+            <set field="reasonCode" from="done.reasonCode"/>
+            <set field="reason" from="done.reason"/>
+            <set field="resultRef" from="done.resultRef"/>
+            <set field="resultText" from="done.resultText"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OpportunityImportScopes" allow-remote="false">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The organizations an opportunity import may be for and whose imports the caller may read: the internal
+            organizations of their sales scope, for a Sales reader. None otherwise.</description>
+        <actions>
+            <set field="scopeList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesImport.js').execute('findScopes', context).scopeList"/>
         </actions>
     </service>
 </services>

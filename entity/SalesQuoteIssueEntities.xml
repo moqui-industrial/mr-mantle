@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A quote's issue and the customer's response (IronStone Sales design §5 OrderDetail's quote context, §17 SAL-QUOTE; impl-sales
+    P10, F9, F10, F70): two facts with identities of their own beside the native order, never a copy of its lines. An issue is the
+    offer as it went out: the order's commercial revision it binds (the seller's salesCommercialRevisionOnly on, F9), the validity,
+    the issuer and the stored PDF (an OrderContent of type OctSalesQuoteIssued, kept when the issue ends). A later revision, a
+    revise, a withdrawal or a decline ends it. A response is the customer's acceptance or decline of one issue, with its evidence and
+    operation key; one issue has at most one response. Resending an issue is a delivery (the ledger's or the rep's own mail), not
+    another issue. mantle.order.SalesQuoteIssueServices over service/mantle/order/SalesQuoteIssues.js reads and writes them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="SalesQuoteIssue" package="mantle.sales.quote" cache="never">
+        <description>One issue of a quote (design §17 SAL-QUOTE): the order and the commercial revision it offers, the seller and
+            customer, when and by whom it was issued, the validity it carries, the PDF stored at that revision (orderContentId and
+            its location) and, once it no longer stands, when and why it ended (SalesQuoteIssueEnd: revised, withdrawn, declined,
+            superseded by a later revision). An issue stands while it is not ended, the order is Proposed at its revision and its
+            validity has not passed.</description>
+        <field name="issueId" type="id" is-pk="true"/>
+        <field name="orderId" type="id"/>
+        <field name="orderPartSeqId" type="id"/>
+        <field name="orderRevision" type="number-integer"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="customerPartyId" type="id"/>
+        <field name="issuedDate" type="date-time"/>
+        <field name="issuedByUserId" type="id"/>
+        <field name="validFromDate" type="date-time"/>
+        <field name="validThruDate" type="date-time"/>
+        <field name="orderContentId" type="id"/>
+        <field name="contentLocation" type="text-medium"><description>The stored PDF's location (read through ec.resource, never
+            its storage entities)</description></field>
+        <field name="endedDate" type="date-time"/>
+        <field name="endReasonEnumId" type="id"/>
+        <field name="endedByUserId" type="id"/>
+        <field name="endNote" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.order.OrderContent"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="Customer" related="mantle.party.Party" short-alias="customer">
+            <key-map field-name="customerPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="SalesQuoteIssueEnd" related="moqui.basic.Enumeration" short-alias="endReason">
+            <key-map field-name="endReasonEnumId" related="enumId"/></relationship>
+        <index name="SAL_QISS_ORDER"><index-field name="orderId"/><index-field name="orderRevision"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales quote issue end" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeRevised" description="Revised" sequenceNum="1" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeWithdrawn" description="Withdrawn" sequenceNum="2" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeDeclined" description="Declined" sequenceNum="3" enumTypeId="SalesQuoteIssueEnd"/>
+            <moqui.basic.Enumeration enumId="SqeSuperseded" description="Superseded by a later revision" sequenceNum="4"
+                    enumTypeId="SalesQuoteIssueEnd"/>
+        </seed-data>
+    </entity>
+    <entity entity-name="SalesQuoteResponse" package="mantle.sales.quote" cache="never">
+        <description>The customer's response to one issue (design §5 Record acceptance and Record decline, §17): accepted or
+            declined (SalesQuoteResponseType), when the customer responded and when and by whom it was recorded (staff, or later
+            the customer on PASS: SalesQuoteResponseSource), the contact who responded, the customer's purchase order, the
+            evidence (a mail of the quote's conversation, a file of the quote) and the reason, the order's status after the
+            response (placed, approved or held for an acceptance; cancelled for a decline) and the operation key a retry answers
+            by. At most one response for an issue.</description>
+        <field name="responseId" type="id" is-pk="true"/>
+        <field name="issueId" type="id"/>
+        <field name="orderId" type="id"/>
+        <field name="responseTypeEnumId" type="id"/>
+        <field name="responseSourceEnumId" type="id"/>
+        <field name="respondedDate" type="date-time"/>
+        <field name="recordedDate" type="date-time"/>
+        <field name="recordedByUserId" type="id"/>
+        <field name="contactPartyId" type="id"/>
+        <field name="otherPartyOrderId" type="text-short"><description>The customer's purchase order of an acceptance</description></field>
+        <field name="evidenceEmailMessageId" type="id"/>
+        <field name="evidenceOrderContentId" type="id"/>
+        <field name="reasonText" type="text-medium"/>
+        <field name="resultStatusId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.sales.quote.SalesQuoteIssue"/>
+        <relationship type="one" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" title="Contact" related="mantle.party.Party" short-alias="contact">
+            <key-map field-name="contactPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SalesQuoteResponseType" related="moqui.basic.Enumeration" short-alias="responseType">
+            <key-map field-name="responseTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SalesQuoteResponseSource" related="moqui.basic.Enumeration" short-alias="source">
+            <key-map field-name="responseSourceEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="ResultStatus" related="moqui.basic.StatusItem" short-alias="resultStatus">
+            <key-map field-name="resultStatusId" related="statusId"/></relationship>
+        <index name="SAL_QRSP_ISSUE"><index-field name="issueId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales quote response type" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.Enumeration enumId="SqrAccept" description="Accepted" sequenceNum="1" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.Enumeration enumId="SqrDecline" description="Declined" sequenceNum="2" enumTypeId="SalesQuoteResponseType"/>
+            <moqui.basic.EnumerationType description="Sales quote response source" enumTypeId="SalesQuoteResponseSource"/>
+            <moqui.basic.Enumeration enumId="SqsStaff" description="Recorded by staff" sequenceNum="1" enumTypeId="SalesQuoteResponseSource"/>
+            <moqui.basic.Enumeration enumId="SqsPortal" description="By the customer online" sequenceNum="2" enumTypeId="SalesQuoteResponseSource"/>
+        </seed-data>
+    </entity>
+    <!-- the stored resources the quote's text renders from (F70: a `.html.fancy-locked` location rendered with an explicit map; an
+        unknown location renders empty): the cover and terms of the quote's mail and print and the reminder's text, each the
+        organization's own location or, when empty, Mantle's default under template/order/ -->
+    <extend-entity entity-name="SalesPolicy" package="mantle.sales.policy">
+        <field name="quoteTextLocation" type="text-medium" enable-audit-log="true"><description>The cover and terms of the quote's
+            mail and print (a .html.fancy-locked resource); empty for Mantle's default</description></field>
+        <field name="reminderTextLocation" type="text-medium" enable-audit-log="true"><description>The reminder's text (a
+            .html.fancy-locked resource); empty for Mantle's default</description></field>
+        <!-- Sales P20 review (design-sales §16 RFQ acknowledgement; impl-sales §4 Nov 14, the user's call) -->
+        <field name="rfqAcknowledge" type="text-indicator" enable-audit-log="true"><description>Y: a request for quote made from
+            mail (create#QuoteRequestFromEmail) is acknowledged once to the address it came from, when that sender is a contact or
+            account of the organization; N or empty, none is sent</description></field>
+        <field name="rfqAcknowledgeTextLocation" type="text-medium" enable-audit-log="true"><description>The acknowledgement's text (a
+            .html.fancy-locked resource); empty for Mantle's default</description></field>
+    </extend-entity>
+    <!-- Sales P13 (design-sales §10 CustomerQuote, QuoteResponse; F36): the customer's own response on PASS (SqsPortal) keeps who
+        answered: the bearer link's capability, or the signed-in account (recordedByUserId, contactPartyId), and the acceptor's name
+        and title as the customer gave them (evidence, not a verified signature) -->
+    <extend-entity entity-name="SalesQuoteResponse" package="mantle.sales.quote">
+        <field name="capabilityId" type="id"><description>The ExternalAccessCapability of the bearer link the customer answered
+            by; empty for staff and a signed-in contact</description></field>
+        <field name="acceptorName" type="text-medium"/>
+        <field name="acceptorTitle" type="text-medium"/>
+    </extend-entity>
+</entities>

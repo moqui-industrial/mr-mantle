@@ -93,10 +93,20 @@ feature("a client project in planning with a work breakdown, its client rate, an
         made.lineSeq = call("mantle.order.OrderServices.create#OrderItem", { orderId: made.orderId, orderPartSeqId: made.partSeq, itemTypeEnumId: "ItemServiceProduct",
             itemDescription: "Milestone walk, fixed fee", quantity: 1, unitAmount: 10000 }).orderItemSeqId
         call(`${PROJECT}.link#ProjectOrderItem`, { workEffortId: "TMS", orderId: made.orderId, orderItemSeqId: made.lineSeq })
-        return { link: one("mantle.order.OrderItemWorkEffort", { orderId: made.orderId, orderItemSeqId: made.lineSeq, workEffortId: "TMS" }) }
+        // a recurring base of the client (impl-sales P16 review) is never a project's: its generated orders are
+        const baseId = call("mantle.order.OrderServices.create#Order", { customerPartyId: CLIENT, vendorPartyId: "ORG_ZIZI_SERVICES", currencyUomId: "USD",
+            orderName: "Milestone walk, recurring" }).orderId
+        const baseLine = call("mantle.order.OrderServices.create#OrderItem", { orderId: baseId, orderPartSeqId: one("mantle.order.OrderPart", { orderId: baseId }).orderPartSeqId,
+            itemTypeEnumId: "ItemServiceProduct", itemDescription: "Monthly retainer", quantity: 1, unitAmount: 500 }).orderItemSeqId
+        call("update#mantle.order.OrderHeader", { orderId: baseId, orderPurposeEnumId: "OrpRecurringTemplate" })
+        const baseRefused = errorOf(`${PROJECT}.link#ProjectOrderItem`, { workEffortId: "TMS", orderId: baseId, orderItemSeqId: baseLine })
+        return { link: one("mantle.order.OrderItemWorkEffort", { orderId: made.orderId, orderItemSeqId: made.lineSeq, workEffortId: "TMS" }), baseRefused,
+            baseLink: one("mantle.order.OrderItemWorkEffort", { orderId: baseId, orderItemSeqId: baseLine, workEffortId: "TMS" }) }
     },
-    then({ link }) {
+    then({ link, baseRefused, baseLink }) {
         link != null
+        String(baseRefused).includes("RECURRING_TEMPLATE")
+        baseLink == null
     },
 })
 

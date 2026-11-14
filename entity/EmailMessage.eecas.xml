@@ -27,4 +27,13 @@ along with this software (see the LICENSE.md file). If not, see
                 emailMessageId:emailMessageId, emailAccountId:emailAccountId, statusId:statusId,
                 oldStatusId:(originalValue == null ? null : originalValue.statusId)}"/></actions>
     </eeca>
+    <!-- Comms' bounce intake on the edge's path (impl-marketing P6, F76): an edge relay replaces the envelope sender with its own and
+        marks a template's sent message ES_BOUNCED itself, so the VERP address is lost there; the message turning ES_BOUNCED is read by
+        process#DeliveryReport after the write commits (handle#BouncedMessage), matched to its delivery by the attempt that sent it. -->
+    <eeca id="DeliveryReportEdgeBounce" entity="moqui.basic.email.EmailMessage" on-update="true"
+            run-on-error="false" get-entire-entity="true" get-original-value="true">
+        <condition><expression>statusId == 'ES_BOUNCED' &amp;&amp; (emailAccountId == null || emailAccountId == '') &amp;&amp;
+            (originalValue == null || originalValue.statusId != 'ES_BOUNCED')</expression></condition>
+        <actions><service-call name="mantle.party.MessageServices.handle#BouncedMessage" in-map="{emailMessageId:emailMessageId}"/></actions>
+    </eeca>
 </eecas>

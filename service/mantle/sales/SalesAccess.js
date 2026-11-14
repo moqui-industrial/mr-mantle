@@ -288,6 +288,508 @@ function requireOpportunity(userScope, salesOpportunityId, edit = false) {
     return found
 }
 
+// ===== P7: quotes (impl-sales P7; design-sales §1.1, §5) =====
+// A quote is a native order of purpose SalesQuote (OrderHeader.orderPurposeEnumId OrpSalesQuote) whose part sells: its vendor an
+// internal organization of the scope, its customer not internal. Inside the organization a Sales reader sees the quotes assigned to
+// them or a team of theirs (the part's SalesRepresentative and SalesTeam OrderPartParty rows, which create#Quote writes) and a holder
+// of SALES_TEAM_VIEW the organization's every quote; a customer or an opportunity link never widens it. An edit needs
+// SALES_QUOTE_EDIT on a quote the caller sees. A quote outside the scope answers as a missing one (RECORD_UNAVAILABLE).
+const quoteRoles = {owner: "SalesRepresentative", team: "SalesTeam", contact: "Contact"}
+const quotePurpose = "OrpSalesQuote"
+// The ids of the orders assigned now to the caller or a team of theirs (the part's owner and team rows), or null for a reader of
+// the organizations' every quote (teamRead).
+function assignedQuoteOrderIds(userScope) {
+    if (userScope.capabilities.teamRead) return null
+    const partyIds = assignmentParties(userScope)
+    if (!partyIds.length) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.order.OrderPartParty")
+                    .condition("partyId", "in", partyIds)
+                    .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                    .selectField("orderId")
+                    .list()
+            ).map(row => row.orderId)
+        )
+    )
+}
+// The quote as the caller may see it, or null: {order, part, organizationPartyId, customerPartyId, canEdit}.
+function quoteOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order || order.orderPurposeEnumId !== quotePurpose) return null
+    const part = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
+    if (!part || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    if (!part.customerPartyId || isInternal(part.customerPartyId)) return null
+    let approverOnly = false
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned =
+            partyIds.length > 0 &&
+            lib
+                .find("mantle.order.OrderPartParty")
+                .condition("orderId", orderId)
+                .condition("partyId", "in", partyIds)
+                .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                .count() > 0
+        // P9: a holder of SALES_APPROVE sees a quote of their organizations that asked for an approval (design §1.1 "an assigned
+        // approval grants its authorized approver the source projection needed to decide that"), to read and decide, not to edit
+        if (!assigned) {
+            if (!approvalAsked(userScope, orderId)) return null
+            approverOnly = true
+        }
+    }
+    return {
+        order,
+        part,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.quoteEdit && !approverOnly
+    }
+}
+// ===== P9: approvals (impl-sales P9; design-sales §1.1, §5 Approvals) =====
+// Whether the caller approves Sales exceptions (SALES_APPROVE) and the quote asked for one (an OrderDecision of purpose SapQuote,
+// mantle.order.SalesApprovalServices request#QuoteApproval); the organization is checked by quoteOf.
+function approvalAsked(userScope, orderId) {
+    return (
+        !!userScope.capabilities.approve &&
+        lib
+            .find("mantle.order.OrderDecision")
+            .condition("orderId", orderId)
+            .condition("decisionPurposeEnumId", "SapQuote")
+            .count() > 0
+    )
+}
+// The quote or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for an edit without
+// SALES_QUOTE_EDIT.
+function requireQuote(userScope, orderId, edit = false) {
+    const found = quoteOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Quote " + (orderId || "") + " is not available")
+    if (edit) requireCapability(userScope, "quoteEdit")
+    // P9: an approver who sees the quote only for its approval may not change it
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Quote " + orderId + " is for you to decide, not to change")
+    return found
+}
+
+// ===== P11: sales orders (impl-sales P11; design-sales §1.1, §6 Orders) =====
+// A sales order is a native order whose first part sells: its vendor an internal organization of the scope, its customer not
+// internal. It is a direct order (purpose OrpSalesOrder, a draft while Open), an accepted quote (OrpSalesQuote once placed), or any
+// other sales order of the seller (a store's, Projects', a replacement), placed. Never a quote not yet placed, a quote template, a
+// recurring base or an open cart. Inside the organization a Sales reader sees the orders assigned to them or a team of theirs (the
+// part's SalesRepresentative and SalesTeam rows) and a holder of SALES_TEAM_VIEW the organization's every one; a holder of
+// SALES_ORDER_APPROVE or ORDER_APPROVE sees the organization's orders awaiting approval or on hold, to decide them, not to change them (design
+// §1.1 "an assigned approval grants its authorized approver the source projection"), and (P12) read only an order they decided once it
+// is approved. One outside the scope answers as missing.
+const orderPurposes = {direct: "OrpSalesOrder", quote: quotePurpose}
+const orderExcludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
+const approvalStatuses = ["OrderPlaced", "OrderHold"]
+// P14: the statuses in which a change operator (SALES_ORDER_CHANGE) sees the organization's orders, read only, to propose and apply
+// commercial changes (design §1.1 BOSS_SALES_CHANGE; mantle.order.OrderChangeServices checks the change itself)
+const changeStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
+// Whether an order header and its first part are a sales order of Sales' kind (above), the scope aside.
+function isSalesOrder(order, part) {
+    if (!order || !part) return false
+    if (orderExcludedPurposes.includes(order.orderPurposeEnumId)) return false
+    if (order.orderPurposeEnumId === quotePurpose && !order.placedDate) return false
+    if (order.statusId === "OrderOpen" && order.orderPurposeEnumId !== orderPurposes.direct) return false
+    return !!part.vendorPartyId && isInternal(part.vendorPartyId) && !!part.customerPartyId && !isInternal(part.customerPartyId)
+}
+// The ids of the orders assigned now to the caller or a team of theirs, or null for a reader of the organizations' every one.
+function assignedOrderIds(userScope) {
+    return assignedQuoteOrderIds(userScope)
+}
+// Whether the caller approves sales orders: SALES_ORDER_APPROVE (a seller whose approval setting is on) or ORDER_APPROVE (elsewhere).
+function orderApprover(userScope) {
+    return !!userScope.capabilities.orderApprove || access.has("ORDER_APPROVE")
+}
+// The order as the caller may see it, or null: {order, part, parts, organizationPartyId, customerPartyId, canEdit, approverOnly}.
+function orderOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order) return null
+    const parts = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())
+    const part = parts[0]
+    if (!isSalesOrder(order, part) || !covers(userScope, part.vendorPartyId)) return null
+    let approverOnly = false
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned =
+            partyIds.length > 0 &&
+            lib
+                .find("mantle.order.OrderPartParty")
+                .condition("orderId", orderId)
+                .condition("partyId", "in", partyIds)
+                .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                .count() > 0
+        if (!assigned) {
+            // P12 (the user's call of Nov 14, P11's review): an approver keeps read-only sight of an order they decided (an
+            // OrderDecision of theirs) once it is approved; the organization's other approved orders stay out of sight
+            const approverReach = orderApprover(userScope) && (approvalStatuses.includes(order.statusId) || decidedBy(orderId))
+            // P14: a change operator's reach, read only (changeStatuses)
+            const changeReach = !!userScope.capabilities.orderChange && changeStatuses.includes(order.statusId)
+            if (!approverReach && !changeReach) return null
+            approverOnly = true
+        }
+    }
+    return {
+        order,
+        part,
+        parts,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.orderEdit && !approverOnly,
+        approverOnly
+    }
+}
+// The order or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for a change without
+// SALES_ORDER_EDIT or by an approver who sees it only to decide it.
+function requireOrder(userScope, orderId, edit = false) {
+    const found = orderOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Order " + (orderId || "") + " is not available")
+    if (edit) requireCapability(userScope, "orderEdit")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Order " + orderId + " is for you to decide, not to change")
+    return found
+}
+
+// ===== P8: requests for quote (impl-sales P8; design-sales §1.1, §5 QuoteRequests) =====
+// A request for quote (RFQ) is a Request of type RqtQuote whose current OrgInternal RequestParty is its selling organization; its
+// customer and contact are its Customer and Contact rows, its owner and team its SalesRepresentative and SalesTeam rows, as a quote's
+// part has them. Inside an organization of the scope a Sales reader sees the RFQs assigned to them or a team of theirs and a holder
+// of SALES_TEAM_VIEW the organization's every one; a customer link never widens it. A change needs SALES_QUOTE_EDIT. One outside the
+// scope answers as a missing one (RECORD_UNAVAILABLE). A warranty claim (RqtWarranty, Customer Service's) is a quote's source only
+// while its current decision is a chargeable repair (repairSourceOf, in SalesQuoteRequests.js): it is never an RFQ here.
+const quoteRequestType = "RqtQuote"
+const quoteRequestRoles = {
+    organization: "OrgInternal",
+    customer: "Customer",
+    contact: "Contact",
+    owner: "SalesRepresentative",
+    team: "SalesTeam"
+}
+// The current RequestParty rows of a request.
+function requestParties(requestId) {
+    return lib.rows("mantle.request.RequestParty", {requestId}).filter(row => lib.active(row))
+}
+// The ids of the RFQs assigned now to the caller or a team of theirs, or null for a reader of the organizations' every one
+// (teamRead).
+function assignedQuoteRequestIds(userScope) {
+    if (userScope.capabilities.teamRead) return null
+    const partyIds = assignmentParties(userScope)
+    if (!partyIds.length) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.request.RequestParty")
+                    .condition("partyId", "in", partyIds)
+                    .condition("roleTypeId", "in", [quoteRequestRoles.owner, quoteRequestRoles.team])
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .selectField("requestId")
+                    .list()
+            ).map(row => row.requestId)
+        )
+    )
+}
+// The RFQ as the caller may see it, or null: {request, parties, organizationPartyId, customerPartyId, canEdit}.
+function quoteRequestOf(userScope, requestId) {
+    if (!requestId || !userScope.capabilities.anyRead) return null
+    const request = lib.one("mantle.request.Request", {requestId})
+    if (!request || request.requestTypeEnumId !== quoteRequestType) return null
+    const parties = requestParties(requestId)
+    const partyOf = roleTypeId => parties.find(row => row.roleTypeId === roleTypeId)?.partyId || null
+    const organizationPartyId = partyOf(quoteRequestRoles.organization)
+    if (!organizationPartyId || !covers(userScope, organizationPartyId) || !isInternal(organizationPartyId)) return null
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned = parties.some(
+            row => [quoteRequestRoles.owner, quoteRequestRoles.team].includes(row.roleTypeId) && partyIds.includes(row.partyId)
+        )
+        if (!assigned) return null
+    }
+    return {
+        request,
+        parties,
+        organizationPartyId,
+        customerPartyId: partyOf(quoteRequestRoles.customer),
+        contactPartyId: partyOf(quoteRequestRoles.contact),
+        ownerPartyId: partyOf(quoteRequestRoles.owner),
+        teamPartyId: partyOf(quoteRequestRoles.team),
+        canEdit: !!userScope.capabilities.quoteEdit
+    }
+}
+// The RFQ or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for a change without SALES_QUOTE_EDIT.
+function requireQuoteRequest(userScope, requestId, edit = false) {
+    const found = quoteRequestOf(userScope, requestId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Request for quote " + (requestId || "") + " is not available")
+    if (edit) requireCapability(userScope, "quoteEdit")
+    return found
+}
+
+// ===== P12: quote templates and the approver's decided orders (impl-sales P12; design-sales §5 QuoteTemplates) =====
+// A quote template is a native order of purpose SalesQuoteTemplate (OrderHeader.orderPurposeEnumId OrpSalesQuoteTemplate), never
+// placed and never leaving Open, whose one part names its selling organization (the vendor, an internal organization) and no
+// customer; its published interval is the part's validity: a draft has none, a published one a start (current from it, scheduled
+// before it) and an end once replaced by its successor or ended (impl-sales §4, Nov 11). Inside an organization of the scope a Sales
+// reader sees its current templates (to start a quote from one); a template manager (SALES_QUOTE_EDIT with SALES_TEAM_MANAGE or
+// SALES_CONFIGURE: a Sales manager or administrator, design §2's M and S) sees and maintains every one of the organization, and
+// changes only a draft. One outside the scope, or not shown to the caller, answers as missing (RECORD_UNAVAILABLE).
+const templatePurpose = "OrpSalesQuoteTemplate"
+// Whether the caller maintains quote templates (a Sales manager or administrator who edits quotes).
+function templateManager(userScope) {
+    const caps = userScope.capabilities
+    return !!caps.quoteEdit && !!(caps.teamManage || caps.configure)
+}
+// A template's state from its part's validity at a time (now when not given): draft, scheduled, current or ended.
+function templateState(part, at = ec.user.nowTimestamp) {
+    const from = lib.ms(part.validFromDate)
+    const thru = lib.ms(part.validThruDate)
+    const now = lib.ms(at)
+    if (from == null) return "draft"
+    if (thru != null && thru <= now) return "ended"
+    return from > now ? "scheduled" : "current"
+}
+// The template as the caller may see it, or null: {order, part, organizationPartyId, state, canManage, canEdit}.
+function templateOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order || order.orderPurposeEnumId !== templatePurpose) return null
+    const part = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
+    if (!part || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    const state = templateState(part)
+    const canManage = templateManager(userScope)
+    if (!canManage && state !== "current") return null
+    return {order, part, organizationPartyId: part.vendorPartyId, state, canManage, canEdit: canManage && state === "draft"}
+}
+// The template or a refusal: RECORD_UNAVAILABLE when the caller does not see it; for a change, PERMISSION_DENIED for a caller who
+// does not maintain templates and TEMPLATE_PUBLISHED for one no longer a draft (a published template is changed by its successor).
+function requireTemplate(userScope, orderId, edit = false) {
+    const found = templateOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Quote template " + (orderId || "") + " is not available")
+    if (edit && !found.canManage)
+        denied("PERMISSION_DENIED", "Quote templates are maintained by a Sales manager or administrator")
+    if (edit && !found.canEdit)
+        denied("TEMPLATE_PUBLISHED", "Quote template " + orderId + " is published; start its successor to change it")
+    return found
+}
+// Whether the caller recorded a decision on the order (an approval or refusal of theirs, OrderDecision; a request is the asker's).
+const decidedResults = ["SdrApproved", "SdrRefused"]
+function decidedBy(orderId) {
+    return (
+        !!ec.user.userId &&
+        lib
+            .find("mantle.order.OrderDecision")
+            .condition("orderId", orderId)
+            .condition("decisionByUserId", ec.user.userId)
+            .condition("decisionResultEnumId", "in", decidedResults)
+            .count() > 0
+    )
+}
+// The ids of the orders the caller recorded a decision on (find#SalesOrders' approver reach beside the orders awaiting approval).
+function decidedOrderIds() {
+    if (!ec.user.userId) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.order.OrderDecision")
+                    .condition("decisionByUserId", ec.user.userId)
+                    .condition("decisionResultEnumId", "in", decidedResults)
+                    .selectField("orderId")
+                    .list()
+            ).map(row => row.orderId)
+        )
+    )
+}
+// ===== end of P12 =====
+
+// ===== P15: customer agreements (impl-sales P15; design-sales §7 Agreements, AgreementDetail) =====
+// A customer agreement is an Agreement of type AgrSales or AgrProduct of a selling organization (organizationPartyId) with its
+// customer (otherPartyId), on the one status flow Purchasing seeded (AgmSt*, F19). A Sales reader of the organization reads the
+// organization's every agreement and template (agreements are the organization's terms, not assigned work); a change needs
+// SALES_AGREEMENT_EDIT. Another organization's, a purchase agreement (AgrPurchase, Purchasing's) and any other type answer as
+// missing (RECORD_UNAVAILABLE).
+const agreementTypes = ["AgrSales", "AgrProduct"]
+function agreementOf(userScope, agreementId) {
+    if (!agreementId || !userScope.capabilities.anyRead) return null
+    const agreement = lib.one("mantle.party.agreement.Agreement", {agreementId: String(agreementId)})
+    if (!agreement || !agreementTypes.includes(agreement.agreementTypeEnumId)) return null
+    if (!covers(userScope, agreement.organizationPartyId)) return null
+    return {agreement, organizationPartyId: agreement.organizationPartyId, canEdit: !!userScope.capabilities.agreementEdit}
+}
+function requireAgreement(userScope, agreementId, edit = false) {
+    const found = agreementOf(userScope, agreementId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Agreement " + (agreementId || "") + " is not available")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Sales agreementEdit is required")
+    return found
+}
+// ===== end of P15 =====
+
+// ===== P16: recurring bases (impl-sales P16; design-sales §7 RecurringOrders, §4 Q7) =====
+// A recurring base is a native order with a cadence (recurCronExpression) whose first part sells (its vendor an internal
+// organization of the scope, its customer not internal): an OrderApproved order marked OrpRecurringTemplate, or a base made before
+// Sales with no marker. A base a Shop contract renews (StoreRecurringContract.baseOrderId) is Shop's and never Sales' here. Inside an
+// organization of the scope a holder of SALES_RECURRENCE_MANAGE reads and keeps its bases and a holder of SALES_TEAM_VIEW reads them;
+// recurrence is the organization's schedule, not assigned work. One outside the scope, or for a caller without either, answers as
+// missing (RECORD_UNAVAILABLE).
+const recurringPurpose = "OrpRecurringTemplate"
+function recurrenceReader(userScope) {
+    return !!(userScope.capabilities.recurrenceManage || userScope.capabilities.teamRead)
+}
+function recurrenceOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead || !recurrenceReader(userScope)) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId: String(orderId)})
+    if (!order || !order.recurCronExpression) return null
+    if (order.orderPurposeEnumId && order.orderPurposeEnumId !== recurringPurpose) return null
+    const part = Array.from(
+        lib.find("mantle.order.OrderPart").condition("orderId", order.orderId).orderBy("orderPartSeqId").list()
+    )[0]
+    if (!part || !part.vendorPartyId || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    if (!part.customerPartyId || isInternal(part.customerPartyId)) return null
+    if (lib.find("mantle.product.subscription.StoreRecurringContract").condition("baseOrderId", order.orderId).count() > 0)
+        return null
+    return {
+        order,
+        part,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.recurrenceManage
+    }
+}
+function requireRecurrence(userScope, orderId, edit = false) {
+    const found = recurrenceOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Recurring order " + (orderId || "") + " is not available")
+    if (edit && !found.canEdit) denied("PERMISSION_DENIED", "Sales recurrenceManage is required")
+    return found
+}
+// ===== end of P16 =====
+
+// ===== P18: forecasts and targets (impl-sales P18; design-sales §8 Forecast, TargetAttainment, §9 Targets) =====
+// A forecast (SalesForecast) is keyed by its organization, its internal party (a person, a sales team of the organization or the
+// organization itself), its time period and its currency. Inside an organization of the scope a Sales reader sees the forecasts of
+// their own key, and a team's manager (a current PrtSalesTeamMember row as Manager) those of the teams they manage and of those
+// teams' current members; a holder of SALES_TEAM_VIEW sees the organization's every one. Entering a judgement (forecastAmount,
+// bestCaseAmount, details) needs SALES_FORECAST_EDIT for one's own key, a team one manages or, with SALES_TEAM_VIEW, a team or the
+// organization, never another person's (their judgement is theirs). Setting a target (quota, basis, parent) needs
+// SALES_TEAM_MANAGE on a key the caller sees. Another organization's forecast answers as missing (RECORD_UNAVAILABLE).
+const forecastBases = {won: "SfbWonOpportunity", order: "SfbPlacedOrder", invoice: "SfbFinalInvoice"}
+// The parties of the current members of a team at a time (now when not given), by their dated membership rows.
+function teamMemberIds(teamPartyId, at = ec.user.nowTimestamp) {
+    if (!teamPartyId) return []
+    return Array.from(
+        new Set(
+            lib
+                .rows("mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: teamRelationships.member,
+                    toPartyId: teamPartyId
+                })
+                .filter(row => lib.active(row, at))
+                .map(row => row.fromPartyId)
+        )
+    )
+}
+// The teams a person manages now (a current membership as Manager).
+function managedTeams(partyId, at = ec.user.nowTimestamp) {
+    if (!partyId) return []
+    return Array.from(
+        new Set(
+            lib
+                .rows("mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: teamRelationships.member,
+                    fromPartyId: partyId,
+                    fromRoleTypeId: "Manager"
+                })
+                .filter(row => lib.active(row, at))
+                .map(row => row.toPartyId)
+        )
+    )
+}
+// The kind of a forecast's internal party in an organization: organization, team or person (a person who works for it as an agent
+// or employee, or a current member of one of its teams), or null when it is none of these.
+function forecastSubjectKind(organizationPartyId, internalPartyId) {
+    if (!organizationPartyId || !internalPartyId) return null
+    if (internalPartyId === organizationPartyId) return "organization"
+    if (
+        teamOrganization(internalPartyId) === organizationPartyId &&
+        lib.one("mantle.party.PartyRole", {partyId: internalPartyId, roleTypeId: "SalesTeam"})
+    )
+        return "team"
+    if (!lib.one("mantle.party.Person", {partyId: internalPartyId})) return null
+    const works = lib
+        .find("mantle.party.PartyRelationship")
+        .condition("fromPartyId", internalPartyId)
+        .condition("toPartyId", organizationPartyId)
+        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .count()
+    if (works > 0) return "person"
+    return memberTeams(internalPartyId).some(teamPartyId => teamOrganization(teamPartyId) === organizationPartyId)
+        ? "person"
+        : null
+}
+// Whether the caller sees the forecasts of a key's internal party in an organization (above).
+function forecastSees(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    if (!kind || !userScope.capabilities.anyRead || !covers(userScope, organizationPartyId)) return false
+    if (userScope.capabilities.teamRead) return true
+    if (internalPartyId === userScope.partyId) return true
+    const managed = managedTeams(userScope.partyId)
+    if (kind === "team") return managed.includes(internalPartyId)
+    if (kind === "person") return managed.some(teamPartyId => teamMemberIds(teamPartyId).includes(internalPartyId))
+    return false
+}
+// Whether the caller may enter the judgement of a key (above): SALES_FORECAST_EDIT on their own key, a team they manage, or, with
+// SALES_TEAM_VIEW, a team or the organization.
+function forecastSubmits(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    if (!userScope.capabilities.forecastEdit || !forecastSees(userScope, organizationPartyId, internalPartyId, kind)) return false
+    if (kind === "person") return internalPartyId === userScope.partyId
+    if (kind === "team") return userScope.capabilities.teamRead || managedTeams(userScope.partyId).includes(internalPartyId)
+    return !!userScope.capabilities.teamRead
+}
+// Whether the caller may set the target of a key: SALES_TEAM_MANAGE on a key they see.
+function targetManages(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    return !!userScope.capabilities.teamManage && forecastSees(userScope, organizationPartyId, internalPartyId, kind)
+}
+// The forecast as the caller may see it, or null: {forecast, organizationPartyId, kind, canSubmit, canManage}.
+function forecastOf(userScope, salesForecastId) {
+    if (!salesForecastId || !userScope.capabilities.anyRead) return null
+    const forecast = lib.one("mantle.sales.forecast.SalesForecast", {salesForecastId: String(salesForecastId)})
+    if (!forecast) return null
+    // a stored forecast of a person who no longer works for the organization stays a person's (its history is kept)
+    const kind =
+        forecastSubjectKind(forecast.organizationPartyId, forecast.internalPartyId) ||
+        (lib.one("mantle.party.Person", {partyId: forecast.internalPartyId || "_NA_"}) ? "person" : null)
+    if (!forecastSees(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind)) return null
+    return {
+        forecast,
+        organizationPartyId: forecast.organizationPartyId,
+        kind,
+        canSubmit: forecastSubmits(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind),
+        canManage: targetManages(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind)
+    }
+}
+function requireForecast(userScope, salesForecastId) {
+    const found = forecastOf(userScope, salesForecastId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Forecast " + (salesForecastId || "") + " is not available")
+    return found
+}
+// ===== end of P18 =====
+
 ;({
     permissions,
     reads,
@@ -316,5 +818,54 @@ function requireOpportunity(userScope, salesOpportunityId, edit = false) {
     assignmentParties,
     assignedOpportunityIds,
     opportunityOf,
-    requireOpportunity
+    requireOpportunity,
+    // P7
+    quoteRoles,
+    quotePurpose,
+    assignedQuoteOrderIds,
+    quoteOf,
+    requireQuote,
+    // P8: requests for quote
+    quoteRequestType,
+    quoteRequestRoles,
+    requestParties,
+    assignedQuoteRequestIds,
+    quoteRequestOf,
+    requireQuoteRequest,
+    // P11: sales orders
+    orderPurposes,
+    orderExcludedPurposes,
+    isSalesOrder,
+    assignedOrderIds,
+    orderApprover,
+    // P14: the change operator's statuses
+    changeStatuses,
+    orderOf,
+    requireOrder,
+    // P12: quote templates; the orders an approver decided
+    templatePurpose,
+    templateManager,
+    templateState,
+    templateOf,
+    requireTemplate,
+    decidedOrderIds,
+    // P15: customer agreements
+    agreementTypes,
+    agreementOf,
+    requireAgreement,
+    // P16: recurring bases
+    recurringPurpose,
+    recurrenceReader,
+    recurrenceOf,
+    requireRecurrence,
+    // P18: forecasts and targets
+    forecastBases,
+    teamMemberIds,
+    managedTeams,
+    forecastSubjectKind,
+    forecastSees,
+    forecastSubmits,
+    targetManages,
+    forecastOf,
+    requireForecast
 })

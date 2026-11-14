@@ -1424,6 +1424,13 @@ function get(p) {
             const header = one(RETURN, {returnId})
             return {returnId, displayId: header?.displayId || returnId, statusText: statusText(header?.statusId)}
         }),
+        // IronStone Sales P8 (the chargeable repair's handoff, design-sales §6, impl-sales F40): the sales quotes made from the
+        // claim's lines, each one's state, total and validity (SalesQuoteRequests.js quotesOfRequest)
+        salesQuotes: theCase.isClaim
+            ? ec.resource
+                  .script("component://mr-mantle/service/mantle/order/SalesQuoteRequests.js")
+                  .quotesOfRequest(theCase.requestId)
+            : [],
         actions: {
             save: edit && open,
             decide: edit && open && theCase.isClaim && !!(evidence.productId || evidence.assetId),

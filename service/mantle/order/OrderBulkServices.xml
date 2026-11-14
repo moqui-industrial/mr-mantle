@@ -302,6 +302,11 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="vendorRoleTypeId" value="OrgInternal" ignore="String(orderType ?? '').toLowerCase() !== 'sales'"/>
                 <econdition field-name="customerRoleTypeId" value="OrgInternal" ignore="String(orderType ?? '').toLowerCase() !== 'purchase'"/>
                 <econdition field-name="customerClassificationId" ignore-if-empty="true"/>
+                <!-- a recurring base or a quote template keeps its own status (impl-sales P16 review): its generated orders change -->
+                <econditions combine="or">
+                    <econdition field-name="orderPurposeEnumId" operator="is-null"/>
+                    <econdition field-name="orderPurposeEnumId" operator="not-in" from="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate']"/>
+                </econditions>
                 <econdition field-name="itemTypeEnumId" operator="in" ignore-if-empty="true" or-null="true"/>
                 <econdition field-name="productId" operator="in" from="inputFieldsMap.findProductId" ignore-if-empty="true"/>
                 <econdition field-name="quantity" operator="greater-equals" from="inputFieldsMap.findQuantity_from" ignore-if-empty="true"/>

@@ -24,13 +24,15 @@ along with this software (see the LICENSE.md file). If not, see
         or empty (a member), its deliveryEnumId CldInbox (each post in the Inbox and its count) or CldMailboxOnly (posts
         only under the mailbox, with its unread count), empty for the list's defaultDeliveryEnumId (empty is the Inbox).
 
-        Entity filters do not apply to contact lists, so these services check a mailbox's visibility themselves (and the
+        The organization filters of contact lists (MANTLE_USER_ORG_CLST and MANTLE_ACTIVE_ORG_CLST, impl-marketing P1) leave a
+        mailbox to these services, so they check a mailbox's visibility themselves (and the
         mailbox services of CommunicationServices call get#ContactListAccess): a public mailbox is read and joined by any
         user; a private one is read only by its members, and a party with a pending request sees only its header. Who
         may post is postingEnumId: ClpMembers (empty), ClpModerators (owners and moderators: announcements) or ClpAnyUser
         (a help mailbox, where a poster who is not a member sees only the threads they take part in). An archived list
         (archivedDate) is read-only: no posts, no new members. Lists of other types are not limited by membership here;
-        Marketing's authz decides who manages them. -->
+        they are reached by the users of their owning organization, a contact administrator and ADMIN (get#ContactListAccess,
+        impl-marketing F77), and Marketing's services decide who manages them. -->
 
     <service verb="get" noun="ContactListAccess">
         <description>
@@ -41,7 +43,11 @@ along with this software (see the LICENSE.md file). If not, see
             canModerate (an owner or moderator), canJoin. A list of another type can be seen and posted to (while not
             archived) and has no member reading. contactList is null when the party may not see it. Another party's
             access to a mailbox is told only to a user who may see the mailbox's header; otherwise it is as for a party
-            outside a private mailbox.
+            outside a private mailbox. A list that is not a mailbox is reached only by a user who works for its owner (or
+            holds MARKETING_ALL_ORGANIZATIONS, for an internal organization's), a contact administrator and ADMIN, whoever
+            the party asked about (impl-marketing P1, F77; mantle/marketing/MarketingAccess.js listReachable): to anyone
+            else it answers as missing (exists false), and an unowned one (_NA_ or empty) is reached by no one else until
+            an administrator adopts it. With no user (a run as the system) such a list is reached as before.
         </description>
         <in-parameters>
             <parameter name="contactListId" required="true"/>
@@ -79,12 +85,15 @@ along with this software (see the LICENSE.md file). If not, see
             const userPartyId = ec.user.userAccount?.partyId || null
             if (!partyId) partyId = userPartyId
             const nowMillis = toMillis(ec.user.nowTimestamp)
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
+            // a list that is not a mailbox: the current user's organization decides (impl-marketing F77), as a missing list
+            const reachable = list == null || list.contactListTypeEnumId === 'MAILBOX' ||
+                    ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js').listReachable(list.ownerPartyId)
             const evaluate = (pid) => {
                 const out = {exists: false, isMailbox: false, isPublic: false, isArchived: false, postingEnumId: null, isMember: false,
                     membershipStatusId: null, memberRoleTypeId: null, memberFromDate: null, deliveryEnumId: null, isOwner: false,
                     canModerate: false, canSeeHeader: false, canReadAll: false, canReadOwn: false, canPost: false, canJoin: false}
-                if (list == null) return out
+                if (list == null || !reachable) return out
                 out.exists = true
                 out.isMailbox = list.contactListTypeEnumId === 'MAILBOX'
                 out.isPublic = list.isPublic === 'Y'
@@ -163,7 +172,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (!partyId) partyId = ec.user.userAccount?.partyId || null
             readableContactListIds = []
             hiddenContactListIds = []
-            const mailboxes = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListTypeEnumId', 'MAILBOX')
+            const mailboxes = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListTypeEnumId', 'MAILBOX')
                     .selectField('contactListId').selectField('isPublic').selectField('postingEnumId').list())
             if (mailboxes.length === 0) return
             const memberOf = new Set(partyId ? Array.from(ec.entity.find('mantle.marketing.contact.ContactListParty')
@@ -182,9 +191,15 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="create" noun="ContactList">
         <description>
-            A contact list. The current user's party becomes its owner (a current CLPT_ACCEPTED row with role ListOwner),
-            and memberPartyIdList its first members. A mailbox (type MAILBOX) needs a user with a party, is private unless
-            isPublic=Y, and its posting policy defaults to ClpMembers and its default delivery to CldInbox.
+            A contact list. For a mailbox the current user's party becomes its owner (a current CLPT_ACCEPTED row with role
+            ListOwner), and memberPartyIdList its first members. A list of another type subscribes no one (impl-marketing P3,
+            design-marketing §4 Lists): neither its creator nor staff are made recipients, memberPartyIdList is refused
+            (MEMBERS_NEED_EVIDENCE), and its members come by evidenced requests (mantle.marketing.AudienceServices
+            request#Subscriptions). A mailbox (type MAILBOX) needs a user with a party, is private unless
+            isPublic=Y, and its posting policy defaults to ClpMembers and its default delivery to CldInbox. A list of another
+            type belongs to ownerPartyId, an organization the caller works for (or any internal organization for a holder of
+            MARKETING_ALL_ORGANIZATIONS), refused otherwise and when none is named (ORGANIZATION_DENIED); a contact
+            administrator and ADMIN may name any owner (impl-marketing P1, F77).
         </description>
         <in-parameters>
             <parameter name="contactListTypeEnumId"/>
@@ -213,6 +228,15 @@ along with this software (see the LICENSE.md file). If not, see
             if (!enumIn(postingEnumId, 'ContactListPosting')) { ec.message.addError(`Unknown posting policy ${postingEnumId}`); return }
             if (!enumIn(defaultDeliveryEnumId, 'ContactListDelivery')) { ec.message.addError(`Unknown delivery ${defaultDeliveryEnumId}`); return }
             if (isPublic !== 'Y') isPublic = 'N'
+            if (!isMailbox) {
+                try {
+                    ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js').requireListOwner(ownerPartyId)
+                } catch (error) { ec.message.addError(String(error.message)); return }
+                // a list that sends outside: membership is evidenced intent, never a list of staff (impl-marketing P3)
+                const named = memberPartyIdList == null ? [] : (typeof memberPartyIdList === 'string' ? memberPartyIdList.split(',') : Array.from(memberPartyIdList))
+                if (named.some((id) => String(id).trim())) {
+                    ec.message.addError('MEMBERS_NEED_EVIDENCE: A list is joined by an evidenced subscription request, not at its creation'); return }
+            }
 
             contactListId = ec.service.sync().name('create#mantle.marketing.contact.ContactList').parameters({
                 contactListTypeEnumId: contactListTypeEnumId, contactListName: contactListName, description: description,
@@ -220,6 +244,7 @@ along with this software (see the LICENSE.md file). If not, see
                 ownerPartyId: ownerPartyId, contactMechTypeEnumId: contactMechTypeEnumId, marketingCampaignId: marketingCampaignId}).call()?.contactListId
             if (ec.message.hasError()) return
 
+            if (!isMailbox) return
             const now = ec.user.nowTimestamp
             const addRow = (partyId, roleTypeId) => ec.service.sync().name('create#mantle.marketing.contact.ContactListParty').parameters({
                 contactListId: contactListId, partyId: partyId, fromDate: now, statusId: 'CLPT_ACCEPTED', roleTypeId: roleTypeId}).call()
@@ -258,7 +283,7 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition('enumTypeId', enumTypeId).useCache(true).one() != null
             if (!enumIn(postingEnumId, 'ContactListPosting')) { ec.message.addError(`Unknown posting policy ${postingEnumId}`); return }
             if (!enumIn(defaultDeliveryEnumId, 'ContactListDelivery')) { ec.message.addError(`Unknown delivery ${defaultDeliveryEnumId}`); return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             const fields = {contactListName: contactListName, description: description, comments: comments,
                 isPublic: isPublic == null ? null : (isPublic === 'Y' ? 'Y' : 'N'), postingEnumId: postingEnumId,
                 defaultDeliveryEnumId: defaultDeliveryEnumId}
@@ -300,7 +325,7 @@ along with this software (see the LICENSE.md file). If not, see
             const now = ec.user.nowTimestamp
             const partyId = ec.user.userAccount?.partyId || null
             contactListList = []
-            let find = ec.entity.find('mantle.marketing.contact.ContactList').orderBy('contactListName')
+            let find = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().orderBy('contactListName')
             if (contactListTypeEnumId) find = find.condition('contactListTypeEnumId', contactListTypeEnumId)
             if (searchText) find = find.condition(cf.makeCondition([cf.makeCondition('contactListName', 'like', `%${searchText}%`, false, true),
                     cf.makeCondition('description', 'like', `%${searchText}%`, false, true)], 'or'))
@@ -479,7 +504,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const cf = ec.entity.conditionFactory
             endedCount = 0
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const current = Array.from(ec.entity.find('mantle.marketing.contact.ContactListParty').condition('contactListId', contactListId)
                     .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
@@ -717,7 +742,7 @@ along with this software (see the LICENSE.md file). If not, see
             const nowMillis = toMillis(ec.user.nowTimestamp)
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
 
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const listName = list.contactListName || contactListId
             if (list.contactListTypeEnumId === 'MAILBOX') { ec.message.addError(`${listName} is a mailbox: post to it instead`); return }

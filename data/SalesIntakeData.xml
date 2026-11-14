@@ -36,6 +36,30 @@ along with this software (see the LICENSE.md file). If not, see
 
     <moqui.basic.Enumeration enumId="ErActCreateLead" enumTypeId="EmailRuleAction" enumCode="createLead" sequenceNum="6"
             description="Make a sales lead" optionValue="mantle.sales.OpportunityServices.create#LeadFromEmail"/>
+    <!-- P8 (design-sales §5 QuoteRequests, CX-MAIL-INTAKE): createQuoteRequest, a message to a sales team's plus-tag address
+        (sales+rfq@...) or to the team the rule's value names as a request for quote in that team's queue (SalesQuoteServices
+        create#QuoteRequestFromEmail; its owner needs SALES_QUOTE_EDIT, check#LeadRuleOwner) -->
+    <moqui.basic.Enumeration enumId="ErActCreateQuoteRequest" enumTypeId="EmailRuleAction" enumCode="createQuoteRequest" sequenceNum="7"
+            description="Make a request for quote" optionValue="mantle.order.SalesQuoteServices.create#QuoteRequestFromEmail"/>
+    <!-- P8, the chargeable repair's notices both ways (the user's call of Nov 13, 2026; SalesQuoteRequests.js): Customer Service's
+        chargeable warranty decision tells the organization's default Sales team (SalesRepairToQuote: requestId, customerName,
+        productName), and a repair's quote tells the claim's assignee or queue (SalesRepairQuoted: requestId, orderId, customerName,
+        madeByName, the claim as the record). Neither title carries the fault text, diagnosis, decision or an amount. The apps that
+        work them set the links (IronStone: BossSetupSalesData.xml, BossSetupData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SalesRepairToQuote" inboxEnumId="NinNotifications"
+            description="Repair to quote" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Repair to quote: claim ${requestId} for ${customerName} (${productName})"/>
+    <moqui.security.user.NotificationTopic topic="SalesRepairQuoted" inboxEnumId="NinNotifications"
+            description="Repair estimate made" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            titleTemplate="Repair estimate ${orderId} made for claim ${requestId} (${customerName}, ${madeByName})"/>
+    <moqui.server.TopicRegistration topic="SalesRepairToQuote" ownerApp="Sales" purpose="A warranty claim's chargeable repair for Sales to quote"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="SALES_QUOTE_EDIT" sequenceNum="50"/>
+    <moqui.server.TopicRegistration topic="SalesRepairQuoted" ownerApp="CustomerService" purpose="Sales made the estimate of a warranty claim's repair"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="SUPPORT_CASE_EDIT" sequenceNum="51"/>
     <mantle.party.PartySettingType partySettingTypeId="SalesIntakePlusTag" description="Sales intake plus tag"/>
     <mantle.party.PartySettingType partySettingTypeId="SalesIntakeSource" description="Sales intake default lead source"/>
 

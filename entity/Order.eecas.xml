@@ -28,8 +28,11 @@ along with this software (see the LICENSE.md file). If not, see
     <eeca id="OrderContentRevision" entity="mantle.order.OrderContent" on-create="true" on-update="true" on-delete="true" run-on-error="false">
         <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision"
                 in-map="{orderId:orderId, revisionKind:(orderContentTypeEnumId == 'OctPurchaseOrderIssued' ? 'issued' : 'content')}"/></actions></eeca>
+    <!-- Sales P10 (impl-sales F166): a quote's or order's internal assignment (its sales representative or team) is not a commercial
+        change where the order counts those only: reassigning it keeps the issue and approvals bound to the revision -->
     <eeca id="OrderPartPartyRevision" entity="mantle.order.OrderPartParty" on-create="true" on-update="true" on-delete="true" run-on-error="false">
-        <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/></actions></eeca>
+        <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision"
+                in-map="{orderId:orderId, revisionKind:(['SalesRepresentative', 'SalesTeam'].includes(roleTypeId) ? 'assignment' : null)}"/></actions></eeca>
     <eeca id="OrderPartContactMechRevision" entity="mantle.order.OrderPartContactMech" on-create="true" on-update="true" on-delete="true" run-on-error="false">
         <actions><service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/></actions></eeca>
     <eeca id="OrderPartTermRevision" entity="mantle.order.OrderPartTerm" on-create="true" on-update="true" on-delete="true" run-on-error="false">

@@ -175,3 +175,26 @@ it in Admin's Jobs.
 
 Insights' internal flow map template is now version 2, with Maintenance's step counted and linked. An organization's copy
 of version 1 keeps its information-only Maintenance step until it copies the template again.
+
+## Sales' report datasets (Sales P20, November 2026)
+
+Sales P20 (mr-boss `plan/impl-sales.md`) adds the quote dataset (`mantle-sales-quotes`, document `MantleSalesQuote`, read by
+the quote-expiring alert template) and types the pipeline document's derived owner, team and stage label as keywords, so a
+split by owner or team (the stalled-deal alert, the pipeline dashboard's owner panel) finds its rows. A new database needs
+nothing. On a database made before it, with the server stopped, load the seed row of the quote dataset's scope policy
+(`MantleSalesQuoteScope` in `SalesWorkspaceData`, `moqui load types=seed`) and the two initial files again, the document
+file first:
+
+```sh
+moqui load location=runtime/components/addon/mr-mantle/data/SalesPipelineReportData.xml
+moqui load location=runtime/components/addon/mr-boss/data/BossSetupSalesData.xml
+```
+
+`BossSetupSalesData` is initial data: loading it again puts back Sales' groups, grants and registrations as shipped; a
+deployment that changed them loads only the P20 block's rows (the end of the file). Then start the server and refresh
+`mantle-sales-pipeline` and `mantle-sales-quotes` from Admin's data readiness, so the index takes the new mapping and the
+quotes already written.
+
+The same phase's review adds the request for quote acknowledgement (two SalesPolicy columns, which the table check adds on
+start, off until an organization turns it on in Sales' defaults) and its delivery source and mail template, seed rows in
+`SalesQuoteIssueData` that the `moqui load types=seed` above loads too.

@@ -71,6 +71,10 @@ const reservedNames = [
     "billing",
     "supplier",
     "support",
+    // IronStone Sales P13: PASS Sales' default base
+    "sales",
+    // IronStone Marketing P7: PASS Marketing's default base
+    "marketing",
     "shop",
     "code",
     "explore",

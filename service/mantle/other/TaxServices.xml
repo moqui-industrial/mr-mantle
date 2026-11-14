@@ -84,12 +84,22 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ======================== -->
 
     <service verb="calculate" noun="OrderSalesTax">
+        <description>An order's tax lines through its tax gateway: a store order's through the store's (as before), a storeless
+            order's (X1, impl-sales P7) through each part's seller (PartyAcctgPreference.taxGatewayConfigId, as an invoice's,
+            SalesTax.js gateway): the part's tax lines replaced by the gateway's results; a part whose seller names no gateway
+            is left untouched. A storeless sale the gateway cannot tax is refused with its reason (TAX_ADDRESS_MISSING,
+            TAX_RATE_MISSING, TAX_RATE_AMBIGUOUS).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderPartSeqId"/>
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
+            <!-- X1 (impl-sales P7; design-sales §5): no store, the seller's gateway -->
+            <if condition="orderHeader != null &amp;&amp; !orderHeader.productStoreId">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/other/SalesTax.js').execute('order', {orderId:orderId, orderPartSeqId:orderPartSeqId || null})</script>
+                <return/>
+            </if>
             <entity-find-related-one value-field="orderHeader" relationship-name="mantle.product.store.ProductStore"
                     to-value-field="productStore" cache="true"/>
             <entity-find-related-one value-field="productStore" relationship-name="mantle.other.tax.TaxGatewayConfig"
@@ -184,6 +194,20 @@ along with this software (see the LICENSE.md file). If not, see
                                 taxAuthorityId:taxResult.taxAuthorityId, itemDescription:itemDescription}"/>
                 </iterate>
             </iterate>
+        </actions>
+    </service>
+    <service verb="check" noun="OrderTaxGateway" allow-remote="false" read-only="true">
+        <description>Whether a storeless order (or one of its parts) is taxed through a seller's gateway (X1, impl-sales P7): a
+            part whose internal vendor's PartyAcctgPreference names a taxGatewayConfigId. False for a store order, whose store
+            decides, and for a storeless order of sellers without a gateway. The order change rules retax a storeless order only
+            when this is true, so no other storeless order changes.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderPartSeqId"/>
+        </in-parameters>
+        <out-parameters><parameter name="taxed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="taxed" from="!!ec.resource.script('component://mr-mantle/service/mantle/other/SalesTax.js').execute('orderTaxed', {orderId:orderId, orderPartSeqId:orderPartSeqId || null}).taxed"/>
         </actions>
     </service>
     <service verb="calculate" noun="InvoiceSalesTax">

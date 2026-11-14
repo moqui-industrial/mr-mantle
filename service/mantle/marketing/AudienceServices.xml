@@ -1,0 +1,534 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.AudienceServices (L, IronStone Marketing design §14.2; impl-marketing P3): the lists of an organization with their
+    subscription policy (dated ContactListPolicy) and template bindings, their members, the one evidenced path to membership
+    (request#Subscriptions, SubscriptionRequest), a member's withdrawal and the single-use reservation, over the native ContactList,
+    ContactListParty, ContactListEmail and PartyConsent and Mantle's list and consent services (MarketingAudiences.js). Each checks
+    MARKETING_AUDIENCE_VIEW, _EDIT or MARKETING_CONSENT_EDIT and the list's organization itself (mantle/marketing/MarketingAccess.js);
+    a mailbox is never a Marketing list. Consent is never implied: a request is pending until confirmed or accepted by the audited
+    evidence path, and never clears a withdrawal or a suppression. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== lists (design §4 Lists, ListDetail) ===== -->
+    <service verb="find" noun="Lists" allow-remote="false" read-only="true">
+        <description>The Marketing lists of the caller's scope (design §4 ContactLists): not mailboxes, owned by an organization of the scope, filtered in the query by text (id, name or description, ignoring case), organization, type, channel, campaign and archived (N, the default; Y; all); paged (contactListList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, type, channel, organization, campaign, single use, state, the policy's public offer, confirmation and purpose, subscribed and pending counts and revision. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="contactListTypeEnumId"/>
+            <parameter name="contactMechTypeEnumId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="archived"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactListList" type="List"/>
+            <parameter name="contactListListCount" type="Integer"/>
+            <parameter name="contactListListPageIndex" type="Integer"/>
+            <parameter name="contactListListPageSize" type="Integer"/>
+            <parameter name="contactListListPageMaxIndex" type="Integer"/>
+            <parameter name="contactListListPageRangeLow" type="Integer"/>
+            <parameter name="contactListListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('findLists', context)"/>
+            <set field="contactListList" from="found.contactListList"/>
+            <set field="contactListListCount" from="found.contactListListCount"/>
+            <set field="contactListListPageIndex" from="found.contactListListPageIndex"/>
+            <set field="contactListListPageSize" from="found.contactListListPageSize"/>
+            <set field="contactListListPageMaxIndex" from="found.contactListListPageMaxIndex"/>
+            <set field="contactListListPageRangeLow" from="found.contactListListPageRangeLow"/>
+            <set field="contactListListPageRangeHigh" from="found.contactListListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="create" noun="List" allow-remote="false">
+        <description>A Marketing list (design §4 NewList, §14.3 QuickList) of an organization of the caller's scope: its name, description, type (marketing, newsletter or announcement; never a mailbox), channel (email addresses, the default, or phone numbers), campaign (of the same organization) and single use, through ContactListServices create#ContactList, which subscribes no one: neither its creator nor staff become recipients. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses ORGANIZATION_DENIED, NAME_REQUIRED, LIST_TYPE_INVALID, CHANNEL_INVALID and RECORD_UNAVAILABLE for another organization's campaign.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="contactListName" required="true"/>
+            <parameter name="description"/>
+            <parameter name="contactListTypeEnumId"/>
+            <parameter name="contactMechTypeEnumId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="singleUse"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactListId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('createList', context)"/>
+            <set field="contactListId" from="found.contactListId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="List" allow-remote="false">
+        <description>Changes a Marketing list's identity (design §4 ListHeader) at the revision read (expectedRevision, its lastUpdatedStamp): name, description, notes, type, campaign (of its organization) and single use (kept while a send holds it, LIST_RESERVED); a field left out is not changed. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE (missing, a mailbox, another organization's or unowned), LIST_ARCHIVED, REVISION_REQUIRED, STALE_REVISION and the create refusals.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="contactListName"/>
+            <parameter name="description"/>
+            <parameter name="comments"/>
+            <parameter name="contactListTypeEnumId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="singleUse"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactListId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('storeList', context)"/>
+            <set field="contactListId" from="found.contactListId"/>
+        </actions>
+    </service>
+    <service verb="archive" noun="List" allow-remote="false">
+        <description>Archives a Marketing list at the revision read: it takes no new request or dispatch, keeps its history and its unsubscribe links working; a reason is added to its notes. Archiving an archived list changes nothing (archived false). Refused while a send holds a single-use list (LIST_RESERVED). Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactListId"/>
+            <parameter name="archived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('archiveList', context)"/>
+            <set field="contactListId" from="found.contactListId"/>
+            <set field="archived" from="found.archived"/>
+        </actions>
+    </service>
+    <service verb="get" noun="List" allow-remote="false" read-only="true">
+        <description>One Marketing list for ListDetail: its header (listRow), the subscription policy in effect and its dated history, the template bindings (current and ended), the counts by membership state and what the caller may do (edit, archive, request, accept with evidence, withdraw). Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="list" type="Map"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="policyHistory" type="List"/>
+            <parameter name="templates" type="List"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('getList', context)"/>
+            <set field="list" from="found.list"/>
+            <set field="policy" from="found.policy"/>
+            <set field="policyHistory" from="found.policyHistory"/>
+            <set field="templates" from="found.templates"/>
+            <set field="counts" from="found.counts"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SubscriptionPolicy" allow-remote="false">
+        <description>A list's subscription policy (design §4 SubscriptionPolicy; F6), dated: the one in effect, named by its revision (expectedRevision, required once one exists), is ended and the new one starts now. Public offer (offered on a published page, P7, apart from the legacy public flag), confirmation required (Y unless N: a request waits for the recipient's confirmation), purpose (a PartyConsentPurpose; empty is the channel's), the evidence text the offer shows, and the confirmation and notice templates. P7: a public offer names its site and opening interval (publicSiteId, offerFromDate, offerThruDate) and is offered only there, while it is open (PASS Subscribe, mantle.marketing.MarketingPortalServices); the confirmation template is the EmailTemplate of a Comms message template of the list's organization. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, REVISION_REQUIRED, STALE_REVISION, PURPOSE_INVALID, TEMPLATE_INVALID, SITE_INVALID and OFFER_INTERVAL_INVALID (an offer with no site is offered nowhere).</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="publicOffer"/>
+            <parameter name="confirmationRequired"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="evidenceText"/>
+            <parameter name="confirmEmailTemplateId"/>
+            <parameter name="noticeEmailTemplateId"/>
+            <parameter name="publicSiteId"><description>P7: the PASS site whose Marketing mount offers the list, one whose mount targets
+                the list's organization (SITE_INVALID); a public offer with none is offered nowhere</description></parameter>
+            <parameter name="offerFromDate" type="Timestamp"><description>P7: the public offer opens (empty: now)</description></parameter>
+            <parameter name="offerThruDate" type="Timestamp"><description>P7: the public offer closes (empty: open while the policy is;
+                not before it opens, OFFER_INTERVAL_INVALID)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactListId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('storeSubscriptionPolicy', context)"/>
+            <set field="contactListId" from="found.contactListId"/>
+            <set field="fromDate" from="found.fromDate"/>
+        </actions>
+    </service>
+    <service verb="store" noun="ContactListEmail" allow-remote="false">
+        <description>A list's template binding (design §4 ListTemplates; ContactListEmail), dated: add (the default) ends the current binding of the kind (ContactListEmailType) and starts the new one with its template (or wiki category); end ends the binding of the kind that started at fromDate. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, TYPE_INVALID, TEMPLATE_REQUIRED and TEMPLATE_INVALID.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="emailTypeEnumId" required="true"/>
+            <parameter name="action"/>
+            <parameter name="emailTemplateId"/>
+            <parameter name="wikiPageCategoryId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('storeContactListEmail', context)"/>
+            <set field="ended" from="found.ended"/>
+        </actions>
+    </service>
+    <!-- ===== members (design §4 Members, MemberDetail) ===== -->
+    <service verb="find" noun="Members" allow-remote="false" read-only="true">
+        <description>The members of a Marketing list (design §4 Members), newest first, filtered in the query: memberStatus (current, the default: pending, subscribed and unsubscribe pending; subscribed; pending; unsubscribed; one CLPT_ status; history: every row) and text (a name or the party id, ignoring case); paged (memberList with its page fields). Each row: the party and name, the state with its text and colour, since and until, the address masked and the revision. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="memberStatus"/>
+            <parameter name="text"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="memberList" type="List"/>
+            <parameter name="memberListCount" type="Integer"/>
+            <parameter name="memberListPageIndex" type="Integer"/>
+            <parameter name="memberListPageSize" type="Integer"/>
+            <parameter name="memberListPageMaxIndex" type="Integer"/>
+            <parameter name="memberListPageRangeLow" type="Integer"/>
+            <parameter name="memberListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('findMembers', context)"/>
+            <set field="memberList" from="found.memberList"/>
+            <set field="memberListCount" from="found.memberListCount"/>
+            <set field="memberListPageIndex" from="found.memberListPageIndex"/>
+            <set field="memberListPageSize" from="found.memberListPageSize"/>
+            <set field="memberListPageMaxIndex" from="found.memberListPageMaxIndex"/>
+            <set field="memberListPageRangeLow" from="found.memberListPageRangeLow"/>
+            <set field="memberListPageRangeHigh" from="found.memberListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Member" allow-remote="false" read-only="true">
+        <description>One party's membership of a Marketing list for MemberDetail (design §4 Membership, ConsentHistory): its current row with the whole address and whether it is suppressed for the list's organization, its earlier rows, its subscription requests with their evidence and outcome, its consent history for the list and the purposes of the list's organization (get#PartyConsentHistory), and what the caller may do (confirm a pending request with evidence, withdraw, request). Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE for a list or member the caller may not see.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="member" type="Map"/>
+            <parameter name="list" type="Map"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="requests" type="List"/>
+            <parameter name="consentHistory" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('getMember', context)"/>
+            <set field="member" from="found.member"/>
+            <set field="list" from="found.list"/>
+            <set field="rows" from="found.rows"/>
+            <set field="requests" from="found.requests"/>
+            <set field="consentHistory" from="found.consentHistory"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+    <service verb="request" noun="Subscriptions" allow-remote="false">
+        <description>The one evidenced path to a Marketing list's membership (design §4 AddMembers, §10 the Sales bulk action "Add to list (evidenced)"; §14.1 SubscriptionRequest): for each party of partyIdList, each current contact of a Sales lead of salesOpportunityIdList (its row key id@revision taken) and each contact of a Sales account of salesAccountPartyIdList (the person, for an individual account), read under the caller's Sales scope (a record the caller does not see is RECORD_UNAVAILABLE, one with no contact MISSING_CONTACT), a SubscriptionRequest with the evidence (source, date, text, the record it came from), each in a transaction of its own with one result: pending (the membership CLPT_PENDING until the recipient confirms), accepted (with accept: CLPT_ACCEPTED and a list consent grant, the audited evidence path, MARKETING_CONSENT_EDIT), existing (ALREADY_MEMBER, ALREADY_PENDING) or refused by reasonCode with the others filed: RECORD_UNAVAILABLE (another user's personal contact too), PERSONAL_CONTACT (the caller's own personal contact: a list takes directory contacts only, as the audience import does; the user's call, Nov 14, built in P6), MISSING_DESTINATION (no address of the list's channel), WITHDRAWN (evidence no later than the party's latest withdrawal of the list or its purpose: a retry never regrants), CONSENT_WITHDRAWN (an acceptance of a purpose the person withdrew, for every organization or the list's, which only their own confirmation renews). A request never clears a withdrawal or a suppression: a suppressed address is filed and stays suppressed (suppressed in its result). Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE for the list, LIST_ARCHIVED, EVIDENCE_REQUIRED, SOURCE_INVALID, EVIDENCE_DATE_INVALID and BATCH_TOO_LARGE (over 500).</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="salesOpportunityIdList" type="List"/>
+            <parameter name="salesAccountPartyIdList" type="List"/>
+            <parameter name="contactMechId"><description>For a single party: the address to send to; else its primary one</description></parameter>
+            <parameter name="sourceEnumId"><description>PartyConsentSource of the evidence; PcsStaff by default</description></parameter>
+            <parameter name="evidenceDate" type="Timestamp"><description>When the evidence was given; now by default</description></parameter>
+            <parameter name="evidenceText"/>
+            <parameter name="accept" type="Boolean"><description>Accept with the evidence (MARKETING_CONSENT_EDIT) rather than wait for confirmation</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="pendingCount" type="Integer"/>
+            <parameter name="acceptedCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="suppressedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('requestSubscriptions', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="pendingCount" from="found.pendingCount"/>
+            <set field="acceptedCount" from="found.acceptedCount"/>
+            <set field="existingCount" from="found.existingCount"/>
+            <set field="refusedCount" from="found.refusedCount"/>
+            <set field="suppressedCount" from="found.suppressedCount"/>
+        </actions>
+    </service>
+    <service verb="file" noun="SubscriptionRequest" allow-remote="false">
+        <description>Internal, for request#Subscriptions, which has checked the caller, the list and the request: one party's request decided and recorded in the caller's transaction (a new one per item there).</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="request" type="Map" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="result" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('fileRequest', context)"/>
+            <set field="result" from="found.result"/>
+        </actions>
+    </service>
+    <service verb="withdraw" noun="Subscription" allow-remote="false">
+        <description>A member's withdrawal from a Marketing list by a consent editor (design §4 SubscriptionAction), recorded at once with where it came from (evidenceText, required) and a reason, through ConsentServices set#ContactListPartySubscription (CLPT_UNSUBSCRIBED and a list withdrawal). Needs MARKETING_CONSENT_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE and EVIDENCE_REQUIRED.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="evidenceText"/>
+            <parameter name="reasonText"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('withdrawSubscription', context)"/>
+            <set field="statusId" from="found.statusId"/>
+            <set field="changed" from="found.changed"/>
+        </actions>
+    </service>
+    <!-- ===== the single-use reservation (design §4 ListDetail; the send that reserves is P9's) ===== -->
+    <service verb="reserve" noun="SingleUseList" allow-remote="false">
+        <description>Internal: a single-use list reserved by a send, under the list's lock: reserved, or not by reasonCode (NOT_SINGLE_USE, LIST_USED after a completed send, LIST_RESERVED by another send); the same send again is reserved. A preview reserves nothing.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sendId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reserved" type="Boolean"/>
+            <parameter name="reasonCode"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('reserveSingleUse', context)"/>
+            <set field="reserved" from="found.reserved"/>
+            <set field="reasonCode" from="found.reasonCode"/>
+        </actions>
+    </service>
+    <service verb="release" noun="SingleUseList" allow-remote="false">
+        <description>Internal: the send that holds a single-use list releases it before any hand-off (cancelled), or with consume uses it (completed: no other send takes it). A send that does not hold it changes nothing (NOT_RESERVED).</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sendId" required="true"/>
+            <parameter name="consume" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="released" type="Boolean"/>
+            <parameter name="consumed" type="Boolean"/>
+            <parameter name="reasonCode"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudiences.js').execute('releaseSingleUse', context)"/>
+            <set field="released" from="found.released"/>
+            <set field="consumed" from="found.consumed"/>
+            <set field="reasonCode" from="found.reasonCode"/>
+        </actions>
+    </service>
+
+    <!-- ===== Marketing P4: audience import and merge (impl-marketing P4; design-marketing §4 AudienceImport, AudienceMerge, §18) ===== -->
+    <!-- The import (MarketingAudienceTransfers.js): the wizard's services check MARKETING_AUDIENCE_IMPORT beside MARKETING_AUDIENCE_EDIT
+        and the list's organization (impl-marketing §4); the runs finder is the target marketingAudience's (data/MarketingAudienceTransferData.xml),
+        answering by MARKETING_AUDIENCE_VIEW and the organization. -->
+    <service verb="preview" noun="AudienceImport" allow-remote="false">
+        <description>Stages a file of contacts for a Marketing list and previews it (design §4 ImportFile, ImportEvidence, ImportMatches), or previews a staged import again with another mapping or evidence at the revision read. The file (importFile, or fileText with fileName; CSV or vCard, at most 1 MiB and 1,000 rows) is read by Commons' contact import (parse#ContactFile, read#ContactRows) and staged by reference and hash; the same file staged again by the same user for the same list before it is applied answers the same import. Columns: the Commons presets' for names, email and phone, or those named (emailColumn, phoneColumn, firstNameColumn, lastNameColumn, nameColumn, organizationColumn); evidenceColumn and evidenceDateColumn give a row's own evidence. Evidence: sourceEnumId (PcsImport by default), evidenceDate (the people's original date, never in the future and never today by default: EVIDENCE_DATE_REQUIRED without a date or a date column) and evidenceText, for the rows without their own; a list supplies none (EVIDENCE_REQUIRED without text or column); accept to accept with it (MARKETING_CONSENT_EDIT) rather than ask for confirmation. Each row's preview: a new or an existing contact (matched by the list channel's address alone, among the parties the caller may see; never a personal contact), the address masked, and an exclusion (INVALID_ADDRESS, MISSING_ADDRESS, EVIDENCE_REQUIRED, EVIDENCE_DATE_REQUIRED, EVIDENCE_DATE_INVALID, DUPLICATE_IN_FILE, EMPTY_ROW) or a note (SUPPRESSED, ALREADY_MEMBER, WITHDRAWN). Changes no membership. Needs MARKETING_AUDIENCE_IMPORT and MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, FILE_REQUIRED, FILE_TOO_LARGE, TOO_MANY_ROWS, COLUMN_UNKNOWN, SOURCE_INVALID, EVIDENCE_DATE_REQUIRED, IMPORT_APPLIED, IMPORT_EXPIRED, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="contactListId"/>
+            <parameter name="audienceImportId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="importFile" type="FileItem"/>
+            <parameter name="fileText" allow-html="any"/>
+            <parameter name="fileName"/>
+            <parameter name="characterSet"/>
+            <parameter name="emailColumn"/>
+            <parameter name="phoneColumn"/>
+            <parameter name="firstNameColumn"/>
+            <parameter name="lastNameColumn"/>
+            <parameter name="nameColumn"/>
+            <parameter name="organizationColumn"/>
+            <parameter name="evidenceColumn"/>
+            <parameter name="evidenceDateColumn"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="evidenceDate" type="Timestamp"/>
+            <parameter name="evidenceText"/>
+            <parameter name="accept" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="audienceImportId"/>
+            <parameter name="revision" type="Long"/>
+            <parameter name="rowCount" type="Integer"/>
+            <parameter name="addCount" type="Integer"/>
+            <parameter name="matchCount" type="Integer"/>
+            <parameter name="excludeCount" type="Integer"/>
+            <parameter name="skipCount" type="Integer"/>
+            <parameter name="suppressedCount" type="Integer"/>
+            <parameter name="notedCount" type="Integer"/>
+            <parameter name="columns" type="List"/>
+            <parameter name="fieldColumns" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('previewAudienceImport', context))</script></actions>
+    </service>
+    <service verb="apply" noun="AudienceImport" allow-remote="false" transaction-timeout="1800">
+        <description>Applies a previewed import at the revision read (design §4 ImportResults): each row not yet applied, in a transaction of its own, its contact matched or made (a directory contact, import#ContactRow) and its request filed through request#Subscriptions' filing (file#SubscriptionRequest; kind Import, the import and row its source record), decided when applied: pending, accepted (with the import's accept), existing, or refused by the request's reason (WITHDRAWN for a withdrawal after the evidence, CONSENT_WITHDRAWN); a row the preview excluded is invalid or skipped; a row that fails is failed, logged and the rest go on. A restart applies only the rows not yet applied; retryFailed applies the failed ones again. Complete, or partial when a row failed. Needs MARKETING_AUDIENCE_IMPORT and MARKETING_AUDIENCE_EDIT, and MARKETING_CONSENT_EDIT for an import that accepts (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, IMPORT_EXPIRED, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="audienceImportId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="retryFailed" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="audienceImportId"/>
+            <parameter name="stateEnumId"/>
+            <parameter name="revision" type="Long"/>
+            <parameter name="pendingCount" type="Integer"/>
+            <parameter name="acceptedCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="invalidCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="stagedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('applyAudienceImport', context))</script></actions>
+    </service>
+    <service verb="apply" noun="AudienceImportRow" allow-remote="false">
+        <description>Internal, for apply#AudienceImport, which has checked the caller and the import: one row in the caller's (new) transaction, its item locked; a row already applied answers as it is.</description>
+        <in-parameters>
+            <parameter name="audienceImportId" required="true"/>
+            <parameter name="rowNumber" type="Integer" required="true"/>
+            <parameter name="row" type="Map"/>
+            <parameter name="retryFailed" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcome"/>
+            <parameter name="reasonCode"/>
+            <parameter name="already" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('applyAudienceImportRow', context))</script></actions>
+    </service>
+    <service verb="get" noun="AudienceImport" allow-remote="false" read-only="true">
+        <description>An import of the caller's organizations (design §4 ImportMatches, ImportResults): its list, file name, state, evidence, who staged and applied it, its expiry, the counts by outcome and by proposed action, and its rows paged (itemList: the row, the proposed action and matched contact, the address masked, the exclusion, the outcome and its reason; outcome filters a state, errors the refused, invalid and failed, excluded the rows the preview left out), with what the caller may do (canPreview, canApply, canRetry, canAccept, canDownloadErrors). Never an address in full. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); another organization's import RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="audienceImportId" required="true"/>
+            <parameter name="outcome"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="audienceImport" type="Map"/>
+            <parameter name="counts" type="Map"/>
+            <parameter name="proposed" type="Map"/>
+            <parameter name="errorCount" type="Integer"/>
+            <parameter name="columns" type="List"/>
+            <parameter name="fieldColumns" type="Map"/>
+            <parameter name="capabilities" type="Map"/>
+            <parameter name="itemList" type="List"/>
+            <parameter name="itemListCount" type="Integer"/>
+            <parameter name="itemListPageIndex" type="Integer"/>
+            <parameter name="itemListPageSize" type="Integer"/>
+            <parameter name="itemListPageMaxIndex" type="Integer"/>
+            <parameter name="itemListPageRangeLow" type="Integer"/>
+            <parameter name="itemListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('getAudienceImport', context))</script></actions>
+    </service>
+    <service verb="find" noun="AudienceImportRuns" allow-remote="false" read-only="true">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetRuns"/>
+        <description>The audience imports of the organizations the caller reads audiences of (MARKETING_AUDIENCE_VIEW), newest first, as summaries (Admin's Imports, AudienceImport's recent imports): the file's name and list, the organization (scopeKey), the state, when and who staged it, the row count and the applied, error and skipped counts, and ownerParameters (audienceImportId). Never a row or an address. contactListId narrows them to one list. None for any other caller.</description>
+        <in-parameters>
+            <parameter name="contactListId"/>
+        </in-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('findAudienceImportRuns', context))</script></actions>
+    </service>
+    <service verb="get" noun="AudienceImportErrors" allow-remote="false" read-only="true">
+        <description>The error rows of an import (design §18): the rows refused, invalid or failed as the file held them, with each row's number and reason, as CSV (a cell a spreadsheet would read as a formula written as text), while the file is staged. The file's every column: for its importers alone, MARKETING_AUDIENCE_IMPORT beside MARKETING_AUDIENCE_EDIT and MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); RECORD_UNAVAILABLE; IMPORT_EXPIRED once the file is purged.</description>
+        <in-parameters><parameter name="audienceImportId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="fileText" allow-html="any"/>
+            <parameter name="fileName"/>
+            <parameter name="rowCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('getAudienceImportErrors', context))</script></actions>
+    </service>
+    <service verb="purge" noun="AudienceImports" allow-remote="false" transaction-timeout="1800">
+        <description>The daily job's (purge_MarketingAudienceImports): the staged files of the imports past their expiry removed and the outcomes kept; an import never applied expires. Each import in a transaction of its own, a failure logged and the rest going on.</description>
+        <in-parameters><parameter name="maxImports" type="Integer"/></in-parameters>
+        <out-parameters><parameter name="purgedCount" type="Integer"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('purgeAudienceImports', context))</script></actions>
+    </service>
+    <!-- The membership export (design §18): the target marketingAudienceMembers' scope and export services, reached through the
+        framework's run#Export as the caller, which asks MARKETING_AUDIENCE_EXPORT and gives the address to a holder of
+        MARKETING_AUDIENCE_VIEW only -->
+    <service verb="find" noun="MemberExportScopes" allow-remote="false" read-only="true">
+        <implements service="org.moqui.admin.DataTransferServices.find#TargetScopes"/>
+        <description>The Marketing lists of the organizations a holder of MARKETING_AUDIENCE_EXPORT may export (scopeKey the list), by name, at most 500. None otherwise.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('findMemberExportScopes', context))</script></actions>
+    </service>
+    <service verb="export" noun="MemberTransfer" allow-remote="false" read-only="true">
+        <implements service="org.moqui.admin.DataTransferServices.run#TargetExport"/>
+        <description>A Marketing list's members (scopeKey the list; selection.memberStatus current, the default, subscribed, pending, unsubscribed or history) as rows: each its party, name, state, since and until, and the address (a field the registration gives a holder of MARKETING_AUDIENCE_VIEW only), the fields asked for alone; rowCount alone with countOnly or past maxRows. Refused with a reason a person can act on: PERMISSION_DENIED without MARKETING_AUDIENCE_EXPORT, SCOPE_INVALID for a list not of the caller's organizations or a mailbox.</description>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAudienceTransfers.js').execute('exportMemberTransfer', context))</script></actions>
+    </service>
+    <!-- The merge (MarketingListMerge.js): membership links only, never a party merge -->
+    <service verb="preview" noun="ListMerge" allow-remote="false" read-only="true">
+        <description>What merging source lists (sourceListIdList, at most 10, of the target's organization and channel) into a target list (contactListId) would do (design §4 MergeSelection, MergePreview), changing nothing: each member of a source with its source states, its target state and the decision (accepted with the source's evidence, for a member accepted on a source of the target's purpose with a grant of that list, by a holder of MARKETING_CONSENT_EDIT; pending, for a pending member, one of another purpose or one with no evidence; existing; kept, unsubscribed from the target; conflict, withdrawn from a source; skipped), paged (memberList), the totals and the previewKey merge#Lists names. archiveSources is part of the preview. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED (the target), SOURCES_REQUIRED, TOO_MANY_SOURCES, SOURCE_IS_TARGET, LIST_MISMATCH and MERGE_TOO_LARGE (over 2,000 members).</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sourceListIdList" type="List"/>
+            <parameter name="archiveSources" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="previewKey"/>
+            <parameter name="targetListId"/>
+            <parameter name="targetName"/>
+            <parameter name="sourceNames" type="List"/>
+            <parameter name="archiveSources" type="Boolean"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="carriedCount" type="Integer"/>
+            <parameter name="conflictCount" type="Integer"/>
+            <parameter name="canAccept" type="Boolean"/>
+            <parameter name="memberList" type="List"/>
+            <parameter name="memberListCount" type="Integer"/>
+            <parameter name="memberListPageIndex" type="Integer"/>
+            <parameter name="memberListPageSize" type="Integer"/>
+            <parameter name="memberListPageMaxIndex" type="Integer"/>
+            <parameter name="memberListPageRangeLow" type="Integer"/>
+            <parameter name="memberListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingListMerge.js').execute('previewListMerge', context))</script></actions>
+    </service>
+    <service verb="merge" noun="Lists" allow-remote="false" transaction-timeout="1800">
+        <description>Applies a previewed merge (design §4 ApplyMerge) when the lists are as previewed (previewKey; else STALE_PREVIEW): each carried member filed on the target through request#Subscriptions' filing, each in a transaction of its own (kind List merge, the source list its source record; accepted with the source grant's evidence and date, or pending), decided when applied, so a withdrawal later than the evidence is refused WITHDRAWN; the source rows kept, the sources archived when asked (a source held by a send stays open, named in archiveRefusals). Never a party merge; nothing pending or withdrawn promoted. operationKey (at most 40 characters) answers a retry with the first result. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses REASON_REQUIRED, PREVIEW_REQUIRED, OPERATION_KEY_REQUIRED, OPERATION_KEY_CONFLICT and preview#ListMerge's refusals.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sourceListIdList" type="List"/>
+            <parameter name="archiveSources" type="Boolean"/>
+            <parameter name="previewKey"/>
+            <parameter name="reasonText"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="targetListId"/>
+            <parameter name="acceptedCount" type="Integer"/>
+            <parameter name="pendingCount" type="Integer"/>
+            <parameter name="existingCount" type="Integer"/>
+            <parameter name="refusedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+            <parameter name="archivedCount" type="Integer"/>
+            <parameter name="archiveRefusals" type="List"/>
+            <parameter name="refusals" type="List"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingListMerge.js').execute('mergeLists', context))</script></actions>
+    </service>
+    <!-- ===== end of Marketing P4 ===== -->
+</services>

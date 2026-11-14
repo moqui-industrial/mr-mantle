@@ -11,12 +11,41 @@
  *   other needs its purpose granted (get#PartyConsentState) at the hand-off, else it is suppressed. A topic's delivery
  *   (consentContactListId: a store's review requests, Commerce P9 follow-up) needs the recipient's latest consent of its
  *   purpose on that list granted instead. The snapshot is kept.
+ * - Suppressions (impl-marketing P3): a destination blocked for every organization or the delivery's is suppressed at the
+ *   attempt, after the consent and before the hand-off (MessageSuppressions.js): a hard bounce stops every delivery, any other
+ *   block (a complaint, a staff block) a promotional one only (transactional N), never a transactional notice (the user's call,
+ *   Nov 14).
+ * - Sending profiles (impl-marketing P6, F13): a delivery that names one goes out through its relay, from its sender and reply-to,
+ *   with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce domain (VERP: the bounce intake finds the delivery by it,
+ *   and only with its random key, so a forged report cannot name a delivery by a guessed id; P6 review), within its
+ *   throttle and quiet hours (the delivery waits, no try counted); a profile that is not ready is a retryable outcome (its tries
+ *   counted, then failed), so nothing goes out before its readiness. A delivery that names none is sent as before.
+ * - Receipts (P6, F14): the later facts of a delivery (delivered, a soft or hard bounce, a complaint) are MessageDeliveryReceipt
+ *   rows apart from its hand-off state (MessageDeliveryReports.js); record#DeliveryReceipt below stays the outcome of an attempt.
+ * - A source's own message (impl-sales P10, impl-marketing P6 and P8): its build may answer the subject (used as given, never
+ *   expanded), the body and the text alternative, handed to send#EmailTemplate over the template's; a send's test message is the
+ *   first promotional source that does (P8), and a promotional delivery never names a transactional-only profile.
+ * - A topic's delivery within an organization (impl-marketing P9: a Marketing send's recipient, queued with
+ *   consentOrganizationPartyId): Marketing's evidenced rule at each attempt (organizationTopicConsent below): the purpose withdrawn by
+ *   its global or organization row, the topic's list row withdrawn or the address's solicitation refused blocks; a granted consent of
+ *   the topic or of the purpose in the organization admits. A topic's delivery queued without it is checked as before. The build
+ *   may give the reply-to (the send's own, over the profile's). resolve#Delivery reaches the deliveries of the reviewer's
+ *   organizations (a system administrator every one) and keeps who resolved it, when and why.
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, call, ms} = lib
+const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
+// loaded when a delivery names a sending profile, so the built sources do not depend on it
+const profiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
+// The random key of a delivery's VERP bounce address (P6 review): letters and digits only, so it never meets the address's dot.
+const newBounceKey = () =>
+    ec.user
+        .randomString(24)
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 16) || ec.user.randomCode(16)
 const D = "mantle.party.MessageDelivery"
 const ATTEMPT = "mantle.party.MessageDeliveryAttempt"
 const limits = {tries: 5, batch: 200, maxBackoffMinutes: 60}
@@ -38,6 +67,19 @@ function queue(p) {
     if (!source || source.enumTypeId !== "MessageDeliverySource") throw new Error("Unknown delivery source " + p.sourceEnumId)
     const existing = one(D, key)
     if (existing) return {deliveryId: existing.deliveryId, created: false, stateEnumId: existing.stateEnumId}
+    // P6: a sending profile of the delivery's organization (its own when none is given)
+    const sendingProfileId = text(p.sendingProfileId) || null
+    let organizationPartyId = text(p.organizationPartyId) || null
+    if (sendingProfileId) {
+        const profile = one("mantle.party.MessageSendingProfile", {sendingProfileId})
+        if (!profile) throw new Error("Unknown sending profile " + sendingProfileId)
+        if (organizationPartyId && organizationPartyId !== profile.organizationPartyId)
+            throw new Error("The sending profile " + sendingProfileId + " is another organization's")
+        // P8 (P6 review F172): a promotional delivery goes from a promotional profile or one for both, never a transactional one
+        if ((p.transactional === false || p.transactional === "N") && profile.purposeEnumId === "MtpTransactional")
+            throw new Error("PROFILE_PURPOSE: The sending profile " + sendingProfileId + " is for transactional messages only")
+        organizationPartyId = profile.organizationPartyId
+    }
     // the delivery is kept in a transaction of its own, so its attempts (each their own) see it; a source whose event does
     // not hold by then answers suppress from its build
     const made = createApart(
@@ -47,12 +89,22 @@ function queue(p) {
             toAddress: text(p.toAddress) || null,
             siteId: p.siteId || null,
             productStoreId: p.productStoreId || null,
+            organizationPartyId,
+            sendingProfileId,
+            bounceKey: sendingProfileId ? newBounceKey() : null,
             transactional: p.transactional === false || p.transactional === "N" ? "N" : "Y",
             consentJson: p.marketingPurposeEnumId
                 ? JSON.stringify(
                       Object.assign(
                           {purposeEnumId: p.marketingPurposeEnumId},
-                          text(p.consentContactListId) ? {contactListId: text(p.consentContactListId)} : {}
+                          text(p.consentContactListId) ? {contactListId: text(p.consentContactListId)} : {},
+                          // P9: a topic's delivery within an organization (Marketing's rule), for the address it goes to
+                          text(p.consentContactListId) && text(p.consentOrganizationPartyId)
+                              ? {
+                                    organizationPartyId: text(p.consentOrganizationPartyId),
+                                    contactMechId: text(p.consentContactMechId) || null
+                                }
+                              : {}
                       )
                   )
                 : null,
@@ -108,14 +160,21 @@ function attemptNow(deliveryId) {
     }
 }
 // The consent snapshot at the hand-off: transactional, or the marketing purpose's state for the recipient.
+// P8: a send's test message (MdsrcCampaignSendTest, impl-marketing P8) is promotional, so every suppression refuses it, and goes only
+// to its policy's test allowlist, checked by test#Send: it asks no recipient's consent, and its snapshot says test.
+const testSources = ["MdsrcCampaignSendTest"]
 function consentOf(delivery) {
     const at = ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd'T'HH:mm:ssZ")
     if (delivery.transactional !== "N") return {transactional: true, at}
+    if (testSources.includes(delivery.sourceEnumId)) return {transactional: false, test: true, granted: true, at}
     const queued = lib.json(delivery.consentJson, {}) || {}
     const purposeEnumId = queued.purposeEnumId || "PcpMarketingEmail"
     let granted = false
     try {
-        if (queued.contactListId) {
+        if (queued.contactListId && queued.organizationPartyId) {
+            // P9: a topic within an organization (a Marketing send), Marketing's evidenced rule
+            granted = organizationTopicConsent(delivery, queued, purposeEnumId)
+        } else if (queued.contactListId) {
             // a topic: the latest consent of its purpose on its list
             const latest = Array.from(
                 find("mantle.party.PartyConsent", {
@@ -139,8 +198,76 @@ function consentOf(delivery) {
     }
     return Object.assign(
         {transactional: false, purposeEnumId, granted, at},
-        queued.contactListId ? {contactListId: queued.contactListId} : {}
+        queued.contactListId ? {contactListId: queued.contactListId} : {},
+        queued.organizationPartyId ? {organizationPartyId: queued.organizationPartyId} : {}
     )
+}
+// ===== Marketing P9: a topic's consent within an organization (impl-marketing P9; MarketingEligibility.js classifyPeople's rule) =====
+// The recipient's consent rows newest first: withdrawn when the purpose's latest global row or latest row of the organization
+// withdraws, the topic's latest list row withdraws, or the address's solicitation is refused (a current PartyContactMech of the
+// address with allowSolicitation N); else granted when the topic's list row grants (of the purpose, or of none) or the purpose's row
+// of the organization (else the global one) grants. A row of another address does not count.
+function organizationTopicConsent(delivery, queued, purposeEnumId) {
+    const org = queued.organizationPartyId
+    const mechId = queued.contactMechId || null
+    const forAddress = row => !row.contactMechId || !mechId || row.contactMechId === mechId
+    const consents = Array.from(
+        find("mantle.party.PartyConsent", {partyId: delivery.recipientPartyId})
+            .orderBy("-consentDate")
+            .orderBy("-partyConsentId")
+            .list()
+    ).filter(row => (ms(row.consentDate) ?? 0) <= nowMs() && forAddress(row))
+    const listRow = consents.find(row => row.contactListId === queued.contactListId) || null
+    const purposeRows = consents.filter(
+        row =>
+            !row.contactListId &&
+            row.purposeEnumId === purposeEnumId &&
+            (!row.organizationPartyId || row.organizationPartyId === org)
+    )
+    const global = purposeRows.find(row => !row.organizationPartyId) || null
+    const scoped = purposeRows.find(row => row.organizationPartyId === org) || null
+    const refused =
+        !!mechId &&
+        Array.from(
+            find("mantle.party.contact.PartyContactMech", {partyId: delivery.recipientPartyId, contactMechId: mechId})
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .list()
+        ).some(row => row.allowSolicitation === "N")
+    if (global?.statusId === "PconWithdrawn" || scoped?.statusId === "PconWithdrawn") return false
+    if (listRow?.statusId === "PconWithdrawn" || refused) return false
+    const listGranted = listRow?.statusId === "PconGranted" && (!listRow.purposeEnumId || listRow.purposeEnumId === purposeEnumId)
+    return listGranted || (scoped || global)?.statusId === "PconGranted"
+}
+// Whether the reviewer may resolve or read a delivery: a system administrator every one; another holder of MESSAGE_DELIVERY_REVIEW
+// the deliveries of the organizations they work for (the delivery's own, else its store's). A delivery of no organization is the
+// system administrator's.
+function reviewerReaches(delivery) {
+    if (lib.access.systemAdmin()) return true
+    const store =
+        !delivery.organizationPartyId && delivery.productStoreId
+            ? one("mantle.product.store.ProductStore", {productStoreId: delivery.productStoreId})
+            : null
+    const org = delivery.organizationPartyId || store?.organizationPartyId || null
+    if (!org || !ec.user.userId) return false
+    const info = ec.service.sync().name("mantle.party.PartyServices.get#PartyOrganizationInfo").disableAuthz().call() || {}
+    return Array.from(info.userOrgIds || []).includes(org)
+}
+// ===== end of Marketing P9 =====
+// Whether the address is suppressed for the delivery: a block of every organization, or of the delivery's organization (its
+// own when queued with one, a seller's quote; else its store's, when it names one); for a transactional notice only a block that
+// stops every delivery (a hard bounce), for a promotional one any.
+function suppressedFor(delivery, toAddress) {
+    const store =
+        !delivery.organizationPartyId && delivery.productStoreId
+            ? one("mantle.product.store.ProductStore", {productStoreId: delivery.productStoreId})
+            : null
+    const found = suppressions.suppressedOf(
+        delivery.channelEnumId || "MdcEmail",
+        [toAddress],
+        delivery.organizationPartyId || store?.organizationPartyId || null,
+        delivery.transactional !== "N"
+    )
+    return found.suppressed.length > 0
 }
 // attempt#Delivery: the delivery locked; a queued or retrying one is built by its source, its consent snapshotted, and
 // handed to send#EmailTemplate; the outcome recorded with the attempt. A sent, failed, suppressed or uncertain one is left.
@@ -167,6 +294,29 @@ function attemptStep(p) {
     }
     if (!consent.transactional && !consent.granted)
         return record("MdsSuppressed", "suppressed", {lastError: "No consent for this message"})
+    // P6: the sending profile's relay, sender and bounce address; its quiet hours and throttle make the delivery wait, untried,
+    // and a profile that is not ready is a retryable outcome (nothing goes out before its readiness)
+    let profileSend = {}
+    if (delivery.sendingProfileId) {
+        // a delivery queued before it had a key (none is sent without one)
+        let bounceKey = text(delivery.bounceKey)
+        if (!bounceKey) {
+            bounceKey = newBounceKey()
+            call("update#" + D, {deliveryId: delivery.deliveryId, bounceKey})
+        }
+        const decided = profiles().forDelivery(delivery.sendingProfileId, delivery.deliveryId, bounceKey)
+        if (decided.wait) {
+            call("update#" + D, {
+                deliveryId: delivery.deliveryId,
+                nextAttemptDate: new Date(nowMs() + decided.wait.minutes * 60000),
+                lastError: decided.wait.reason
+            })
+            return {stateEnumId: delivery.stateEnumId}
+        }
+        if (decided.refuse)
+            return recordOutcome(delivery, attempts, {deliveryOutcome: "retryable", sendError: decided.refuse}, record)
+        profileSend = decided.send
+    }
     const source = one("moqui.basic.Enumeration", {enumId: delivery.sourceEnumId})
     let built
     try {
@@ -188,6 +338,10 @@ function attemptStep(p) {
     if (built.suppress) return record("MdsSuppressed", "suppressed", {lastError: text(built.suppress).slice(0, 255) || null})
     const toAddress = text(built.toAddress) || text(delivery.toAddress)
     if (!toAddress) return record("MdsFailed", "permanent", {lastError: "The recipient has no address"})
+    // a suppressed destination is never handed off (impl-marketing P3, F13): its block of every organization, or of the
+    // delivery's (its own organization, else its store's); a hard bounce whatever the message, another block a promotional one only (the
+    // user's call, Nov 14); a subscription never ends one
+    if (suppressedFor(delivery, toAddress)) return record("MdsSuppressed", "suppressed", {lastError: "The address is suppressed"})
     let out
     try {
         out =
@@ -198,7 +352,17 @@ function attemptStep(p) {
                     emailTemplateId: delivery.templateKey,
                     toAddresses: toAddress,
                     bodyParameters: built.bodyParameters || {},
-                    ...(built.extraHeaders ? {extraHeaders: built.extraHeaders} : {})
+                    // a source that makes its own subject (Comms' templates, P6), and the sending profile's relay, sender, reply-to
+                    // and VERP bounce address (send#EmailTemplate's per-call values, F17)
+                    ...(built.subject ? {subject: built.subject} : {}),
+                    ...profileSend,
+                    // P9: a source's own reply-to (a Marketing send's), over the profile's
+                    ...(built.replyToAddresses ? {replyToAddresses: built.replyToAddresses} : {}),
+                    ...(built.extraHeaders ? {extraHeaders: built.extraHeaders} : {}),
+                    // a source that makes its own body and attachments (Sales' quote and reminder, impl-sales P10: the issued PDF)
+                    ...(built.body ? {body: built.body} : {}),
+                    ...(built.bodyText ? {bodyText: built.bodyText} : {}),
+                    ...(built.attachments ? {attachments: built.attachments} : {})
                 })
                 .call() || {}
         if (ec.message.hasError()) {
@@ -289,6 +453,9 @@ function runDeliveries(p) {
 // resolve#Delivery (a reviewer's decision on an uncertain delivery): sent (the provider shows it), failed, or tried again.
 function resolveDelivery(p) {
     const delivery = find(D, {deliveryId: p.deliveryId}).forUpdate(true).one()
+    // P9: a reviewer of the delivery's organization (another's answers as missing)
+    if (delivery && p.checkReach !== false && !reviewerReaches(delivery))
+        lib.denied("RECORD_UNAVAILABLE", "Delivery " + text(p.deliveryId) + " is not available")
     if (!delivery || delivery.stateEnumId !== "MdsUncertain") throw new Error("Only an uncertain delivery is resolved")
     const states = {sent: "MdsSent", failed: "MdsFailed", retry: "MdsRetry"}
     const stateEnumId = states[p.outcome]
@@ -297,9 +464,26 @@ function resolveDelivery(p) {
         deliveryId: delivery.deliveryId,
         stateEnumId,
         nextAttemptDate: stateEnumId === "MdsRetry" ? ec.user.nowTimestamp : delivery.nextAttemptDate,
-        lastError: text(p.note).slice(0, 255) || delivery.lastError
+        lastError: text(p.note).slice(0, 255) || delivery.lastError,
+        // P9: who resolved it, when and why
+        resolvedByUserId: ec.user.userId || null,
+        resolvedDate: ec.user.nowTimestamp,
+        resolutionNote: text(p.note).slice(0, 4000) || null
     })
     return {stateEnumId}
+}
+// requeue#Delivery (a source's retry of what it sent, impl-sales P10: a quote send to a recipient that failed): a failed or
+// waiting delivery queued again from now, in a transaction of its own so the next attempt (each its own) sees it. A sent,
+// suppressed or uncertain one is left as it is: an uncertain send is reviewed, never repeated blindly.
+function requeue(p) {
+    return createApart("mantle.party.MessageServices.requeue#DeliveryStep", {deliveryId: p.deliveryId})
+}
+function requeueStep(p) {
+    const delivery = find(D, {deliveryId: p.deliveryId}).forUpdate(true).one()
+    if (!delivery || !["MdsFailed", "MdsRetry"].includes(delivery.stateEnumId))
+        return {stateEnumId: delivery?.stateEnumId || null, requeued: false}
+    call("update#" + D, {deliveryId: delivery.deliveryId, stateEnumId: "MdsQueued", nextAttemptDate: ec.user.nowTimestamp})
+    return {stateEnumId: "MdsQueued", requeued: true}
 }
 // The deliveries of an event (a source's own view of what went out), newest first.
 const ofEvent = eventKey => rows(D, {eventKey}).sort((a, b) => (ms(b.createdDate) ?? 0) - (ms(a.createdDate) ?? 0))
@@ -361,6 +545,8 @@ function recoverMailOutcome(p) {
     const delivery = attempt ? one(D, {deliveryId: attempt.deliveryId}) : null
     if (!delivery || delivery.stateEnumId !== "MdsUncertain" || attempt.attemptSeqId !== lastAttemptSeqId(delivery))
         return refuse("NOT_UNCERTAIN", "Only the last attempt of an uncertain delivery is reconciled")
+    // P9: a reviewer of the delivery's organization
+    if (!reviewerReaches(delivery)) return refuse("NOT_UNCERTAIN", "Only the last attempt of an uncertain delivery is reconciled")
     const resolved = resolveDelivery({
         deliveryId: delivery.deliveryId,
         outcome: p.action === "sent" ? "sent" : "retry",
@@ -369,10 +555,22 @@ function recoverMailOutcome(p) {
     return {applied: true, ownerStateText: stateTexts[resolved.stateEnumId] || ""}
 }
 
-const operations = {queue, attempt: attemptStep, receipt, runDeliveries, resolveDelivery, mailOutcomeOwners, recoverMailOutcome}
+const operations = {
+    queue,
+    attempt: attemptStep,
+    receipt,
+    runDeliveries,
+    resolveDelivery,
+    mailOutcomeOwners,
+    recoverMailOutcome,
+    requeue,
+    requeueStep
+}
 ;({
     limits,
     ofEvent,
+    reviewerReaches,
+    stateTexts,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown message delivery operation " + op)
         return operations[op](parameters || {})

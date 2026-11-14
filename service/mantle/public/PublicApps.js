@@ -26,6 +26,19 @@ const apps = {
         readiness: 'mantle.request.CaseFeedbackServices.check#SupportAppReadiness',
         accountCard: 'mantle.request.SupportCaseServices.get#AccountCard',
     },
+    // PASS Sales (IronStone impl-sales P13; design-sales §10.1): a seller's customer quotes (and orders, P17), its target the
+    // selling organization; its card of the PASS Account hub is the customer's Quotes and orders
+    sales: {
+        target: 'organization',
+        readiness: 'mantle.order.SalesPortalServices.check#SalesAppReadiness',
+        accountCard: 'mantle.order.SalesPortalServices.get#AccountCard',
+    },
+    // PASS Marketing (IronStone impl-marketing P7, F24; design-marketing §13.1): public subscription to an organization's offered
+    // lists and its confirmation, its target the organization; the Account Email preferences page carries its context
+    marketing: {
+        target: 'organization',
+        readiness: 'mantle.marketing.MarketingPortalServices.check#MarketingAppReadiness',
+    },
     // Shop (mr-pass impl-shop P1, F2, F34): its target the ProductStore it sells from; it may be a site's one root app in
     // place of Forum; a site has one Shop mount; its readiness is Commerce's store readiness (read only)
     shop: {

@@ -5,7 +5,8 @@
 // audit-logged key fields (the kind, the consent, the order revision it binds, the commercial fields, and each line's action,
 // product, quantity, unit, ship date, proposed price and status), so a decision made before a change no longer counts. A
 // decision is an OrderChangeDecision. Cancel and substitute are applied here under ORDER_CHANGE_APPROVE and ORDER_CHANGE_APPLY;
-// the commercial kinds are filed and decided under SALES_APPROVE and applied by the order's owner (Sales), never here. Apply
+// the commercial kinds are filed and decided under SALES_APPROVE and applied by the order's owner under SALES_ORDER_CHANGE
+// (impl-sales P14: SalesOrderChanges.js, called here for those kinds, with Sales' filers and readers beside these). Apply
 // runs every check again under the order's lock, holds the order with the Change reason (hold#Order) and releases it
 // (release#OrderHold), and either commits whole or leaves the order as it was. Quantities are in the order line's unit, which
 // these orders share with the product's stock unit (a line in another unit is refused, UNIT_UNSUPPORTED).
@@ -13,6 +14,8 @@ const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/Enti
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
 const cases = () => ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
 const confirmations = () => ec.resource.script("component://mr-mantle/service/mantle/order/OrderConfirmations.js")
+// impl-sales P14: the order owner's part of the commercial kinds
+const sales = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesOrderChanges.js")
 const {find, one, rows, call, denied, access, ms} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -49,7 +52,9 @@ const requestRevisionFields = [
     "cancellationReason",
     "addressContactMechId",
     "shipmentMethodEnumId",
-    "carrierPartyId"
+    "carrierPartyId",
+    // impl-sales P14: the part an address, ship method or carrier change applies to
+    "orderPartSeqId"
 ]
 const itemRevisionFields = [
     "statusId",
@@ -67,6 +72,9 @@ const readPermissions = [
     "SALES_APPROVE",
     "SALES_ORDER_CHANGE"
 ]
+// impl-sales P14: a Sales manager or reader of the organization's orders (SALES_TEAM_VIEW) lists the organization's commercial
+// proposals (Sales' Changes); a cancel or substitute only of an order they see (OrderDetail's Changes; P14 review)
+const ownerListPermission = "SALES_TEAM_VIEW"
 const amountPermissions = ["PRICE_VIEW", "ACCOUNTING_VIEW", "RECEIVABLE_VIEW", "ORDER_APPROVE"]
 const financePermissions = ["ACCOUNTING_VIEW", "RECEIVABLE_VIEW"]
 // a completed order may still have a package not shipped (pack#Shipment completes the part); its shipped lines are refused
@@ -94,7 +102,11 @@ const productText = productId => {
 const money = (value, currencyUomId) =>
     value == null ? "" : currencyUomId ? ec.l10n.formatCurrency(lib.money(value, currencyUomId), currencyUomId) : String(value)
 const revisionText = revision => (revision ? lib.dateText(revision) : "")
-const amountRead = () => hasAny(amountPermissions)
+// impl-sales P14: and a Sales reader who sees the order (Sales shows its own orders' prices), or its approver or change operator
+const amountRead = ch =>
+    hasAny(amountPermissions) ||
+    (!!ch && !ch.applied && hasAny(["SALES_APPROVE", "SALES_ORDER_CHANGE"])) ||
+    (!!ch && sales().seesOrder(ch.so.orderId))
 
 // ===== the order =====
 // Warehouse's one lock order (F294) is the shipment, then the order parts and header: a pick locks its shipment and never
@@ -178,7 +190,8 @@ function changeOf(requestId, options = {}) {
     }
 }
 function requireRead(ch) {
-    if (!ch.own && !hasAny(readPermissions))
+    // impl-sales P14: a Sales reader who sees the order reads its changes (the order's owner, OrderDetail's Changes)
+    if (!ch.own && !hasAny(readPermissions) && !sales().seesOrder(ch.so.orderId))
         denied("PERMISSION_DENIED", readPermissions.join(" or ") + " is required to read order changes")
 }
 // The permission that decides a kind: ORDER_CHANGE_APPROVE for cancel and substitute, Sales' SALES_APPROVE for the rest.
@@ -371,6 +384,8 @@ function availableAt(productId, facilityId) {
 // Each line against the order as it is now: {lines: [{line, facts, cancelQuantity, reopen, substitute}], conflicts}. With
 // strict, the first conflict is refused by its code (apply); otherwise each is listed (preview, save).
 function checkLines(ch, lineRows, strict) {
+    // impl-sales P14: a commercial kind's lines are the order owner's to check (SalesOrderChanges.js)
+    if (!ch.applied) return sales().checkLines(ch, lineRows, strict, salesTools)
     const so = ch.so
     const conflicts = []
     const conflict = (code, message) => {
@@ -585,17 +600,25 @@ function save(p) {
     const existing = blank(p.requestId) ? null : changeOf(p.requestId, {lock: true, scoped: hasAny(readPermissions)})
     const orderId = existing ? existing.so.orderId : text(p.orderId)
     const staff = has("ORDER_CHANGE_REQUEST")
+    // impl-sales P14: a commercial kind filed in Sales by a change operator or the order's editor (SalesOrderChanges.js canFile)
+    const askedKind = text(p.orderChangeKindEnumId) || existing?.kind || null
+    const salesFiler =
+        !staff &&
+        !!askedKind &&
+        Object.hasOwn(kindActions, askedKind) &&
+        !appliedKinds.includes(askedKind) &&
+        sales().canFile(orderId)
     let so
-    if (staff) so = orderOf(orderId, {lock: true})
+    if (staff || salesFiler) so = orderOf(orderId, {lock: true})
     else {
         // a customer contact's own order: unscoped, then checked as theirs
         so = orderOf(orderId, {lock: true, scoped: false})
         if (!customerSide(so)) denied("PERMISSION_DENIED", "ORDER_CHANGE_REQUEST is required")
     }
-    if (existing && !existing.own && !staff) denied("PERMISSION_DENIED", "ORDER_CHANGE_REQUEST is required")
+    if (existing && !existing.own && !staff && !salesFiler) denied("PERMISSION_DENIED", "ORDER_CHANGE_REQUEST is required")
     const kind = text(p.orderChangeKindEnumId) || existing?.kind
     if (!Object.hasOwn(kindActions, kind || "")) denied("KIND_INVALID", "Choose what the change is")
-    if (!staff && kind !== "OckCancel") denied("PERMISSION_DENIED", "A customer may ask only to cancel")
+    if (!staff && !salesFiler && kind !== "OckCancel") denied("PERMISSION_DENIED", "A customer may ask only to cancel")
     const operation = !blank(p.operationKey)
         ? lib.operation(p, "OrderChangeSave", so.organizationPartyId, {
               requestId: p.requestId || null,
@@ -613,6 +636,9 @@ function save(p) {
     if (p.expectedOrderRevision != null && number(p.expectedOrderRevision) !== so.revision)
         denied("STALE_ORDER", "Order " + so.orderId + " is at revision " + so.revision + " now; review it again")
     const lines = linesFrom(p, kind)
+    // impl-sales P14: a commercial kind's fields (a price, an increase or a new line, a date, the part and its new address, method or
+    // carrier), checked by the order's owner; its conflicts with the order are the preview's
+    const ownerFields = appliedKinds.includes(kind) ? {orderPartSeqId: null} : sales().validateSave(so, kind, lines, p)
     if (kind === "OckSubstitute" && blank(p.customerConsentRef) && blank(existing?.request?.customerConsentRef))
         denied("CONSENT_REQUIRED", "Record the customer's consent to the substitute")
     const values = {
@@ -623,7 +649,8 @@ function save(p) {
         customerConsentRef: text(p.customerConsentRef) ?? existing?.request?.customerConsentRef ?? null,
         addressContactMechId: text(p.addressContactMechId),
         shipmentMethodEnumId: text(p.shipmentMethodEnumId),
-        carrierPartyId: text(p.carrierPartyId)
+        carrierPartyId: text(p.carrierPartyId),
+        orderPartSeqId: ownerFields.orderPartSeqId
     }
     const filer = ec.user.userAccount?.partyId || null
     let requestId
@@ -658,6 +685,21 @@ function save(p) {
     const seqStart = rows(ITEM, {requestId}).length
     lines.forEach((line, index) => {
         const orderItem = line.orderItemSeqId ? one(ORDER_ITEM, {orderId: so.orderId, orderItemSeqId: line.orderItemSeqId}) : null
+        // impl-sales P14: a new line (a quantity increase with a product and no order line), linked to no order line yet
+        if (!orderItem && line.changeActionEnumId === "OclQuantity" && !line.orderItemSeqId && line.productId) {
+            const requestItemSeqId = String(seqStart + index + 1).padStart(2, "0")
+            call("create#" + ITEM, {
+                requestId,
+                requestItemSeqId,
+                statusId: "ReqSubmitted",
+                changeActionEnumId: line.changeActionEnumId,
+                productId: line.productId,
+                quantity: line.quantity,
+                quantityUomId: line.quantityUomId || null,
+                requiredByDate: line.requiredByDate || null
+            })
+            return
+        }
         if (!orderItem) denied("LINE_UNAVAILABLE", "Line " + (line.orderItemSeqId || "") + " is not on order " + so.orderId)
         const product = line.changeActionEnumId === "OclSubstitute" ? line.productId : line.productId || orderItem.productId
         if (line.changeActionEnumId === "OclSubstitute" && !product)
@@ -693,7 +735,7 @@ function save(p) {
         call("update#" + DECISION, {orderChangeDecisionId: row.orderChangeDecisionId, supersededDate: ec.user.nowTimestamp})
     let result = {requestId, sourceRevision: revision, statusId: "ReqSubmitted", immediate: false, notifiedCount: 0}
     // a customer's own cancel, applied at once under customerImmediateCancel when nothing on it has moved
-    if (!staff && !existing && immediateCancelAllowed(ch)) {
+    if (!staff && !salesFiler && !existing && immediateCancelAllowed(ch)) {
         const policy = cases().policyOf(so.organizationPartyId)
         call("create#" + DECISION, {
             requestId,
@@ -711,7 +753,7 @@ function save(p) {
         result = Object.assign(result, {statusId: "ReqCompleted", immediate: true, stateText: "Cancelled"})
     } else {
         result.notifiedCount = notify(ch, revision)
-        result.stateText = staff ? stateTexts.requested : "Cancellation requested"
+        result.stateText = staff || salesFiler ? stateTexts.requested : "Cancellation requested"
     }
     if (operation) lib.complete(operation, REQUEST, requestId, result)
     return Object.assign(result, {alreadyApplied: false})
@@ -834,9 +876,13 @@ function decideMessage(p, decision) {
 
 // ===== apply =====
 function apply(p) {
-    if (!has("ORDER_CHANGE_APPLY")) denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY is required to apply an order change")
+    // impl-sales P14: a commercial kind is applied by the order's owner under SALES_ORDER_CHANGE (SalesOrderChanges.js)
+    if (!has("ORDER_CHANGE_APPLY") && !has("SALES_ORDER_CHANGE"))
+        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY is required to apply an order change")
     const first = changeOf(p.requestId)
-    if (!first.applied)
+    if (first.applied && !has("ORDER_CHANGE_APPLY"))
+        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY is required to apply an order change")
+    if (!first.applied && !has("SALES_ORDER_CHANGE"))
         denied(
             "FORBIDDEN",
             "A " +
@@ -884,6 +930,8 @@ function applyChange(ch, p, options) {
         .fiscal(so.organizationPartyId, ec.user.nowTimestamp, false)
         .findings.find(row => row.code === "PERIOD_CLOSED")
     if (closed) denied("CLOSED_PERIOD", "The fiscal period of today is closed for " + partyName(so.organizationPartyId))
+    // impl-sales P14: a commercial kind's checks and writes are the order owner's (SalesOrderChanges.js)
+    if (!ch.applied) return sales().apply(ch, p, revision, salesTools)
     const lineRows = linesOf(ch.requestId)
     const checked = checkLines(ch, lineRows, true)
     if (!options.policy && String(p.previewVersion) !== factsVersion(checked.lines.map(line => line.facts)))
@@ -991,23 +1039,26 @@ function applyChange(ch, p, options) {
     }
 }
 // The applied change's PDF as the order's OrderContent; a render that fails is logged and the change stays.
-function storeApplied(ch, lines, revision) {
+function storeApplied(ch, lines, revision, givenPrintLines = null) {
     ec.message.pushErrors()
     try {
-        const printLines = lines.map((line, index) => {
-            const before = quantityText(line.facts.quantity) + " × " + productText(line.facts.productId)
-            const left = line.facts.quantity - line.cancelQuantity
-            const after = line.substitute
-                ? quantityText(left) +
-                  " × " +
-                  productText(line.facts.productId) +
-                  " + " +
-                  quantityText(line.substitute.quantity) +
-                  " × " +
-                  productText(line.substitute.productId)
-                : quantityText(left) + " × " + productText(line.facts.productId)
-            return {seq: index + 1, actionText: enumText(line.item.changeActionEnumId), beforeText: before, afterText: after}
-        })
+        // impl-sales P14: a commercial change gives its own lines (before and after in its words)
+        const printLines =
+            givenPrintLines ||
+            lines.map((line, index) => {
+                const before = quantityText(line.facts.quantity) + " × " + productText(line.facts.productId)
+                const left = line.facts.quantity - line.cancelQuantity
+                const after = line.substitute
+                    ? quantityText(left) +
+                      " × " +
+                      productText(line.facts.productId) +
+                      " + " +
+                      quantityText(line.substitute.quantity) +
+                      " × " +
+                      productText(line.substitute.productId)
+                    : quantityText(left) + " × " + productText(line.facts.productId)
+                return {seq: index + 1, actionText: enumText(line.item.changeActionEnumId), beforeText: before, afterText: after}
+            })
         const html = ec.resource.template("component://mr-mantle/template/order/OrderChangeApplied.print.html.fancy", {
             orderId: ch.so.orderId,
             requestId: ch.requestId,
@@ -1053,10 +1104,14 @@ const appliedContentOf = ch =>
     ) || null
 
 // ===== the confirmation email =====
+// impl-sales P20 (design-sales §16 Change confirmation): Sales' change operator, who applies a commercial change of an order of their
+// sales scope (SalesOrderChanges.js mayApply: SALES_ORDER_CHANGE), sends its confirmation too, as Customer Service's applier does.
+const mayConfirm = ch => hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]) || (!!ch && sales().mayApply(ch))
 function confirm(p) {
-    if (!hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]))
-        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY or SUPPORT_CASE_EDIT is required")
+    if (!hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT", "SALES_ORDER_CHANGE"]))
+        denied("PERMISSION_DENIED", "ORDER_CHANGE_APPLY, SUPPORT_CASE_EDIT or SALES_ORDER_CHANGE is required")
     const ch = changeOf(p.requestId)
+    if (!mayConfirm(ch)) denied("RECORD_UNAVAILABLE", "Order change " + (p.requestId || "") + " is not available")
     const recipient = String(p.toAddress || "")
         .trim()
         .toLowerCase()
@@ -1121,7 +1176,7 @@ const escapeHtml = value =>
 
 // ===== reads =====
 function lineRowsOf(ch, checked) {
-    const amounts = amountRead()
+    const amounts = amountRead(ch)
     const currency = ch.so.currencyUomId
     return checked.lines.map(line => {
         const f = line.facts
@@ -1145,9 +1200,11 @@ function lineRowsOf(ch, checked) {
             shortText: quantityText(f.short),
             proposedQuantityText: quantityText(line.quantity),
             cancelQuantityText: quantityText(line.cancelQuantity),
+            // impl-sales P14: a commercial line says what it becomes (a price, a quantity, a date, a new line)
             afterText:
+                line.afterText ??
                 quantityText(f.quantity - line.cancelQuantity) +
-                (sub ? " + " + quantityText(sub.quantity) + " × " + productText(sub.productId) : ""),
+                    (sub ? " + " + quantityText(sub.quantity) + " × " + productText(sub.productId) : ""),
             priceText: amounts ? money(f.item.unitAmount, currency) : null,
             proposedPriceText:
                 amounts && line.item.proposedUnitAmount != null ? money(line.item.proposedUnitAmount, currency) : null,
@@ -1186,22 +1243,21 @@ function actionsOf(ch, state, revision) {
                     ? "Another approver decides a change you proposed"
                     : "The order changed since the proposal"
         ),
-        apply: why(
-            ch.applied && state === "approved" && has("ORDER_CHANGE_APPLY"),
-            !ch.applied
-                ? "The order's owner (Sales) applies this kind"
-                : state !== "approved"
-                  ? "It is not approved"
-                  : "ORDER_CHANGE_APPLY is required"
-        ),
+        // impl-sales P14: a commercial kind by the order's owner, SALES_ORDER_CHANGE in the seller's sales scope
+        apply: ch.applied
+            ? why(
+                  state === "approved" && has("ORDER_CHANGE_APPLY"),
+                  state !== "approved" ? "It is not approved" : "ORDER_CHANGE_APPLY is required"
+              )
+            : why(
+                  state === "approved" && sales().mayApply(ch),
+                  !sales().mayApply(ch) ? "The order's owner (Sales) applies this kind" : "It is not approved"
+              ),
         withdraw: why(
             open && (ch.own || has(kindPermission)),
             open ? "Only who filed it or an approver" : "The change is closed"
         ),
-        confirm: why(
-            ch.request.statusId === "ReqCompleted" && hasAny(["ORDER_CHANGE_APPLY", "SUPPORT_CASE_EDIT"]),
-            "Only an applied change is confirmed"
-        )
+        confirm: why(ch.request.statusId === "ReqCompleted" && mayConfirm(ch), "Only an applied change is confirmed")
     }
 }
 function get(p) {
@@ -1257,7 +1313,11 @@ function get(p) {
             conflicts: checked.conflicts,
             decisions,
             orderContentId: content?.orderContentId || null,
-            amountsWithheld: !amountRead(),
+            amountsWithheld: !amountRead(ch),
+            // impl-sales P14: a part kind's part and its value before and after
+            orderPartSeqId: checked.partChange?.part?.orderPartSeqId || r.orderPartSeqId || null,
+            partBeforeText: checked.partChange?.beforeText || "",
+            partAfterText: checked.partChange?.afterText || "",
             actions: actionsOf(ch, state, revision)
         }
     }
@@ -1279,7 +1339,11 @@ function preview(p) {
                 ", the proposal was made at revision " +
                 number(ch.request.expectedOrderRevision)
         })
-    if (!ch.applied) conflicts.push({code: "FORBIDDEN", message: "The order's owner (Sales) decides and applies this kind"})
+    // impl-sales P14: a commercial kind's effects (the total, tax, freight and credit) for the order's owner; to anyone who cannot apply
+    // it, the reminder that the owner does
+    const effects = ch.applied ? null : sales().effects(ch, checked, amountRead(ch))
+    if (!ch.applied && !sales().mayApply(ch))
+        conflicts.push({code: "FORBIDDEN", message: "The order's owner (Sales) decides and applies this kind"})
     let paidText = null
     if (hasAny(financePermissions)) {
         const paid = rows("mantle.account.payment.Payment", {orderId: ch.so.orderId})
@@ -1302,13 +1366,24 @@ function preview(p) {
             blocked: conflicts.length > 0,
             heldText: holds.join(", "),
             paidText,
-            amountsWithheld: !amountRead(),
-            previewVersion: factsVersion(checked.lines.map(line => line.facts))
+            amountsWithheld: !amountRead(ch),
+            effects,
+            partBeforeText: checked.partChange?.beforeText || "",
+            partAfterText: checked.partChange?.afterText || "",
+            previewVersion: ch.applied ? factsVersion(checked.lines.map(line => line.facts)) : checked.version
         }
     }
 }
 function findChanges(p) {
-    if (!hasAny(readPermissions)) denied("PERMISSION_DENIED", readPermissions.join(" or ") + " is required to read order changes")
+    // impl-sales P14: one order's changes for a Sales reader who sees it (OrderDetail's Changes); the organization's commercial ones
+    // for a Sales manager or reader of the organization's orders
+    const orderSeen = !blank(p.orderId) && !hasAny(readPermissions) && sales().seesOrder(p.orderId)
+    const ownerKindsOnly = !hasAny(readPermissions) && !orderSeen && has(ownerListPermission)
+    if (!hasAny(readPermissions) && !orderSeen && !ownerKindsOnly)
+        denied(
+            "PERMISSION_DENIED",
+            readPermissions.concat(ownerListPermission).join(" or ") + " is required to read order changes"
+        )
     const userScope = facilityScope.scope()
     let query = ec.entity
         .find(REQUEST)
@@ -1320,6 +1395,10 @@ function findChanges(p) {
     if (!blank(p.requestedByPartyId)) query = query.condition("filedByPartyId", p.requestedByPartyId)
     if (p.fromDate) query = query.condition("requestDate", "greater-equals", p.fromDate)
     if (p.thruDate) query = query.condition("requestDate", "less", p.thruDate)
+    // impl-sales P14: by kind, or by who applies it (applied: Customer Service's cancel and substitute; owner: the commercial kinds)
+    if (!blank(p.orderChangeKindEnumId)) query = query.condition("orderChangeKindEnumId", p.orderChangeKindEnumId)
+    if (p.kindGroup === "applied") query = query.condition("orderChangeKindEnumId", "in", appliedKinds)
+    else if (p.kindGroup === "owner" || ownerKindsOnly) query = query.condition("orderChangeKindEnumId", "not-in", appliedKinds)
     // the user's organizations' orders: their OrgInternal party, read in the query
     const orgIds = userScope.organizationPartyIds
     const partyFilter = (roleTypeId, partyIds) =>
@@ -1387,6 +1466,14 @@ function findChanges(p) {
     return lib.pageList(rowsOut, p, "changeList")
 }
 
+// impl-sales P14: what SalesOrderChanges.js uses of this module
+const salesTools = {
+    lineFacts: (orderId, orderItemSeqId) => lineFacts(orderId, orderItemSeqId),
+    invoicesOf: shipmentId => packing().invoicesOf(shipmentId),
+    storeApplied: (ch, lines, revision, printLines) => storeApplied(ch, lines, revision, printLines),
+    clearNotices: requestId => clearNotices(requestId),
+    linesOf: requestId => linesOf(requestId)
+}
 const operations = {
     save,
     withdraw,

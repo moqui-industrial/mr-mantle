@@ -684,7 +684,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <!-- a recurring base (RecurringTemplate, X5) never reserves: it is the next period's template (mr-pass impl-shop P7) -->
-            <if condition="orderHeader?.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
+            <!-- nor a Sales quote template (impl-sales P12) -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader?.orderPurposeEnumId)"><return/></if>
             <set field="productStore" from="orderHeader['mantle.product.store.ProductStore']"/>
 
             <!-- return early if doesn't appear to be sales order (vendor OrgInternal) or store setting is no res -->
@@ -754,7 +755,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <!-- a recurring base (RecurringTemplate, X5) never reserves (mr-pass impl-shop P7) -->
-            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
+            <!-- nor a Sales quote template (impl-sales P12) -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader.orderPurposeEnumId)"><return/></if>
 
             <entity-find-related-one value-field="orderItem" relationship-name="mantle.order.OrderPart" to-value-field="orderPart"/>
 
@@ -846,6 +848,9 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="resStatusList" from="['OrderOpen', 'OrderRequested', 'OrderProposed', 'OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderHold']"/>
             <if condition="!resStatusList.includes(orderHeader.statusId) || !resStatusList.includes(orderPart.statusId)">
                 <return message="Not reserving, order or part not in status that allows reservation"/></if>
+            <!-- a recurring base or a quote template is never reserved, whoever calls (impl-sales P16; its generated orders are) -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader.orderPurposeEnumId)">
+                <return message="Not reserving, order ${orderId} is a template"/></if>
 
             <!-- before finding remaining quantity and getting existing reservations, resetReservations if specified -->
             <if condition="resetReservations">

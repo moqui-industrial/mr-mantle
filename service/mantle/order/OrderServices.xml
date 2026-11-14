@@ -1097,6 +1097,10 @@ General Order Placement and eCommerce Usage
         <out-parameters><parameter name="oldStatusId"/><parameter name="statusChanged" type="Boolean"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
+            <!-- a Sales quote template (purpose SalesQuoteTemplate, impl-sales P12) is never placed and never leaves Open: a quote
+                is a copy of it -->
+            <if condition="orderHeader?.orderPurposeEnumId == 'OrpSalesQuoteTemplate' &amp;&amp; statusId != 'OrderOpen'">
+                <return error="true" message="QUOTE_TEMPLATE: Order ${orderId} is a quote template; start a quote from it instead"/></if>
             <entity-find entity-name="mantle.order.OrderPart" list="orderPartList" for-update="true">
                 <econdition field-name="orderId"/>
                 <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>
@@ -1237,7 +1241,11 @@ General Order Placement and eCommerce Usage
             hold instead of approving it (the order when it has one part), keeping its reservations, and answers creditHeld;
             an order of several parts approves the parts that were not held, each on its own, and never touches a part it
             does not approve. A Warn result approves with creditWarning. An organization with no credit policy approves as
-            before.</description>
+            before. Sales' direction (impl-sales P11, §4 Nov 11, F11): a sales part whose seller's SalesPolicy has the approval setting
+            on (orderApprovalRequired) needs SALES_ORDER_APPROVE in the approver's sales scope and a current Sales decision of each
+            order rule it meets (SALES_APPROVAL_REQUIRED; mantle.order.SalesOrderServices.approve#SalesOrder records them), not
+            ORDER_APPROVE; with the setting off, its default, ORDER_APPROVE as before. Pre-approval warnings never refuse a person's
+            approval (this service does not call check#OrderPreApprove).</description>
         <implements service="mantle.order.OrderServices.change#OrderStatusInterface"/>
         <in-parameters>
             <parameter name="approvedDate" type="Timestamp" default="ec.user.nowTimestamp"/>
@@ -1310,9 +1318,12 @@ General Order Placement and eCommerce Usage
             released with PAYMENT_HOLD_RELEASE); the other types need the
             permission their type names (enumCode), and a Change or Purchase reason may also be placed under the order's
             change permission for its direction (PURCHASE_ORDER_EDIT on a purchase part, ORDER_CHANGE_APPLY or
-            SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. It
-            checks no organization: its callers check
-            the order's organization before calling it (as the credit services do).</description>
+            SALES_ORDER_CHANGE on another; crosscut §1.4, X4), so a buyer holds a purchase order an approver releases. The order's
+            organization and direction (impl-sales P11, Customer Service F78, F12): a user places a Manual, Change or Purchase reason
+            only on an order of an organization they work for (the seller of a sales part, the buyer of a purchase part;
+            ORDER_UNAVAILABLE otherwise, as for a missing order) and a Purchase reason only on a purchase part (HOLD_TYPE_DIRECTION);
+            a Credit or Payment reason is its owner service's, which checks the organization, and a call with no user is its
+            caller's to check.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderPartSeqId"/>
@@ -1352,6 +1363,10 @@ General Order Placement and eCommerce Usage
                 <if condition="orderPart == null">
                     <return error="true" message="ORDER_UNAVAILABLE: Order ${orderId} part ${orderPartSeqId} not found"/></if>
             </if>
+            <!-- Sales P11 (Customer Service F78, F12): the order's organization and direction for a user's hold -->
+            <set field="holdRefusal" from="['OhtCredit', 'OhtPayment'].includes(holdTypeEnumId) ? null
+                : ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js').holdScopeRefusal(orderId, orderPartSeqId, holdTypeEnumId)"/>
+            <if condition="holdRefusal"><return error="true" message="${holdRefusal}"/></if>
             <set field="currentStatusId" from="(orderPart ?? orderHeader).statusId"/>
             <!-- a sent purchase order un-sends to Approved first (D7): Mantle has no Sent to Hold transition -->
             <if condition="currentStatusId == 'OrderSent' &amp;&amp; ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
@@ -1393,8 +1408,10 @@ General Order Placement and eCommerce Usage
             part) returns from OrderHold to the reason's return status only when no other reason is open on it (on that part,
             or on the whole order), so one app's release never releases another's hold; a part's release touches only that
             part. Needs the permission the reason's type names (enumCode); refuses a released reason (HOLD_ALREADY_RELEASED)
-            and a release without a comment. It checks no organization: its callers check the order's organization first
-            (release#CreditHold does).</description>
+            and a release without a comment. The order's organization (impl-sales P11, Customer Service F78, F12): a Manual,
+            Change or Purchase reason is released only by a user who works for the order's organization (HOLD_UNAVAILABLE
+            otherwise, as for a missing reason); a Credit or Payment reason's owner service checks it (release#CreditHold does), and
+            a call with no user is its caller's to check.</description>
         <in-parameters>
             <parameter name="orderHoldReasonId" required="true"/>
             <parameter name="releaseComment" required="true"/>
@@ -1414,6 +1431,10 @@ General Order Placement and eCommerce Usage
                 <return error="true" message="PERMISSION_DENIED: ${holdType.enumCode} authority is required"/></if>
             <set field="orderId" from="reason.orderId"/>
             <set field="orderPartSeqId" from="reason.orderPartSeqId || null"/>
+            <!-- Sales P11 (Customer Service F78, F12): the order's organization for a user's release -->
+            <if condition="!['OhtCredit', 'OhtPayment'].includes(reason.holdTypeEnumId) &amp;&amp; ec.resource.script('component://mr-mantle/service/mantle/order/PurchaseOrders.js')
+                    .holdScopeRefusal(orderId, orderPartSeqId, null)">
+                <return error="true" message="HOLD_UNAVAILABLE: The hold is not available"/></if>
             <!-- Warehouse's lock order (F294, Packing.js lockOrders): the order parts (the reason's, else all), then the
                 header, then the reason -->
             <entity-find entity-name="mantle.order.OrderPart" list="lockedParts" for-update="true" disable-authz="true">
@@ -1499,12 +1520,20 @@ General Order Placement and eCommerce Usage
             then change the order status to Approved.
 
             This is called by SECA rule on OrderHeader change to OrderPlaced status, and directly in PaymentServices.authorize#OrderPayments.
+
+            Sales' approval setting (impl-sales P11, §4 Nov 11, F52): an order with a sales part whose seller's SalesPolicy has
+            orderApprovalRequired Y is never approved here; it stays placed (its payment authorized) for a holder of
+            SALES_ORDER_APPROVE, whichever app placed it. With the setting off, its default, nothing changes.
         </description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return error="true" message="Order ${orderId} not found"/></if>
             <if condition="orderHeader.statusId != 'OrderPlaced'"><return/></if>
+            <if condition="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId)">
+                <log message="Not auto-approving Order ${orderId}: its seller's sales orders wait for a Sales approver"/>
+                <return/>
+            </if>
 
             <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                 <econdition field-name="orderId"/>
@@ -2443,6 +2472,12 @@ General Order Placement and eCommerce Usage
             <set field="orderHeader.recurCronExpression" from="null"/>
             <set field="orderHeader.lastOrderedDate" from="null"/>
             <set field="orderHeader.recurAutoInvoice" from="null"/>
+            <!-- Sales' recurrence fields (impl-sales P16, entity/SalesRecurrenceEntities.xml) are a base's own, never a copy's -->
+            <script><![CDATA[
+                for (const field of ['recurTimeZone', 'recurFromDate', 'recurThruDate', 'recurPausedDate', 'recurResumedDate',
+                        'recurAgreementId', 'recurRevision', 'recurFailureDate', 'recurFailureMessage', 'recurOccurrenceDate'])
+                    orderHeader.set(field, null)
+            ]]></script>
 
             <if condition="clearDates">
                 <!-- set the fields even if null, don't do this for other fields -->
@@ -2482,11 +2517,18 @@ General Order Placement and eCommerce Usage
 
             <entity-find entity-name="mantle.order.OrderItem" list="valueList">
                 <econdition field-name="orderId" from="baseOrderId"/><order-by field-name="orderItemSeqId"/></entity-find>
+            <!-- every line copied (impl-sales follow-up 2): a child line (a discount, a tax line) keeps its own parent, whose id in the
+                copy differs from the source's where the source's ids have gaps (each retax deletes and adds tax lines) -->
+            <script>const copiedSeqIds = {}</script>
             <iterate list="valueList" entry="value">
                 <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.includes(value.itemTypeEnumId))"><continue/></if>
+                <set field="sourceSeqId" from="value.orderItemSeqId"/>
                 <set field="value.orderId" from="orderId"/>
                 <set field="value.orderItemSeqId" from="null"/>
+                <if condition="!productItemsOnly &amp;&amp; value.parentItemSeqId &amp;&amp; copiedSeqIds[value.parentItemSeqId]">
+                    <set field="value.parentItemSeqId" from="copiedSeqIds[value.parentItemSeqId]"/></if>
                 <entity-sequenced-id-secondary value-field="value"/>
+                <script>copiedSeqIds[sourceSeqId] = value.orderItemSeqId</script>
                 <if condition="clearDates"><set field="value.requiredByDate" from="requiredByDate"/></if>
                 <entity-create value-field="value"/>
             </iterate>
@@ -2580,19 +2622,27 @@ General Order Placement and eCommerce Usage
             <!-- cancel reservations if there are any -->
             <service-call name="mantle.product.AssetServices.remove#OrderReservations" in-map="{orderId:orderId}"/>
 
-            <!-- TODO: don't allow AssetReservation, ShipmentItemSource, or OrderItemBilling for OrderHeader with recurCronExpression -->
+            <!-- a base marked OrpRecurringTemplate (Shop's and Sales' bases, impl-sales P16) is refused reservation
+                (reserve#AssetForOrderItem), shipment (create#OrderPartShipment, add#OrderPartToShipment, the load evaluation) and
+                invoicing (create#InvoiceFromSource) wherever they are asked -->
         </actions>
     </service>
 
-    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all">
-        <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve</description>
+    <!-- impl-sales P19 (design-sales §8 shipped definitions): the recurrence worker is the operation sales.recurrence.run -->
+    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all" operation="sales.recurrence.run">
+        <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve. A Shop-linked base goes
+            to Shop's occurrence coordinator. Every other base is due as Sales' recurrence reads it (impl-sales P16,
+            service/mantle/order/SalesRecurrence.js occurrenceOf: its latest scheduled time in its own zone after its last order,
+            inside its dates and not paused; a base without those fields as before) and is ordered in its own transaction, one
+            after another: a base that fails is named in the log and on the base, and the next one runs.</description>
         <actions>
             <entity-find entity-name="mantle.order.OrderHeader" list="orderHeaderList" cache="false">
                 <econdition field-name="statusId" value="OrderApproved"/>
                 <econdition field-name="recurCronExpression" operator="is-not-null"/>
-                <select-field field-name="orderId,recurCronExpression,lastOrderedDate"/>
+                <econdition field-name="recurPausedDate" operator="is-null"/>
                 <order-by field-name="orderId"/>
             </entity-find>
+            <set field="recurrence" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js')"/>
             <iterate list="orderHeaderList" entry="orderHeader">
                 <!-- a Shop-linked base (its StoreRecurringContract; mr-pass impl-shop P7, X5) is never cloned here: it goes to
                     Shop's occurrence coordinator, which claims the contract's due period once; every other base as before -->
@@ -2603,17 +2653,26 @@ General Order Placement and eCommerce Usage
                             in-map="{baseOrderId:orderHeader.orderId}" async="true"/>
                     <continue/>
                 </if>
-                <!-- check recurCronExpression vs lastOrderedDate to see if we need to run -->
-                <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(orderHeader.recurCronExpression, orderHeader.lastOrderedDate)"/>
-
-                <if condition="shouldRun">
-                    <service-call name="mantle.order.OrderServices.create#RecurringOrder"
-                            in-map="{baseOrderId:orderHeader.orderId}" async="true"/>
+                <!-- the base's due occurrence (impl-sales P16): in its zone, its dates, not paused -->
+                <if condition="recurrence.occurrenceOf(orderHeader).due">
+                    <script>recurrence.runOccurrence(orderHeader.orderId)</script>
                 </if>
             </iterate>
         </actions>
     </service>
     <service verb="create" noun="RecurringOrder" authenticate="anonymous-all">
+        <description>One occurrence of a recurring base, under the base's lock: refused unless it is Approved with a cadence and
+            due (impl-sales P16, SalesRecurrence.js occurrenceOf: in its zone, inside its dates, not paused) and unless every
+            agreement it or a line's price names still applies at the occurrence (AGREEMENT_INACTIVE, an error, so the job records
+            it). One order for an occurrence (recurOccurrenceDate on the order), for the job and an operator alike: an occurrence
+            already ordered answers that order. The order is a copy of the base with no payment copied (copyPayment=false: a
+            renewal payment is Accounting's to make), no purpose, placed through place#Order, so the seller's approval setting
+            and every placement rule apply. A Sales base (marked OrpRecurringTemplate) repeats every line, its charges and
+            discounts with its products, and the order is retaxed before it is placed by its own path (handle#OrderMajorChange: a
+            storeless seller's gateway, X1; a store's promotions, shipping and tax); a base not marked repeats its product lines as
+            before. Auto-invoice (recurAutoInvoice) bills the order when it is approved, at placement or later by a person
+            (SalesRecurrence.secas.xml, SalesRecurrenceServices.invoice#RecurringOrder; impl-sales follow-up 2). A Shop-linked base
+            is Shop's.</description>
         <in-parameters>
             <parameter name="baseOrderId" required="true"/>
         </in-parameters>
@@ -2635,31 +2694,44 @@ General Order Placement and eCommerce Usage
             <if condition="shopContractCount &gt; 0">
                 <return type="warning" message="Order ${baseOrderId} is a Shop subscription's base; its renewals are Shop's"/></if>
 
-            <!-- check again to make sure hasn't run since last execution time -->
-            <set field="shouldRun" from="ec.service.isLastRunBeforeLastSchedule(baseOrderHeader.recurCronExpression, baseOrderHeader.lastOrderedDate)"/>
-            <if condition="!shouldRun"><return type="warning" message="Order ${baseOrderHeader.orderId} is not yet scheduled to reorder since last order time ${baseOrderHeader.lastOrderedDate}"/></if>
+            <!-- check again, under the lock, that an occurrence is due (impl-sales P16: its zone, dates and pause) -->
+            <set field="recurrence" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js')"/>
+            <set field="occurrence" from="recurrence.occurrenceOf(baseOrderHeader)"/>
+            <if condition="!occurrence.due"><return type="warning" message="${occurrence.message}"/></if>
+            <set field="occurrenceDate" from="new Date(occurrence.occurrenceDate)"/>
+            <!-- one order for an occurrence -->
+            <set field="orderId" from="recurrence.orderForOccurrence(baseOrderId, occurrence.occurrenceDate)"/>
+            <if condition="orderId"><return type="warning" message="Order ${orderId} was already made for this occurrence of order ${baseOrderId}"/></if>
+            <!-- the agreement price guard: the base's agreements still apply at the occurrence -->
+            <set field="agreementRefusal" from="recurrence.agreementRefusal(baseOrderHeader, occurrence.occurrenceDate)"/>
+            <if condition="agreementRefusal"><return error="true" message="${agreementRefusal}"/></if>
 
-            <!-- clone the order -->
-            <service-call name="mantle.order.OrderServices.clone#Order" out-map="cloneOut" in-map="{baseOrderId:baseOrderId}"/>
+            <!-- clone the order: no payment copied (design-sales §7, X5), not a template, for this occurrence; a Sales base's every
+                line (impl-sales follow-up 2), another base's product lines as before -->
+            <set field="salesBase" from="baseOrderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"/>
+            <service-call name="mantle.order.OrderServices.clone#Order" out-map="cloneOut"
+                    in-map="{baseOrderId:baseOrderId, copyPayment:false, productItemsOnly:!salesBase}"/>
             <set field="orderId" from="cloneOut.orderId"/>
-
-            <!-- Place the Order -->
-            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
-
-            <!-- if recurAutoInvoice == 'Y' AND Order was auto-approved then create Invoice -->
-            <if condition="baseOrderHeader.recurAutoInvoice == 'Y'">
+            <service-call name="update#mantle.order.OrderHeader"
+                    in-map="{orderId:orderId, orderPurposeEnumId:null, recurOccurrenceDate:occurrenceDate}"/>
+            <!-- a Sales base's order retaxed now by its own path (its seller's gateway, or its store's promotions, shipping and
+                tax), so the lines copied from the base are figured once, at this occurrence -->
+            <if condition="salesBase">
                 <entity-find entity-name="mantle.order.OrderPart" list="orderPartList">
                     <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
                 <iterate list="orderPartList" entry="orderPart">
-                    <if condition="orderPart?.statusId == 'OrderApproved'">
-                        <service-call name="mantle.account.InvoiceServices.create#EntireOrderPartInvoice"
-                                in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
-                    </if>
+                    <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
+                            in-map="{orderId:orderId, orderPartSeqId:orderPart.orderPartSeqId}"/>
                 </iterate>
             </if>
 
-            <!-- set lastOrderedDate on recurring order -->
+            <!-- Place the Order; auto-invoice bills it once it is approved (SalesRecurrence.secas.xml), now or later -->
+            <service-call name="mantle.order.OrderServices.place#Order" in-map="{orderId:orderId, requireInventory:false}"/>
+
+            <!-- set lastOrderedDate on recurring order; a run that made its order clears the last failure -->
             <set field="baseOrderHeader.lastOrderedDate" from="ec.user.nowTimestamp"/>
+            <set field="baseOrderHeader.recurFailureDate" from="null"/>
+            <set field="baseOrderHeader.recurFailureMessage" from="null"/>
             <entity-update value-field="baseOrderHeader"/>
         </actions>
     </service>
@@ -2706,7 +2778,14 @@ General Order Placement and eCommerce Usage
                             in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                 </if>
 
-                <if condition="orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
+                <!-- X1 (impl-sales P7): a storeless order whose seller names a tax gateway is retaxed on a line change, a shipping
+                    charge line the rep entered too (no carrier estimate without a store); any other storeless order as before -->
+                <set field="storelessTaxed" from="false"/>
+                <if condition="!orderHeader.productStoreId &amp;&amp; !(['ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
+                    <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId}" out-map="storelessTax"/>
+                    <set field="storelessTaxed" from="!!storelessTax.taxed"/>
+                </if>
+                <if condition="(orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))) || storelessTaxed">
                     <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                             in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
                     <if condition="hasOriginal &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
@@ -2738,6 +2817,9 @@ General Order Placement and eCommerce Usage
             <parameter name="disableTaxCalc"/>
             <parameter name="partTotal" type="BigDecimal"/>
             <parameter name="statusId"/>
+            <!-- impl-sales P10: the customer's reference and the new-customer mark, so a change of those alone is told apart -->
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="isNewCustomer"/>
             <parameter name="originalValue" type="Map"/>
         </in-parameters>
         <actions>
@@ -2746,7 +2828,14 @@ General Order Placement and eCommerce Usage
             <if condition="hasOriginal &amp;&amp; ((partTotal == null) !== (originalValue.partTotal == null) || (partTotal != null &amp;&amp; !toDecimal(partTotal).eq(originalValue.partTotal)))"><return/></if>
 
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
-            <if condition="orderHeader.productStoreId &amp;&amp; (!hasOriginal || postalContactMechId != originalValue.postalContactMechId ||
+            <!-- X1 (impl-sales P7): a storeless order whose seller names a tax gateway is retaxed on an address or customer change -->
+            <set field="storelessTaxed" from="false"/>
+            <if condition="!orderHeader.productStoreId">
+                <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"
+                        out-map="storelessTax"/>
+                <set field="storelessTaxed" from="!!storelessTax.taxed"/>
+            </if>
+            <if condition="(orderHeader.productStoreId || storelessTaxed) &amp;&amp; (!hasOriginal || postalContactMechId != originalValue.postalContactMechId ||
                     carrierPartyId != originalValue.carrierPartyId || shipmentMethodEnumId != originalValue.shipmentMethodEnumId ||
                     customerPartyId != originalValue.customerPartyId || disablePromotions != originalValue.disablePromotions ||
                     disableShippingCalc != originalValue.disableShippingCalc || disableTaxCalc != originalValue.disableTaxCalc)"><then>
@@ -2759,8 +2848,23 @@ General Order Placement and eCommerce Usage
                     &amp;&amp; shipmentMethodEnumId == originalValue.shipmentMethodEnumId &amp;&amp; customerPartyId == originalValue.customerPartyId"/>
                 <!-- the send's own Approved to Sent is the issue of the revision, not a change of it (send#PurchaseOrder) -->
                 <set field="issuedOnly" from="statusOnly &amp;&amp; statusId == 'OrderSent' &amp;&amp; originalValue.statusId == 'OrderApproved'"/>
+                <!-- the customer's reference (its purchase order recorded with an acceptance, impl-sales P10) and place#Order's
+                    new-customer mark are not commercial changes either: every other field of the part unchanged (Sales P10 review:
+                    the part as stored now against its original value, so a reference written with any other field counts) -->
+                <script><![CDATA[
+                    const same = (a, b) => (a == null || a === "" ? "" : String(a)) === (b == null || b === "" ? "" : String(b))
+                    const referenceFields = ["otherPartyOrderId", "otherPartyOrderDate", "isNewCustomer", "lastUpdatedStamp"]
+                    referenceOnly = false
+                    if (hasOriginal && !statusOnly && (!same(otherPartyOrderId, originalValue.otherPartyOrderId)
+                            || !same(isNewCustomer, originalValue.isNewCustomer))) {
+                        const stored = ec.entity.find("mantle.order.OrderPart").condition({orderId, orderPartSeqId}).disableAuthz().one()
+                        referenceOnly = stored != null && Object.keys(originalValue)
+                            .filter(name => !referenceFields.includes(name))
+                            .every(name => same(stored[name], originalValue[name]))
+                    }
+                ]]></script>
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision"
-                        in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : null))}"/>
+                        in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : (referenceOnly ? 'reference' : null)))}"/>
             </else></if>
         </actions>
     </service>
@@ -2776,6 +2880,29 @@ General Order Placement and eCommerce Usage
             <if condition="ec.context.sharedMap[sharedFlagKey]"><return/></if>
 
             <if condition="orderHeader == null"><entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/></if>
+            <!-- X1 (impl-sales P7; design-sales §5): an order without a store runs the tax step alone, through its seller's tax
+                gateway (calculate#OrderSalesTax), when a seller of it names one; promotions and carrier estimates stay store-only,
+                and freight on a storeless order is a charge line. A storeless order of sellers without a gateway is untouched. -->
+            <if condition="!orderHeader.productStoreId">
+                <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"
+                        out-map="storelessTax"/>
+                <if condition="!storelessTax.taxed"><return/></if>
+                <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
+                <set field="noRecalcStatuses" from="['OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderRejected', 'OrderCancelled']"/>
+                <if condition="noRecalcStatuses.includes(orderHeader.statusId) || noRecalcStatuses.includes(orderPart?.statusId)">
+                    <return type="warning" message="Not updating tax for order ${orderId} in status ${orderHeader.status?.description}"/></if>
+                <entity-find-count entity-name="mantle.order.OrderItemBillingDetail" count-field="partBillingCount">
+                    <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/></entity-find-count>
+                <if condition="partBillingCount">
+                    <return type="warning" message="Not updating tax for order part ${orderId}:${orderPartSeqId} with ${partBillingCount} OrderItemBilling records"/></if>
+                <if condition="!('Y' === orderPart?.disableTaxCalc)">
+                    <script>ec.context.sharedMap[sharedFlagKey] = true</script>
+                    <service-call name="mantle.other.TaxServices.calculate#OrderSalesTax" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
+                    <script>delete ec.context.sharedMap[sharedFlagKey]</script>
+                </if>
+                <service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/>
+                <return/>
+            </if>
             <if condition="orderHeader.productStoreId">
                 <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
                 <set field="noRecalcStatuses" from="['OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderRejected', 'OrderCancelled']"/>
@@ -2941,8 +3068,9 @@ General Order Placement and eCommerce Usage
             this revision); every other order counts as before.</description>
         <in-parameters>
             <parameter name="orderId"/>
-            <parameter name="revisionKind"><description>Empty or commercial: counts. content, note or status: not counted
-                where the order counts commercial changes only. item: counted only there. issued (the issued purchase
+            <parameter name="revisionKind"><description>Empty or commercial: counts. content, note, status, assignment (a
+                part's SalesRepresentative or SalesTeam row) or reference (the customer's reference, OrderPart.otherPartyOrderId, or
+                the new-customer mark alone; impl-sales P10): not counted where the order counts commercial changes only. item: counted only there. issued (the issued purchase
                 order's PDF and its Approved to Sent): never counted on an order with a purchase part, else as status.</description></parameter>
         </in-parameters>
         <actions>

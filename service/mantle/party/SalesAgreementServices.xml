@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' customer agreements (G of IronStone Sales design §12.1; design §7 Agreements and AgreementDetail; impl-sales P15,
+    SAL-AGREEMENT), over SalesAgreements.js: Agreements of type AgrSales or AgrProduct of a selling organization with its customer, on
+    the one Agreement status flow Purchasing seeded (F19), their parties, terms, items and negotiated prices (ProductPrice rows naming
+    the agreement). A Sales reader of the organization reads them; a change needs SALES_AGREEMENT_EDIT (PERMISSION_DENIED); another
+    organization's, a purchase agreement and a missing one answer RECORD_UNAVAILABLE alike (SalesAccess.js agreementOf). Every change
+    names the revision it read (agreementRevision: REVISION_REQUIRED, REVISION_CHANGED). Dates are passed as text, so an empty one
+    clears a date and an absent one leaves it. The price resolver applies an agreement's prices only while it is active and in its
+    dates (mantle/product/PriceResolver.js agreementApplies). Purchasing's agreements and services are not touched. All in process
+    only (allow-remote="false"). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="SalesAgreements" allow-remote="false" read-only="true">
+        <description>AgreementList's agreements (design §7 AgreementFind): the customer agreements of the caller's organizations (or
+            the one named), by state (open: draft or active, the default; draft; active; expiring: active and ending within 30 days;
+            ended: expired, closed or cancelled; templates; all; templates only under templates), customer, type, text (name or id),
+            a date range they are in effect in, or an order (orderId: the agreements whose prices its lines took, of a quote or order
+            the caller sees), paged. Refuses a caller who reads no Sales (PERMISSION_DENIED), an organization outside the scope
+            (ORGANIZATION_DENIED), a state not listed (STATE_INVALID) and an order the caller does not see (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="agreementTypeEnumId"/>
+            <parameter name="state"/>
+            <parameter name="text"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="orderId"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementList" type="List"/>
+            <parameter name="agreementListCount" type="Integer"/>
+            <parameter name="agreementListPageIndex" type="Integer"/>
+            <parameter name="agreementListPageSize" type="Integer"/>
+            <parameter name="agreementListPageMaxIndex" type="Integer"/>
+            <parameter name="agreementListPageRangeLow" type="Integer"/>
+            <parameter name="agreementListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('findAgreements', context))</script>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesAgreement" allow-remote="false" read-only="true">
+        <description>AgreementDetail's agreement as the caller may see it, else agreementFound false: its header (type, name, text,
+            organization, customer, currency, dates, status, revision, the template it came from, the agreement it renews and its
+            renewal), what activation still needs (activationIssues: each code and message), its parties with their side and role,
+            its terms, its items with the negotiated price in effect, its documents (AgreementContent), the quote and order lines
+            priced from it that the caller sees, the history of its audited fields, the term types, and what the caller may do (edit,
+            activate, end, renew, start an agreement from a template).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementFound" type="Boolean"/>
+            <parameter name="agreement" type="Map"/>
+            <parameter name="activationIssues" type="List"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="terms" type="List"/>
+            <parameter name="items" type="List"/>
+            <parameter name="contents" type="List"/>
+            <parameter name="connections" type="List"/>
+            <parameter name="history" type="List"/>
+            <parameter name="termTypes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('getAgreement', context)"/>
+            <set field="agreementFound" from="!!found.agreementFound"/>
+            <set field="agreement" from="found.agreement || null"/>
+            <set field="activationIssues" from="found.activationIssues || []"/>
+            <set field="parties" from="found.parties || []"/>
+            <set field="terms" from="found.terms || []"/>
+            <set field="items" from="found.items || []"/>
+            <set field="contents" from="found.contents || []"/>
+            <set field="connections" from="found.connections || []"/>
+            <set field="history" from="found.history || []"/>
+            <set field="termTypes" from="found.termTypes || []"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesAgreementPrint" allow-remote="false" read-only="true">
+        <description>The agreement's print as it is now (design-sales §7 AgreementDetail, §16 Agreement; html-print and PDF; Sales P20
+            review): its parties, items with their negotiated prices, terms and text from the agreement's own records, marked a draft
+            until it is active. For one who reads the agreement (a Sales reader of its organization); another organization's, a
+            purchase agreement and a missing one RECORD_UNAVAILABLE alike. No cost, margin or linked orders.</description>
+        <in-parameters><parameter name="agreementId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('agreementPrint', context)"/>
+            <set field="agreementId" from="out.agreementId"/>
+            <set field="printHtml" from="out.printHtml"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
+    <service verb="create" noun="SalesAgreement" allow-remote="false">
+        <description>NewAgreement (design §7): a draft customer agreement at revision 1 of a selling organization of the caller's scope
+            (else the default one) with a customer that is an account of it or shared, a sales (AgrSales, the default) or product
+            (AgrProduct) agreement, its name, currency (else the template's, else the organization's), dates and text; or a template
+            (isTemplate, no customer needed). With templateAgreementId, a template of the same organization, its items with their
+            prices, its terms and its text are copied, the prices the new customer's. Refuses a caller without SALES_AGREEMENT_EDIT
+            (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), a customer that is not such an account
+            (CUSTOMER_INVALID), a template that is not one of the organization's (TEMPLATE_INVALID), another type (TYPE_INVALID), no
+            name (NAME_REQUIRED), an unknown currency (CURRENCY_INVALID) and dates out of order (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="agreementTypeEnumId"/>
+            <parameter name="templateAgreementId"/>
+            <parameter name="isTemplate"/>
+            <parameter name="description"/>
+            <parameter name="textData"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('createAgreement', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesAgreement" allow-remote="false">
+        <description>AgreementHeader (design §7): a draft's name, text, customer (an account of the organization; its prices follow),
+            currency and dates; an active agreement's name, text and a later through date. The revision is counted once, with the
+            change reason in the audit log. Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller
+            does not see (RECORD_UNAVAILABLE), an expired, closed or cancelled one (AGREEMENT_CLOSED), a stale revision
+            (REVISION_REQUIRED, REVISION_CHANGED), an active agreement's customer, currency or start (CUSTOMER_LOCKED,
+            CURRENCY_LOCKED, DATE_LOCKED), a through date already past or dates out of order (DATE_INVALID), no name
+            (NAME_REQUIRED) and a customer that is not an account of the organization (CUSTOMER_INVALID).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="description"/>
+            <parameter name="textData"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('storeAgreement', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="AgreementParty" allow-remote="false">
+        <description>AgreementParties (design §7): a party added to a draft or active agreement in an agreement role (AgreementSigner
+            by default), or removed (remove): the organization, the customer, a current contact of the customer or a person working
+            for the organization. Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not
+            see (RECORD_UNAVAILABLE), an ended one (AGREEMENT_CLOSED), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), a role
+            that is not an agreement role (ROLE_INVALID), any other party (PARTY_INVALID), a party not on it (PARTY_UNAVAILABLE) and
+            the removal of an active agreement's last signer of the customer's (PARTIES_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="remove"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('storeParty', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="AgreementTerm" allow-remote="false">
+        <description>AgreementTerms (design §7): a settlement or other term (a TermType term type, a settlement term, its text and
+            value, an item it applies to, its dates) added, changed or removed (remove). A draft's term changes in place and is
+            removed; an active agreement's is ended now and its change started as a new term, so the earlier wording stays readable.
+            Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see
+            (RECORD_UNAVAILABLE), an ended one (AGREEMENT_CLOSED), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), a term not
+            on it (TERM_UNAVAILABLE), no or another type or an unknown settlement term (TERM_TYPE_INVALID), an item not on it
+            (ITEM_UNAVAILABLE) and a negative value (AMOUNT_INVALID).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="agreementTermId"/>
+            <parameter name="termTypeEnumId"/>
+            <parameter name="settlementTermId"/>
+            <parameter name="termText"/>
+            <parameter name="termNumber"/>
+            <parameter name="agreementItemSeqId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="remove"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementTermId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('storeTerm', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="AgreementItem" allow-remote="false">
+        <description>AgreementItems and AgreementPrices (design §7): an item added, changed or removed (remove): a pricing item
+            (AitPricing, the default) for a product of the organization's or the shared catalogue with its negotiated price and
+            minimum quantity (a ProductPrice row naming the agreement and item, the organization the vendor and the customer the
+            customer, in the agreement's currency), or a section or exhibit of text; its quantity, unit, text and dates, inside the
+            agreement's. A draft's item and price change in place and a removed one goes; an active agreement's price change ends the
+            price in effect now and starts the next, and a removed item is ended, so an order priced earlier keeps its price and the
+            price as of a time stays readable. Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the
+            caller does not see (RECORD_UNAVAILABLE), an ended one (AGREEMENT_CLOSED), a stale revision (REVISION_REQUIRED,
+            REVISION_CHANGED), an item not on it (ITEM_UNAVAILABLE), another item type (ITEM_TYPE_INVALID), a pricing item or price
+            without a product (PRODUCT_REQUIRED), another organization's product (PRODUCT_NOT_USABLE), an active item's product
+            change (PRODUCT_LOCKED), a new pricing price missing (PRICE_REQUIRED), a negative amount (AMOUNT_INVALID), dates out of
+            order or outside the agreement's (DATE_INVALID) and a product added to an active agreement that another active agreement
+            with the customer prices in its dates (AGREEMENT_OVERLAP).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="agreementItemSeqId"/>
+            <parameter name="agreementItemTypeEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="price"/>
+            <parameter name="minQuantity"/>
+            <parameter name="quantity"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="itemText"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="remove"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementItemSeqId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('storeItem', context))</script>
+        </actions>
+    </service>
+    <service verb="activate" noun="SalesAgreement" allow-remote="false">
+        <description>ActivateAgreement (design §7): a draft set Active from its start (the date given, else its own, else now), once
+            it has its customer and a signer of the customer's (the customer or a current contact), its dates in order and not ended,
+            its acceptance evidence (a signed agreement document, AgreementContent of type AcntDocument, or the evidence given here,
+            kept as one), and its items, prices or terms (each pricing item priced, every price row in its currency and of its own
+            parties). A renewal ends the agreement it renews at its start (closed when that is now). Refuses a caller without
+            SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see (RECORD_UNAVAILABLE), a stale revision
+            (REVISION_REQUIRED, REVISION_CHANGED), a template (TEMPLATE_NO_ACTIVATE), one that is not a draft (STATUS_INVALID), and
+            by its first missing need PARTIES_REQUIRED, DATE_INVALID, EVIDENCE_REQUIRED, TERMS_REQUIRED, PRICE_REQUIRED,
+            PRICE_INVALID or AGREEMENT_OVERLAP (another active agreement with the customer in these dates prices one of its products;
+            a renewal's predecessor is not counted), naming each.</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="fromDate"/>
+            <parameter name="acceptanceEvidence"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="predecessorEnded"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('activateAgreement', context))</script>
+        </actions>
+    </service>
+    <service verb="end" noun="SalesAgreement" allow-remote="false">
+        <description>EndAgreement (design §7), with its reason in the audit log: a draft cancelled; an active agreement closed now, or
+            ended at a later end date (it stays active until then and the job then expires it); an expired one closed. Its prices
+            stop for a new quote from its end; its orders, their prices and their subscriptions are not changed. Refuses a caller
+            without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see (RECORD_UNAVAILABLE), a stale
+            revision (REVISION_REQUIRED, REVISION_CHANGED), no reason (REASON_REQUIRED), an end before a later start (DATE_INVALID)
+            and a closed or cancelled one (AGREEMENT_CLOSED).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="endDate"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="statusId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('endAgreement', context))</script>
+        </actions>
+    </service>
+    <service verb="renew" noun="SalesAgreement" allow-remote="false">
+        <description>Renewal as a dated successor (design §7): a draft copy of an active or expired agreement (its parties, its items
+            with their prices in effect, its terms in effect and its text), from the date given, else its end (or now when that has
+            passed), for the same length when it had one, linked to it through AgreementAssoc (AatRenewal); its activation ends the
+            predecessor. Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see
+            (RECORD_UNAVAILABLE), a template (TEMPLATE_NO_ACTIVATE), a draft, closed or cancelled one (STATUS_INVALID), one renewed
+            already by an agreement not cancelled (SUCCESSOR_EXISTS), a stale revision (REVISION_REQUIRED, REVISION_CHANGED; the
+            predecessor's revision is counted) and dates out of order (DATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
+            <parameter name="description"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="agreementRevision" type="Integer"/>
+            <parameter name="predecessorAgreementId"/>
+            <parameter name="predecessorRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('renewAgreement', context))</script>
+        </actions>
+    </service>
+    <service verb="expire" noun="SalesAgreements" allow-remote="false">
+        <description>The daily job (expire_SalesAgreements, beside Purchasing's expire_PurchaseAgreements): each active customer
+            agreement (AgrSales, AgrProduct) past its through date set Expired, each in its own transaction (one that fails is logged
+            and the others go on). Its orders stay; the price resolver stops its prices at the date already.</description>
+        <out-parameters>
+            <parameter name="expiredCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="expiredCount" from="ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('expireAgreements', context).expiredCount"/>
+        </actions>
+    </service>
+</services>

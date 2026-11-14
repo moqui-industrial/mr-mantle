@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' recurring orders and subscriptions (the recurrence part of G of IronStone Sales design §12.1; design §7 RecurringOrders and
+    Subscriptions, §13.1; impl-sales P16, SAL-RECURRENCE, CX-RECURRING, F22, F23, §4 Q7), over SalesRecurrence.js: a recurring base is an
+    approved copy of a sales order marked OrpRecurringTemplate, with its cadence in its own zone, its dates, a pause and the agreement it
+    is kept under (entity/SalesRecurrenceEntities.xml); the one worker (OrderServices.create#RecurringOrders, create#RecurringOrder)
+    reads them. SALES_RECURRENCE_MANAGE keeps the bases of the caller's organizations and SALES_TEAM_VIEW reads them; another
+    organization's answers as missing (RECORD_UNAVAILABLE, SalesAccess.js recurrenceOf); a Shop contract's base is Shop's. Every change
+    names the base's revision (recurRevision: REVISION_REQUIRED, REVISION_CHANGED). A Sales reader reads the subscriptions of the scope
+    (store contracts read only, beside storeless subscriptions of native orders). All in process only (allow-remote="false"). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="RecurringSalesOrders" allow-remote="false" read-only="true">
+        <description>RecurrenceList's bases (design §7 RecurrenceFind): the recurring sales orders of the caller's organizations (or the one
+            named), by state (active, the default; paused; ended; failing: the last run failed; all), customer, agreement and text (the
+            base's id or name), newest first, paged; each with its customer, cadence and zone, dates, next occurrence, last order made,
+            amount, agreement, the last failure, its revision and what the caller may do (edit, pause, resume, end, retry a due
+            occurrence). Refuses a caller who neither keeps nor reads the organization's recurrence (PERMISSION_DENIED), an
+            organization outside the scope (ORGANIZATION_DENIED) and a state not listed (STATE_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="agreementId"/>
+            <parameter name="state"/>
+            <parameter name="text"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recurrenceList" type="List"/>
+            <parameter name="recurrenceListCount" type="Integer"/>
+            <parameter name="recurrenceListPageIndex" type="Integer"/>
+            <parameter name="recurrenceListPageSize" type="Integer"/>
+            <parameter name="recurrenceListPageMaxIndex" type="Integer"/>
+            <parameter name="recurrenceListPageRangeLow" type="Integer"/>
+            <parameter name="recurrenceListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('findRecurringSalesOrders', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesRecurrence" allow-remote="false">
+        <description>RecurrenceSettings (design §7): a base's schedule. With orderId, an approved sales order of the caller's scope becomes
+            the source of a new base: a copy with no payments of every line (its charges and discounts with its products), approved,
+            marked OrpRecurringTemplate, never reserved, shipped or billed (the order it came from stays an ordinary order); an order made recurring before Sales is kept as it is. With baseOrderId
+            and recurRevision, a base's schedule is changed. The schedule is monthly on a day (1-28, or L) at an hour, weekly on a day,
+            yearly on a day of a month, or a cron expression (frequency cron), read in recurTimeZone (the user's when empty); between
+            recurFromDate (now when empty for a new base) and recurThruDate; kept under recurAgreementId, an active agreement of the
+            seller with the customer (AGREEMENT_INVALID); recurAutoInvoice Y bills each order made once it is approved, at placement or later by a person (invoice#RecurringOrder), and needs the finance
+            right (RECEIVABLE_EDIT) to turn on. Through mantle.order.OrderServices.update#OrderRecur. Needs SALES_RECURRENCE_MANAGE
+            (PERMISSION_DENIED); refuses another organization's order or base (RECORD_UNAVAILABLE), an order not approved
+            (ORDER_NOT_APPROVED), a schedule that cannot be read (SCHEDULE_INVALID), an unknown zone (ZONE_INVALID), an end before
+            the start (DATE_INVALID) and a stale revision (REVISION_REQUIRED, REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="baseOrderId"/>
+            <parameter name="orderId"/>
+            <parameter name="recurRevision"/>
+            <parameter name="frequency"/>
+            <parameter name="dayOfMonth"/>
+            <parameter name="dayOfWeek"/>
+            <parameter name="month"/>
+            <parameter name="hourOfDay"/>
+            <parameter name="recurCronExpression"/>
+            <parameter name="recurTimeZone"/>
+            <parameter name="recurFromDate"/>
+            <parameter name="recurThruDate"/>
+            <parameter name="recurAgreementId"/>
+            <parameter name="recurAutoInvoice"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="baseOrderId"/>
+            <parameter name="recurRevision"/>
+            <parameter name="nextText"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('storeSalesRecurrence', context))</script>
+        </actions>
+    </service>
+    <service verb="change" noun="SalesRecurrence" allow-remote="false">
+        <description>RecurrenceAction (design §7) at the base's revision: pause (with a reason; the occurrences that fall in the pause
+            are skipped), resume, end (with a reason, now or at a later date), or retry: the due occurrence ordered now through
+            create#RecurringOrder, one order for an occurrence, so a retry after the job ran answers the order the job made; keyed by
+            operationKey, so a double submit answers the first result; a failure is recorded on the base and returned. Needs
+            SALES_RECURRENCE_MANAGE on a base of the scope; refuses another's (RECORD_UNAVAILABLE), an operation the state does not
+            allow (STATE_INVALID), a retry with nothing due (NOTHING_DUE), a missing reason (REASON_REQUIRED) and a stale revision
+            (REVISION_REQUIRED, REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="baseOrderId" required="true"/>
+            <parameter name="recurRevision"/>
+            <parameter name="operation" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="endDate"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="baseOrderId"/>
+            <parameter name="operation"/>
+            <parameter name="recurRevision"/>
+            <parameter name="orderId"/>
+            <parameter name="failure"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('changeSalesRecurrence', context))</script>
+        </actions>
+    </service>
+    <service verb="find" noun="SalesSubscriptions" allow-remote="false" read-only="true">
+        <description>Subscriptions in Sales' context (design §7, Commerce's Subscriptions mounted with a Sales context): the store
+            contracts of the stores of the caller's organizations, read only (Commerce keeps them), beside the storeless Subscription
+            rows of native orders sold by those organizations, each with its customer, product, period or paid-through, next renewal,
+            billing (a store contract's state; a storeless row's "Billed" or "No billing link") and access apart, the order it came
+            from, its recurring base and the agreement it is kept under; by kind (all, store, storeless), organization, customer,
+            agreement (storeless only) and store (store contracts only), newest first, paged. A Sales reader's (PERMISSION_DENIED);
+            refuses an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="agreementId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="kind"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="subscriptionList" type="List"/>
+            <parameter name="subscriptionListCount" type="Integer"/>
+            <parameter name="subscriptionListPageIndex" type="Integer"/>
+            <parameter name="subscriptionListPageSize" type="Integer"/>
+            <parameter name="subscriptionListPageMaxIndex" type="Integer"/>
+            <parameter name="subscriptionListPageRangeLow" type="Integer"/>
+            <parameter name="subscriptionListPageRangeHigh" type="Integer"/>
+            <parameter name="truncated" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('findSalesSubscriptions', context))</script>
+        </actions>
+    </service>
+    <service verb="add" noun="SubscriptionFollowUp" allow-remote="false">
+        <description>Follow up (design §7 Subscriptions): a Commons task (mantle.work.TaskServices.create#SimpleTask) on the customer of
+            a store contract (contractId) or a storeless subscription (subscriptionId) of the caller's scope, assigned to the caller or
+            a person who works for its organization (OWNER_INVALID), due when given, linked to the customer (link#WorkEffortRecord),
+            so it shows in the assignee's Today. Needs SALES_ACCOUNT_EDIT (PERMISSION_DENIED); another organization's subscription
+            answers as missing (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="contractId"/>
+            <parameter name="subscriptionId"/>
+            <parameter name="workEffortName"/>
+            <parameter name="description"/>
+            <parameter name="estimatedCompletionDate"/>
+            <parameter name="assignToPartyId"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortId"/></out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('addSubscriptionFollowUp', context))</script>
+        </actions>
+    </service>
+    <service verb="invoice" noun="RecurringOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (impl-sales follow-up 2; §4 Nov 14): run by the SalesRecurrenceApprovedInvoice SECA once an order's
+            approval commits, by the job's automatic approval or a person's. An order the worker made for an occurrence of a base whose
+            auto-invoice is on (recurAutoInvoice Y), not a Shop contract's base, has each approved sale part with nothing billed invoiced
+            through Accounting's create#FulfillmentInvoice (the ordered basis, one invoice for a source), each part of the base's seller in its own
+            transaction under the part's lock, read again there (two approvals' rules at once bill it once);
+            any other order is left as it is, so it bills once. Reads only the records (no supplied party or flag); a part that cannot
+            be billed is logged naming the order and never fails the approval.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invoiceIds" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesRecurrence.js').execute('invoiceRecurringOrder', context))</script>
+        </actions>
+    </service>
+</services>

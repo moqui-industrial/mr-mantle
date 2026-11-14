@@ -72,6 +72,12 @@ const TOKEN_WRITES = [
     'requestOrderCancel',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
+    // IronStone Sales P13: a quote link's acceptance or decline (input.token)
+    'respondSalesQuote',
+    // IronStone Marketing P7: a subscription request (anonymous: PASS's request key, its limits and the neutral receipt bound it)
+    // and its confirmation link's POST (input.token)
+    'requestSubscription',
+    'verifySubscription',
 ]
 /* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
    connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads
@@ -126,6 +132,10 @@ const DOWNLOADS = [
     'getShopThemeAsset',
     // Smithy (mr-pass plan/design-smithy.md §15.2): a tree as a zip or tar.gz, a file the framework wrote
     'downloadArchive',
+    // IronStone Sales P13: an issued quote's PDF
+    'getSalesQuoteDocument',
+    // IronStone Sales P17: an order's confirmation as placed
+    'getSalesOrderDocument',
     // Smithy DG5 (§15.6): a run's artifact or report
     'downloadArtifact',
     // Smithy DG7 (§15.8): a release's file
@@ -223,6 +233,9 @@ const REASONS = [
     'notBuilt',
     // Smithy DG2: a credential change by an account with no password to give again needs a fresh sign-in
     'recentSignInRequired',
+    // IronStone Sales P13: a quote above the seller's threshold is accepted signed in; a quote answered already
+    'acceptanceSignInRequired',
+    'responseRecorded',
     // Smithy DG6: a repository a moderator hid is not forked (design-smithy §12.3)
     'repositoryHidden',
     // Smithy DG8: the GitHub import (design-smithy §15.9)

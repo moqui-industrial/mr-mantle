@@ -343,7 +343,8 @@ function withoutRecurringBases(query) {
         cf.makeCondition(
             [
                 cf.makeCondition("orderPurposeEnumId", "is-null", null),
-                cf.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+                // Sales P12: nor is a quote template, never placed
+                cf.makeCondition("orderPurposeEnumId", "not-in", ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"])
             ],
             "or"
         )
@@ -932,9 +933,9 @@ function findStoreCustomers(p) {
     const shaped = ids
         .filter(partyId => names[partyId])
         .map(partyId => {
+            // a recurring base is no order of the customer's (impl-sales P16 review)
             const orders = Array.from(
-                s
-                    .own(find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId}))
+                withoutRecurringBases(s.own(find("mantle.order.OrderHeaderAndPart", {customerPartyId: partyId})))
                     .condition("productStoreId", "in", storeIds)
                     .orderBy("-entryDate")
                     .limit(limits.detail)
@@ -1340,9 +1341,9 @@ function storeCallRecords(p) {
     const s = scope()
     const partyIds = unique(Array.from(p.partyIds || []))
     if (!partyIds.length || !s.storeIds.length) return {records: []}
+    // a recurring base is no open order of the caller's (impl-sales P16 review)
     const orders = Array.from(
-        s
-            .own(find("mantle.order.OrderHeaderAndPart"))
+        withoutRecurringBases(s.own(find("mantle.order.OrderHeaderAndPart")))
             .condition("customerPartyId", "in", partyIds)
             .condition("productStoreId", "in", s.storeIds)
             .condition("statusId", "in", [

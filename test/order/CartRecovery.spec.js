@@ -590,3 +590,64 @@ feature(
         }
     }
 )
+
+// impl-marketing P11 (F27): one sender per store. A Marketing automation is offered as the sender only while an active automation of
+// the store's organization has the store's cart trigger; with it the store's built-in recovery sends nothing, and the automation reads
+// each idle cart's visit once, never one built-in recovery already handled.
+feature("a store's recovery has one sender: a Marketing automation, offered with one, and built-in recovery then sends nothing", {
+    when() {
+        const policy = {productStoreId: ids.store, sender: "automation", changeReason: "Marketing sends it"}
+        const unoffered = run(users.operator, "mantle.product.StoreAdminServices.store#CartRecoveryPolicy", policy)
+        system(() =>
+            make("mantle.marketing.automation.MarketingAutomation", {
+                marketingAutomationId: prefix + "_AUTO",
+                organizationPartyId: ids.org,
+                automationName: "Cart reminder",
+                productStoreId: ids.store,
+                triggerEnumId: "AtrCartAbandoned",
+                statusId: "MaActive"
+            })
+        )
+        const offered = run(users.reader, "mantle.product.StoreAdminServices.get#CartRecoveryPolicy", {productStoreId: ids.store})
+        const saved = run(users.operator, "mantle.product.StoreAdminServices.store#CartRecoveryPolicy", policy)
+        // the buyer turns cart reminders on again (the feature before turned them off)
+        system(() =>
+            call("mantle.party.ConsentServices.store#PartyConsent", {
+                partyId: ids.buyer,
+                purposeEnumId: "PcpCartReminder",
+                statusId: "PconGranted",
+                contactListId: ec.resource
+                    .script("component://mr-mantle/service/mantle/public/StoreTopics.js")
+                    .topicList("cartReminders", ids.store, false),
+                sourceEnumId: "PcsForm",
+                evidenceText: "Cart recovery spec: turned on again",
+                updateSolicitation: false
+            })
+        )
+        const idle = system(() => cart("automated", {partyId: ids.buyer}))
+        capture.clear()
+        const job = run(users.operator, O + "run#CartRecovery", {productStoreIds: [ids.store]})
+        const read = system(() =>
+            ec.resource.script("component://mr-mantle/service/mantle/order/CartRecovery.js").automationCarts(ids.store)
+        )
+        return {
+            unoffered,
+            offered: offered.view.senderOptions.map(option => option.value),
+            saved,
+            job,
+            reason: run(users.operator, O + "get#CartRecovery", {orderId: idle}).recovery?.reasonCode,
+            read: read.map(found => found.orderId),
+            idle,
+            mails: capture.count()
+        }
+    },
+    then(r) {
+        code(r.unoffered) == "AUTOMATION_UNAVAILABLE"
+        r.offered.join(",") == "builtin,automation"
+        r.saved.error == ""
+        r.job.stores == 0 && r.mails == 0
+        r.reason == "OTHER_SENDER"
+        r.read.includes(r.idle)
+        !r.read.includes(carts.ok)
+    }
+})

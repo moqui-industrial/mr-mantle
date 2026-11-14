@@ -14,8 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- mantle.sales.SalesWorkspaceServices (S, design-sales §12.1): Sales' authorized projections. P2 (design §9 Settings): the
     setup readiness (get#SalesReadiness, SalesSettings.js). P3 (design §4): the accounts and contacts of the caller's sales scope
-    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; Home's
-    of P6). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
+    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; P6: Home, the
+    pipeline dataset's row filter and the lifecycle participant, SalesWorkspace.js). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
     outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== P2: the setup readiness (design §9 Settings SalesReadiness) ===== -->
@@ -26,7 +26,10 @@ along with this software (see the LICENSE.md file). If not, see
             checks of checkKey, title, state (ready, warning, failed or unavailable), reasonCode, message, the organization as
             subject and scope, and for a check that is not ready its owner's place as a route key (fixRoute, with fixId where it
             names a record): a default pipeline (salesStages), a pipeline in effect without stages (salesStages, the pipeline), a
-            team with a member (salesTeams) and a lead source offered (salesLeadSources). Later phases add theirs. One check that
+            team with a member (salesTeams) and a lead source offered (salesLeadSources); P9 the Sales defaults and the commercial
+            revision (salesDefaults), P13 the public quote pages, and P19 Sales' scheduled jobs (none paused or failing on its last
+            run), its mail templates (the organization's or Mantle's quote, reminder and confirmation templates with a from address
+            and a mail server) and its approval rules (salesApprovalPolicies: the approval setting on with no rule). One check that
             fails is unavailable by name and the others go on. Changes nothing. Refuses a caller without SALES_CONFIGURE
             (PERMISSION_DENIED) and an organization outside their scope (ORGANIZATION_DENIED).</description>
         <in-parameters>
@@ -167,6 +170,152 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('accountContactProjection', context)"/>
             <set field="admitted" from="!!found.admitted"/>
             <set field="partyIdList" from="found.partyIdList"/>
+        </actions>
+    </service>
+
+    <!-- ========== P6: Home, the pipeline dataset's row filter and the lifecycle participant (SalesWorkspace.js) ========== -->
+    <service verb="get" noun="SalesHome" allow-remote="false" read-only="true">
+        <description>Sales Home's work (design §3 Home SalesWork and AssignedWork): counters, each the count of the scoped list it
+            opens with that list's own filters (find#Opportunities: the leads to work, the user's own open opportunities and those
+            of them past their expected close), with its listPath and parameters; a counter that fails is unavailable, never zero,
+            and the others go on; P8: the requests for quote awaiting a response (find#QuoteRequests state awaiting); the counters
+            of records not built yet (quotes to send and expiring, blocked orders) are notConfigured. assignedWork: the user's own open leads and opportunities, the soonest to close first, each with its
+            next activity (at most ten; assignedCount all of them). In the organization named (in the scope, ORGANIZATION_DENIED
+            otherwise) or every one of the scope. Refuses a caller who reads nothing of Sales (PERMISSION_DENIED).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="counters" type="List"/>
+            <parameter name="assignedWork" type="List"/>
+            <parameter name="assignedCount" type="Integer"/>
+            <parameter name="assignedState"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('salesHome', context)"/>
+            <set field="counters" from="found.counters"/>
+            <set field="assignedWork" from="found.assignedWork"/>
+            <set field="assignedCount" from="found.assignedCount"/>
+            <set field="assignedState" from="found.assignedState"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PipelineRowFilter" allow-remote="false" read-only="true">
+        <description>The report engine's row filter of the pipeline dataset (report/mantle-sales-pipeline.json; the ReportScopePolicy
+            MantleSalesScope, data/SalesWorkspaceData.xml): Sales' scope, not the organization alone (impl-sales F66): the deals of
+            the organizations of the signed-in viewer's sales scope and, without SALES_TEAM_VIEW, of those only the deals assigned
+            now to the viewer or a team of theirs. Nothing for a viewer who reads nothing of Sales; a userId of another user is
+            refused.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="filter" type="Map"/></out-parameters>
+        <actions>
+            <set field="filter" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('pipelineRowFilter', context).filter"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteRowFilter" allow-remote="false" read-only="true">
+        <description>The report engine's row filter of the quote dataset (report/mantle-sales-quotes.json; the ReportScopePolicy
+            MantleSalesQuoteScope, data/SalesWorkspaceData.xml; impl-sales P20): Sales' quote scope, as the quote lists read it: Sales
+            quotes (never a template) not placed, of the organizations of the signed-in viewer's sales scope and, without
+            SALES_TEAM_VIEW, of those only the quotes assigned to the viewer or a team of theirs. Nothing for a viewer who reads
+            nothing of Sales; a userId of another user is refused.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="filter" type="Map"/></out-parameters>
+        <actions>
+            <set field="filter" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('quoteRowFilter', context).filter"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OwnedSalesAssignments" allow-remote="false">
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <description>Sales' lifecycle participant's lookup (design-admin §14; impl-sales P6, F54): what userId owns of Sales, for an
+            offboarding preview: the open leads and opportunities they own now (resourceId deal:id), their open quotes (Open,
+            Requested or Proposed and never placed; quote:orderId, P7) and the accounts they manage now (account:partyId), each named
+            with its organization, never an amount, all transferable but a shared account. The caller's own, or another user's
+            with SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise).</description>
+        <actions>
+            <set field="resourceList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('findOwnedAssignments', context).resourceList"/>
+        </actions>
+    </service>
+    <service verb="transfer" noun="SalesAssignment" allow-remote="false">
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <description>One deal, quote or account of fromUserId's handed to toUserId's person (the owned-resource contract): a deal's owner
+            row ends now and the new owner's starts (its team kept), an open quote's owner row (undated) is replaced by the new
+            owner's (its team and contact kept; P7), an account's manager relationship ends now and the new manager's starts. With
+            SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise). Refuses a resource fromUserId does not own now (RECORD_UNAVAILABLE), a
+            closed deal or a quote no longer open (RECORD_CLOSED), a new owner with no enabled account and person (OWNER_INVALID)
+            and one who does not work for the record's organization (NOT_EMPLOYED).</description>
+        <in-parameters><parameter name="salesResourceId" required="true"/></in-parameters>
+        <actions>
+            <set field="transferred" from="!!ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('transferAssignment', context).transferred"/>
+        </actions>
+    </service>
+    <!-- P11: the order list (design §6 OrderList; service/mantle/order/SalesOrders.js findOrders) -->
+    <service verb="find" noun="SalesOrders" allow-remote="false" read-only="true">
+        <description>The one scoped list of sales orders (design §6 OrderList, Home, Insights and the palette): orders whose first
+            part sells (an internal vendor of the caller's scope, a customer that is not internal), the caller's and their teams'
+            (the organization's every one for SALES_TEAM_VIEW; and for SALES_ORDER_APPROVE those awaiting approval or held), never a
+            quote not yet placed, a quote template, a recurring base or an open cart (a direct draft is listed under draft). Saved
+            lists: recent (any, the default), draft, awaiting (Placed: Awaiting approval), held, blocked (awaiting or held),
+            toFulfill (approved, nothing shipped), partFulfilled (approved, some shipped), toInvoice (shipped, nothing billed),
+            cancelled; filtered by organization, customer, opportunity, owner (mine Y: the caller), store and text (id, name or the
+            customer's reference), paged in the query. Each row's customer (unnamed when the caller may not see the account),
+            seller, kind, state, total, open holds and progress (shipped of ordered by line unit, billed of the total by currency;
+            never summed across units), and on the awaiting list its pre-approval warnings. Needs a Sales read
+            (PERMISSION_DENIED); an organization outside the scope is refused (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="list"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="productStoreId"/>
+            <parameter name="text"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderList" type="List"/>
+            <parameter name="orderListCount" type="Integer"/>
+            <parameter name="orderListPageIndex" type="Integer"/>
+            <parameter name="orderListPageSize" type="Integer"/>
+            <parameter name="orderListPageMaxIndex" type="Integer"/>
+            <parameter name="orderListPageRangeLow" type="Integer"/>
+            <parameter name="orderListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('findOrders', context)"/>
+            <set field="orderList" from="found.orderList"/>
+            <set field="orderListCount" from="found.orderListCount"/>
+            <set field="orderListPageIndex" from="found.orderListPageIndex"/>
+            <set field="orderListPageSize" from="found.orderListPageSize"/>
+            <set field="orderListPageMaxIndex" from="found.orderListPageMaxIndex"/>
+            <set field="orderListPageRangeLow" from="found.orderListPageRangeLow"/>
+            <set field="orderListPageRangeHigh" from="found.orderListPageRangeHigh"/>
+        </actions>
+    </service>
+    <!-- ========== P19: the report catalogue ========== -->
+    <service verb="get" noun="SalesReports" allow-remote="false" read-only="true">
+        <description>Sales' report catalogue (design-sales §8 Reports SalesReportCatalogue; impl-sales P19), the catalogue service of
+            Sales' entries in Insights' catalog (catalogueService, called with appRoot): the reports the caller may read, each with its
+            entry id, report id, owner, title, description, path under the app root, parameters and whether it exports. Sales
+            summary, Sales analysis, Pipeline analysis, Win/loss and Target attainment for a report reader (SALES_REPORT_VIEW),
+            Forecast for every Sales reader. Refuses another app root (REPORTS_UNAVAILABLE: Accounting's mount of Sales analysis
+            has its own entry under Accounting's catalogue, F59) and a caller who reads no Sales (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="appRoot"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reports" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="reports" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('salesReports', context).reports"/>
         </actions>
     </service>
 </services>

@@ -1,0 +1,653 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.CampaignServices (C, IronStone Marketing design §14.2): the campaign lifecycle, parties, budgets, approvals,
+    policies and vocabularies. P1 (design §15.4): the adoption of the campaigns, lists and segments that belong to no organization
+    (MarketingAdoption.js), the rule that keeps MarketingCampaign.organizationPartyId equal to its effective MarketingOrganization
+    party row starting there. P2 (design §3, §12, §14.3): the campaigns (MarketingCampaigns.js), their costs (MarketingCosts.js), the
+    approvals on Purchasing's rules (MarketingApprovals.js: a decision bound to the revision it was asked at, a material change ending
+    it, no self-approval but under the one-person team's flag), the policy and vocabulary (MarketingPolicies.js), the campaign as a
+    Chatter and RecordFiles host and the lifecycle participant's services. Each checks its permission and the organization itself
+    (mantle/marketing/MarketingAccess.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== P1: adoption (design §15.4) ===== -->
+    <service verb="preview" noun="Adoption" allow-remote="false" read-only="true">
+        <description>The records awaiting adoption: the campaigns with no organization, the lists that are not mailboxes and the
+            segments whose owner is empty or _NA_, at most 200 of each, each with recordKind (campaign, list, segment), kindName,
+            recordId, label, detail (status or type), lastUpdatedStamp (the revision apply#Adoption names) and revision (the same as
+            millis, for a form); counts by kind.
+            Changes nothing. Refuses a caller without MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
+        <out-parameters>
+            <parameter name="records" type="List"/>
+            <parameter name="counts" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAdoption.js').execute('preview', context)"/>
+            <set field="records" from="found.records"/>
+            <set field="counts" from="found.counts"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="Adoption" allow-remote="false">
+        <description>Assigns each record of assignments (maps of recordKind, recordId, organizationPartyId and the lastUpdatedStamp
+            read) to an organization of the administrator's scope, each on its own transaction with one result: a list's or a
+            segment's ownerPartyId, or a campaign's organizationPartyId with its dated MarketingOrganization MarketingCampaignParty
+            row, each audited with the change reason "Adopted by" the administrator. Unknown historical consent stays unknown:
+            nothing but the owner changes. A result is adopted, or refused by reasonCode with the others applied: UNKNOWN_KIND;
+            RECORD_UNAVAILABLE for a record that is missing or a mailbox; ALREADY_OWNED for a record that belongs to an
+            organization (an adoption applies once per record, the record read locked); REVISION_REQUIRED for an assignment that
+            names no revision; REVISION_CHANGED for a revision that is not the one read, naming
+            the current one; ORGANIZATION_DENIED for an organization outside the scope. Refuses a caller without
+            MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="assignments" type="List" required="true"><description>Maps of recordKind, recordId,
+                organizationPartyId and lastUpdatedStamp (a Timestamp or its millis; required)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="adoptedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAdoption.js').execute('apply', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="adoptedCount" from="found.adoptedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: campaigns (design §3 Campaigns, CampaignDetail; MarketingCampaigns.js) ===== -->
+    <service verb="find" noun="Campaigns" allow-remote="false" read-only="true">
+        <description>The campaigns of the caller's scope (design §3 CampaignList), filtered in the query: text (id, name or summary, ignoring case), an organization of the scope, status (one, open, or all), parent, a date range they overlap, a manager or contributor (mine: the caller); paged (campaignList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, status with its text and colour, organization, parent, dates, budget and actual cost in the campaign's currency, managers and revision (lastUpdatedStamp in millis). Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="statusId"/>
+            <parameter name="parentCampaignId"/>
+            <parameter name="rangeFrom" type="Timestamp"/>
+            <parameter name="rangeThru" type="Timestamp"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignList" type="List"/>
+            <parameter name="campaignListCount" type="Integer"/>
+            <parameter name="campaignListPageIndex" type="Integer"/>
+            <parameter name="campaignListPageSize" type="Integer"/>
+            <parameter name="campaignListPageMaxIndex" type="Integer"/>
+            <parameter name="campaignListPageRangeLow" type="Integer"/>
+            <parameter name="campaignListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('find', context)"/>
+            <set field="campaignList" from="found.campaignList"/>
+            <set field="campaignListCount" from="found.campaignListCount"/>
+            <set field="campaignListPageIndex" from="found.campaignListPageIndex"/>
+            <set field="campaignListPageSize" from="found.campaignListPageSize"/>
+            <set field="campaignListPageMaxIndex" from="found.campaignListPageMaxIndex"/>
+            <set field="campaignListPageRangeLow" from="found.campaignListPageRangeLow"/>
+            <set field="campaignListPageRangeHigh" from="found.campaignListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Campaign" allow-remote="false">
+        <description>A planned campaign (design §3 NewCampaign): its name, summary, organization (of the caller's scope, its MarketingOrganization row mirrored to organizationPartyId), manager (a person who works for it; the caller by default), parent (an open campaign of the same organization), dates (thru after from), currency (named, else the policy's, else the organization's accounting currency) and budget, at revision 1, the caller its author. Needs MARKETING_CAMPAIGN_EDIT (PERMISSION_DENIED); refuses another organization (ORGANIZATION_DENIED) and NAME_REQUIRED, DATES_INVALID, CURRENCY_REQUIRED, AMOUNT_INVALID, PARTY_INVALID, ORGANIZATION_MISMATCH, PARENT_CLOSED.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="campaignName" required="true"/>
+            <parameter name="campaignSummary"/>
+            <parameter name="parentCampaignId"/>
+            <parameter name="managerPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="costUomId"/>
+            <parameter name="budgetedCost"/>
+            <parameter name="estimatedCost"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('create', context)"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Campaign" allow-remote="false">
+        <description>The plan of an open campaign (design §3 CampaignHeader) at the revision read (expectedRevision; REVISION_REQUIRED, STALE_REVISION naming the current one): name, summary, expected response and revenue; a change of the parent or the dates is material: the revision rises, the earlier approvals end and an approved campaign returns to Planned; refused in progress (CAMPAIGN_IN_PROGRESS) and closed (CAMPAIGN_CLOSED). Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope (RECORD_UNAVAILABLE otherwise).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="campaignName"/>
+            <parameter name="campaignSummary"/>
+            <parameter name="parentCampaignId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="expectedResponsePercent"/>
+            <parameter name="expectedRevenue"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="campaignRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('store', context)"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="campaignRevision" from="found.campaignRevision"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CampaignBudget" allow-remote="false">
+        <description>The budget of an open campaign (design §3 Budget) at the revision read: budgetedCost, estimatedCost and costUomId (not changed once it has costs, CURRENCY_IN_USE), the explanation recorded as the audit reason; a material change (the revision rises, the approvals end, an approved campaign returns to review). Refuses as store#Campaign.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="budgetedCost"/>
+            <parameter name="estimatedCost"/>
+            <parameter name="costUomId"/>
+            <parameter name="explanation"/>
+            <parameter name="testAddresses"><description>P8: the addresses a send's test may go to, a line each, at most ten</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="campaignRevision" type="Integer"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('storeBudget', context)"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="campaignRevision" from="found.campaignRevision"/>
+            <set field="changed" from="found.changed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CampaignParty" allow-remote="false">
+        <description>A dated party row of an open campaign (design §3 CampaignParties) at the revision read: action add or end of a manager or contributor (a person who works for its organization, PARTY_INVALID; the last manager kept while the policy requires one, MANAGER_REQUIRED), or the organization's successor (of the caller's scope; refused while the campaign has costs, links or related campaigns, ORGANIZATION_IN_USE), which ends the old row and is mirrored to organizationPartyId. A change of the organization or a manager is material. Refuses as store#Campaign and ROLE_INVALID, ACTION_INVALID.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="roleTypeId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="action"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="campaignRevision" type="Integer"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('storeParty', context)"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="campaignRevision" from="found.campaignRevision"/>
+            <set field="changed" from="found.changed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CampaignAssociation" allow-remote="false">
+        <description>A typed, dated link of an open campaign to a record of its own organization (design §14.1 CampaignAssociation): action add (CakList a list that is not a mailbox, CakSegment a segment, CakPromotion a store promotion, CakForm a form publication; an event and a page once their phases keep their organization, KIND_UNAVAILABLE) or end (campaignAssociationId); another organization's record answers as a missing one (RECORD_UNAVAILABLE); a current link of the same record answered again. Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="action"/>
+            <parameter name="associationKindEnumId"/>
+            <parameter name="sourceId"/>
+            <parameter name="purpose"/>
+            <parameter name="campaignAssociationId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignAssociationId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('storeAssociation', context)"/>
+            <set field="campaignAssociationId" from="found.campaignAssociationId"/>
+        </actions>
+    </service>
+    <service verb="start" noun="Campaign" allow-remote="false">
+        <description>Starts an approved campaign (Approved to In progress, its start date now): it needs the approval of its current revision (APPROVAL_REQUIRED); STATUS_INVALID otherwise. At the revision read (expectedRevision: REVISION_REQUIRED, STALE_REVISION). Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('transition', Object.assign({action:'start'}, context))"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="Campaign" allow-remote="false">
+        <description>Completes a campaign in progress: refused with the counts of its pending work (PENDING_WORK: open related campaigns; the sends and enrollments of later phases); STATUS_INVALID otherwise. At the revision read (expectedRevision: REVISION_REQUIRED, STALE_REVISION). Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('transition', Object.assign({action:'complete'}, context))"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Campaign" allow-remote="false">
+        <description>Cancels an open campaign (Planned, Approved or In progress), the reason recorded on the status audit; its pending approval requests end with it (superseded); what was sent or registered stays. CAMPAIGN_CLOSED for a closed one. At the revision read (expectedRevision: REVISION_REQUIRED, STALE_REVISION). Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope (PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('transition', Object.assign({action:'cancel'}, context))"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+            <set field="statusId" from="found.statusId"/>
+        </actions>
+    </service>
+    <service verb="duplicate" noun="Campaign" allow-remote="false">
+        <description>A new planned campaign from one the caller reads (design §3: a campaign template is a campaign duplicated): the name given (else "Copy of" it), summary, organization, open parent, currency, budget, managers and current links, new dates when given; its approvals, costs, files and notes stay with the original. Needs MARKETING_CAMPAIGN_EDIT and the campaign's organization in the scope.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="campaignName"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingCampaignId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('duplicate', context)"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Campaign" allow-remote="false" read-only="true">
+        <description>A campaign of the caller's scope for its detail and plan print (design §3 CampaignDetail, §18): campaign (the plan, status, organization, parent, dates, budget, actual and expected amounts in its currency, revision, campaignRevision), parties (dated rows of its organization, managers and contributors), associations, children, notes (the native MarketingCampaignNote rows, read only), costs and costSummary (MarketingCosts.js; a source's Accounting details masked without its read permission), decisions (requests and decisions with self-approvals marked and those ended by a later change), pendingWork, approvalProblems, awaitingApproval and capabilities (what the caller may do now). As of a date (asOf) the parties, links, costs, notes and decisions are those in effect then. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and a campaign outside the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaign" type="Map"/>
+            <parameter name="parties" type="List"/>
+            <parameter name="associations" type="List"/>
+            <parameter name="children" type="List"/>
+            <parameter name="notes" type="List"/>
+            <parameter name="costs" type="List"/>
+            <parameter name="costSummary" type="Map"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="pendingWork" type="List"/>
+            <parameter name="approvalProblems" type="List"/>
+            <parameter name="awaitingApproval" type="Boolean"/>
+            <parameter name="capabilities" type="Map"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('get', context)"/>
+            <set field="campaign" from="found.campaign"/>
+            <set field="parties" from="found.parties"/>
+            <set field="associations" from="found.associations"/>
+            <set field="children" from="found.children"/>
+            <set field="notes" from="found.notes"/>
+            <set field="costs" from="found.costs"/>
+            <set field="costSummary" from="found.costSummary"/>
+            <set field="decisions" from="found.decisions"/>
+            <set field="pendingWork" from="found.pendingWork"/>
+            <set field="approvalProblems" from="found.approvalProblems"/>
+            <set field="awaitingApproval" from="found.awaitingApproval"/>
+            <set field="capabilities" from="found.capabilities"/>
+            <set field="asOfText" from="found.asOfText"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: costs (design §3 CostEntries; F81; MarketingCosts.js) ===== -->
+    <service verb="store" noun="CampaignCost" allow-remote="false">
+        <description>A cost of an open campaign in its currency (design §3 CostEntries, F81): manual (a description and an amount) or one Accounting line of its organization, never both (COST_SOURCE_INVALID): a purchase invoice item (invoiceId, invoiceItemSeqId; PAYABLE_VIEW or ACCOUNTING_VIEW) or a posted ledger debit (acctgTransId, acctgTransEntrySeqId; ACCOUNTING_VIEW), SOURCE_FORBIDDEN without the read; a line counted once by a campaign (SOURCE_ALREADY_COUNTED), its allocations over every campaign within its amount (ALLOCATION_EXCEEDS), in the campaign's currency (CURRENCY_MISMATCH); or the reversal of a cost (reversalOfCostId; ALREADY_REVERSED). actualCost is kept the sum of the campaign's rows. An operationKey answers a retry with the first result. Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="costSourceEnumId"/>
+            <parameter name="invoiceId"/>
+            <parameter name="invoiceItemSeqId"/>
+            <parameter name="acctgTransId"/>
+            <parameter name="acctgTransEntrySeqId"/>
+            <parameter name="amount"/>
+            <parameter name="description"/>
+            <parameter name="costDate" type="Timestamp"/>
+            <parameter name="reversalOfCostId"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignCostId"/>
+            <parameter name="actualCost" type="BigDecimal"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCosts.js').execute('store', context)"/>
+            <set field="campaignCostId" from="found.campaignCostId"/>
+            <set field="actualCost" from="found.actualCost"/>
+            <set field="alreadyApplied" from="found.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="find" noun="CampaignCosts" allow-remote="false" read-only="true">
+        <description>A campaign's costs, newest first (as of a date: those recorded by then), each with its source (masked without the source's read permission), amount and state (counted, reversed, reversal), and the summary: actual cost, budget, what is left and whether it is over. Refuses as get#Campaign.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="costs" type="List"/>
+            <parameter name="summary" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCosts.js').execute('find', context)"/>
+            <set field="costs" from="found.costs"/>
+            <set field="summary" from="found.summary"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: approvals (design §3 Approvals; F42, §4 Nov 11; MarketingApprovals.js) ===== -->
+    <service verb="request" noun="MarketingApproval" allow-remote="false">
+        <description>Asks for approval of a target at its current revision (targetKind campaign; send P8; automation P11: a draft automation with what approval needs, an approved campaign, a ready promotional profile, a send step and its trigger's source, MARKETING_SEND_EDIT): a planned campaign (STATUS_INVALID) with what approval needs (NOT_READY naming it: an organization, dates, a budget currency, a manager), none pending at that revision (APPROVAL_PENDING); a stale targetRevision when given STALE_REVISION. The request is recorded (MarketingDecision MddRequested) and the holders of MARKETING_APPROVE who work for the organization told (MarketingCampaignApproval, its title the campaign's name and revision), the author left out unless the one-person-team flag lets them decide; a failed notice is logged. Needs the author's edit permission (MARKETING_CAMPAIGN_EDIT) on a target of the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="targetKind" default-value="campaign"/>
+            <parameter name="targetId" required="true"/>
+            <parameter name="targetRevision" type="Integer"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingDecisionId"/>
+            <parameter name="targetRevision" type="Integer"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingApprovals.js').execute('request', context)"/>
+            <set field="marketingDecisionId" from="found.marketingDecisionId"/>
+            <set field="targetRevision" from="found.targetRevision"/>
+            <set field="notifiedCount" from="found.notifiedCount"/>
+        </actions>
+    </service>
+    <service verb="decide" noun="MarketingApproval" allow-remote="false">
+        <description>A decision on the pending request of a target (design §3 Approvals): approve or refuse (REASON_REQUIRED for a refusal; DECISION_INVALID) at the revision named (REVISION_REQUIRED; STALE_REVISION naming the current one), the target read locked so a draft is decided once (ALREADY_DECIDED; APPROVAL_NOT_REQUESTED when none is pending). An author (who started it, made its current revision's material change, or asked) never decides their own (SELF_APPROVAL) unless the organization's MarketingPolicy has the one-person-team flag on, for a campaign or a send to fewer than 500 recipients, recorded as a self-approval. An approval checks what approval needs again (NOT_READY) and approves the campaign (Planned to Approved); a refusal leaves it planned. The approvers' notices are read. Needs MARKETING_APPROVE (PERMISSION_DENIED) on a target of the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="targetKind" default-value="campaign"/>
+            <parameter name="targetId" required="true"/>
+            <parameter name="targetRevision" type="Integer"/>
+            <parameter name="decision" required="true"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingDecisionId"/>
+            <parameter name="decision"/>
+            <parameter name="targetRevision" type="Integer"/>
+            <parameter name="selfApproval" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingApprovals.js').execute('decide', context)"/>
+            <set field="marketingDecisionId" from="found.marketingDecisionId"/>
+            <set field="decision" from="found.decision"/>
+            <set field="targetRevision" from="found.targetRevision"/>
+            <set field="selfApproval" from="found.selfApproval"/>
+        </actions>
+    </service>
+    <service verb="approve" noun="MarketingTarget" allow-remote="false">
+        <description>The approve service of the Marketing approval topics, which the framework's approve#NotificationMessage calls as the user: decide#MarketingApproval at the revision the notice names (targetRevision); a notice with none is refused (REVISION_REQUIRED), one of another record too (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="decision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingApprovals.js').execute('approveNotice', context)"/>
+            <set field="decision" from="found.decision"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="MarketingTarget" allow-remote="false">
+        <description>The refuse service of the Marketing approval topics, which the framework's refuse#NotificationMessage calls as the user: decide#MarketingApproval at the revision the notice names (targetRevision); a notice with none is refused (REVISION_REQUIRED), one of another record too (SOURCE_INVALID).</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="decision"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingApprovals.js').execute('refuseNotice', context)"/>
+            <set field="decision" from="found.decision"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Decisions" allow-remote="false" read-only="true">
+        <description>A target's requests and decisions, newest first (as of a date for a print: those made by then): the decision with self-approvals marked, the revision, who and when, the reason, and whether a later change ended it; with the target's current revision. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and a target outside the scope (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="targetKind" default-value="campaign"/>
+            <parameter name="targetId" required="true"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="decisions" type="List"/>
+            <parameter name="targetRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingApprovals.js').execute('decisions', context)"/>
+            <set field="decisions" from="found.decisions"/>
+            <set field="targetRevision" from="found.targetRevision"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: policy and vocabulary (design §12 CampaignDefaults, Vocabularies; MarketingPolicies.js) ===== -->
+    <service verb="get" noun="MarketingPolicy" allow-remote="false" read-only="true">
+        <description>The MarketingPolicy in effect for an organization (none: the defaults, no self-approval and a manager required) and its history, newest first (50), with the self-approval limit (500, the user's call). Needs MARKETING_CONFIGURE (PERMISSION_DENIED) and an organization of the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="policy" type="Map"/>
+            <parameter name="history" type="List"/>
+            <parameter name="selfApprovalLimit" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPolicies.js').execute('get', context)"/>
+            <set field="policy" from="found.policy"/>
+            <set field="history" from="found.history"/>
+            <set field="selfApprovalLimit" from="found.selfApprovalLimit"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="MarketingPolicy" allow-remote="false" read-only="true">
+        <description>What a policy's values would change, nothing written (design §12 PolicyPreview): the requests awaiting approval its self-approval flag would affect, the planned campaigns that would need a manager, what is missing (a currency), and when it takes effect. Refuses as get#MarketingPolicy and NUMBER_INVALID, CURRENCY_INVALID.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="selfApprovalAllowed"/>
+            <parameter name="managerRequired"/>
+            <parameter name="audienceLimit" type="Integer"/>
+            <parameter name="frequencyCapCount" type="Integer"/>
+            <parameter name="frequencyCapDays" type="Integer"/>
+            <parameter name="recipientRetentionDays" type="Integer"/>
+            <parameter name="statisticsRetentionDays" type="Integer"/>
+            <parameter name="explanation"/>
+            <parameter name="testAddresses"><description>P8: the addresses a send's test may go to, a line each, at most ten</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="findings" type="List"/>
+            <parameter name="effectiveText"/>
+            <parameter name="pendingCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPolicies.js').execute('preview', context)"/>
+            <set field="findings" from="found.findings"/>
+            <set field="effectiveText" from="found.effectiveText"/>
+            <set field="pendingCount" from="found.pendingCount"/>
+        </actions>
+    </service>
+    <service verb="store" noun="MarketingPolicy" allow-remote="false">
+        <description>A new MarketingPolicy for an organization from now, ending the one in effect (named as read: expectedPolicyId, empty for the first; STALE_REVISION otherwise): its currency, the one-person-team flag (selfApprovalAllowed, off by default), whether a manager is required, the audience limit, frequency cap and retention days, its explanation, and the test allowlist of a send's test message (P8: at most ten addresses, VALUE_INVALID). Refuses as preview#MarketingPolicy.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="selfApprovalAllowed"/>
+            <parameter name="managerRequired"/>
+            <parameter name="audienceLimit" type="Integer"/>
+            <parameter name="frequencyCapCount" type="Integer"/>
+            <parameter name="frequencyCapDays" type="Integer"/>
+            <parameter name="recipientRetentionDays" type="Integer"/>
+            <parameter name="statisticsRetentionDays" type="Integer"/>
+            <parameter name="explanation"/>
+            <parameter name="expectedPolicyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingPolicyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPolicies.js').execute('store', context)"/>
+            <set field="marketingPolicyId" from="found.marketingPolicyId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Vocabulary" allow-remote="false">
+        <description>Adds (action add) or ends (action end, marketingVocabularyId) a dated value an organization offers (design §12 Vocabularies): a ContactListType or TrackingCodeType enumeration (enumId, VALUE_INVALID), or a UTM source, medium or content code (vocabularyCode, as in a link, CODE_INVALID) with its label, channel and sequence; one current binding per organization, kind and value (VALUE_TAKEN). Needs MARKETING_CONFIGURE and an organization of the scope.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="action"/>
+            <parameter name="marketingVocabularyId"/>
+            <parameter name="vocabularyKindEnumId"/>
+            <parameter name="enumId"/>
+            <parameter name="vocabularyCode"/>
+            <parameter name="label"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="sequenceNum" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketingVocabularyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPolicies.js').execute('storeVocabulary', context)"/>
+            <set field="marketingVocabularyId" from="found.marketingVocabularyId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Vocabulary" allow-remote="false" read-only="true">
+        <description>The values an organization offers, by kind and sequence (current ones, or with includeEnded every one): kind, value, label, dates. Refuses a caller who reads nothing of Marketing (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="vocabularyKindEnumId"/>
+            <parameter name="includeEnded"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="vocabularyList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPolicies.js').execute('findVocabulary', context)"/>
+            <set field="vocabularyList" from="found.vocabularyList"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: the lifecycle participant marketing.campaigns (Admin's registry; §4, F59) ===== -->
+    <service verb="find" noun="OwnedCampaignRoles" allow-remote="false" read-only="true">
+        <description>A user's manager and contributor rows on open campaigns (not completed or cancelled), names only, for Admin's offboarding (resourceId role:campaign). Another user's need MARKETING_OWNER_CHANGE (PERMISSION_DENIED). Approvals go to the holders of the permission and a scheduled send keeps its approval: neither is a person's.</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <out-parameters>
+            <parameter name="resourceList" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('findOwnedRoles', context)"/>
+            <set field="resourceList" from="found.resourceList"/>
+        </actions>
+    </service>
+    <service verb="transfer" noun="CampaignRole" allow-remote="false">
+        <description>Moves one of fromUserId's campaign rows (campaignResourceId role:campaign) to toUserId from now: the row ended and the successor's started; a manager's move is material on a campaign not yet in progress. Needs MARKETING_OWNER_CHANGE (PERMISSION_DENIED); refuses a row the user does not hold (RECORD_UNAVAILABLE), a closed campaign (CAMPAIGN_CLOSED), a successor who is disabled or no person (OWNER_INVALID) or does not work for the campaign's organization (NOT_EMPLOYED).</description>
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <in-parameters>
+            <parameter name="campaignResourceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="transferred" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('transferRole', context)"/>
+            <set field="transferred" from="found.transferred"/>
+        </actions>
+    </service>
+
+    <!-- ===== P2: the campaign as a Chatter and RecordFiles host (design §14.3; get#RecordLinkInfo) ===== -->
+    <service verb="check" noun="CampaignAccess" allow-remote="false" read-only="true">
+        <description>Whether the caller sees a campaign (a Marketing reader of its organization; never an unowned one) and may change
+            it (MARKETING_CAMPAIGN_EDIT while it is open): the record visibility of get#RecordLinkInfo and RecordFiles for the
+            campaign and its files (CampaignAsset). A call with no user sees none.</description>
+        <in-parameters><parameter name="marketingCampaignId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="organizationPartyId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('access', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+            <set field="organizationPartyId" from="found.organizationPartyId || null"/>
+        </actions>
+    </service>
+    <service verb="create" noun="CampaignAsset">
+        <description>A file of a campaign (CampaignAsset, the record files of get#RecordLinkInfo): the row, and the uploaded file saved
+            through save#CampaignAssetFile. Needs MARKETING_CAMPAIGN_EDIT on an open campaign the caller sees (RECORD_UNAVAILABLE,
+            PERMISSION_DENIED).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.marketing.campaign.CampaignAsset" include="nonpk">
+                <exclude field-name="contentLocation"/></auto-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="contentFile" type="FileItem"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignAssetId"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('assetAccess', context)</script>
+            <service-call name="create#mantle.marketing.campaign.CampaignAsset" in-map="context" out-map="context" disable-authz="true"/>
+            <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
+                <service-call name="mantle.marketing.CampaignServices.save#CampaignAssetFile" in-map="context" disable-authz="true"/></if>
+        </actions>
+    </service>
+    <service verb="save" noun="CampaignAssetFile" allow-remote="false">
+        <description>Internal to create#CampaignAsset, which checks the caller: the file of a CampaignAsset row of that
+            campaign.</description>
+        <in-parameters>
+            <parameter name="campaignAssetId" required="true"/>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="contentFile" type="FileItem" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="contentLocation"/></out-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.marketing.campaign.CampaignAsset" value-field="assetRow" disable-authz="true"/>
+            <if condition="assetRow == null || assetRow.marketingCampaignId != marketingCampaignId">
+                <return error="true" message="RECORD_UNAVAILABLE: File ${campaignAssetId} is not of campaign ${marketingCampaignId}"/></if>
+            <set field="filename" from="contentFile.getName()"/>
+            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
+                    : 'mantle.content.large.root'"/>
+            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="contentLocation" value="${contentRoot}/marketingCampaign/${marketingCampaignId}/asset_${campaignAssetId}/${filename}"/>
+            <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
+            <script>
+                const fileStream = contentFile.getInputStream()
+                try { docRr.putStream(fileStream) } finally { fileStream.close() }
+            </script>
+            <service-call name="update#mantle.marketing.campaign.CampaignAsset" disable-authz="true"
+                    in-map="{campaignAssetId:campaignAssetId, contentLocation:contentLocation}"/>
+        </actions>
+    </service>
+</services>

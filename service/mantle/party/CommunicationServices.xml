@@ -778,7 +778,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('statusId', 'CLPT_ACCEPTED').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
                 const listIds = Array.from(new Set(memberRows.map((row) => row.contactListId)))
                 const defaults = {}
-                if (listIds.length) for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                if (listIds.length) for (const list of ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                         .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
                 mailboxOnlyIds = Array.from(new Set(memberRows.filter((row) => (row.deliveryEnumId || defaults[row.contactListId] || 'CldInbox') === 'CldMailboxOnly')
                         .map((row) => row.contactListId)))
@@ -1259,7 +1259,7 @@ along with this software (see the LICENSE.md file). If not, see
             const mailboxOnly = new Set()
             if (listIds.length) {
                 const defaults = {}
-                for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                for (const list of ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                         .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
                 for (const row of ec.entity.find('mantle.marketing.contact.ContactListParty').condition('partyId', partyId)
                         .condition('contactListId', 'in', listIds).condition('statusId', 'CLPT_ACCEPTED')
@@ -2135,6 +2135,28 @@ along with this software (see the LICENSE.md file). If not, see
             for every caller, authorization disabled or not; a call with no user sees none. Its activities are linked through
             SalesOpportunityWorkEffort.
 
+            A marketing campaign (mantle.marketing.campaign.MarketingCampaign, IronStone Marketing's Chatter and files host,
+            impl-marketing P2) and its files (CampaignAsset) are seen only by a Marketing reader of its organization, never an unowned
+            one (mantle.marketing.CampaignServices.check#CampaignAccess), for every caller, authorization disabled or not; a call with
+            no user sees none.
+
+            A marketing send (mantle.marketing.campaign.CampaignSend, IronStone Marketing's Chatter and files host, impl-marketing P8)
+            and its files (CampaignSendContent) are seen only by a Marketing reader of its organization
+            (mantle.marketing.CampaignSendServices.check#SendAccess), for every caller, authorization disabled or not; a call with no
+            user sees none.
+
+            A sales quote not yet placed (an OrderHeader of purpose OrpSalesQuote with no placedDate, IronStone Sales P7) and its files
+            (OrderContent) are seen only by a Sales reader of its seller to whom it is assigned, or to a team of theirs, and by a
+            reader of the organization's quotes (mantle.order.SalesQuoteServices.check#QuoteAccess), for every caller, authorization
+            disabled or not; a call with no user sees none. Once placed it is an order, under the order rule. A Sales quote
+            template (purpose OrpSalesQuoteTemplate, impl-sales P12) and its files are seen only by a Sales reader of its
+            organization while it is current and by a template manager of the organization (the same check), never as an order.
+
+            A customer's request for quote (a Request of type RqtQuote, IronStone Sales P8) and its files (RequestContent) are seen
+            only by a Sales reader of its organization to whom it is assigned, or to a team of theirs, and by a reader of the
+            organization's (mantle.order.SalesQuoteServices.check#QuoteRequestAccess), for every caller, authorization disabled or
+            not; a call with no user sees none.
+
             A payslip (mantle.humanres.payroll.Payslip, IronStone People's payslip content host, P26) and its files (PayslipContent)
             are seen only by a payroll reader of its employer (mantle.humanres.PayrollResultServices.check#PayslipAccess; the person
             reads their own issued slip through get#MyPayslip), for every caller, authorization disabled or not; a call with no user
@@ -2230,7 +2252,15 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.humanres.payroll.Payslip': content('mantle.humanres.payroll.PayslipContent', 'payslipId', 'contentTypeEnumId'),
                 // IronStone Sales' opportunity content host (impl-sales P4, F69): a lead's or opportunity's files, its Sales readers'
                 'mantle.sales.opportunity.SalesOpportunity': content('mantle.sales.opportunity.SalesOpportunityContent',
-                        'salesOpportunityId', 'contentTypeEnumId')}
+                        'salesOpportunityId', 'contentTypeEnumId'),
+                // IronStone Marketing's campaign files host (impl-marketing P2, design §14.3 CampaignAsset): a campaign's files,
+                // its Marketing readers'
+                'mantle.marketing.campaign.MarketingCampaign': content('mantle.marketing.campaign.CampaignAsset',
+                        'marketingCampaignId', 'contentTypeEnumId'),
+                // IronStone Marketing's send files host (impl-marketing P8, design §14.3 CampaignSendContent): a send's files, its
+                // Marketing readers'
+                'mantle.marketing.campaign.CampaignSend': content('mantle.marketing.campaign.CampaignSendContent',
+                        'campaignSendId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2673,6 +2703,43 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.sales.opportunity.SalesOpportunity' || entityName === 'mantle.sales.opportunity.SalesOpportunityContent')
                     return !!ec.service.sync().name('mantle.sales.OpportunityServices.check#OpportunityAccess')
                             .parameter('salesOpportunityId', value.salesOpportunityId).disableAuthz().call()?.recordVisible
+                // IronStone Marketing's campaign and its files (impl-marketing P2): a Marketing reader of its organization, never
+                // an unowned campaign (mantle.marketing.CampaignServices.check#CampaignAccess), whatever the entity filters and
+                // authorization; a call with no user sees none
+                if (entityName === 'mantle.marketing.campaign.MarketingCampaign' || entityName === 'mantle.marketing.campaign.CampaignAsset')
+                    return !!ec.service.sync().name('mantle.marketing.CampaignServices.check#CampaignAccess')
+                            .parameter('marketingCampaignId', value.marketingCampaignId).disableAuthz().call()?.recordVisible
+                // IronStone Marketing's send and its files (impl-marketing P8): a Marketing reader of its organization
+                // (mantle.marketing.CampaignSendServices.check#SendAccess), whatever the entity filters and authorization; a call
+                // with no user sees none
+                if (entityName === 'mantle.marketing.campaign.CampaignSend' || entityName === 'mantle.marketing.campaign.CampaignSendContent')
+                    return !!ec.service.sync().name('mantle.marketing.CampaignSendServices.check#SendAccess')
+                            .parameter('campaignSendId', value.campaignSendId).disableAuthz().call()?.recordVisible
+                // IronStone Sales' quote not yet placed and its files (impl-sales P7 review): a Sales reader of its seller to whom it is
+                // assigned (or to a team of theirs), or a reader of the organization's quotes (SALES_TEAM_VIEW)
+                // (mantle.order.SalesQuoteServices.check#QuoteAccess), not every party of its organizations or its customer, whatever
+                // the entity filters and authorization; a call with no user sees none. A placed order keeps the order rule below.
+                if (entityName === ORDER || entityName === 'mantle.order.OrderContent') {
+                    const header = entityName === ORDER ? value
+                            : ec.entity.find(ORDER).condition('orderId', value.orderId).disableAuthz().one()
+                    // a Sales quote template (impl-sales P12 review) the same way, placed never: a Sales reader of its
+                    // organization while it is current, a template manager always (SalesAccess.js templateOf)
+                    if (header && ((header.orderPurposeEnumId === 'OrpSalesQuote' && !header.placedDate)
+                            || header.orderPurposeEnumId === 'OrpSalesQuoteTemplate'))
+                        return !!ec.service.sync().name('mantle.order.SalesQuoteServices.check#QuoteAccess')
+                                .parameter('orderId', header.orderId).disableAuthz().call()?.recordVisible
+                }
+                // IronStone Sales' request for quote and its files (impl-sales P8): a Sales reader of its organization to whom it is
+                // assigned (or to a team of theirs), or a reader of the organization's (SALES_TEAM_VIEW)
+                // (mantle.order.SalesQuoteServices.check#QuoteRequestAccess), not its filer or its customer's party, whatever the
+                // entity filters and authorization; a call with no user sees none
+                if (entityName === REQUEST || entityName === 'mantle.request.RequestContent') {
+                    const request = entityName === REQUEST ? value
+                            : ec.entity.find(REQUEST).condition('requestId', value.requestId).disableAuthz().one()
+                    if (request && request.requestTypeEnumId === 'RqtQuote')
+                        return !!ec.service.sync().name('mantle.order.SalesQuoteServices.check#QuoteRequestAccess')
+                                .parameter('requestId', request.requestId).disableAuthz().call()?.recordVisible
+                }
                 // an agreement: of one of the user's organizations, with a party the user may see
                 if (entityName === 'mantle.party.agreement.Agreement') {
                     const orgIds = userOrganizationIds()

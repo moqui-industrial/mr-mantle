@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Mantle's user-facts provider (mr-moqui crates/moqui-llm/src/facts.rs; impl-sales P6, F65; design-crosscut CX-ASSIST): what a new
+    agent conversation's prompt says about the user's organizations, for every app's skills (Sales', Marketing's, the others'), named
+    in Mantle's MoquiConf.xml llm-facade. Generic: it names no app. The facts are fixed when a conversation starts and the active
+    organization may change during it, so a tool still takes its organization and checks it. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="OrganizationFacts" authenticate="false" allow-remote="false" read-only="true">
+        <implements service="org.moqui.agent.AgentServices.get#UserFacts"/>
+        <description>The user's organizations (the internal organizations they work in as get#PartyInternalOrgIds finds them: their
+            agent, employee and member organizations and those organizations' direct rollup children) and the active one (their
+            ACTIVE_ORGANIZATION preference when they may use it, by get#PartyOrganizationInfo's rule, read without clearing
+            anything; else none chosen), each by name and id, at most twenty. Only for the signed-in user (or with no user, the
+            agent runtime's own context): another user's facts are none. Reads only (it runs under the read fence).</description>
+        <actions>
+            <set field="factList" from="[]"/>
+            <if condition="ec.user.userId &amp;&amp; userId != ec.user.userId"><return/></if>
+            <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount" disable-authz="true">
+                <field-map field-name="userId"/></entity-find-one>
+            <if condition="!userAccount?.partyId"><return/></if>
+            <service-call name="mantle.party.PartyServices.get#PartyInternalOrgIds" out-map="orgInfo"
+                    in-map="{partyId: userAccount.partyId}" disable-authz="true"/>
+            <set field="userOrgIds" from="Array.from(orgInfo.userOrgIds || [])"/>
+            <entity-find-one entity-name="moqui.security.UserPreference" value-field="activePref" disable-authz="true">
+                <field-map field-name="userId"/><field-map field-name="preferenceKey" value="ACTIVE_ORGANIZATION"/></entity-find-one>
+            <set field="activeOrgId" from="activePref?.preferenceValue || null"/>
+            <!-- the rule of get#PartyOrganizationInfo: a member, or an administrator choosing any internal organization -->
+            <set field="activeAllowed" from="!!activeOrgId &amp;&amp; userOrgIds.includes(activeOrgId)"/>
+            <if condition="activeOrgId &amp;&amp; !activeAllowed &amp;&amp; userId == ec.user.userId &amp;&amp; (ec.user.isInGroup('ADMIN') || ec.user.hasPermission('ACCOUNTING_ADMIN'))">
+                <entity-find-one entity-name="mantle.party.PartyRole" value-field="internalRole" cache="true" disable-authz="true">
+                    <field-map field-name="partyId" from="activeOrgId"/><field-map field-name="roleTypeId" value="OrgInternal"/></entity-find-one>
+                <set field="activeAllowed" from="!!internalRole"/>
+            </if>
+            <set field="namedIds" from="userOrgIds.slice(0, 20).concat(activeAllowed &amp;&amp; !userOrgIds.includes(activeOrgId) ? [activeOrgId] : [])"/>
+            <entity-find entity-name="mantle.party.Organization" list="organizationList" disable-authz="true">
+                <econdition field-name="partyId" operator="in" from="namedIds.length ? namedIds : ['_NA_']"/>
+                <order-by field-name="organizationName"/>
+            </entity-find>
+            <set field="nameOf" from="Object.fromEntries(Array.from(organizationList).map(row =&gt; [row.partyId, (row.organizationName || row.partyId) + ' (' + row.partyId + ')']))"/>
+            <if condition="userOrgIds.length">
+                <script>factList.push({label: 'Organizations', value: userOrgIds.slice(0, 20).map(id =&gt; nameOf[id] || id).join(', ') + (userOrgIds.length &gt; 20 ? ' and ' + (userOrgIds.length - 20) + ' more' : '')})</script>
+            </if>
+            <script>factList.push({label: 'Active organization', value: activeAllowed ? (nameOf[activeOrgId] || activeOrgId) : 'none chosen; ask which organization when a task needs one'})</script>
+        </actions>
+    </service>
+</services>

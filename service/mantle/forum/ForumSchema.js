@@ -1674,4 +1674,75 @@
         service: 'mantle.forum.DeliveryServices.claim#HeldMail',
         fields: ['siteId', 'token', 'operationId'],
     },
+    // IronStone Sales P13 (impl-sales P13; design-sales §10): PASS Sales' customer quotes (mantle.order.SalesPortalServices)
+    findSalesQuotes: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerQuotes',
+        fields: ['siteId', 'state', 'cursor', 'limit'],
+    },
+    getSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerQuote',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesQuoteDocument: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    respondSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.respond#CustomerQuote',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'action',
+            'expectedRevision',
+            'acknowledge',
+            'purchaseOrder',
+            'acceptorName',
+            'acceptorTitle',
+            'reason',
+            'operationId',
+        ],
+    },
+    getSalesQuoteResponse: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteResponse',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    // IronStone Sales P17 (impl-sales P17; design-sales §10): PASS Sales' customer orders, reads only
+    findSalesOrders: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerOrders',
+        fields: ['siteId', 'state', 'reference', 'cursor', 'limit'],
+    },
+    getSalesOrder: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerOrder',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesOrderDocument: {
+        service: 'mantle.order.SalesPortalServices.get#OrderDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    // IronStone Marketing P7 (impl-marketing P7; design-marketing §13): PASS Marketing's public subscription
+    // (mantle.marketing.MarketingPortalServices)
+    getMarketingPublication: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Publication',
+        fields: ['siteId', 'contactListId'],
+    },
+    requestSubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.request#Subscription',
+        fields: [
+            'siteId',
+            'emailAddress',
+            'displayName',
+            'contactListIds',
+            'consent',
+            'operationId',
+        ],
+    },
+    getSubscriptionRequest: {
+        service: 'mantle.marketing.MarketingPortalServices.get#SubscriptionRequest',
+        fields: ['siteId', 'token'],
+    },
+    verifySubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.verify#Subscription',
+        fields: ['siteId', 'token', 'operationId'],
+    },
 })

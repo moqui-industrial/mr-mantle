@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' forecasts and targets (F of IronStone Sales design §12.1; design §8 Forecast and TargetAttainment, §9 Targets; impl-sales
+    P18, SAL-FORECAST), over SalesForecasts.js: a SalesForecast row a key (organization, internal party: a person, a sales team or the
+    organization itself, time period, currency), holding the entered judgement and the target (quota and basis) and its parent in the
+    team hierarchy; the pipeline, won, order and invoice measures computed as read, from the records the reader sees, never stored
+    and never added across currencies. A reader sees their own key, a team manager their teams' and members', a holder of
+    SALES_TEAM_VIEW the organization's (SalesAccess.js forecastOf); another organization's forecast answers RECORD_UNAVAILABLE. A
+    judgement needs SALES_FORECAST_EDIT, a target SALES_TEAM_MANAGE; every write of a stored row names the revision it read
+    (REVISION_CHANGED). All in process only (allow-remote="false"). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="define" noun="ForecastKey" type="interface">
+        <description>A forecast's key, each part optional where a service says so: the organization (of the caller's scope, else the
+            default one), the internal party (a person who works for it, one of its sales teams or the organization itself; else the
+            caller), the time period (a Sales or Fiscal period of the organization; else its Sales quarter holding today) and the
+            currency (else the organization's base currency).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="internalPartyId"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="currencyUomId"/>
+        </in-parameters>
+    </service>
+
+    <service verb="get" noun="Forecast" allow-remote="false" read-only="true">
+        <description>Forecast's slice (design §8 ForecastMetrics, ForecastDeals): a stored forecast by id, or a key, as of a time (now
+            by default). Its measures, each labelled: the quota and its basis, the open and the weighted pipeline (qualified open
+            deals expected to close in the period, in the key's currency), open and won monthly recurring revenue, the submitted
+            forecast and best case, the won amount (deals closed won in the period, not invoiced revenue), placed orders and
+            finalized invoices by their own dates, and for the organization's key the orders and invoices with no representative.
+            The deals read are those of the key's party and of its descendant forecasts' parties at the as-of time, each once, of
+            those the reader sees; each deal is listed with whether it counts and the reason one is left out (a lead, no expected
+            close, no amount, no probability, another currency), paged. Also the child forecasts with their own judgement (never
+            added to the parent's), the product and category allocations and what the caller may do. No percentage on a zero quota.
+            Refuses a caller who reads no Sales (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), a party
+            that is no person, team or the organization (SUBJECT_INVALID), a period that is not the organization's (PERIOD_INVALID),
+            an unknown currency (CURRENCY_INVALID) and a forecast the caller does not see (RECORD_UNAVAILABLE).</description>
+        <implements service="mantle.sales.ForecastServices.define#ForecastKey"/>
+        <in-parameters>
+            <parameter name="salesForecastId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="forecastFound" type="Boolean"/>
+            <parameter name="noPeriod" type="Boolean"><description>No period was named and the organization has no sales period
+                holding today: nothing to show</description></parameter>
+            <parameter name="forecast" type="Map"/>
+            <parameter name="measures" type="List"/>
+            <parameter name="children" type="List"/>
+            <parameter name="details" type="List"/>
+            <parameter name="dealList" type="List"/>
+            <parameter name="dealListCount" type="Integer"/>
+            <parameter name="dealListPageIndex" type="Integer"/>
+            <parameter name="dealListPageSize" type="Integer"/>
+            <parameter name="dealListPageMaxIndex" type="Integer"/>
+            <parameter name="dealListPageRangeLow" type="Integer"/>
+            <parameter name="dealListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('getForecast', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Forecast" allow-remote="false">
+        <description>SubmitForecast (design §8): the caller's judgement on a key, its forecast amount and best case (not below the
+            forecast) with a reason kept in the audit log, and when and by whom it was entered. A stored forecast is named by its id
+            and the revision read; a key with no forecast yet makes one. Refuses a caller without SALES_FORECAST_EDIT or a key not
+            theirs to judge (their own, a team they manage, or with SALES_TEAM_VIEW a team or the organization; PERMISSION_DENIED), a
+            stale revision (REVISION_CHANGED), a key that has a forecast already (FORECAST_EXISTS), no forecast amount
+            (AMOUNT_REQUIRED), a negative or too precise amount (AMOUNT_INVALID, CURRENCY_PRECISION), a best case below the forecast
+            (BEST_CASE_INVALID) and a forecast below its allocations (DETAIL_OVER_FORECAST), with the key's refusals of
+            get#Forecast.</description>
+        <implements service="mantle.sales.ForecastServices.define#ForecastKey"/>
+        <in-parameters>
+            <parameter name="salesForecastId"/>
+            <parameter name="forecastAmount"/>
+            <parameter name="bestCaseAmount"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesForecastId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('storeForecast', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="ForecastDetail" allow-remote="false">
+        <description>ForecastDetail (design §8): an allocation of a forecast's judgement to a product or a category (one of them), an
+            amount and a quantity with its unit, or its removal (remove with its sequence id), at the forecast's revision. The
+            allocations never add up to more than the forecast, and a product is never counted both directly and through a category
+            it is a member of. Refuses a forecast the caller does not see (RECORD_UNAVAILABLE) or may not judge (PERMISSION_DENIED),
+            a stale revision (REVISION_CHANGED), neither or both of a product and a category (DIMENSION_REQUIRED), an unknown one
+            (PRODUCT_INVALID, CATEGORY_INVALID), an overlap (DETAIL_OVERLAP), no amount or quantity (AMOUNT_REQUIRED), an amount
+            before the forecast is submitted (FORECAST_REQUIRED) and allocations over the forecast (DETAIL_OVER_FORECAST).</description>
+        <in-parameters>
+            <parameter name="salesForecastId" required="true"/>
+            <parameter name="salesForecastDetailSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="productCategoryId"/>
+            <parameter name="amount"/>
+            <parameter name="quantity"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="remove"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesForecastDetailSeqId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('storeForecastDetail', context))</script>
+        </actions>
+    </service>
+
+    <service verb="store" noun="Target" allow-remote="false">
+        <description>SalesTargets (design §9 Targets): a key's target, its quota, the basis it is measured on (won opportunity value
+            by default, placed sales order value or finalized sales invoice value) and its parent forecast in the team hierarchy
+            (clearParent to remove it), the reason kept in the audit log; changing a target never changes the measured actuals. A new
+            key (organization, internal party and period required) makes its forecast; a stored one is named by id and revision, its
+            key unchanged. Refuses a caller without SALES_TEAM_MANAGE or a key they do not see (PERMISSION_DENIED), a stale revision
+            (REVISION_CHANGED), a key that has a forecast already (DUPLICATE_KEY), no quota (AMOUNT_REQUIRED), another basis
+            (BASIS_INVALID), a parent not of the same organization, period and currency or not seen (PARENT_INVALID) and a hierarchy
+            cycle (HIERARCHY_CYCLE), with the key's refusals of get#Forecast.</description>
+        <implements service="mantle.sales.ForecastServices.define#ForecastKey"/>
+        <in-parameters>
+            <parameter name="salesForecastId"/>
+            <parameter name="quotaAmount"/>
+            <parameter name="basisEnumId"/>
+            <parameter name="parentSalesForecastId"/>
+            <parameter name="clearParent"/>
+            <parameter name="reason"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesForecastId"/>
+            <parameter name="revision"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('storeTarget', context))</script>
+        </actions>
+    </service>
+
+    <service verb="find" noun="Targets" allow-remote="false" read-only="true">
+        <description>SalesTargets' list (design §9 Targets): the targets of an organization (the default one when none is named), of a
+            period when named, the caller sees, with their party, period, currency, quota, basis, parent, submitted forecast, revision
+            and whether the caller may change them, and whether the organization has periods; with includeForecasts the forecasts with no quota too. Refuses a caller who reads
+            no Sales (PERMISSION_DENIED) and an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="includeForecasts"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="periodsFound" type="Boolean"><description>Whether the organization has a sales or fiscal period</description></parameter>
+            <parameter name="targetList" type="List"/>
+            <parameter name="targetListCount" type="Integer"/>
+            <parameter name="targetListPageIndex" type="Integer"/>
+            <parameter name="targetListPageSize" type="Integer"/>
+            <parameter name="targetListPageMaxIndex" type="Integer"/>
+            <parameter name="targetListPageRangeLow" type="Integer"/>
+            <parameter name="targetListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('findTargets', context))</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="TargetAttainment" allow-remote="false" read-only="true">
+        <description>TargetAttainment (design §8 TargetOptions, TargetResults): each target of an organization, period and currency
+            the caller sees (narrowed to one target and those below it, and to a basis, when named), as of a time: its quota, the
+            submitted forecast, the actual on the one basis the target names (won opportunity value, placed sales order value or
+            finalized sales invoice value, never added together), the variance, the percentage (none for a zero quota) and the count
+            of source records; and, for a reader of the organization's whole pipeline, the orders and invoices with no
+            representative apart. Counts only the deals, orders and invoices the reader sees; no template or recurring base. Refuses
+            a caller without SALES_REPORT_VIEW (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), a period
+            not the organization's (PERIOD_INVALID), an unknown currency (CURRENCY_INVALID) or basis (BASIS_INVALID) and a target not
+            seen (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="basisEnumId"/>
+            <parameter name="salesForecastId"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="timePeriodId"/>
+            <parameter name="periodName"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="noPeriod" type="Boolean"><description>No period was named and the organization has none holding today</description></parameter>
+            <parameter name="unassignedList" type="List"/>
+            <parameter name="resultList" type="List"/>
+            <parameter name="resultListCount" type="Integer"/>
+            <parameter name="resultListPageIndex" type="Integer"/>
+            <parameter name="resultListPageSize" type="Integer"/>
+            <parameter name="resultListPageMaxIndex" type="Integer"/>
+            <parameter name="resultListPageRangeLow" type="Integer"/>
+            <parameter name="resultListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('getTargetAttainment', context))</script>
+        </actions>
+    </service>
+
+    <service verb="ensure" noun="SalesPeriods" allow-remote="false">
+        <description>The sales periods of an organization's calendar year (this year by default): its Sales year, four quarters and
+            twelve months, each made only when the organization has none of its type starting that day, the quarters under the year
+            and the months under their quarter. Refuses a caller who is neither a sales manager (SALES_TEAM_MANAGE) nor the Sales
+            administrator (SALES_CONFIGURE; PERMISSION_DENIED), an organization outside the scope or not internal
+            (ORGANIZATION_DENIED) and a year outside 2000 to 2100 (YEAR_INVALID).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="year"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="createdCount" type="Integer"/>
+            <parameter name="yearPeriodId"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesForecasts.js').execute('ensureSalesPeriods', context))</script>
+        </actions>
+    </service>
+    <!-- ========== P19: the pipeline reports (design §8 PipelineAnalysis, WinLoss; impl-sales P19), over SalesPipelineReports.js ========== -->
+    <service verb="get" noun="PipelineAnalysis" allow-remote="false" read-only="true">
+        <description>PipelineAnalysis (design §8 PipelineMeasures, PipelineFunnel): the open qualified deals a Sales report reader sees,
+            as they stood at the as-of time (now by default; each field from its audit log), under the filters (organization, team,
+            owner, pipeline, stage, source, campaign, account, currency, expected close period), grouped by stage, source, owner or
+            age band and by currency: count, estimated and weighted amount, monthly recurring amount, average age, missing estimates
+            and next-activity coverage (open tasks now), never added across currencies; the open leads counted apart. Stage
+            durations from the audited stage changes up to the time, reopenings included, a stay whose entry or exit the log does
+            not show counted unknown, never guessed. Lead conversion over the leads created between cohortFrom and cohortThru (the
+            90 days to the time by default): created, qualified (convertedDate), disqualified, still open, won. The funnel's steps
+            visits (Marketing's count#SalesVisits when it exists, else not available), leads, qualified and won, as counts. The open
+            deals behind the measures, paged (pageNoLimit for an export, up to 2,000). Refuses a caller without SALES_REPORT_VIEW
+            (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), an unknown grouping (GROUPING_INVALID) and
+            more than 2,000 deals (TOO_MANY_RECORDS).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="opportunityStageId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="closeFrom"/>
+            <parameter name="closeThru"/>
+            <parameter name="cohortFrom"/>
+            <parameter name="cohortThru"/>
+            <parameter name="asOfDate"/>
+            <parameter name="groupBy" default-value="stage"><description>stage, source, owner or age</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="groupBy"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="openDealCount" type="Integer"/>
+            <parameter name="openLeadCount" type="Integer"/>
+            <parameter name="measureList" type="List"/>
+            <parameter name="stageDurationList" type="List"/>
+            <parameter name="conversion" type="Map"/>
+            <parameter name="funnelSteps" type="List"/>
+            <parameter name="activityNote"/>
+            <parameter name="dealList" type="List"/>
+            <parameter name="dealListCount" type="Integer"/>
+            <parameter name="dealListPageIndex" type="Integer"/>
+            <parameter name="dealListPageSize" type="Integer"/>
+            <parameter name="dealListPageMaxIndex" type="Integer"/>
+            <parameter name="dealListPageRangeLow" type="Integer"/>
+            <parameter name="dealListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesPipelineReports.js').execute('pipelineAnalysis', context))</script>
+        </actions>
+    </service>
+
+    <service verb="get" noun="WinLoss" allow-remote="false" read-only="true">
+        <description>WinLoss (design §8 OutcomeOptions, OutcomeResults): the deals a Sales report reader sees closed in a period (the
+            calendar quarter holding the as-of time by default), under the filters (organization, team, owner, account, source,
+            currency, lost reason). In the final-outcome mode (mode final, the default) each deal once, by its outcome and close date
+            as of the report time; in the event mode (events) each close event in the period, a reopened deal's earlier closes among
+            them. Won and lost counts and amounts by currency, never added across currencies; win rate as won over won and lost
+            opportunities only; leads closed Lost (disqualified before qualification) counted apart; loss reasons (as recorded at
+            the close) with counts and amounts by currency; average cycle time (created to closed) of won and of lost deals; the
+            reopenings of the deals counted; the outcomes listed, paged (pageNoLimit for an export, up to 2,000). Refuses a caller
+            without SALES_REPORT_VIEW (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED), an unknown mode
+            (MODE_INVALID) and more than 2,000 deals (TOO_MANY_RECORDS).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="accountPartyId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="salesPipelineId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="lostReasonEnumId"/>
+            <parameter name="fromDate"/>
+            <parameter name="thruDate"/>
+            <parameter name="asOfDate"/>
+            <parameter name="mode" default-value="final"><description>final or events</description></parameter>
+            <parameter name="pageIndex"/>
+            <parameter name="pageSize"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="mode"/>
+            <parameter name="modeText"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="wonCount" type="Integer"/>
+            <parameter name="lostCount" type="Integer"/>
+            <parameter name="disqualifiedCount" type="Integer"/>
+            <parameter name="winRatePercent"/>
+            <parameter name="winRateText"/>
+            <parameter name="averageWonCycleDays"/>
+            <parameter name="averageWonCycleText"/>
+            <parameter name="averageLostCycleText"/>
+            <parameter name="reopenCount" type="Integer"/>
+            <parameter name="outcomeList" type="List"/>
+            <parameter name="reasonList" type="List"/>
+            <parameter name="dealList" type="List"/>
+            <parameter name="dealListCount" type="Integer"/>
+            <parameter name="dealListPageIndex" type="Integer"/>
+            <parameter name="dealListPageSize" type="Integer"/>
+            <parameter name="dealListPageMaxIndex" type="Integer"/>
+            <parameter name="dealListPageRangeLow" type="Integer"/>
+            <parameter name="dealListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/sales/SalesPipelineReports.js').execute('winLoss', context))</script>
+        </actions>
+    </service>
+</services>

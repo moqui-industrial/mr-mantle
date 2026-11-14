@@ -1,0 +1,79 @@
+{
+  "id": "mantle-sales-pipeline-stage-age",
+  "type": "dataset",
+  "title": "Sales pipeline by stage age",
+  "body": {
+    "folder": "Sales",
+    "description": "The same leads and opportunities as the Sales pipeline, timed by when each entered its current stage, so a time range finds the deals that have not moved for a while (the stalled-deal alert). Each viewer reads the deals of their sales scope, as the Sales pipeline's.",
+    "documentType": "MantleSalesOpportunity",
+    "timeField": "stageEnteredDate",
+    "signal": "business",
+    "rowFilterService": "mantle.sales.SalesWorkspaceServices.get#PipelineRowFilter",
+    "fieldDefaults": {
+      "typeEnumId": {
+        "enumTypeId": "SalesOpportunityType"
+      },
+      "statusId": {
+        "statusTypeId": "SalesOpportunity"
+      },
+      "lostReasonEnumId": {
+        "enumTypeId": "SalesLostReason"
+      },
+      "organizationPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "teamPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "salesPipelineId": {
+        "lookup": {
+          "entityName": "mantle.sales.opportunity.SalesPipeline",
+          "keyField": "salesPipelineId",
+          "displayField": "pipelineName"
+        }
+      },
+      "opportunityStageId": {
+        "lookup": {
+          "entityName": "mantle.sales.opportunity.SalesOpportunityStage",
+          "keyField": "opportunityStageId",
+          "displayField": "description"
+        }
+      },
+      "dataSourceId": {
+        "lookup": {
+          "entityName": "moqui.basic.DataSource",
+          "keyField": "dataSourceId",
+          "displayField": "description"
+        }
+      },
+      "currencyUomId": {
+        "lookup": {
+          "entityName": "moqui.basic.Uom",
+          "keyField": "uomId",
+          "displayField": "description"
+        }
+      },
+      "estimatedAmount": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      },
+      "recurringAmount": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      },
+      "estimatedProbability": {
+        "decimals": 0
+      }
+    }
+  }
+}
