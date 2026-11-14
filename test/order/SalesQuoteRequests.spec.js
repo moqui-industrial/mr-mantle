@@ -145,9 +145,9 @@ const noticesOf = (topic, requestId) =>
         .map(row => ({
             titleText: String(row.titleText || ""),
             recordId: row.recordId,
-            userIds: rowsOf("moqui.security.user.NotificationMessageUser", {notificationMessageId: row.notificationMessageId}).map(
-                user => user.userId
-            )
+            userIds: rowsOf("moqui.security.user.NotificationMessageUser", {
+                notificationMessageId: row.notificationMessageId
+            }).map(user => user.userId)
         }))
 const detail = (username, requestId) => as(username, "get#QuoteRequest", {requestId})
 const linkVisible = (username, recordEntityName, recordId) =>
@@ -577,17 +577,15 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
                 )
                 return requestId
             })
-        // the organization's default Sales team (Sales P9's SalesPolicy, when this build has it) is East
-        const policies = ec.entity.isEntityDefined("mantle.sales.policy.SalesPolicy")
-        if (policies)
-            system(() =>
-                make("mantle.sales.policy.SalesPolicy", {
-                    salesPolicyId: prefix + "_POLICY",
-                    organizationPartyId: orgA,
-                    fromDate: 0,
-                    defaultTeamPartyId: teams.east
-                })
-            )
+        // the organization's default Sales team (its SalesPolicy, Sales P9) is East
+        system(() =>
+            make("mantle.sales.policy.SalesPolicy", {
+                salesPolicyId: prefix + "_POLICY",
+                organizationPartyId: orgA,
+                fromDate: 0,
+                defaultTeamPartyId: teams.east
+            })
+        )
         const chargeable = claim("CHARGE", {decisionEnumId: "WdRejected", chargeEstimate: 180, chargeCurrencyUomId: "USD"})
         const covered = claim("COVERED", {decisionEnumId: "WdCovered"})
         // Customer Service's decisions as decide#WarrantyClaim's commit hands them on: the chargeable one tells East's quote makers
@@ -616,7 +614,6 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
             .script("component://mr-mantle/service/mantle/order/SalesQuoteRequests.js")
             .quotesOfRequest(chargeable)
         return {
-            policies,
             toSales,
             coveredToSales,
             salesNotices: noticesOf("SalesRepairToQuote", chargeable),
@@ -666,14 +663,13 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
         r.byId.includes(r.chargeable)
         // the notices both ways (the user's call of Nov 13, 2026), none naming the fault or an amount
         r.coveredToSales.sentCount == 0
-        r.policies ? r.toSales.sentCount == 1 : r.toSales.sentCount == 0
-        !r.policies || r.salesNotices.some(notice => notice.userIds.includes(users.rep) && !notice.userIds.includes(users.reader))
+        r.toSales.sentCount == 1
+        r.salesNotices.length == 1
+        r.salesNotices[0].userIds.join() == users.rep
         r.serviceNotices.length == 1
         r.serviceNotices[0].userIds.join() == users.agent
         r.serviceNotices[0].recordId == r.chargeable
         r.serviceNotices[0].titleText.includes(r.quote.orderId)
-        r.salesNotices
-            .concat(r.serviceNotices)
-            .every(notice => !/water|Diagnosis|damage|180/i.test(notice.titleText))
+        r.salesNotices.concat(r.serviceNotices).every(notice => !/water|Diagnosis|damage|180/i.test(notice.titleText))
     }
 })

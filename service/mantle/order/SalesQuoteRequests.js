@@ -964,7 +964,8 @@ function findQuoteRequests(p) {
     query = query.selectField("requestId").selectField("requestDate").selectField("responseRequiredDate").distinct(true)
     const orderBy = text(p.orderByField)
     const sort =
-        orderBy && (kind === "repair" ? /^[-+^]?requestDate$/ : /^[-+^]?(requestName|requestDate|responseRequiredDate)$/).test(orderBy)
+        orderBy &&
+        (kind === "repair" ? /^[-+^]?requestDate$/ : /^[-+^]?(requestName|requestDate|responseRequiredDate)$/).test(orderBy)
             ? [orderBy, "requestId"]
             : ["-requestDate", "requestId"]
     let pageRows
@@ -1120,16 +1121,13 @@ const activeUserIds = partyId =>
               .filter(row => row.disabled !== "Y")
               .map(row => row.userId)
         : []
-// The organization's default Sales team: Sales P9's SalesPolicy in effect (an organization's dated Sales defaults), when this build
-// has it; none otherwise.
+// The organization's default Sales team: its SalesPolicy in effect (Sales P9, SalesApprovals.js policyOf), else none.
 function defaultTeamOf(organizationPartyId) {
-    const entity = "mantle.sales.policy.SalesPolicy"
-    if (!organizationPartyId || !ec.entity.isEntityDefined(entity)) return null
-    const now = ms(ec.user.nowTimestamp)
-    const policy = rows(entity, {organizationPartyId})
-        .filter(row => (row.fromDate == null || ms(row.fromDate) <= now) && (row.thruDate == null || ms(row.thruDate) > now))
-        .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0]
-    return policy?.defaultTeamPartyId || null
+    if (!organizationPartyId) return null
+    return (
+        ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js").policyOf(organizationPartyId)
+            ?.defaultTeamPartyId || null
+    )
 }
 // notify#RepairToQuote: after a warranty decision (decide#WarrantyClaim's commit), a chargeable one current on an open claim tells
 // the current members of the organization's default team who would see it under "Repairs to quote" (SALES_QUOTE_EDIT or
@@ -1162,9 +1160,7 @@ function notifyRepairToQuote(p) {
         ).filter(partyId => settings.worksFor(partyId, organizationPartyId))
         const userIds = memberIds
             .flatMap(activeUserIds)
-            .filter(
-                userId => intake().userHolds(userId, "SALES_QUOTE_EDIT") || intake().userHolds(userId, "SALES_TEAM_VIEW")
-            )
+            .filter(userId => intake().userHolds(userId, "SALES_QUOTE_EDIT") || intake().userHolds(userId, "SALES_TEAM_VIEW"))
         if (!userIds.length) return {sentCount}
         ec.makeNotificationMessage()
             .topic(toSalesTopic)
