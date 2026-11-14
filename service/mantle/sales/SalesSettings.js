@@ -854,7 +854,9 @@ const routes = {
     stages: "salesStages",
     teams: "salesTeams",
     sources: "salesLeadSources",
-    defaults: "salesDefaults"
+    defaults: "salesDefaults",
+    // P19: the approval rules (Settings › Approval policies)
+    approvalPolicies: "salesApprovalPolicies"
 }
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
 const readinessChecks = [
@@ -975,6 +977,91 @@ const readinessChecks = [
         }
     }
 ]
+// ===== P19: readiness complete (impl-sales P19): Sales' jobs, its mail templates and its approval rules =====
+// Sales' scheduled jobs: the lead intake purge, the quote reminders and the agreement expiry; a job paused or whose last run failed
+// is named (instance-wide, so each organization's check names the same jobs).
+const salesJobs = ["purge_SalesLeadIntakes", "send_SalesQuoteReminders", "expire_SalesAgreements"]
+// The mail Sales sends (the quote, its reminder and the storeless order confirmation) needs its template, a from address and a mail
+// server with a host.
+readinessChecks.push(
+    {
+        checkKey: "sales.jobs",
+        title: "Scheduled jobs",
+        run: () => {
+            const problems = []
+            for (const jobName of salesJobs) {
+                const job = one("moqui.service.job.ServiceJob", {jobName})
+                if (!job) {
+                    problems.push(jobName + " is missing")
+                    continue
+                }
+                if (job.paused === "Y") problems.push(jobName + " is paused")
+                const last = Array.from(
+                    find("moqui.service.job.ServiceJobRun", {jobName}).orderBy("-startTime").limit(1).list()
+                )[0]
+                if (last?.hasError === "Y") problems.push(jobName + "'s last run failed")
+            }
+            if (problems.length) return {state: "warning", reasonCode: "JOB_FAILED", message: problems.join("; ")}
+            return {state: "ready", message: salesJobs.length + " jobs scheduled, none failing"}
+        }
+    },
+    {
+        checkKey: "sales.templates",
+        title: "Mail templates",
+        run: organizationPartyId => {
+            // the organization's own templates where its Sales defaults name them, else Mantle's
+            const policy = approvals().policyOf(organizationPartyId)
+            const chosen = {
+                [policy?.quoteEmailTemplateId || "MANTLE_SALES_QUOTE"]: "Quote",
+                [policy?.reminderEmailTemplateId || "MANTLE_SALES_QUOTE_REMINDER"]: "Quote reminder",
+                [policy?.confirmationEmailTemplateId || "MANTLE_SALES_ORDER_CONFIRMATION"]: "Order confirmation"
+            }
+            const missing = []
+            for (const [emailTemplateId, label] of Object.entries(chosen)) {
+                const template = one("moqui.basic.email.EmailTemplate", {emailTemplateId})
+                if (!template) missing.push(label + " (no template)")
+                else if (blank(template.fromAddress)) missing.push(label + " (no from address)")
+                else {
+                    const server = template.emailServerId
+                        ? one("moqui.basic.email.EmailServer", {emailServerId: template.emailServerId})
+                        : null
+                    if (!server || blank(server.smtpHost)) missing.push(label + " (no mail server)")
+                }
+            }
+            if (missing.length)
+                return {
+                    state: "warning",
+                    reasonCode: "TEMPLATE_INCOMPLETE",
+                    message: "Mail cannot go out for: " + missing.join(", ")
+                }
+            return {state: "ready", message: "Quote, reminder and confirmation mail have their templates"}
+        }
+    },
+    {
+        checkKey: "sales.approvalPolicies",
+        title: "Approval rules",
+        run: organizationPartyId => {
+            const policy = approvals().policyOf(organizationPartyId)
+            const ruleCount = find("mantle.sales.policy.SalesApprovalPolicy", {organizationPartyId})
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .count()
+            if (policy?.orderApprovalRequired === "Y" && !ruleCount)
+                return {
+                    state: "warning",
+                    reasonCode: "NO_APPROVAL_RULE",
+                    message: "Every sales order waits for an approver, and no approval rule names who decides",
+                    fixRoute: routes.approvalPolicies
+                }
+            return {
+                state: "ready",
+                message: ruleCount
+                    ? ruleCount + (ruleCount === 1 ? " approval rule" : " approval rules") + " in effect"
+                    : "No approval rules: quotes are issued and orders approved without a Sales approval"
+            }
+        }
+    }
+)
+// ===== end of P19 =====
 // The organizations that use Sales: a pipeline, a team, a source offered or an opportunity of theirs.
 function usesSales(organizationPartyId) {
     return (

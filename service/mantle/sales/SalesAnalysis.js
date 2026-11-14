@@ -7,6 +7,14 @@
 // mix another organization's sales (F6); a user without report read in the organization is refused. Without a period or
 // days it reads the organization's fiscal month holding today. A read capped at its limit is named (complete false),
 // never cut silently.
+//
+// Sales' report scope (impl-sales P19, design-sales §8 SalesAnalysis; Z10: Sales owns the report, Accounting mounts it): a report
+// reader (ACCOUNTING_VIEW) of the organization is answered as before, with the cost of what was shipped and its margin (Accounting's
+// finance columns); a holder of SALES_REPORT_VIEW without it is answered for an organization of their sales scope (SalesAccess.js
+// reportOrganizations), the cost and margin only when they read both prices and costs (PRICE_VIEW and PRODUCT_COST_VIEW), else
+// withheld (null, never zero; costShown false). A shipped line's cost is its issuances' quantity times their asset's acquire cost,
+// and only where that cost is in the sale's currency: a cost in another currency or none makes the row's cost unknown (named in
+// costIncomplete), never converted or counted as zero.
 const policy = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
 const reports = ec.resource.script("component://mr-mantle/service/mantle/ledger/FinanceReports.js")
 const {find, denied} = policy
@@ -82,18 +90,90 @@ function customerClasses(customerIds) {
     return out
 }
 
-function analysis(p) {
-    const s = policy.organization(p, "reportRead")
-    const org = s.organizationPartyId
-    if (!p.timePeriodId && !p.fromDate && !p.thruDate) {
-        const month = policy.call("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", {
-            organizationPartyId: org,
-            filterDate: ec.user.nowTimestamp,
-            timePeriodTypeId: "FiscalMonth"
-        }).timePeriodList
-        p = Object.assign({}, p, {timePeriodId: Array.from(month || [])[0]?.timePeriodId || null})
+// The reader of the analysis (impl-sales P19): {organizationPartyId, finance, costShown}. Accounting's report reader of the
+// organization first; else a Sales report reader of an organization of their scope; else Accounting's refusal, as before.
+function analysisReader(p) {
+    const named = p.organizationPartyId ? String(p.organizationPartyId) : null
+    const caps = policy.capabilities()
+    const salesReader = access.has("SALES_REPORT_VIEW")
+    if (caps.reportRead && caps.read) {
+        const a = policy.access("reportRead")
+        if (!salesReader || !named || a.allowedOrganizationPartyIds.includes(named))
+            return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: true}
     }
-    p = reports.execute("options", Object.assign({}, p, {organizationPartyId: org}))
+    if (!salesReader) return {organizationPartyId: policy.organization(p, "reportRead").organizationPartyId, finance: true, costShown: true}
+    const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
+    const userScope = salesAccess.scope()
+    const org = named || salesAccess.defaultOrganization(userScope)
+    if (!org) denied("ORGANIZATION_REQUIRED", "Choose an organization")
+    salesAccess.reportOrganizations([org])
+    return {organizationPartyId: org, finance: false, costShown: access.has("PRICE_VIEW") && access.has("PRODUCT_COST_VIEW")}
+}
+// A Sales report reader's days (impl-sales P19): a fiscal or sales period of the organization itself (its own records, read
+// without Accounting's period check), else the days given, else the organization's fiscal month holding today, else the calendar
+// month; the same bounds as Accounting's options (the period's days from midnight in the user's zone).
+const salesPeriodTypes = ["FiscalYear", "FiscalQuarter", "FiscalMonth", "SalesYear", "SalesQuarter", "SalesMonth"]
+function salesOptions(p, org) {
+    const out = Object.assign({}, p, {organizationPartyId: org})
+    const day = value => ec.l10n.format(value, "yyyy-MM-dd")
+    const afterDay = value => policy.lib.calendarDateText(Date.parse(policy.lib.calendarDateText(value)) + 86400000)
+    let period = null
+    if (p.timePeriodId) {
+        period = find("mantle.party.time.TimePeriod", {timePeriodId: String(p.timePeriodId)}).one()
+        if (!period || period.partyId !== org || !salesPeriodTypes.includes(period.timePeriodTypeId))
+            denied("PERIOD_INVALID", "Choose a period of the organization")
+    } else if (!p.fromDate && !p.thruDate) {
+        const today = day(ec.user.nowTimestamp)
+        period =
+            Array.from(find("mantle.party.time.TimePeriod", {partyId: org, timePeriodTypeId: "FiscalMonth"}).list()).find(
+                row => policy.lib.calendarDateText(row.fromDate) <= today && policy.lib.calendarDateText(row.thruDate) >= today
+            ) || null
+        if (!period) {
+            const range = ec.user.getPeriodRange("month", 0, ec.user.nowTimestamp)
+            out.fromDate = new Date(Number(range[0]))
+            out.thruDate = new Date(Number(range[1]))
+        }
+    }
+    if (period) {
+        const fromDay = policy.lib.calendarDateText(period.fromDate)
+        const thruDay = afterDay(period.thruDate)
+        out.fromDate = ec.l10n.parseTimestamp(fromDay, "yyyy-MM-dd")
+        out.thruDate = ec.l10n.parseTimestamp(thruDay, "yyyy-MM-dd")
+    }
+    out.fromAccountingDate = out.fromDate ? day(out.fromDate) : null
+    out.thruAccountingDate = out.thruDate ? day(out.thruDate) : null
+    if (out.fromDate && out.thruDate && policy.lib.ms(out.fromDate) >= policy.lib.ms(out.thruDate))
+        throw new Error("Choose an increasing report date range")
+    return out
+}
+
+// A row's cost and margin (impl-sales P19): for the cost reader, the cost of what was shipped and the margin over the shipped
+// value, in the sale's currency, unknown (null) when a cost is missing or in another currency; withheld (null) for anyone else.
+function costOf(total, costShown) {
+    if (!costShown || total.costUnknown) return {issuedCost: null, marginValue: null, marginPercent: null}
+    const cost = ec.l10n.roundCurrency(total.issuedCost, total.currencyUomId)
+    const margin = total.issuedValue.subtract(total.issuedCost)
+    return {
+        issuedCost: cost,
+        marginValue: ec.l10n.roundCurrency(margin, total.currencyUomId),
+        marginPercent: total.issuedValue.isZero() ? null : margin.divide(total.issuedValue, 6, "HALF_EVEN").multiply(toDecimal(100))
+    }
+}
+
+function analysis(p) {
+    const reader = analysisReader(p)
+    const org = reader.organizationPartyId
+    if (reader.finance) {
+        if (!p.timePeriodId && !p.fromDate && !p.thruDate) {
+            const month = policy.call("mantle.ledger.LedgerServices.get#OrganizationFiscalTimePeriods", {
+                organizationPartyId: org,
+                filterDate: ec.user.nowTimestamp,
+                timePeriodTypeId: "FiscalMonth"
+            }).timePeriodList
+            p = Object.assign({}, p, {timePeriodId: Array.from(month || [])[0]?.timePeriodId || null})
+        }
+        p = reports.execute("options", Object.assign({}, p, {organizationPartyId: org}))
+    } else p = salesOptions(p, org)
     const sales = salesTypes()
     const groupBy = p.groupBy || "product"
     if (!GROUPINGS.includes(groupBy)) denied("GROUPING_INVALID", "Group sales by product, customer or customer class")
@@ -120,10 +200,36 @@ function analysis(p) {
         Array.from(find("mantle.order.OrderItem").condition("orderId", "in", chunk).orderBy("orderId,orderItemSeqId").list())
     ).filter(row => partOf.has(row.orderId + ":" + row.orderPartSeqId))
     const issued = {}
-    for (const row of inChunks(orderIds, chunk =>
+    // P19: each issuance's cost (its quantity times its asset's acquire cost, in the asset's cost currency), for the cost reader
+    const issuedCost = {}
+    const issuances = inChunks(orderIds, chunk =>
         Array.from(find("mantle.product.issuance.AssetIssuance").condition("orderId", "in", chunk).list())
-    ))
-        issued[row.orderId + ":" + row.orderItemSeqId] = dec(issued[row.orderId + ":" + row.orderItemSeqId]).add(dec(row.quantity))
+    )
+    const assets = reader.costShown
+        ? new Map(
+              inChunks([...new Set(issuances.map(row => row.assetId).filter(Boolean))], chunk =>
+                  Array.from(
+                      find("mantle.product.asset.Asset")
+                          .condition("assetId", "in", chunk)
+                          .selectField("assetId")
+                          .selectField("acquireCost")
+                          .selectField("acquireCostUomId")
+                          .list()
+                  )
+              ).map(row => [row.assetId, row])
+          )
+        : new Map()
+    for (const row of issuances) {
+        const key = row.orderId + ":" + row.orderItemSeqId
+        issued[key] = dec(issued[key]).add(dec(row.quantity))
+        if (!reader.costShown) continue
+        const asset = assets.get(row.assetId)
+        const costs = (issuedCost[key] = issuedCost[key] || [])
+        costs.push({
+            amount: asset?.acquireCost == null ? null : dec(row.quantity).multiply(dec(asset.acquireCost)),
+            currencyUomId: asset?.acquireCostUomId || null
+        })
+    }
 
     // the organization's issued sales invoices of the span, by book day
     let invoiceQuery = find("mantle.account.invoice.Invoice", {fromPartyId: org, invoiceTypeEnumId: "InvoiceSales"})
@@ -198,7 +304,10 @@ function analysis(p) {
                     invoicedQuantity: zero(),
                     invoicedValue: zero(),
                     returnedQuantity: zero(),
-                    returnedValue: zero()
+                    returnedValue: zero(),
+                    issuedValue: zero(),
+                    issuedCost: zero(),
+                    costUnknown: false
                 })
             )
         return rows.get(key)
@@ -210,7 +319,14 @@ function analysis(p) {
         const quantity = item.quantity == null ? toDecimal(1) : dec(item.quantity)
         total.orderedQuantity = total.orderedQuantity.add(quantity)
         total.orderedValue = total.orderedValue.add(quantity.multiply(dec(item.unitAmount)))
-        total.issuedQuantity = total.issuedQuantity.add(dec(issued[item.orderId + ":" + item.orderItemSeqId]))
+        const shipped = dec(issued[item.orderId + ":" + item.orderItemSeqId])
+        total.issuedQuantity = total.issuedQuantity.add(shipped)
+        total.issuedValue = total.issuedValue.add(shipped.multiply(dec(item.unitAmount)))
+        // a cost in another currency than the sale's, or none, is unknown: never converted, never zero
+        for (const cost of issuedCost[item.orderId + ":" + item.orderItemSeqId] || []) {
+            if (cost.amount == null || (cost.currencyUomId && cost.currencyUomId !== part.currencyUomId)) total.costUnknown = true
+            else total.issuedCost = total.issuedCost.add(cost.amount)
+        }
     }
     for (const item of invoiceItems) {
         if (!sales.has(item.itemTypeEnumId)) continue
@@ -233,15 +349,21 @@ function analysis(p) {
                 orderedValue: ec.l10n.roundCurrency(total.orderedValue, total.currencyUomId),
                 invoicedValue: ec.l10n.roundCurrency(total.invoicedValue, total.currencyUomId),
                 returnedValue: ec.l10n.roundCurrency(total.returnedValue, total.currencyUomId),
-                netValue: ec.l10n.roundCurrency(total.invoicedValue.subtract(total.returnedValue), total.currencyUomId)
-            })
+                netValue: ec.l10n.roundCurrency(total.invoicedValue.subtract(total.returnedValue), total.currencyUomId),
+                issuedValue: ec.l10n.roundCurrency(total.issuedValue, total.currencyUomId)
+            }, costOf(total, reader.costShown))
         )
         .sort(
             (a, b) =>
                 b.invoicedValue.compare(a.invoicedValue) || b.orderedValue.compare(a.orderedValue) || a.label.localeCompare(b.label)
         )
+    const costIncomplete = reader.costShown && analysisRows.some(total => total.costUnknown)
     return {
         analysisRows,
+        costShown: reader.costShown,
+        costIncomplete: costIncomplete
+            ? "Some shipped lines have no cost, or a cost in another currency than the sale's; their cost and margin are shown as unknown."
+            : null,
         organizationPartyId: org,
         groupBy,
         fromDate: p.fromDate,

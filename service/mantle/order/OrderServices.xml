@@ -2613,7 +2613,8 @@ General Order Placement and eCommerce Usage
         </actions>
     </service>
 
-    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all">
+    <!-- impl-sales P19 (design-sales §8 shipped definitions): the recurrence worker is the operation sales.recurrence.run -->
+    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all" operation="sales.recurrence.run">
         <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve</description>
         <actions>
             <entity-find entity-name="mantle.order.OrderHeader" list="orderHeaderList" cache="false">

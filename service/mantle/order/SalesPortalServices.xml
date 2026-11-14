@@ -91,7 +91,8 @@ along with this software (see the LICENSE.md file). If not, see
         operations findSalesOrders, getSalesOrder and getSalesOrderDocument (reads only, no bearer write) -->
     <service verb="find" noun="CustomerOrders" authenticate="anonymous-all" allow-remote="false">
         <description>findSalesOrders: a signed-in account's placed orders of the customers it acts for at the site's Sales organization
-            (storeless, not a recurring base or template, not being changed, cancelled or rejected; newest first; state open or all;
+            (storeless, not a recurring base or template, not rejected; a cancelled one marked Cancelled under all, never open, Sales P19;
+            newest first; state open or all;
             reference the order or the customer's PO; limit and cursor), with each one's delivery and billing state; never a bearer
             link's.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
@@ -104,7 +105,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>getSalesOrder: the order a bearer link (token: the storeless confirmation's OrderView, its one order) or a signed-in
             account (orderId: an order of a customer it acts for) reaches, read only: lines, totals, promised dates, the accepted quote,
             shipments with tracking, invoices with their open amount (Billing's page for a signed-in account), Support's pages for a
-            change, cancel or return where the site mounts Support, and the confirmation's PDF name.</description>
+            change, cancel or return where the site mounts Support, and the confirmation's PDF name. A cancelled order opens marked
+            Cancelled (cancelled true), with Support's ask page alone and no Billing page (Sales P19).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
