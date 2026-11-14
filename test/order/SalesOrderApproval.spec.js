@@ -156,6 +156,7 @@ feature(
     {
         when() {
             const gated = placedOrder(f.orgA, f.accounts.a)
+            f.gated = gated
             const open = placedOrder(f.orgB, f.accounts.b)
             const approve = (username, orderId) => native(username, "mantle.order.OrderServices.approve#Order", {orderId})
             const purchase = system(() => {
@@ -254,6 +255,13 @@ feature(
             as(ownerApprover, orders + "place#SalesOrder", {orderId: own, orderRevision: revision(own)})
             const self = as(ownerApprover, orders + "approve#SalesOrder", {orderId: own, orderRevision: revision(own)}).refused
             const selfStatus = status(own)
+            // Sales P12 (the user's call of Nov 14): the approver keeps read-only sight of the order they decided once approved, not
+            // of the organization's other approved orders (the first feature's, approved with no decision of theirs)
+            const decided = as(users.salesApprover, orders + "get#SalesOrder", {orderId: store})
+            const undecided = as(users.salesApprover, orders + "get#SalesOrder", {orderId: f.gated})
+            const listed = as(users.salesApprover, "mantle.sales.SalesWorkspaceServices.find#SalesOrders", {
+                list: "recent"
+            }).orderList.map(row => row.orderId)
             // with it off a store order auto-approves as before
             const offStore = paidOrder(f.orgB, f.accounts.b2, f.orgB + "_STORE")
             const offWarnings = system(() =>
@@ -273,7 +281,12 @@ feature(
                 offWarnings,
                 storeStatus: status(store),
                 self,
-                selfStatus
+                selfStatus,
+                decided,
+                undecided,
+                listed,
+                store,
+                gatedStatus: status(f.gated)
             }
         },
         then({
@@ -288,7 +301,12 @@ feature(
             offWarnings,
             storeStatus,
             self,
-            selfStatus
+            selfStatus,
+            decided,
+            undecided,
+            listed,
+            store,
+            gatedStatus
         }) {
             before.store == "OrderPlaced" && before.storeless == "OrderPlaced" && before.authorized == 2
             detail.orderFound && detail.order.approverOnly == true && detail.can.approve == true
@@ -305,6 +323,9 @@ feature(
             second.refused == "" && second.outcome == "approved"
             offWarnings.length == 0 && offStatus == "OrderApproved"
             self.includes("SELF_APPROVAL") && selfStatus == "OrderPlaced"
+            decided.orderFound && decided.order.approverOnly == true && decided.can.cancelRemainder == false
+            gatedStatus == "OrderApproved" && undecided.orderFound == false
+            listed.includes(store) && !listed.includes(f.gated)
         }
     }
 )

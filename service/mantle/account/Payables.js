@@ -324,6 +324,8 @@ function invoiceSource(p, {part, header, payable, organizationPartyId}) {
     // a recurring base (RecurringTemplate, X5) is the next period's template, never invoiced (mr-pass impl-shop P7)
     if (header.orderPurposeEnumId === "OrpRecurringTemplate")
         denied("RECURRING_TEMPLATE", "A recurring template is not invoiced; its renewal orders are")
+    // nor a Sales quote template (impl-sales P12), never placed
+    if (header.orderPurposeEnumId === "OrpSalesQuoteTemplate") denied("QUOTE_TEMPLATE", "A quote template is not invoiced")
     const basis = p.basis || "ordered"
     if (!["ordered", "received"].includes(basis)) denied("SOURCE_BASIS_INVALID", "Choose the ordered or the received basis")
     if (basis === "received" && !payable) denied("SOURCE_BASIS_INVALID", "Only a purchase is billed on its receipts")
