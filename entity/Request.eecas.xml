@@ -18,11 +18,14 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- IronStone People P21 (F20): a confidential case (requestTypeEnumId RqtHrCase, People's grievances) gets none of these rules: no
     triage notice, case profile or service-level clock; the support-case rules on its parties, messages and work find no case profile
     (ensure#CaseProfile leaves the type alone), and complete#RequestFromWork never moves it. -->
+<!-- IronStone Sales P8 (F31, F63): a customer's request for quote (RqtQuote, Sales' RFQ) is no triage notice's either: it is in a
+    sales team's queue (SalesQuoteRequests.js), and complete#RequestFromWork never moves it; the case rules need no guard, since a
+    request is a case only in a service queue or of a type an organization service-enables. -->
 <eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
     <eeca id="RequestTriageNotice" entity="mantle.request.Request" on-create="true" on-update="true" get-entire-entity="true" get-original-value="true">
         <condition><expression>statusId == 'ReqSubmitted' &amp;&amp; (eecaOperation == 'create' || originalValue == null ||
             originalValue.statusId != 'ReqSubmitted' || (rootWorkEffortId &amp;&amp; originalValue.rootWorkEffortId != rootWorkEffortId))
-            &amp;&amp; requestTypeEnumId != 'RqtPurchaseRfq' &amp;&amp; requestTypeEnumId != 'RqtHrCase'</expression></condition>
+            &amp;&amp; requestTypeEnumId != 'RqtPurchaseRfq' &amp;&amp; requestTypeEnumId != 'RqtHrCase' &amp;&amp; requestTypeEnumId != 'RqtQuote'</expression></condition>
         <actions><service-call name="mantle.request.RequestServices.queue#RequestTriage" in-map="{requestId:requestId}"/></actions>
     </eeca>
     <!-- IronStone Customer Service (impl-customer-service P2, D23, F62): a request that may have become a support case (made,

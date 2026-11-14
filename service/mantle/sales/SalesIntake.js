@@ -371,6 +371,7 @@ function userHolds(userId, permission) {
 // are (a rename, a disable) changes nothing the check is about, and create#LeadFromEmail checks the owner again each time the rule
 // runs. Refuses nothing but a createLead action of an owner without the permission.
 const leadAction = "createLead"
+const rfqAction = "createQuoteRequest"
 function checkLeadRuleOwner(p) {
     let actions = p.actionList != null ? Array.from(p.actionList) : null
     if (actions == null && !blank(p.actionsJson)) {
@@ -381,13 +382,19 @@ function checkLeadRuleOwner(p) {
             return {}
         }
     }
-    if (!Array.isArray(actions) || !actions.some(action => text(action?.action) === leadAction)) return {}
+    if (!Array.isArray(actions)) return {}
+    const lead = actions.some(action => text(action?.action) === leadAction)
+    // P8: the createQuoteRequest action likewise needs its owner to make quotes (SALES_QUOTE_EDIT)
+    const rfq = actions.some(action => text(action?.action) === rfqAction)
+    if (!lead && !rfq) return {}
     const ruleId = text(p.emailRuleId)
     const ownerUserId = ruleId ? one("moqui.basic.email.EmailRule", {emailRuleId: ruleId})?.ownerUserId : ec.user.userId
     // an unknown rule: the framework's update#EmailRule answers it
     if (ruleId && !ownerUserId) return {}
-    if (!userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
+    if (lead && !userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
         denied("RULE_NOT_ALLOWED", "Making sales leads from mail needs the rule's owner to hold SALES_OPPORTUNITY_EDIT")
+    if (rfq && !userHolds(ownerUserId, "SALES_QUOTE_EDIT"))
+        denied("RULE_NOT_ALLOWED", "Taking requests for quote from mail needs the rule's owner to hold SALES_QUOTE_EDIT")
     return {}
 }
 // The source identity of a mail message: its Message-ID, so the same mail delivered to two addresses or accounts is one intake;
@@ -674,9 +681,30 @@ function purgeLeadIntakes(p) {
         salesAccess.requireCapability(userScope, "configure")
         organizationPartyIds = userScope.organizationPartyIds
     }
-    const days = Number(p.retentionDays || defaultRetentionDays)
-    if (!Number.isFinite(days) || days < 1) denied("RETENTION_INVALID", "The retention is at least one day")
-    const before = new Date(nowMs() - days * 24 * 60 * 60 * 1000)
+    const dayMs = 24 * 60 * 60 * 1000
+    const given = blank(p.retentionDays) ? null : Number(p.retentionDays)
+    if (given != null && (!Number.isFinite(given) || given < 1)) denied("RETENTION_INVALID", "The retention is at least one day")
+    // P9: with no retention given, each organization's (its SalesPolicy's intakeRetentionDays, 30 when none); the query reaches back
+    // to the shortest of them and each intake is held to its own organization's
+    const approvals = ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
+    const retentions = {}
+    const retentionOf = organizationPartyId => {
+        if (given != null) return given
+        if (!Object.hasOwn(retentions, organizationPartyId || ""))
+            retentions[organizationPartyId || ""] =
+                Number(approvals.policyOf(organizationPartyId)?.intakeRetentionDays || 0) || defaultRetentionDays
+        return retentions[organizationPartyId || ""]
+    }
+    const shortest =
+        given != null
+            ? given
+            : Math.min(
+                  defaultRetentionDays,
+                  ...rows("mantle.sales.policy.SalesPolicy")
+                      .filter(row => lib.active(row) && Number(row.intakeRetentionDays) > 0)
+                      .map(row => Number(row.intakeRetentionDays))
+              )
+    const before = new Date(nowMs() - shortest * dayMs)
     let query = find(INTAKE)
         .condition("purgedDate", null)
         .condition("verifiedDate", null)
@@ -691,6 +719,8 @@ function purgeLeadIntakes(p) {
     let keptCount = 0
     let leadsClosedCount = 0
     for (const intake of Array.from(query.list())) {
+        const intakeBefore = new Date(nowMs() - retentionOf(intake.organizationPartyId) * dayMs)
+        if ((ms(intake.receivedDate) ?? Infinity) >= intakeBefore.getTime()) continue
         const lead = intake.salesOpportunityId ? one(OPPORTUNITY, {salesOpportunityId: intake.salesOpportunityId}) : null
         if (lead && (lead.convertedDate || lead.typeEnumId !== "SotLead")) {
             keptCount++
@@ -710,7 +740,7 @@ function purgeLeadIntakes(p) {
                         submittedPhone: null,
                         purgedDate: ec.user.nowTimestamp
                     })
-                    const untouched = untouchedLead(lead, before)
+                    const untouched = untouchedLead(lead, intakeBefore)
                     if (untouched) clearLead(lead)
                     if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
                     return untouched
@@ -917,5 +947,10 @@ const operations = {
     details,
     sourceKinds,
     // for BOSS's Comms action on a mail message: the same source identity the mail rule writes
-    emailIdentity
+    emailIdentity,
+    // P8: for the createQuoteRequest mail rule action and Create RFQ (SalesQuoteRequests.js), the same team, owner check and text
+    intakeTeam,
+    userHolds,
+    subjectName,
+    plainText
 })

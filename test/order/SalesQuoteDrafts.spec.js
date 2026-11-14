@@ -2,7 +2,8 @@
 // the quotes are orders of purpose SalesQuote of the caller's scope, never a Shop cart or a recurring base; a rep sees their own and
 // their team's, not another team's or organization's, and a manager the organization's; a quote is for one account of its seller;
 // a line takes the seller's price for the customer (a customer price over the list price, for a rep without PRICE_VIEW), and an
-// entered price keeps its calculated basis with the reason and actor; a free line needs SALES_APPROVE; a product with no price
+// entered price keeps its calculated basis with the reason and actor; a free line is the rep's to draft while the manual-price rule
+// will need it approved (P9, the user's call of Nov 13; SalesQuoteApprovals has the rule's other side); a product with no price
 // blocks the line until one is entered; a stale revision and another team's rep are refused. Standalone: spec-local organizations,
 // teams, users, accounts, products and prices; the users' services run with artifact authorization on under a spec grant of the
 // services, as an app root's grant gives them.
@@ -358,7 +359,7 @@ feature("a line takes the customer's price; an entered price keeps its calculate
     }
 })
 
-feature("a missing price blocks the line until one is entered; a free line needs a sales approver", {
+feature("a missing price blocks the line until one is entered; a rep's free line waits for an approver", {
     when() {
         const missing = as(users.rep, "store#QuoteLine", {
             orderId: quotes.rep,
@@ -378,16 +379,9 @@ feature("a missing price blocks the line until one is entered; a free line needs
             freeLine: "Y",
             overrideReason: "Sample unit"
         }
-        const repFree = as(
-            users.rep,
-            "store#QuoteLine",
-            Object.assign({orderRevision: revision(users.rep, quotes.rep)}, free)
-        ).refused
-        const approverFree = as(
-            users.approver,
-            "store#QuoteLine",
-            Object.assign({orderRevision: revision(users.approver, quotes.rep)}, free)
-        )
+        // P9: with no approval rule of the organization the manual-price rule covers a free line, so the rep drafts it and the quote
+        // needs another's approval
+        const repFree = as(users.rep, "store#QuoteLine", Object.assign({orderRevision: revision(users.rep, quotes.rep)}, free))
         const shipping = as(users.rep, "store#QuoteLine", {
             orderId: quotes.rep,
             orderRevision: revision(users.rep, quotes.rep),
@@ -399,18 +393,19 @@ feature("a missing price blocks the line until one is entered; a free line needs
             entered,
             enteredLine: lineOf(users.rep, quotes.rep, entered.orderItemSeqId),
             repFree,
-            approverFree,
-            freeLine: lineOf(users.rep, quotes.rep, approverFree.orderItemSeqId),
+            freeLine: lineOf(users.rep, quotes.rep, repFree.orderItemSeqId),
+            approval: as(users.rep, "get#Quote", {orderId: quotes.rep}).approval,
             shippingLine: lineOf(users.rep, quotes.rep, shipping.orderItemSeqId)
         }
     },
-    then({missing, entered, enteredLine, repFree, approverFree, freeLine, shippingLine}) {
+    then({missing, entered, enteredLine, repFree, freeLine, approval, shippingLine}) {
         missing.includes("PRICE_UNAVAILABLE")
         entered.refused == ""
         enteredLine.priceAvailable == false
         enteredLine.priceSource == "manual"
-        repFree.includes("FREE_LINE_DENIED")
-        approverFree.refused == ""
+        repFree.refused == ""
+        approval.needsApproval == true
+        approval.approved == false
         freeLine.priceSource == "free"
         toDecimal(freeLine.unitAmount).isZero()
         shippingLine.shipping == true

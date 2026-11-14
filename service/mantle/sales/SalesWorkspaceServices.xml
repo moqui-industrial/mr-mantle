@@ -175,8 +175,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Sales Home's work (design §3 Home SalesWork and AssignedWork): counters, each the count of the scoped list it
             opens with that list's own filters (find#Opportunities: the leads to work, the user's own open opportunities and those
             of them past their expected close), with its listPath and parameters; a counter that fails is unavailable, never zero,
-            and the others go on; the counters of records not built yet (requests for quote, quotes, blocked orders) are
-            notConfigured. assignedWork: the user's own open leads and opportunities, the soonest to close first, each with its
+            and the others go on; P8: the requests for quote awaiting a response (find#QuoteRequests state awaiting); the counters
+            of records not built yet (quotes to send and expiring, blocked orders) are notConfigured. assignedWork: the user's own open leads and opportunities, the soonest to close first, each with its
             next activity (at most ten; assignedCount all of them). In the organization named (in the scope, ORGANIZATION_DENIED
             otherwise) or every one of the scope. Refuses a caller who reads nothing of Sales (PERMISSION_DENIED).</description>
         <in-parameters><parameter name="organizationPartyId"/></in-parameters>

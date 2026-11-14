@@ -827,7 +827,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="purge" noun="LeadIntakes" allow-remote="false">
         <description>The purge of design §3 Leads (X15): the submitted name, organization, email and phone of each unverified
-            intake received more than retentionDays ago (30 until Sales' defaults set them, P9) whose lead never qualified,
+            intake received more than retentionDays ago (when not given, its organization's SalesPolicy intakeRetentionDays, 30
+            when none; impl-sales P9) whose lead never qualified,
             blanked with its purgedDate; a qualified or verified one is kept. The intake row, its source identity and key stay, so
             a retry still answers one lead. The lead it made goes too when it is still an unqualified open lead untouched since
             its intake (the user's call of Nov 13, impl-sales P6): its name and description blanked, the mail filed on it unlinked,
@@ -855,7 +856,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Whether the mail rule being saved may carry the createLead action (ErActCreateLead): when the save gives the
             actions (actionList or actionsJson) and they name createLead, the rule's owner (the caller on create, the stored rule's
             owner on update) must hold SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, and the save is not made). A rule without
-            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at.</description>
+            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at. P8: a
+            createQuoteRequest action (ErActCreateQuoteRequest) likewise needs the owner to hold SALES_QUOTE_EDIT.</description>
         <in-parameters>
             <parameter name="emailRuleId"/>
             <parameter name="actionList" type="List"/>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' approval rules on Mantle's order (IronStone Sales design §5 the approval binding, §13.1; impl-sales P9, §4 Nov 11, F60):
+    autoApprove#Order approves only when check#OrderPreApprove has no warning, so a sales order of a seller with a Sales rule in
+    effect that meets it without a current approval is not approved automatically, as the credit and purchase approval warnings
+    stop it (AccountingCredit.secas.xml, Purchase.secas.xml); a person's approve#Order does not call the check. With no Sales rule
+    nothing is added. A commercial change of a quote supersedes its earlier decisions. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="OrderPreApproveSales" service="mantle.order.OrderInfoServices.check#OrderPreApprove" when="post-service">
+        <actions>
+            <service-call name="mantle.order.SalesApprovalServices.check#SalesPreApprove" out-map="salesOut" disable-authz="true"
+                    in-map="{orderId:orderId}"/>
+            <if condition="salesOut.approveWarnings?.length">
+                <set field="results.approveWarnings"
+                        from="Array.from(results.approveWarnings ?? []).concat(Array.from(salesOut.approveWarnings))"/>
+            </if>
+        </actions>
+    </seca>
+    <!-- every order's revision passes here: the condition leaves out the kinds that are not commercial, and the service returns at
+        once for an order that is no quote -->
+    <seca id="OrderRevisionSalesApproval" service="mantle.order.OrderServices.increment#OrderRevision" when="post-service">
+        <condition><expression>orderId &amp;&amp; !['status', 'content', 'note'].includes(revisionKind)</expression></condition>
+        <actions>
+            <service-call name="mantle.order.SalesApprovalServices.handle#SalesApprovalRevision" disable-authz="true"
+                    in-map="{orderId:orderId, revisionKind:revisionKind}"/>
+        </actions>
+    </seca>
+</secas>

@@ -70,7 +70,6 @@ function counterDefinitions(organizationPartyId) {
 }
 // the counters of the records later phases build: not configured until then, never zero
 const laterCounters = [
-    {counterKey: "quoteRequests", title: "RFQs awaiting response", source: "Requests for quote"},
     {counterKey: "quotesToSend", title: "Quotes to send", source: "Quotes"},
     {counterKey: "quotesExpiring", title: "Quotes expiring", source: "Quotes"},
     {counterKey: "ordersBlocked", title: "Orders blocked", source: "Orders"}
@@ -111,6 +110,32 @@ function salesHome(p) {
         }
         counters.push(counter)
     }
+    // P8: the requests for quote awaiting a response (not quoted, declined or completed) the user sees, in the RFQ list's filter
+    const rfqCounter = {
+        counterKey: "quoteRequests",
+        title: L("RFQs awaiting response"),
+        listPath: "Quotes/QuoteRequests",
+        parameters: Object.assign({state: "awaiting"}, organizationPartyId ? {organizationPartyId} : {}),
+        count: null,
+        state: "unavailable",
+        stateText: L("Unavailable")
+    }
+    ec.message.pushErrors()
+    try {
+        const found = ec.resource
+            .script("component://mr-mantle/service/mantle/order/SalesQuoteRequests.js")
+            .execute("findQuoteRequests", Object.assign({pageSize: 1}, rfqCounter.parameters))
+        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        rfqCounter.count = Number(found.quoteRequestListCount || 0)
+        rfqCounter.state = "ready"
+        rfqCounter.stateText = String(rfqCounter.count)
+    } catch (error) {
+        ec.logger.error("Sales Home counter quoteRequests is unavailable: " + error.message)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+    counters.push(rfqCounter)
     for (const later of laterCounters)
         counters.push({
             counterKey: later.counterKey,
