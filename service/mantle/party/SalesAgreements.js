@@ -1165,9 +1165,104 @@ function expireAgreements() {
     return {expiredCount}
 }
 
+// ===== P20 review: get#SalesAgreementPrint (design §7 AgreementDetail, §16 Agreement; impl-sales §4 Nov 14, the user's call) =====
+// The agreement as it is now, from its own records (the header, parties, items with their negotiated prices, terms and text), for
+// one who reads it (SalesAccess.js agreementOf: another organization's, a purchase agreement and a missing one answer
+// RECORD_UNAVAILABLE alike); marked a draft until it is active. Rendered through Mantle's trusted print template; no cost, margin
+// or linked orders.
+const printLocation = "component://mr-mantle/template/party/SalesAgreement.print.html.fancy"
+function agreementPrint(p) {
+    const userScope = salesAccess.scope()
+    const found = salesAccess.agreementOf(userScope, text(p.agreementId))
+    if (!found) denied("RECORD_UNAVAILABLE", "Agreement " + (text(p.agreementId) || "") + " is not available")
+    const agreement = found.agreement
+    const agreementId = agreement.agreementId
+    const currencyUomId = agreement.currencyUomId
+    const parties = rows(PARTY, {agreementId})
+    const items = itemsOf(agreementId)
+    const names = lib.partyNames(
+        Array.from(
+            new Set(
+                [agreement.organizationPartyId, agreement.otherPartyId].concat(parties.map(row => row.partyId)).filter(Boolean)
+            )
+        )
+    )
+    const nameOf = partyId => names[partyId] || partyId
+    const productIds = Array.from(new Set(items.map(item => item.productId).filter(Boolean)))
+    const products = productIds.length
+        ? Object.fromEntries(
+              Array.from(find("mantle.product.Product").condition("productId", "in", productIds).list()).map(row => [
+                  row.productId,
+                  row
+              ])
+          )
+        : {}
+    const productText = productId => {
+        const product = productId ? products[productId] : null
+        return product
+            ? [product.pseudoId || product.productId, product.productName].filter(Boolean).join(" · ")
+            : productId || ""
+    }
+    const endedText = row => (row.thruDate != null && ms(row.thruDate) <= now() ? L("Ended") + " " + dayText(row.thruDate) : "")
+    const isTemplate = agreement.isTemplate === "Y"
+    const printHtml = ec.resource.template(printLocation, {
+        agreementId,
+        description: agreement.description && agreement.description !== agreementId ? agreement.description : "",
+        typeText: enumText(agreement.agreementTypeEnumId),
+        organizationName: nameOf(agreement.organizationPartyId),
+        customerName: agreement.otherPartyId ? nameOf(agreement.otherPartyId) : "",
+        statusText: isTemplate ? L("Template") : statusText(agreement.statusId),
+        revisionText: L("Revision") + " " + revisionOf(agreement),
+        validityText: intervalText(agreement),
+        agreedText: dayText(agreement.agreementDate),
+        currencyText: currencyUomId || "",
+        draft: isTemplate || agreement.statusId === "AgmStDraft" ? "Y" : "N",
+        textData: agreement.textData || "",
+        partyRows: parties.map(row => ({
+            partyText: nameOf(row.partyId),
+            roleText: one("mantle.party.RoleType", {roleTypeId: row.roleTypeId})?.description || row.roleTypeId
+        })),
+        itemRows: items.map(item => {
+            const price = priceAt(agreementId, item.agreementItemSeqId)
+            return {
+                seq: item.agreementItemSeqId,
+                kindText: enumText(item.agreementItemTypeEnumId),
+                productText: productText(item.productId),
+                itemText: item.itemText || "",
+                quantityText: item.quantity == null ? "" : String(Number(String(item.quantity))),
+                fromQuantityText:
+                    price?.minQuantity == null || Number(String(price.minQuantity)) <= 1
+                        ? ""
+                        : String(Number(String(price.minQuantity))),
+                priceText: price ? moneyText(price.price, currencyUomId) : item.productId ? L("No price") : "",
+                datesText: item.fromDate || item.thruDate ? intervalText(item) : "",
+                endedText: endedText(item)
+            }
+        }),
+        termRows: termsOf(agreementId).map(row => ({
+            typeText: enumText(row.termTypeEnumId),
+            valueText: [
+                row.settlementTermId
+                    ? one("mantle.account.invoice.SettlementTerm", {settlementTermId: row.settlementTermId})?.description ||
+                      row.settlementTermId
+                    : "",
+                row.termNumber == null ? "" : String(Number(String(row.termNumber))),
+                row.termText || ""
+            ]
+                .filter(Boolean)
+                .join(" · "),
+            itemText: row.agreementItemSeqId || "",
+            datesText: row.fromDate || row.thruDate ? intervalText(row) : "",
+            endedText: endedText(row)
+        }))
+    })
+    return {agreementId, printHtml, fileName: "Agreement-" + agreementId + "-r" + revisionOf(agreement) + ".pdf"}
+}
+
 const operations = {
     findAgreements,
     getAgreement,
+    agreementPrint,
     createAgreement,
     storeAgreement,
     storeParty,

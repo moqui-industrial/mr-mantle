@@ -1,0 +1,49 @@
+{
+  "id": "mantle-sales-quotes",
+  "type": "dataset",
+  "title": "Sales quotes",
+  "body": {
+    "folder": "Sales",
+    "description": "Sales quotes not yet placed, with their selling organization, customer, status, validity, total and currency, owner and team, by the date each is valid through, so a time range ahead finds the quotes about to expire (the quote-expiring alert). Each viewer reads the quotes of their sales scope: their organizations' quotes assigned to them or a team of theirs, or the organizations' every quote for a holder of SALES_TEAM_VIEW. Never a quote template or a placed quote.",
+    "documentType": "MantleSalesQuote",
+    "timeField": "validThruDate",
+    "signal": "business",
+    "rowFilterService": "mantle.sales.SalesWorkspaceServices.get#QuoteRowFilter",
+    "fieldDefaults": {
+      "statusId": {
+        "statusTypeId": "OrderHeader"
+      },
+      "vendorPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "teamPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "currencyUomId": {
+        "lookup": {
+          "entityName": "moqui.basic.Uom",
+          "keyField": "uomId",
+          "displayField": "description"
+        }
+      },
+      "grandTotal": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      },
+      "partTotal": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      }
+    }
+  }
+}

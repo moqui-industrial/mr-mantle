@@ -112,6 +112,12 @@ along with this software (see the LICENSE.md file). If not, see
             mail and print (a .html.fancy-locked resource); empty for Mantle's default</description></field>
         <field name="reminderTextLocation" type="text-medium" enable-audit-log="true"><description>The reminder's text (a
             .html.fancy-locked resource); empty for Mantle's default</description></field>
+        <!-- Sales P20 review (design-sales §16 RFQ acknowledgement; impl-sales §4 Nov 14, the user's call) -->
+        <field name="rfqAcknowledge" type="text-indicator" enable-audit-log="true"><description>Y: a request for quote made from
+            mail (create#QuoteRequestFromEmail) is acknowledged once to the address it came from, when that sender is a contact or
+            account of the organization; N or empty, none is sent</description></field>
+        <field name="rfqAcknowledgeTextLocation" type="text-medium" enable-audit-log="true"><description>The acknowledgement's text (a
+            .html.fancy-locked resource); empty for Mantle's default</description></field>
     </extend-entity>
     <!-- Sales P13 (design-sales §10 CustomerQuote, QuoteResponse; F36): the customer's own response on PASS (SqsPortal) keeps who
         answered: the bearer link's capability, or the signed-in account (recordedByUserId, contactPartyId), and the acceptor's name

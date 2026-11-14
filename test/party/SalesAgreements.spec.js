@@ -198,6 +198,37 @@ feature(
     }
 )
 
+// Sales P20 review (design-sales §7 AgreementDetail, §16 Agreement; impl-sales §4 Nov 14, the user's call): the print
+feature("the agreement's print is its own records, for who reads it; another organization's keeper gets none", {
+    when() {
+        const printed = asUser(t.reader, G + "get#SalesAgreementPrint", {agreementId: t.agreement})
+        const other = asUser(t.keeperB, G + "get#SalesAgreementPrint", {agreementId: t.agreement})
+        // the one render to PDF, as AgreementDetail's Print sends it
+        const pdf = system(() => ec.resource.xslFoTransform(String(printed.printHtml || ""), null, null, "application/pdf"))
+        return {
+            printed,
+            other,
+            pdfHead: String.fromCharCode(...Array.from(pdf || []).slice(0, 4)),
+            productName: one("mantle.product.Product", {productId: f.product}).productName,
+            customerName: one("mantle.party.Organization", {partyId: f.accounts.a})?.organizationName || ""
+        }
+    },
+    then(r) {
+        r.printed.refused == ""
+        r.printed.fileName.startsWith("Agreement-" + t.agreement)
+        r.printed.printHtml.includes(t.agreement)
+        r.printed.printHtml.includes(r.productName)
+        r.printed.printHtml.includes(r.customerName)
+        // the negotiated prices, the signer, and no draft mark on an active agreement
+        r.printed.printHtml.includes("80.00")
+        r.printed.printHtml.includes("45.00")
+        r.printed.printHtml.includes("Signer") || r.printed.printHtml.includes("signer")
+        !r.printed.printHtml.includes("Draft:")
+        r.other.refused.includes("RECORD_UNAVAILABLE")
+        r.pdfHead == "%PDF"
+    }
+})
+
 feature(
     "an active agreement prices a new quote and the explanation names it; ended, a new quote does not and the earlier keeps its price",
     {

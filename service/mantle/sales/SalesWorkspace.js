@@ -223,6 +223,34 @@ function pipelineRowFilter(p) {
     return {filter: all.length === 1 ? all[0] : {bool: {all}}}
 }
 
+// ===== P20: get#QuoteRowFilter =====
+// The quote dataset's rows (report/mantle-sales-quotes.json; impl-sales §4 Nov 14, the quote-expiring alert) the signed-in viewer
+// reads: Sales quotes (purpose OrpSalesQuote; never a template) not placed, of the organizations of their sales scope and, without
+// SALES_TEAM_VIEW, of those only the quotes assigned to them or a team of theirs (the rule of SalesAccess.js quoteOf; an approver's
+// sight of a quote that asked them is the quote's own screen's, not the dataset's). Nothing for a viewer who reads nothing of Sales;
+// another user's filter is refused.
+function quoteRowFilter(p) {
+    if (!ec.user.userId) return {filter: nothing()}
+    if (text(p.userId) && text(p.userId) !== ec.user.userId)
+        denied("PERMISSION_DENIED", "The sales row filter is computed for the signed-in user only")
+    const userScope = salesAccess.scope()
+    if (!userScope.capabilities.anyRead) return {filter: nothing()}
+    const all = [
+        {field: {name: "orderPurposeEnumId", op: "eq", value: salesAccess.quotePurpose}},
+        {field: {name: "placedDate", op: "exists", negate: true}}
+    ]
+    if (userScope.organizationPartyIds != null) {
+        if (!userScope.organizationPartyIds.length) return {filter: nothing()}
+        all.push({field: {name: "vendorPartyId", op: "in", values: Array.from(userScope.organizationPartyIds)}})
+    }
+    const assigned = salesAccess.assignedQuoteOrderIds(userScope)
+    if (assigned != null) {
+        if (!assigned.length) return {filter: nothing()}
+        all.push({field: {name: "orderId", op: "in", values: assigned}})
+    }
+    return {filter: {bool: {all}}}
+}
+
 // ===== the lifecycle participant =====
 // The account a lookup or transfer is about: the caller's own, or another user's for a holder of SALES_OWNER_CHANGE.
 function ownerAccount(userId, permission = "SALES_OWNER_CHANGE") {
@@ -544,7 +572,7 @@ function salesReports(p) {
 }
 // ===== end of P19 =====
 
-const operations = {salesHome, pipelineRowFilter, findOwnedAssignments, transferAssignment, salesReports}
+const operations = {salesHome, pipelineRowFilter, quoteRowFilter, findOwnedAssignments, transferAssignment, salesReports}
 ;({
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown sales workspace operation " + op)
