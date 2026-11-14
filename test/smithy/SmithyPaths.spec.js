@@ -174,10 +174,24 @@ feature("a tree and a file are the repository's own, a README is rendered and cl
             directory: read("getBlob", {refPath: "main/src"}),
             raw: read("downloadBlob", {refPath: "main/README.md"}),
             blame: read("getBlame", {refPath: "main/README.md"}),
+            // a tree as a file: the transport's download, whose location stays with the authority
+            archive: lib.as("SMP_MEMBER", () =>
+                ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                    siteId: SITE,
+                    operation: "downloadArchive",
+                    input: {repositoryId: ids.code, refPath: "main", format: "zip"},
+                    sessionChecked: true
+                })
+            ),
+            archives: [
+                read("downloadArchive", {refPath: "main", format: "zip"}).kind,
+                read("downloadArchive", {refPath: "main/src", format: "zip"}, "SMP_MEMBER").kind,
+                read("downloadArchive", {refPath: "main", format: "rar"}, "SMP_MEMBER").kind
+            ],
             secret: lib.op(null, SITE, "getTree", {repositoryId: ids.secret})
         }
     },
-    then({tree, file, blob, directory, raw, blame, secret}) {
+    then({tree, file, blob, directory, raw, blame, archive, archives, secret}) {
         tree.empty == false
         tree.entryList.map(entry => entry.type + " " + entry.path + " " + entry.lfs) == ["dir src false", "file README.md false"]
         tree.entryList[0].lastCommit.summary == "Add a helper"
@@ -197,9 +211,18 @@ feature("a tree and a file are the repository's own, a README is rendered and cl
         raw.file.filename == "README.md"
         raw.file.mimeType == "text/plain; charset=utf-8"
         raw.text.startsWith("# Hello")
-        // not built is a refusal of its own, not Not Found
-        blame.kind == "Unprocessable"
-        blame.reason == "notBuilt"
+        // each run of lines with its commit, and no address
+        blame.text.startsWith("# Hello")
+        blame.hunkList.map(hunk => hunk.startLine + " " + hunk.lineCount + " " + hunk.commitId + " " + hunk.summary) ==
+            ["1 3 " + ids.first + " Start"]
+        JSON.stringify(blame).includes("@") == false
+        archive.result.file.filename.endsWith(".zip")
+        archive.result.file.size > 0
+        archive.result.location == null
+        archive.download.location.includes("git-archive")
+        archive.download.disposition == "attachment"
+        // for a signed-in account, of a whole tree, as a zip or a tar.gz
+        archives == ["AuthenticationRequired", "Unprocessable", "Unprocessable"]
         secret.kind == "NotFound"
     }
 })

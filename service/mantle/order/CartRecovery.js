@@ -138,13 +138,7 @@ function factsOf(order) {
 function verifiedEmail(partyId) {
     if (!partyId) return null
     for (const account of rows("moqui.security.UserAccount", {partyId})) {
-        const address = text(account.emailAddress).toLowerCase()
-        if (
-            address &&
-            rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
-                row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === address
-            )
-        )
+        if (ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js").verified(account.userId))
             return text(account.emailAddress)
     }
     return null

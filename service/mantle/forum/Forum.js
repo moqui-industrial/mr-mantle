@@ -162,12 +162,7 @@ function ensureParty() {
     const ua = ec.user.userAccount
     if (!ua) fail('AuthenticationRequired', 'Sign in to join')
     if (ua.partyId) return ua.partyId
-    if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
-    )
+    if (!verifiedAddress(ua.userId))
         fail('Unauthorized', 'Verify your email before joining')
     const account = one(
         'moqui.security.UserAccount',
@@ -218,6 +213,11 @@ function readingBoundary(root, siteId, contactListId) {
     }
 }
 
+/* Whether an account has verified its current email address: the one check (mantle/public/ConfirmedAddress.js). */
+const verifiedAddress = (userId) =>
+    ec.resource
+        .script('component://mr-mantle/service/mantle/public/ConfirmedAddress.js')
+        .verified(userId)
 const methods = {}
 const moderation = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumModeration.js',
@@ -367,12 +367,7 @@ methods.joinSite = (p) => {
     )
         fail('Unauthorized', 'An invitation is required')
     const ua = ec.user.userAccount
-    if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
-    )
+    if (!verifiedAddress(ua.userId))
         fail('Unauthorized', 'Verify your email before joining')
     const old = member(p.siteId)
     if (old && old.state === 'active')
@@ -615,7 +610,18 @@ methods.storeProfile = (p) => {
         timeZone: p.timeZone,
         revision: Number(old?.revision || 0) + 1,
     }
+    const oldHandle = old?.handle || null
     old ? update(old, fields) : create(S + 'PublicSiteProfile', fields)
+    // a handle is a personal namespace of Smithy: a changed one moves its repositories' paths and leaves a redirect,
+    // and a handle that is taken ends the redirect from it (design-smithy §4.3)
+    if (oldHandle !== p.handle) {
+        const smithyCore = ec.resource.script(
+            'component://mr-mantle/service/mantle/smithy/SmithyCore.js',
+        )
+        if (oldHandle)
+            smithyCore.handleChanged(p.siteId, partyId, oldHandle, p.handle)
+        else smithyCore.releasePath(p.siteId, p.handle)
+    }
     return {
         profile: pick(
             fields,
@@ -2310,10 +2316,7 @@ methods.redeemInvitation = (p) => {
         v = invitation(p, true),
         ua = ec.user.userAccount
     if (
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        }) ||
+        !verifiedAddress(ua.userId) ||
         hash(String(ua.emailAddress || '').toLowerCase()) !== v.emailHash
     )
         fail('Unauthorized', 'Sign in with the verified intended address')
@@ -4869,10 +4872,7 @@ methods.testRoute = (p) => {
     if (!settings) fail('Conflict', 'Configure outbound mail first')
     if (
         !ua?.emailAddress ||
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
+        !verifiedAddress(ua.userId)
     )
         fail('Conflict', 'Your own address must be verified')
     const out = ec.service
@@ -5079,10 +5079,7 @@ function processInbound(ctx) {
     if (
         !ua ||
         !ua.partyId ||
-        !one('moqui.security.public.VerifiedAddress', {
-            userId: ua.userId,
-            emailAddress: ua.emailAddress,
-        })
+        !verifiedAddress(ua.userId)
     )
         return record('held', 'Sender is not a verified account address')
     const domain = sender.split('@')[1]
@@ -5613,6 +5610,8 @@ function execute(operation, p) {
     policy,
     mentionHandles,
     plainText,
+    // the word rules, for Smithy's names and descriptions (mr-pass plan/design-smithy.md §11)
+    applyRules,
     processInbound,
     postInbound,
     replyAddress,

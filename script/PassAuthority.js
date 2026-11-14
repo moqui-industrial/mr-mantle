@@ -95,6 +95,8 @@ const DOWNLOADS = [
     'getShopReviewImage',
     // Shop F55: a theme release's binary asset by digest, inline and immutable
     'getShopThemeAsset',
+    // Smithy (mr-pass plan/design-smithy.md §15.2): a tree as a zip or tar.gz, a file the framework wrote
+    'downloadArchive',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
@@ -186,6 +188,8 @@ const REASONS = [
     'notEditable',
     'policyRefused',
     'notBuilt',
+    // Smithy DG2: a credential change by an account with no password to give again needs a fresh sign-in
+    'recentSignInRequired',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or

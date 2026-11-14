@@ -22,6 +22,7 @@
         <field name="groupLfsBytes" type="number-integer"><description>A group's default; 5368709120 when empty</description></field>
         <field name="groupRunnerMinutes" type="number-integer"><description>A group's default, a month; 2000 when empty</description></field>
         <field name="maxEditBytes" type="number-integer"><description>The page editor's limit; 1048576 when empty</description></field>
+        <field name="repositoryKind" type="text-short"><description>The kind of a new repository, a GitRepository.repositoryKind: db when empty, or local</description></field>
         <field name="revision" type="number-integer"/>
         <relationship type="one" related="mantle.public.PublicSite"/>
         <relationship type="one-nofk" title="Home" related="mantle.smithy.SmithyGroup">
@@ -161,5 +162,47 @@
         <relationship type="one-nofk" title="SmithyRole" related="moqui.basic.Enumeration">
             <key-map field-name="roleEnumId" related="enumId"/></relationship>
         <index name="SMITHY_REPO_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
+    </entity>
+    <entity entity-name="SmithyAccount" package="mantle.smithy">
+        <description>An account's Smithy settings in a site, made when first needed: its limits (each the site's default
+            when empty), the bot mark and the GitHub login.</description>
+        <field name="siteId" type="id" is-pk="true"/>
+        <field name="partyId" type="id" is-pk="true"/>
+        <field name="githubLogin" type="text-medium"><description>Lower case; set at a sign-in through the GitHub provider, or by the import for a placeholder</description></field>
+        <field name="placeholder" type="text-indicator"><description>Y: made by the import, not yet claimed</description></field>
+        <field name="claimedAt" type="date-time"/>
+        <field name="bot" type="text-indicator"/>
+        <field name="botOperatorPartyId" type="id"/>
+        <field name="maxRepositories" type="number-integer"><description>Personal repositories; empty: the site's default</description></field>
+        <field name="maxRepositoryBytes" type="number-integer"><description>For one repository; empty: the site's default</description></field>
+        <field name="maxLfsBytes" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="runnerMinutesMonthly" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="setByPartyId" type="id"><description>Who last set a limit or the bot mark</description></field>
+        <field name="reason" type="text-long"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="BotOperator" related="mantle.party.Party">
+            <key-map field-name="botOperatorPartyId" related="partyId"/></relationship>
+        <index name="SMITHY_ACCOUNT_LOGIN" unique="true"><index-field name="siteId"/><index-field name="githubLogin"/></index>
+    </entity>
+    <entity entity-name="SmithyPathRedirect" package="mantle.smithy">
+        <description>The old path of a renamed group, or the old handle of an account: pages redirect from it to where
+            the group or the namespace is now, until the path is taken. Another party may take it 90 days after
+            createdAt, the party it belongs to at once (SmithyCore.js pathHeld). A repository's own old path is the
+            framework's GitRepositoryPathRedirect.</description>
+        <field name="siteId" type="id" is-pk="true"/>
+        <field name="oldPath" type="text-medium" is-pk="true"><description>Lower case</description></field>
+        <field name="redirectKindEnumId" type="id"><description>SmithyRedirectKind: SrkGroup, SrkAccount</description></field>
+        <field name="groupId" type="id"><description>The group that had the path</description></field>
+        <field name="partyId" type="id"><description>The account that had the handle</description></field>
+        <field name="createdAt" type="date-time"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyGroup"/>
+        <relationship type="one-nofk" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="SmithyRedirectKind" related="moqui.basic.Enumeration">
+            <key-map field-name="redirectKindEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_REDIRECT_GROUP"><index-field name="groupId"/></index>
+        <index name="SMITHY_REDIRECT_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
     </entity>
 </entities>

@@ -149,4 +149,51 @@ const authz = (userId, repositoryId, action) =>
         artifactTypeEnumId: "AT_GIT_REPOSITORY",
         artifactName: repositoryId
     }).authzTypeEnumId
-;({OPERATOR, run, make, row, set, site, account, role, as, op, service, createGroup, createRepository, commit, authz})
+/* A site's Smithy settings row (SmithySite), made with these fields or changed to them. */
+function settings(siteId, fields) {
+    if (row("mantle.smithy.SmithySite", {siteId})) set("mantle.smithy.SmithySite", {siteId}, fields)
+    else make("mantle.smithy.SmithySite", {siteId, revision: 1, ...fields})
+}
+/* A sanction of the forum on a party in a site: kind suspend or silence. */
+const sanction = (siteId, partyId, kind) =>
+    make("mantle.forum.ForumSanction", {
+        sanctionId: siteId + "_" + partyId + "_" + kind,
+        siteId,
+        partyId,
+        kind,
+        fromDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 1000,
+        revision: 1
+    })
+/* What the push gate (the pre-receive rule's service) or the LFS upload check says of a push by a user: the errors that
+   refuse it, none when it is accepted. */
+function gate(name, parameters) {
+    ec.service
+        .sync()
+        .name("mantle.smithy.SmithyGitServices.check#" + name)
+        .parameters(parameters)
+        .disableAuthz()
+        .call()
+    const problems = Array.from(ec.message.errors || []).map(String)
+    ec.message.clearErrors()
+    return problems
+}
+;({
+    OPERATOR,
+    run,
+    make,
+    row,
+    set,
+    site,
+    account,
+    role,
+    as,
+    op,
+    service,
+    createGroup,
+    createRepository,
+    commit,
+    authz,
+    settings,
+    sanction,
+    gate
+})

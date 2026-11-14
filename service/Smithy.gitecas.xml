@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Smithy's push gate (mr-pass plan/design-smithy.md §5.5): before a push is accepted, to any repository; the service
+    returns at once for one with no SmithyRepository row. A write through Moqui (a page's commit, create#GitRef) is not a
+    push: the operation that makes it has checked its caller. -->
+<gitecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/git-eca-3.xsd">
+    <giteca rule-name="SmithyPushGate" source="push" event="pre-receive">
+        <actions><service-call name="mantle.smithy.SmithyGitServices.check#Push" in-map="context"/></actions>
+    </giteca>
+</gitecas>

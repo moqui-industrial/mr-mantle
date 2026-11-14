@@ -64,5 +64,210 @@
     downloadArchive: {
         service: "mantle.smithy.SmithyServices.download#Archive",
         fields: ["siteId", "repositoryId", "refPath", "format"]
+    },
+    // DG2 (§15.3): accounts and push
+    getSmithySettings: {
+        service: "mantle.smithy.SmithyServices.get#Settings",
+        fields: ["siteId"]
+    },
+    storeSmithySettings: {
+        service: "mantle.smithy.SmithyServices.store#Settings",
+        fields: [
+            "siteId",
+            "homeGroupPath",
+            "groupCreate",
+            "repositoryCreate",
+            "forkCreate",
+            "defaultMaxRepositories",
+            "defaultRepositoryBytes",
+            "defaultLfsBytes",
+            "defaultRunnerMinutes",
+            "groupRepositoryBytes",
+            "groupLfsBytes",
+            "groupRunnerMinutes",
+            "maxEditBytes",
+            "repositoryKind",
+            "expectedRevision"
+        ]
+    },
+    requestGroup: {
+        service: "mantle.smithy.SmithyServices.request#Group",
+        fields: ["siteId", "pathSegment", "name", "description", "visibility", "reason", "operationId"]
+    },
+    findGroupRequests: {
+        service: "mantle.smithy.SmithyServices.find#GroupRequests",
+        fields: ["siteId", "status", "limit", "cursor"]
+    },
+    decideGroupRequest: {
+        service: "mantle.smithy.SmithyServices.decide#GroupRequest",
+        fields: ["siteId", "groupId", "decision", "reason", "expectedRevision"]
+    },
+    createSubgroup: {
+        service: "mantle.smithy.SmithyServices.create#Subgroup",
+        fields: ["siteId", "groupId", "pathSegment", "name", "description", "visibility", "operationId"]
+    },
+    updateGroup: {
+        service: "mantle.smithy.SmithyServices.update#Group",
+        fields: ["siteId", "groupId", "name", "description", "avatarId", "visibility", "issueRepositoryPath", "expectedRevision"]
+    },
+    renameGroup: {
+        service: "mantle.smithy.SmithyServices.rename#Group",
+        fields: ["siteId", "groupId", "pathSegment", "expectedRevision"]
+    },
+    deleteGroup: {
+        service: "mantle.smithy.SmithyServices.delete#Group",
+        fields: ["siteId", "groupId", "confirmPath", "expectedRevision"]
+    },
+    setGroupMember: {
+        service: "mantle.smithy.SmithyServices.set#GroupMember",
+        fields: ["siteId", "groupId", "handle", "role", "thruDate", "expectedRevision"]
+    },
+    leaveGroup: {
+        service: "mantle.smithy.SmithyServices.leave#Group",
+        fields: ["siteId", "groupId"]
+    },
+    createRepository: {
+        service: "mantle.smithy.SmithyServices.create#Repository",
+        fields: ["siteId", "groupId", "slug", "name", "description", "visibility", "withReadme", "operationId"]
+    },
+    updateRepository: {
+        service: "mantle.smithy.SmithyServices.update#Repository",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "name",
+            "description",
+            "defaultBranch",
+            "defaultMergeMethod",
+            "issuesEnabled",
+            "mergeRequestsEnabled",
+            "pipelinesEnabled",
+            "forumEnabled",
+            "docsEnabled",
+            "docsPath",
+            "pinnedSequence",
+            "expectedRevision"
+        ]
+    },
+    setRepositoryVisibility: {
+        service: "mantle.smithy.SmithyServices.set#RepositoryVisibility",
+        fields: ["siteId", "repositoryId", "visibility", "expectedRevision"]
+    },
+    renameRepository: {
+        service: "mantle.smithy.SmithyServices.rename#Repository",
+        fields: ["siteId", "repositoryId", "slug", "expectedRevision"]
+    },
+    transferRepository: {
+        service: "mantle.smithy.SmithyServices.transfer#Repository",
+        fields: ["siteId", "repositoryId", "targetGroupId", "expectedRevision"]
+    },
+    setRepositoryArchived: {
+        service: "mantle.smithy.SmithyServices.set#RepositoryArchived",
+        fields: ["siteId", "repositoryId", "archived", "expectedRevision"]
+    },
+    deleteRepository: {
+        service: "mantle.smithy.SmithyServices.delete#Repository",
+        fields: ["siteId", "repositoryId", "confirmPath", "expectedRevision"]
+    },
+    findRepositoryMembers: {
+        service: "mantle.smithy.SmithyServices.find#RepositoryMembers",
+        fields: ["siteId", "repositoryId", "limit", "cursor"]
+    },
+    setRepositoryMember: {
+        service: "mantle.smithy.SmithyServices.set#RepositoryMember",
+        fields: ["siteId", "repositoryId", "handle", "role", "thruDate", "expectedRevision"]
+    },
+    getBranchRules: {
+        service: "mantle.smithy.SmithyServices.get#BranchRules",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeBranchRule: {
+        service: "mantle.smithy.SmithyServices.store#BranchRule",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "branchRuleId",
+            "refPattern",
+            "allowForcePush",
+            "allowDelete",
+            "requireMergeRequest",
+            "requiredApprovals",
+            "dismissStaleApprovals",
+            "requiredStatusContexts",
+            "allowedMergeMethods",
+            "operationId"
+        ]
+    },
+    deleteBranchRule: {
+        service: "mantle.smithy.SmithyServices.delete#BranchRule",
+        fields: ["siteId", "repositoryId", "branchRuleId"]
+    },
+    findWebhooks: {
+        service: "mantle.smithy.SmithyServices.find#Webhooks",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeWebhook: {
+        service: "mantle.smithy.SmithyServices.store#Webhook",
+        fields: ["siteId", "repositoryId", "webhookId", "url", "events", "secret", "active", "description", "operationId"]
+    },
+    deleteWebhook: {
+        service: "mantle.smithy.SmithyServices.delete#Webhook",
+        fields: ["siteId", "repositoryId", "webhookId"]
+    },
+    testWebhook: {
+        service: "mantle.smithy.SmithyServices.test#Webhook",
+        fields: ["siteId", "repositoryId", "webhookId"]
+    },
+    findWebhookDeliveries: {
+        service: "mantle.smithy.SmithyServices.find#WebhookDeliveries",
+        fields: ["siteId", "repositoryId", "webhookId", "limit", "cursor"]
+    },
+    createRef: {
+        service: "mantle.smithy.SmithyServices.create#Ref",
+        fields: ["siteId", "repositoryId", "refType", "name", "fromRevision", "message", "operationId"]
+    },
+    deleteRef: {
+        service: "mantle.smithy.SmithyServices.delete#Ref",
+        fields: ["siteId", "repositoryId", "refType", "name"]
+    },
+    findGitAccess: {
+        service: "mantle.smithy.SmithyServices.find#GitAccess",
+        fields: ["siteId"]
+    },
+    addSshKey: {
+        service: "mantle.smithy.SmithyServices.add#SshKey",
+        fields: ["siteId", "name", "publicKey", "password", "code", "operationId"]
+    },
+    removeSshKey: {
+        service: "mantle.smithy.SmithyServices.remove#SshKey",
+        fields: ["siteId", "sshKeyId"]
+    },
+    createAccessToken: {
+        service: "mantle.smithy.SmithyServices.create#AccessToken",
+        fields: ["siteId", "name", "expiresAt", "password", "code", "operationId"]
+    },
+    revokeAccessToken: {
+        service: "mantle.smithy.SmithyServices.revoke#AccessToken",
+        fields: ["siteId", "tokenId"]
+    },
+    getQuotaUsage: {
+        service: "mantle.smithy.SmithyServices.get#QuotaUsage",
+        fields: ["siteId", "groupId", "handle"]
+    },
+    setQuota: {
+        service: "mantle.smithy.SmithyServices.set#Quota",
+        fields: [
+            "siteId",
+            "groupId",
+            "handle",
+            "maxRepositories",
+            "maxRepositoryBytes",
+            "maxLfsBytes",
+            "runnerMinutesMonthly",
+            "bot",
+            "botOperatorHandle",
+            "reason",
+            "expectedRevision"
+        ]
     }
 })

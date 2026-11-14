@@ -412,13 +412,15 @@ function lockActor() {
             .forUpdate(true)
             .one()
 }
-function receipt(p, action, work) {
+/* lock: what serializes the actor's retries, the actor's account row unless the work writes, in a transaction of its
+   own, a row that refers to it (a login key), which would wait for that lock. */
+function receipt(p, action, work, lock = lockActor) {
     const actorPartyId = requireUser()
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(p.operationId || ''))
         invalid(
             'operationId must contain 8–64 letters, numbers, underscores or hyphens',
         )
-    lockActor()
+    lock()
     const key = {
             siteId: p.siteId,
             actorPartyId,

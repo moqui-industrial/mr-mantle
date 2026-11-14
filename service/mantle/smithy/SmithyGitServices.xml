@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- What the git server asks Smithy (mr-pass plan/design-smithy.md §5.5, §11 Quotas): not operations. check#Push is
+        called by the pre-receive gitECA rule SmithyPushGate (service/Smithy.gitecas.xml), check#LfsUpload by the LFS batch
+        API (MoquiConf.xml, git-server lfs-upload-check-service). Each returns at once for a repository with no
+        SmithyRepository row, so a Projects-only repository is pushed to as before. An error refuses, and its text is what
+        the git client shows. Who may push at all is mantle.work.GitServices.check#GitRepositoryAuthz's to say. -->
+    <service verb="check" noun="Push" authenticate="anonymous-all" allow-remote="false">
+        <description>The push gate. For a repository Smithy has, refuses a push (refs/for/* included): by an account
+            without a confirmed address, or by no account; by an account suspended on the site; on a site that no
+            longer mounts Smithy; to an archived repository; and one whose pack (packBytes) would take the repository
+            past its namespace's size limit for one repository (the account's, or its nearest group's, else the site's
+            default). What the repository stores is the framework's count (get#GitRepositoryUsage), asked for this
+            repository alone; a push is refused when it cannot be read. A push that adds nothing (packBytes 0, deletes
+            only) is not held to the size.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="userId"/>
+            <parameter name="packBytes" type="Long"/>
+            <parameter name="source"/>
+            <parameter name="transport"/>
+        </in-parameters>
+        <actions>
+            <script><![CDATA[
+                for (const problem of ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkPush({repositoryId, userId, packBytes}))
+                    ec.message.addError(problem)
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="check" noun="LfsUpload" authenticate="anonymous-all" allow-remote="false">
+        <description>The Git LFS upload check (the framework's check#GitLfsUpload contract): LFS uploads do not pass
+            pre-receive, so for a repository Smithy has this refuses an upload by an account without a confirmed address
+            or suspended on the site, on a site that no longer mounts Smithy, to an archived repository, when the usage cannot be read, and one whose bytes (uploadBytes) would take the Git LFS
+            files of the repository's namespace (the account's repositories, or those below the group whose limit it
+            is) past their limit.</description>
+        <implements service="org.moqui.git.GitServices.check#GitLfsUpload"/>
+        <actions>
+            <script><![CDATA[
+                for (const problem of ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkLfsUpload({repositoryId, userId, uploadBytes}))
+                    ec.message.addError(problem)
+            ]]></script>
+        </actions>
+    </service>
+</services>

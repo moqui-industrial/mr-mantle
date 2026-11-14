@@ -24,6 +24,9 @@
     <moqui.basic.Enumeration enumId="ScpOperators" enumTypeId="SmithyCreatePolicy" enumCode="operators" sequenceNum="1" description="Operators only"/>
     <moqui.basic.Enumeration enumId="ScpRequest" enumTypeId="SmithyCreatePolicy" enumCode="request" sequenceNum="2" description="By request and approval"/>
     <moqui.basic.Enumeration enumId="ScpVerified" enumTypeId="SmithyCreatePolicy" enumCode="verified" sequenceNum="3" description="Any verified account"/>
+    <moqui.basic.EnumerationType description="Smithy Redirect Kind" enumTypeId="SmithyRedirectKind"/>
+    <moqui.basic.Enumeration enumId="SrkGroup" enumTypeId="SmithyRedirectKind" enumCode="group" sequenceNum="1" description="Group"/>
+    <moqui.basic.Enumeration enumId="SrkAccount" enumTypeId="SmithyRedirectKind" enumCode="account" sequenceNum="2" description="Account"/>
 
     <moqui.basic.StatusType description="Smithy Group" statusTypeId="SmithyGroup"/>
     <moqui.basic.StatusItem statusId="SmgRequested" statusTypeId="SmithyGroup" statusCode="requested" sequenceNum="1" description="Requested"/>

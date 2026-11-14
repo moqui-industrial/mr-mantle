@@ -5,7 +5,24 @@
  * Entity access is privileged here; Smithy.js, the rights service and the name check turn authorization off around it.
  */
 const forum = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
-const {S, now, me, find, one, rows, update, fail, missing, invalid, active, member, isOperator, sanctioned, internalParty} = forum
+const {
+    S,
+    now,
+    millis,
+    me,
+    find,
+    one,
+    rows,
+    update,
+    fail,
+    missing,
+    invalid,
+    active,
+    member,
+    isOperator,
+    sanctioned,
+    internalParty
+} = forum
 const M = "mantle.smithy."
 const GIT = "org.moqui.git.GitServices."
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -26,6 +43,7 @@ const ROLE_CODES = {
     SmrOwner: "owner"
 }
 const STATUS_CODES = {SmgRequested: "requested", SmgActive: "active", SmgRefused: "refused"}
+const POLICY_CODES = {ScpOperators: "operators", ScpRequest: "request", ScpVerified: "verified"}
 const idOfCode = (codes, code) => Object.keys(codes).find(id => codes[id] === code) || null
 const visibilityRank = enumId => VISIBILITY[enumId] || 3
 const roleOfRank = rank =>
@@ -39,6 +57,9 @@ const HANDLE = /^[a-z0-9][a-z0-9_-]{2,31}$/
 const GROUP_SEGMENT = /^[a-z0-9][a-z0-9_-]{1,38}$/
 const SLUG = /^[a-z0-9_][a-z0-9_.-]{0,99}$/
 const MAX_GROUP_DEPTH = 4
+/* The most repositories below one top-level group: a group has no count of its own to set (§11 Quotas), and this bounds
+   what a rename, a narrowing and a quota read walk. */
+const GROUP_REPOSITORY_LIMIT = 1000
 /* Smithy's own first segments and the default base of each PASS app (mr-pass service/pass/Apps.js, which the
    authority cannot read), which no group path or handle takes, so a mount made later shadows none. */
 const reservedNames = [
@@ -101,16 +122,78 @@ function nameHeld(siteId, name, handles = true) {
     const word = String(name || "").toLowerCase()
     return !!word && (!!groupHolding(siteId, word) || (handles && !!one(S + "PublicSiteProfile", {siteId, handle: word})))
 }
+/* An old path redirects until it is taken (§4.3): by the party it belongs to at once, by another after 90 days. */
+const REDIRECT_DAYS = 90
+const redirectExpired = createdAt => !createdAt || millis(createdAt) + REDIRECT_DAYS * 86400000 <= millis(now())
+/* Whether a party is an Owner of a group by its active rows on it and the groups above. */
+function ownsGroup(groupId, partyId) {
+    const chain = partyId ? groupChain(groupId) : null
+    return !!chain && groupRank(chain, partyId)[0] >= RANK.SmrOwner
+}
+/* Whether an old path still holds its place against a party: the unexpired SmithyPathRedirect of a group that the party
+   is no Owner of, or of another account's handle; and the unexpired GitRepositoryPathRedirect of a repository of the
+   site that the party is no Owner of (its namespace's account, or an Owner of its groups). The framework lets a
+   repository take a redirected path at once, so this is asked before SmithyCore.setPath. own: what is the asker's
+   whatever its rows say: all (an operator on a page), groupId or repositoryId (the one that is taking its path back). */
+function pathHeld(siteId, path, partyId, own = {}) {
+    const oldPath = String(path || "").toLowerCase()
+    const moved = one(M + "SmithyPathRedirect", {siteId, oldPath})
+    if (moved && !own.all && !redirectExpired(moved.createdAt)) {
+        const mine =
+            moved.redirectKindEnumId === "SrkAccount"
+                ? !!partyId && moved.partyId === partyId
+                : !!moved.groupId && (moved.groupId === own.groupId || ownsGroup(moved.groupId, partyId))
+        if (!mine) return true
+    }
+    if (!oldPath.includes("/")) return false
+    // the framework's key of an old path is the path in lower case
+    const renamed = one("moqui.resource.GitRepositoryPathRedirect", {oldPathKey: oldPath})
+    if (!renamed || renamed.repositoryId === own.repositoryId || redirectExpired(renamed.createdDate)) return false
+    // the old path of a repository that is not this site's (another site's, or one with no Smithy row, as a
+    // Projects-only repository) is nobody's here to take, an operator's neither
+    const repo = one(M + "SmithyRepository", {repositoryId: renamed.repositoryId})
+    if (!repo || repo.siteId !== siteId) return true
+    if (own.all) return false
+    return !(repo.ownerPartyId ? !!partyId && repo.ownerPartyId === partyId : ownsGroup(repo.groupId, partyId))
+}
+/* A path that is taken ends the redirect from it; the framework removes a repository's own (set#GitRepositoryPath). */
+function releasePath(siteId, path) {
+    const moved = one(M + "SmithyPathRedirect", {siteId, oldPath: String(path || "").toLowerCase()})
+    if (moved) moved.delete()
+}
+/* The old path of a group or a handle, kept as a redirect to where it is now. A redirect from the new path to the same
+   group or account (a name taken back) ends. */
+function keepRedirect(siteId, oldPath, newPath, target) {
+    releasePath(siteId, newPath)
+    releasePath(siteId, oldPath)
+    forum.create(M + "SmithyPathRedirect", {
+        siteId,
+        oldPath,
+        redirectKindEnumId: target.groupId ? "SrkGroup" : "SrkAccount",
+        groupId: target.groupId || null,
+        partyId: target.partyId || null,
+        createdAt: now()
+    })
+}
 /* Whether a first-segment name is free in a site's one name set, for a new top-level group (kind "group") or a
-   handle (kind "handle", which the party's own profile may already hold). The caller has locked the site's
-   PublicSite row, so a handle and a group path are not taken at the same time. */
-function nameFree(siteId, name, forPartyId, kind = "group") {
+   handle (kind "handle", which the party's own profile may already hold). An old path that still redirects holds its
+   name against everyone but the party it belongs to. The caller has locked the site's PublicSite row, so a handle and
+   a group path are not taken at the same time. */
+function nameFree(siteId, name, forPartyId, kind = "group", own = {}) {
     const word = String(name || "").toLowerCase()
     if (!word || reservedFirstSegments(siteId).has(word)) return false
     if (groupHolding(siteId, word)) return false
     const profile = one(S + "PublicSiteProfile", {siteId, handle: word})
     if (profile && (kind !== "handle" || profile.partyId !== forPartyId)) return false
-    return true
+    return !pathHeld(siteId, word, forPartyId, own)
+}
+/* A handle that changed moves its personal namespace (§4.3): each repository's path through setPath, and the old handle
+   kept as a redirect. Called by Forum's storeProfile, which has checked the new handle with nameFree. */
+function handleChanged(siteId, partyId, oldHandle, newHandle) {
+    if (!oldHandle || !newHandle || oldHandle === newHandle) return
+    keepRedirect(siteId, oldHandle, newHandle, {partyId})
+    for (const repo of find(M + "SmithyRepository", {siteId, ownerPartyId: partyId}).list())
+        setPath(repo, {repositoryPath: newHandle + "/" + repo.slug})
 }
 /* Whether a name is free among a group's subgroups and repositories, which are one set, or among a personal
    namespace's repositories. */
@@ -123,6 +206,31 @@ function siblingFree(siteId, groupId, ownerPartyId, name) {
         return taken === 0 && find(M + "SmithyRepository", {siteId, groupId, slug: word}).count() === 0
     }
     return find(M + "SmithyRepository", {siteId, ownerPartyId, slug: word}).count() === 0
+}
+
+// ===== the site's settings (§11 SiteSettings, §14.2 SmithySite) =====
+const SETTING_DEFAULTS = {
+    groupCreateEnumId: "ScpRequest",
+    repositoryCreateEnumId: "ScpVerified",
+    forkCreateEnumId: "ScpVerified",
+    defaultMaxRepositories: 5,
+    defaultRepositoryBytes: 1073741824,
+    defaultLfsBytes: 1073741824,
+    defaultRunnerMinutes: 0,
+    groupRepositoryBytes: 5368709120,
+    groupLfsBytes: 5368709120,
+    groupRunnerMinutes: 2000,
+    maxEditBytes: 1048576,
+    repositoryKind: "db"
+}
+/* A site's Smithy settings, each its default where the row, or its field, is empty; row is the SmithySite or null. */
+function settings(siteId) {
+    const row = one(M + "SmithySite", {siteId})
+    const out = {row, homeGroupId: row?.homeGroupId || null, revision: Number(row?.revision || 0)}
+    for (const [name, fallback] of Object.entries(SETTING_DEFAULTS))
+        out[name] =
+            row?.[name] == null || row[name] === "" ? fallback : typeof fallback === "number" ? Number(row[name]) : row[name]
+    return out
 }
 
 // ===== the actor =====
@@ -170,10 +278,13 @@ function siteAccess(siteId, a) {
         }
     })
 }
-/* The site of a page operation, or Not Found. */
+/* Whether a site has Smithy: an enabled mount of the app. Without one no operation answers, and git takes no write. */
+const mounted = siteId => remember("mount|" + siteId, () => !!publicApps().mount(siteId, "smithy"))
+/* The site of a page operation, or Not Found: a site that is not open to the caller, and one that does not mount
+   Smithy, whatever rows it has. */
 function site(siteId) {
     const access = siteAccess(siteId, actor())
-    if (!access.open) missing()
+    if (!access.open || !mounted(siteId)) missing()
     return access.site
 }
 
@@ -319,11 +430,13 @@ function rights(repositoryId, userId) {
     if (!repo) return {known: false, canView: false, role: null, rank: 0, confirmed: false}
     const a = actor(userId || null)
     const r = repositoryRights(repo, a)
+    // a site that no longer mounts Smithy: who could view a repository still clones it, and nobody writes
+    const rank = !r.canView ? 0 : mounted(repo.siteId) ? r.rank : Math.min(r.rank, RANK.SmrGuest)
     return {
         known: true,
         canView: r.canView,
-        role: r.canView ? roleOfRank(r.rank) : null,
-        rank: r.canView ? r.rank : 0,
+        role: roleOfRank(rank),
+        rank,
         confirmed: !!a.userId && confirmedAddress().confirmed(a.userId)
     }
 }
@@ -524,6 +637,21 @@ function resolvePath(siteId, path) {
         if (target && target.siteId === siteId && repositoryRights(target, a).canView)
             return answer({kind: "redirect", redirectPath: [target.repositoryPath].concat(given.slice(length)).join("/")})
     }
+    // an old path of a group that was renamed or of a handle that changed, by the longest prefix
+    for (let length = lowered.length; length > 0; length--) {
+        const moved = one(M + "SmithyPathRedirect", {siteId, oldPath: lowered.slice(0, length).join("/")})
+        if (!moved) continue
+        let current = null
+        if (moved.redirectKindEnumId === "SrkAccount") {
+            const profile = one(S + "PublicSiteProfile", {siteId, partyId: moved.partyId})
+            if (accountShown(profile, a)) current = profile.handle
+        } else {
+            const target = moved.groupId ? one(M + "SmithyGroup", {groupId: moved.groupId}) : null
+            if (target && target.siteId === siteId && groupRights(target, a).canView) current = target.groupPath
+        }
+        if (current) return answer({kind: "redirect", redirectPath: [current].concat(given.slice(length)).join("/")})
+        break
+    }
     // a GitHub URL whose host was changed: the longest proper prefix that is a repository, then a form GitHub has
     if (lowered.length >= 3)
         for (let length = Math.min(lowered.length - 1, MAX_GROUP_DEPTH + 1); length >= 2; length--) {
@@ -543,6 +671,7 @@ function resolvePath(siteId, path) {
     RANK,
     ROLE_CODES,
     STATUS_CODES,
+    POLICY_CODES,
     idOfCode,
     visibilityRank,
     roleOfRank,
@@ -557,6 +686,13 @@ function resolvePath(siteId, path) {
     groupHolding,
     nameFree,
     siblingFree,
+    pathHeld,
+    releasePath,
+    keepRedirect,
+    handleChanged,
+    ownsGroup,
+    settings,
+    SETTING_DEFAULTS,
     actor,
     withMemo,
     siteAccess,
@@ -578,5 +714,9 @@ function resolvePath(siteId, path) {
     profileShown,
     accountShown,
     resolvePath,
-    confirmed: userId => confirmedAddress().confirmed(userId)
+    GROUP_REPOSITORY_LIMIT,
+    mounted,
+    // of an account by its userId (none: false), and of the signed-in account
+    confirmed: userId => confirmedAddress().confirmed(userId),
+    confirmedNow: () => confirmedAddress().currentConfirmed()
 })

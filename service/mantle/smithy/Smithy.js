@@ -1,15 +1,18 @@
 /* CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md.
- * Smithy's operations (mr-pass plan/design-smithy.md §15.2, DG1: public read): groups, repositories and the code
- * reads, each a method that SmithyServices.xml's wrapper runs through execute(). A read of code is the framework's
+ * Smithy's operations (mr-pass plan/design-smithy.md §15), each a method that SmithyServices.xml's wrapper runs through
+ * execute(). Here: the public reads (§15.2) of groups, repositories and code, the projections, and what makes a group
+ * and a repository. SmithyManage.js adds the settings, groups, repositories, members and quotas of §15.3, and
+ * SmithyGit.js its refs, branch rules, webhooks, git access and the push gate. A read of code is the framework's
  * hosting service (org.moqui.git.GitServices) after Smithy's own check; what the caller may not view is Not Found.
- * Also the two services that make a group and a repository until DG2's operations. The rules are SmithyCore.js's.
- * Entity access is privileged here; every projection passes the evaluator first.
+ * The rules are SmithyCore.js's. Entity access is privileged here; every projection passes the evaluator first.
  */
 const core = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
 const {M, forum, VISIBILITY_CODES, VISIBILITY_IDS, RANK, ROLE_CODES, STATUS_CODES, git} = core
 const {S, now, me, find, one, fail, missing, invalid, requireUser, page} = forum
 const GIT_REPOSITORY = "moqui.resource.GitRepository"
 const flag = value => value === true || value === "true" || value === "Y"
+/* The framework's merge methods as an operation's words. */
+const MERGE_METHODS = {GmmMerge: "merge", GmmSquash: "squash", GmmFastForward: "fastForward", GmmRebase: "rebase"}
 const text = value => (value == null ? "" : String(value))
 /* The limits of the code pages, the same for every caller (§7). */
 const TREE_PAGE = 1000
@@ -155,6 +158,7 @@ function repositoryView(r) {
         groupId: repo.groupId || null,
         ownerHandle: handleOf(repo.siteId, repo.ownerPartyId),
         defaultBranch: hosted?.branch || "main",
+        defaultMergeMethod: MERGE_METHODS[hosted?.defaultMergeMethodEnumId] || "merge",
         archived: !!hosted?.archivedDate,
         mirror: hosted?.repositoryKind === "remote",
         hidden: r.hidden,
@@ -168,6 +172,8 @@ function repositoryView(r) {
             forum: repo.forumEnabled === "Y",
             docs: repo.docsEnabled === "Y"
         },
+        docsPath: repo.docsPath || "docs",
+        pinnedSequence: repo.pinnedSequence == null ? null : Number(repo.pinnedSequence),
         component: repo.componentName ? {name: repo.componentName, version: repo.componentVersion || null} : null,
         lastPushAt: hosted?.lastUpdateDate || null,
         revision: Number(repo.revision || 1)
@@ -176,7 +182,7 @@ function repositoryView(r) {
 /* What the caller may do in a repository (§5.3), so a page shows only the controls that would be accepted. */
 function repositoryCapabilities(r) {
     const signedIn = !!me()
-    const confirmed = signedIn && core.confirmed()
+    const confirmed = signedIn && core.confirmedNow()
     const writable = confirmed && !r.git?.archivedDate
     const holds = role => writable && r.rank >= RANK[role]
     return {
@@ -196,6 +202,17 @@ function repositoryCapabilities(r) {
         canModerate: confirmed && (r.rank >= RANK.SmrOwner || r.access.staff)
     }
 }
+/* A role row as a member: the account by its profile and never its party id. */
+const memberView = (profile, row, fromPath) => ({
+    handle: profile?.handle || null,
+    displayName: profile?.displayName || "",
+    avatarUrl: null,
+    role: ROLE_CODES[row.roleEnumId] || null,
+    fromPath: fromPath || null,
+    fromDate: row.fromDate || null,
+    thruDate: row.thruDate || null,
+    revision: row.revision == null ? null : Number(row.revision)
+})
 const refView = ref => ({kind: ref.kind, name: ref.name, fullName: ref.fullName, commitId: ref.commitId})
 /* Commits as the pages show them: the author's name and no address, with the combined check state. An address is not
    matched to an account, which would tell whose address it is. */
@@ -348,7 +365,7 @@ methods.getGroup = p => {
     const r = core.group(p.groupId, p.siteId)
     const a = core.actor()
     const signedIn = !!me()
-    const confirmed = signedIn && core.confirmed()
+    const confirmed = signedIn && core.confirmedNow()
     return {
         group: groupView(r, a),
         // from the top-level group down to the parent; the name only of a group the caller may view itself
@@ -388,16 +405,9 @@ methods.findGroupMembers = p => {
         .filter(entry => owner || core.profileShown(entry.profile, a))
         .sort((x, y) => y.rank - x.rank || text(x.profile?.handle).localeCompare(text(y.profile?.handle)))
     return {
-        memberList: shown.slice(pg.offset, pg.offset + pg.limit).map(({row, fromPath, profile}) => ({
-            handle: profile?.handle || null,
-            displayName: profile?.displayName || "",
-            avatarUrl: null,
-            role: ROLE_CODES[row.roleEnumId],
-            fromPath,
-            fromDate: row.fromDate || null,
-            thruDate: row.thruDate || null,
-            revision: Number(row.revision || 1)
-        })),
+        memberList: shown
+            .slice(pg.offset, pg.offset + pg.limit)
+            .map(({row, fromPath, profile}) => memberView(profile, row, fromPath)),
         nextCursor: shown.length > pg.offset + pg.limit ? pg.next(pg.offset + pg.limit) : null
     }
 }
@@ -575,17 +585,66 @@ methods.downloadBlob = p => {
         bytes: blob.bytes ?? null
     }
 }
-/* Blame and the archive download wait for the framework's services (design §16 N-BLAME, N-ARCHIVE): the view check
-   answers Not Found as every read does, then the refusal says the feature is not there. */
-methods.getBlame = p => {
-    fileAt(p)
-    return notBuilt("Blame")
+/* A framework read whose refusal is the request's own (a file too large or binary for blame, a tree too large to
+   archive): Unprocessable with its text; nothing out is Not Found. */
+function gitOrRefuse(name, parameters) {
+    const out = ec.service
+        .sync()
+        .name(core.GIT + name)
+        .parameters(parameters)
+        .call()
+    if (ec.message.hasError()) {
+        const problem = text(ec.message.getErrorsString()).split("\n")[0]
+        ec.message.clearErrors()
+        ec.logger.warn("Smithy read " + name + " of " + parameters.repositoryId + " refused: " + problem)
+        invalid(problem.slice(0, 200))
+    }
+    return out || {}
 }
+/* Blame: the file's text and, for each run of lines, the commit that last changed them. An author's address is not
+   returned, and none is matched to an account. */
+methods.getBlame = p => {
+    const {ref, entry} = fileAt(p)
+    if (entry.lfs) invalid("A file kept in Git LFS has no blame")
+    if (Number(entry.size || 0) > TEXT_LIMIT) invalid("The file is too large for blame")
+    const blame = gitOrRefuse("get#GitBlame", {repositoryId: p.repositoryId, revision: ref.commitId, path: ref.path})
+    if (!blame.commitId) missing()
+    const blob = git("get#GitBlob", {repositoryId: p.repositoryId, revision: ref.commitId, path: ref.path})
+    return {
+        ref: refView(ref),
+        path: ref.path,
+        text: blob.text ?? null,
+        hunkList: Array.from(blame.hunkList || []).map(hunk => ({
+            startLine: Number(hunk.startLine),
+            lineCount: Number(hunk.lineCount),
+            commitId: hunk.commitId,
+            summary: hunk.summary || "",
+            authorName: hunk.authorName || "",
+            authorHandle: null,
+            date: hunk.authorDate || null
+        }))
+    }
+}
+/* A tree at a ref as a zip or tar.gz: the framework writes the file and the transport streams it (PassAuthority.js
+   DOWNLOADS). The framework has no cap by client, so until Smithy keeps one an archive is for a signed-in account. */
 methods.downloadArchive = p => {
     core.repository(p.repositoryId, p.siteId)
     if (!["zip", "tar.gz"].includes(p.format)) invalid("format must be zip or tar.gz")
-    core.splitRefPath(p.repositoryId, p.refPath)
-    return notBuilt("An archive download")
+    const ref = core.splitRefPath(p.repositoryId, p.refPath)
+    if (ref.path) invalid("An archive is of a branch, a tag or a commit, with no path after it")
+    if (ref.empty) missing()
+    requireUser()
+    const made = gitOrRefuse("get#GitArchive", {repositoryId: p.repositoryId, revision: ref.commitId, format: p.format})
+    if (!made.archiveLocation) missing()
+    return {
+        file: {
+            filename: made.fileName,
+            mimeType: made.contentType || "application/octet-stream",
+            size: Number(made.archiveSize || 0)
+        },
+        commitId: made.commitId || ref.commitId,
+        location: made.archiveLocation
+    }
 }
 methods.findCommits = p => {
     core.repository(p.repositoryId, p.siteId)
@@ -751,7 +810,7 @@ methods.findRefs = p => {
     }
 }
 
-// ===== making a group and a repository (until DG2's requestGroup, createSubgroup and createRepository) =====
+// ===== making a group and a repository =====
 function sequenced(entityName, fields) {
     const value = ec.entity.makeValue(entityName)
     value.setSequencedIdPrimary()
@@ -761,48 +820,80 @@ function sequenced(entityName, fields) {
 }
 const visibilityId = (code, fallback) =>
     code ? core.idOfCode(VISIBILITY_CODES, code) || invalid("visibility must be public, members or private") : fallback
-/* A signed-in caller with a confirmed address; an operator needs none. */
+/* Who writes: a signed-in caller with a confirmed address (an operator needs none) who is not suspended on the site. */
 function writer(siteId) {
     const partyId = requireUser()
     const access = core.siteAccess(siteId, core.actor())
-    if (!access.operator && !core.confirmed()) fail("Unauthorized", "addressUnconfirmed: Confirm your email address to continue")
+    if (!access.operator && !core.confirmedNow())
+        fail("Unauthorized", "addressUnconfirmed: Confirm your email address to continue")
+    if (access.suspended) fail("Unauthorized", "accessDenied: Your account is suspended on this site")
     return {partyId, access}
 }
-/* create#Group: a top-level group by the site's owner or an operator, or a subgroup by an Owner of its parent. */
-function createGroup(p) {
-    // the site's row is locked, so a group path and a handle are not taken at the same time
-    one(S + "PublicSite", {siteId: p.siteId}, true)
-    core.site(p.siteId)
-    const {partyId, access} = writer(p.siteId)
-    const parent = p.parentGroupId ? core.group(p.parentGroupId, p.siteId) : null
-    if (parent) core.requireRole(parent, "SmrOwner")
-    else if (!access.owner) fail("Unauthorized", "accessDenied: Only the site's owner makes a group")
-    const pathSegment = text(p.pathSegment)
+/* The site's PublicSite row locked, so a group path, a handle and a repository's path are not taken at the same time.
+   Taken once the caller is known to be one who may write, so that nobody else holds the site's row. */
+const lockNames = siteId => one(S + "PublicSite", {siteId}, true)
+/* The Owner row a group starts with, or that an approved request gives its requester. */
+function grantOwner(group, partyId, addedByPartyId) {
+    const fields = {roleEnumId: "SmrOwner", fromDate: now(), thruDate: null, addedByPartyId}
+    const row = one(M + "SmithyGroupParty", {groupId: group.groupId, partyId}, true)
+    if (row) forum.update(row, {...fields, revision: Number(row.revision || 1) + 1})
+    else forum.create(M + "SmithyGroupParty", {groupId: group.groupId, partyId, siteId: group.siteId, ...fields, revision: 1})
+}
+/* What a group's row holds beside its path, name, visibility and request: empty on a new group. */
+const GROUP_SETTINGS = [
+    "avatarId",
+    "contactListId",
+    "newsContactListId",
+    "workEffortId",
+    "issueRepositoryId",
+    "landingRepositoryId",
+    "landingPath",
+    "agreementEnumId",
+    "agreementPath",
+    "runnerPoolId",
+    "outsideRunnerPoolId",
+    "maxRepositoryBytes",
+    "maxLfsBytes",
+    "runnerMinutesMonthly",
+    "hiddenAt",
+    "hiddenByPartyId",
+    "hideReason"
+]
+/* A new group after its caller's own checks (who may make it): the name rules, the nesting, the visibility's ceiling and
+   the row, a top-level one (no parent) or a subgroup of parent (a group's rights). The site's PublicSite row is locked by
+   the caller, so a group path and a handle are not taken at the same time. g: siteId, partyId, access, parent,
+   pathSegment, name, description, visibility, statusId, reason. */
+function makeGroup(g) {
+    const {siteId, partyId, parent} = g
+    const pathSegment = text(g.pathSegment)
     if (!core.validGroupSegment(pathSegment))
         invalid("nameInvalid[pathSegment]: A group's path is 2 to 39 lower case letters, digits, underscores or hyphens")
-    const name = text(p.name).trim() || pathSegment
+    const name = text(g.name).trim() || pathSegment
     if (name.length > 255) invalid("name is too long")
     if (parent && (parent.group.statusId !== "SmgActive" || parent.chain.length >= core.MAX_GROUP_DEPTH))
-        invalid("policyRefused[parentGroupId]: Subgroups nest to four levels")
-    const visibilityEnumId = visibilityId(p.visibility, parent ? VISIBILITY_IDS[parent.visibility] : "SmvPrivate")
+        invalid("policyRefused[" + (g.parentField || "groupId") + "]: Subgroups nest to four levels, below an active group")
+    const visibilityEnumId = visibilityId(g.visibility, parent ? VISIBILITY_IDS[parent.visibility] : "SmvPrivate")
     if (parent && core.visibilityRank(visibilityEnumId) < parent.visibility)
         invalid("policyRefused[visibility]: A subgroup is no wider than its group")
-    const free = parent
-        ? core.siblingFree(p.siteId, parent.group.groupId, null, pathSegment)
-        : core.nameFree(p.siteId, pathSegment, partyId)
-    if (!free) invalid("nameTaken[pathSegment]: That name is taken")
     const groupPath = parent ? parent.group.groupPath + "/" + pathSegment : pathSegment
+    // an operator's page role is an Owner's everywhere, so an old path holds nothing against one
+    const own = {all: !!g.access?.operator}
+    const free = parent
+        ? core.siblingFree(siteId, parent.group.groupId, null, pathSegment) && !core.pathHeld(siteId, groupPath, partyId, own)
+        : core.nameFree(siteId, pathSegment, partyId, "group", own)
+    if (!free) invalid("nameTaken[pathSegment]: That name is taken")
+    const statusId = g.statusId || "SmgActive"
     const fields = {
-        siteId: p.siteId,
+        siteId,
         parentGroupId: parent?.group.groupId || null,
         pathSegment,
         groupPath,
         name,
-        description: text(p.description) || null,
+        description: text(g.description) || null,
         visibilityEnumId,
-        statusId: "SmgActive",
+        statusId,
         requestedByPartyId: partyId,
-        requestReason: null,
+        requestReason: text(g.reason) || null,
         decidedByPartyId: null,
         decidedAt: null,
         decisionReason: null,
@@ -810,73 +901,75 @@ function createGroup(p) {
         createdAt: now(),
         revision: 1
     }
-    // a refused request's path is free: its row, which the path's unique index holds, is taken over
-    const refused = one(M + "SmithyGroup", {siteId: p.siteId, groupPath}, true)
-    const created = refused ? forum.update(refused, fields) : sequenced(M + "SmithyGroup", fields)
+    // a refused request's path is free: its row, which the path's unique index holds, is taken over, with nothing of
+    // the request it was (its limits, a hide, its settings) left on it
+    const refused = one(M + "SmithyGroup", {siteId, groupPath}, true)
+    const created = refused
+        ? forum.update(refused, {...Object.fromEntries(GROUP_SETTINGS.map(name => [name, null])), ...fields})
+        : sequenced(M + "SmithyGroup", fields)
     if (refused) find(M + "SmithyGroupParty", {groupId: refused.groupId}).deleteAll()
-    // a top-level group has an Owner from the start; a subgroup's Owners are its parent's
-    if (!parent)
-        forum.create(M + "SmithyGroupParty", {
-            groupId: created.groupId,
-            partyId,
-            siteId: p.siteId,
-            roleEnumId: "SmrOwner",
-            fromDate: now(),
-            addedByPartyId: partyId,
-            revision: 1
-        })
-    return {groupId: created.groupId, groupPath: created.groupPath}
+    // the path is taken: a redirect from it ends
+    core.releasePath(siteId, groupPath)
+    // an active top-level group has an Owner from the start; a subgroup's Owners are its parent's
+    if (!parent && statusId === "SmgActive") grantOwner(created, partyId, partyId)
+    return created
 }
-/* create#Repository: a new hosted repository in a group by its Maintainer, or in the caller's namespace by the site's
-   staff. bind#Repository (bind): a hosted repository that is there, of any kind, a remote mirror included, bound to a
-   group by an operator. */
-function createRepository(p, bind) {
-    one(S + "PublicSite", {siteId: p.siteId}, true)
+/* create#Group: a top-level group by the site's owner or an operator, or a subgroup by an Owner of its parent; for
+   operators, seed data and specs. The operations are requestGroup and createSubgroup (SmithyManage.js). */
+function createGroup(p) {
     core.site(p.siteId)
     const {partyId, access} = writer(p.siteId)
-    if (bind && !access.operator) fail("Unauthorized", "accessDenied: Only an operator binds a repository that is there")
-    if (bind && !p.groupId) invalid("groupId is required")
-    const parent = p.groupId ? core.group(p.groupId, p.siteId) : null
-    let namespace
-    if (parent) {
-        core.requireRole(parent, "SmrMaintainer")
-        if (parent.group.statusId !== "SmgActive") invalid("policyRefused[groupId]: The group is not active")
-        namespace = parent.group.groupPath
-    } else {
-        if (!access.owner) fail("Unauthorized", "accessDenied: Only the site's owner makes a personal repository")
-        namespace = handleOf(p.siteId, partyId)
-        if (!namespace) invalid("policyRefused[groupId]: Choose a handle before making a personal repository")
-    }
-    const slug = text(p.slug || p.name).toLowerCase()
+    const parent = p.parentGroupId ? core.group(p.parentGroupId, p.siteId) : null
+    if (parent) core.requireRole(parent, "SmrOwner")
+    else if (!access.owner) fail("Unauthorized", "accessDenied: Only the site's owner makes a group")
+    lockNames(p.siteId)
+    const created = makeGroup({...p, partyId, access, parent, parentField: "parentGroupId"})
+    return {groupId: created.groupId, groupPath: created.groupPath}
+}
+/* A new repository after its caller's own checks (who may make it, the policy and the limits): the name rules, the
+   visibility's ceiling, the hosted repository (a new one of repositoryKind, or with bindRepositoryId one that is
+   there), the Smithy row and the path. r: siteId, partyId, access, parent (a group's rights; none: the namespace of
+   partyId), slug, name, description, visibility, repositoryKind, branch, bindRepositoryId. */
+function makeRepository(r) {
+    const {siteId, partyId, parent} = r
+    if (parent && parent.group.statusId !== "SmgActive") invalid("policyRefused[groupId]: The group is not active")
+    const namespace = parent ? parent.group.groupPath : handleOf(siteId, partyId)
+    if (!namespace) invalid("policyRefused[groupId]: Choose a handle before making a personal repository")
+    const slug = text(r.slug || r.name).toLowerCase()
     if (!core.validSlug(slug))
         invalid("nameInvalid[slug]: A repository's name is letters, digits, '.', '_' and '-', and does not end in .git")
-    const name = text(p.name).trim() || slug
+    const name = text(r.name).trim() || slug
     if (name.length > 255) invalid("name is too long")
     // private unless asked: a repository is never made wider than was said
-    const visibilityEnumId = visibilityId(p.visibility, "SmvPrivate")
+    const visibilityEnumId = visibilityId(r.visibility, "SmvPrivate")
     if (parent && core.visibilityRank(visibilityEnumId) < parent.visibility)
         invalid("policyRefused[visibility]: A repository is no wider than its group")
     const repositoryPath = namespace + "/" + slug
+    // a top-level group and what is below it hold a bounded count of repositories
+    const top = parent ? parent.chain[parent.chain.length - 1] : null
     if (
-        !core.siblingFree(p.siteId, parent?.group.groupId || null, parent ? null : partyId, slug) ||
-        one(M + "SmithyRepository", {repositoryPath}) ||
-        find(GIT_REPOSITORY, {repositoryPath}).count() > 0
+        top &&
+        find(M + "SmithyRepository", {siteId})
+            .condition("repositoryPath", "like", top.groupPath + "/%")
+            .count() >= core.GROUP_REPOSITORY_LIMIT
     )
+        invalid("quotaExceeded: The group has as many repositories as a group may have")
+    if (!pathFree(siteId, parent?.group.groupId || null, parent ? null : partyId, slug, repositoryPath, partyId, r.access))
         invalid("nameTaken[slug]: That name is taken")
-    let repositoryId = bind ? text(p.repositoryId) : ""
-    if (bind) {
+    let repositoryId = text(r.bindRepositoryId)
+    if (repositoryId) {
         if (!one(GIT_REPOSITORY, {repositoryId}) || one(M + "SmithyRepository", {repositoryId}))
             invalid("repositoryId names no hosted repository that Smithy does not have")
     } else {
-        const repositoryKind = p.repositoryKind || "local"
+        const repositoryKind = r.repositoryKind || "local"
         if (!["local", "db"].includes(repositoryKind)) invalid("repositoryKind must be local or db")
         do repositoryId = "smr" + ec.entity.sequencedIdPrimary(M + "SmithyRepository", 0, 50)
         while (one(GIT_REPOSITORY, {repositoryId}))
         const made = {
             repositoryId,
             repositoryKind,
-            branch: text(p.branch) || "main",
-            description: text(p.description).slice(0, 255) || null
+            branch: text(r.branch) || "main",
+            description: text(r.description).slice(0, 255) || null
         }
         ec.service
             .sync()
@@ -892,7 +985,7 @@ function createRepository(p, bind) {
     }
     const created = forum.create(M + "SmithyRepository", {
         repositoryId,
-        siteId: p.siteId,
+        siteId,
         groupId: parent?.group.groupId || null,
         ownerPartyId: parent ? null : partyId,
         slug,
@@ -911,10 +1004,99 @@ function createRepository(p, bind) {
     core.setPath(created, {repositoryPath})
     return {repositoryId, repositoryPath}
 }
+/* Whether a repository's name is free in its group (among its subgroups and repositories) or its personal namespace,
+   and its path taken by no repository and held by no old path against the party (§4.3; an operator's page role is an
+   Owner's everywhere). exceptRepositoryId: the repository that is being moved. */
+function pathFree(siteId, groupId, ownerPartyId, slug, repositoryPath, partyId, access, exceptRepositoryId) {
+    if (!core.siblingFree(siteId, groupId, ownerPartyId, slug)) return false
+    const holder = one(M + "SmithyRepository", {repositoryPath})
+    if (holder && holder.repositoryId !== exceptRepositoryId) return false
+    const hosted = find(GIT_REPOSITORY, {repositoryPath})
+    if ((exceptRepositoryId ? hosted.condition("repositoryId", "not-equals", exceptRepositoryId) : hosted).count() > 0)
+        return false
+    return !core.pathHeld(siteId, repositoryPath, partyId, {all: !!access?.operator, repositoryId: exceptRepositoryId})
+}
+/* create#Repository: a new hosted repository in a group by its Maintainer, or in the caller's namespace by the site's
+   staff. bind#Repository (bind): a hosted repository that is there, of any kind, a remote mirror included, bound to a
+   group by an operator. For operators, seed data and specs; the operation is createRepository (SmithyManage.js). */
+function createRepository(p, bind) {
+    core.site(p.siteId)
+    const {partyId, access} = writer(p.siteId)
+    if (bind && !access.operator) fail("Unauthorized", "accessDenied: Only an operator binds a repository that is there")
+    if (bind && !p.groupId) invalid("groupId is required")
+    const parent = p.groupId ? core.group(p.groupId, p.siteId) : null
+    if (parent) core.requireRole(parent, "SmrMaintainer")
+    else if (!access.owner) fail("Unauthorized", "accessDenied: Only the site's owner makes a personal repository")
+    if (bind && !text(p.repositoryId)) invalid("repositoryId is required")
+    lockNames(p.siteId)
+    return makeRepository({...p, partyId, access, parent, bindRepositoryId: bind ? p.repositoryId : null})
+}
+
+// ===== the operations of §15.3, in their own modules =====
+const kit = {
+    core,
+    methods,
+    flag,
+    text,
+    handleOf,
+    groupView,
+    repositoryView,
+    memberView,
+    visibilityId,
+    writer,
+    grantOwner,
+    lockNames,
+    makeGroup,
+    makeRepository,
+    pathFree,
+    MERGE_METHODS,
+    GIT_REPOSITORY
+}
+ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyManage.js")(kit)
+const gitModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyGit.js")(kit)
 
 // ===== dispatch =====
-const NUMBERS = ["limit", "offset"]
-const FLAGS = ["mine", "includeSubgroups", "pinned", "plain", "withDiffs", "checkMergeable", "namesOnly"]
+const NUMBERS = [
+    "limit",
+    "offset",
+    "expectedRevision",
+    "defaultMaxRepositories",
+    "defaultRepositoryBytes",
+    "defaultLfsBytes",
+    "defaultRunnerMinutes",
+    "groupRepositoryBytes",
+    "groupLfsBytes",
+    "groupRunnerMinutes",
+    "maxEditBytes",
+    "pinnedSequence",
+    "requiredApprovals",
+    "maxRepositories",
+    "maxRepositoryBytes",
+    "maxLfsBytes",
+    "runnerMinutesMonthly"
+]
+const FLAGS = [
+    "mine",
+    "includeSubgroups",
+    "pinned",
+    "plain",
+    "withDiffs",
+    "checkMergeable",
+    "namesOnly",
+    "withReadme",
+    "archived",
+    "issuesEnabled",
+    "mergeRequestsEnabled",
+    "pipelinesEnabled",
+    "forumEnabled",
+    "docsEnabled",
+    "allowForcePush",
+    "allowDelete",
+    "requireMergeRequest",
+    "dismissStaleApprovals",
+    "active",
+    "bot"
+]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
     const fn = methods[operation]
@@ -950,5 +1132,9 @@ function privileged(work) {
     createRepository: p => privileged(() => createRepository(p || {}, false)),
     bindRepository: p => privileged(() => createRepository(p || {}, true)),
     rights: (repositoryId, userId) => privileged(() => core.rights(repositoryId, userId)),
-    nameFree: (siteId, name, forPartyId, kind) => privileged(() => core.nameFree(siteId, name, forPartyId, kind))
+    nameFree: (siteId, name, forPartyId, kind) => privileged(() => core.nameFree(siteId, name, forPartyId, kind)),
+    // the push gate and the LFS upload check (SmithyGitServices.xml): the problems that refuse, none to accept
+    checkPush: context => privileged(() => core.withMemo(() => gitModule.checkPush(context))),
+    checkLfsUpload: context => privileged(() => core.withMemo(() => gitModule.checkLfsUpload(context))),
+    accountCard: siteId => privileged(() => core.withMemo(() => gitModule.accountCard(siteId)))
 })

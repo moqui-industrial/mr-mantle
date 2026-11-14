@@ -290,11 +290,7 @@ function selfOf(partyId) {
     )
     if (works) return false
     // the account's current address verified (a changed email needs fresh verification; an older verified one is not it)
-    const email = String(account.emailAddress || "").trim().toLowerCase()
-    if (!email) return false
-    return rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
-        row => !!row.verifiedAt && String(row.emailAddress || "").trim().toLowerCase() === email
-    )
+    return ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js").verified(account.userId)
 }
 // What a page may reach: a token's record within its scope, or a record whose outside party the signed-in user is a
 // contact of. organizationPartyId, when given, is the organization the page serves (its app mount's target).

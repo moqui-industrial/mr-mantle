@@ -206,9 +206,7 @@ function verifiedFor(partyId, email) {
     return rows("moqui.security.UserAccount", {partyId}).some(
         account =>
             text(account.emailAddress).toLowerCase() === address &&
-            rows("moqui.security.public.VerifiedAddress", {userId: account.userId}).some(
-                row => !!row.verifiedAt && text(row.emailAddress).toLowerCase() === address
-            )
+            ec.resource.script("component://mr-mantle/service/mantle/public/ConfirmedAddress.js").verified(account.userId)
     )
 }
 // Whether a party has an account whose own email is verified.
