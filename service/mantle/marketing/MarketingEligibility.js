@@ -115,7 +115,14 @@ function purposeState(consents, purposeEnumId, contactMechId, organizationPartyI
 // People classified for a topic as of a time: {rows: [{partyId, bucket, reasonCode, contactMechId, address, destinationKey,
 // tracked}], counts: {bucket: n}, untrackedEligible}. o: organizationPartyId, list (the topic's row), purposeEnumId, channelEnumId,
 // partyIds, asOf. No permission: the caller has checked who asks and for what (preview#Audience here; P8's prepare, P11's admission).
+// classifyPeople puts each person of a set in buckets 1 to 5 on their own; settle applies the rules across people (a withdrawal at
+// an address, the duplicates) to every person classified, so a send's paged evaluation (evaluateSend) classifies page by page and
+// settles once, with the same result as one call over everyone.
 function classify(o) {
+    const found = classifyPeople(o)
+    return summarize(settle(found.people), found)
+}
+function classifyPeople(o) {
     const org = o.organizationPartyId
     const topic = o.list
     const asOf = o.asOf || ec.user.nowTimestamp
@@ -234,6 +241,27 @@ function classify(o) {
         person.tracked = purposeState(person.consents, "PcpTracking", person.info.contactMechId, org).granted
         set("eligible", "ELIGIBLE")
     }
+    // only what settle and the rows need is kept of each person
+    return {
+        people: people.map(person => ({
+            partyId: person.partyId,
+            bucket: person.bucket,
+            reasonCode: person.reasonCode,
+            withdrew: !!person.withdrew,
+            contactMechId: person.info?.contactMechId || null,
+            address: person.address,
+            key: person.key,
+            tracked: !!person.tracked,
+            suppressionText: person.suppressionText || ""
+        })),
+        purposeEnumId,
+        channelEnumId: channel
+    }
+}
+// The rules across people, over every person classified (in any order): a withdrawal of anyone at an address blocks it for
+// everyone there, ahead of needing evidence (P5 review); then the duplicates, the lowest party id at an address chosen.
+function settle(people) {
+    people.sort((a, b) => idOrder(a.partyId, b.partyId))
     // 4 again, by destination: a withdrawal of anyone at an address blocks it for everyone there, ahead of needing evidence (P5
     // review); then 6, the duplicates
     const withdrawnKeys = new Set(people.filter(person => person.withdrew && person.key).map(person => person.key))
@@ -250,6 +278,9 @@ function classify(o) {
             Object.assign(person, {bucket: "duplicate", reasonCode: "DUPLICATE_DESTINATION", duplicateOf: chosen.get(person.key)})
         else chosen.set(person.key, person.partyId)
     }
+    return people
+}
+function summarize(people, found) {
     const counts = Object.fromEntries(buckets.map(entry => [entry.bucket, 0]))
     const reasons = {}
     let untrackedEligible = 0
@@ -263,7 +294,7 @@ function classify(o) {
             partyId: person.partyId,
             bucket: person.bucket,
             reasonCode: person.reasonCode,
-            contactMechId: person.info?.contactMechId || null,
+            contactMechId: person.contactMechId || null,
             address: person.address,
             destinationKey: person.key,
             tracked: person.bucket === "eligible" ? !!person.tracked : false,
@@ -273,8 +304,8 @@ function classify(o) {
         counts,
         reasons,
         untrackedEligible,
-        purposeEnumId,
-        channelEnumId: channel
+        purposeEnumId: found.purposeEnumId,
+        channelEnumId: found.channelEnumId
     }
 }
 function classifyRecipients(p) {
@@ -459,15 +490,149 @@ function previewAudience(p) {
         previewKey: lib.hash(request),
         // by the address's record, not its text: the digest is an unkeyed hash an author holds, and must not confirm a guessed
         // address (an address changed is a new contact mech, so the digest still moves with it; P5 review)
-        resultDigest: lib.hash(eligibleRows.map(row => [row.partyId, row.contactMechId, row.tracked]))
+        resultDigest: digestOf(eligibleRows)
     })
 }
+
+// ===== a send's audience, in pages (P8; the user's call of Nov 14) =====
+// The 5,000-person cap stays for an interactive evaluation and preview; a send's audience is evaluated in pages over the universe
+// narrowed to its topic's members (only an accepted member of the topic is ever eligible): each page of members, in party id order,
+// is matched against the send's lists and segments (a segment over that page only: a party's match does not depend on who else is
+// evaluated) less its exclusions, and classified; the rules across people are settled once over every page. A person of the
+// selection who is not on the topic is never eligible, so is read only when they hold an address a page may send to (their
+// withdrawal blocks it, as in the preview: P8 review). The eligible people are those a preview of the same audience finds eligible,
+// with the same resultDigest; the counts are of the topic's members and those sharers (the other people of a source who are not
+// members, whom a preview counts as not subscribed, are not read). o: userScope, topic (the list
+// row), purposeEnumId, lists, segments, excludeLists, excludeSegments (rows the caller checked), asOf, pageSize (500; at most
+// 1,000). {rows: the eligible, in party id order, counts, untrackedEligible, matchedCount, resultDigest, pages}.
+function evaluateSend(o) {
+    const topic = o.topic
+    const org = topic.ownerPartyId
+    const asOf = o.asOf || ec.user.nowTimestamp
+    const pageSize = Math.max(1, Math.min(1000, Number(o.pageSize) || 500))
+    const channel = channelOfList(topic)
+    const purposeEnumId = o.purposeEnumId || purposeOf(topic)
+    const listIds = (o.lists || []).map(list => list.contactListId)
+    const excludeListIds = (o.excludeLists || []).map(list => list.contactListId)
+    const onTopicOnly = !listIds.length && !(o.segments || []).length
+    // a segment's own refusals (a source the caller cannot read, a cycle) before any page is counted
+    for (const segment of (o.segments || []).concat(o.excludeSegments || []))
+        segments.matchesOf(segments.context(o.userScope, org, asOf, []), segment)
+    const memberOf = (ids, partyIds) =>
+        ids.length
+            ? new Set(
+                  rowsIn(CLP, "partyId", partyIds, {}, query =>
+                      query.condition("contactListId", "in", ids).conditionDate("fromDate", "thruDate", asOf)
+                  ).map(row => row.partyId)
+              )
+            : new Set()
+    const classifyOf = partyIds =>
+        classifyPeople({organizationPartyId: org, list: topic, purposeEnumId, channelEnumId: channel, partyIds, asOf}).people
+    // The people not on the topic who hold one of the addresses (key -> a contact mech of it) and are in the selection (a source
+    // list's member or a segment's match, less the exclusions), each once, classified: they are never eligible (not subscribed or
+    // withdrawn), and settle blocks an address one of them withdrew at. An email address is matched by its text in any case.
+    const sharersSeen = new Set()
+    const sharersOf = keys => {
+        if (onTopicOnly) return []
+        const factory = ec.entity.conditionFactory
+        const candidates = new Set()
+        const entries = Array.from(keys.entries())
+        for (let start = 0; start < entries.length; start += 200) {
+            const batch = entries.slice(start, start + 200)
+            const byAddress =
+                channel === "MdcEmail"
+                    ? batch.map(([key]) => factory.makeCondition("infoString", "equals", key).ignoreCase())
+                    : []
+            const byMech = batch.map(([, contactMechId]) => contactMechId).filter(Boolean)
+            if (byMech.length) byAddress.push(factory.makeCondition("contactMechId", "in", byMech))
+            if (!byAddress.length) continue
+            for (const info of Array.from(
+                find("mantle.party.contact.PartyContactMechInfo")
+                    .condition("contactMechTypeEnumId", channel === "MdcSms" ? "CmtTelecomNumber" : "CmtEmailAddress")
+                    .condition(factory.makeCondition(byAddress, "or"))
+                    .conditionDate("fromDate", "thruDate", asOf)
+                    .selectField("partyId")
+                    .list()
+            ))
+                if (!sharersSeen.has(info.partyId)) candidates.add(info.partyId)
+        }
+        if (!candidates.size) return []
+        // a member of the topic (in any state) is classified in its own page
+        for (const partyId of memberOf([topic.contactListId], Array.from(candidates))) candidates.delete(partyId)
+        for (const partyId of candidates) sharersSeen.add(partyId)
+        if (!candidates.size) return []
+        const ids = Array.from(candidates)
+        const ctx = segments.context(o.userScope, org, asOf, ids)
+        const included = memberOf(listIds, ids)
+        for (const segment of o.segments || []) for (const partyId of segments.matchesOf(ctx, segment)) included.add(partyId)
+        for (const partyId of memberOf(excludeListIds, ids)) included.delete(partyId)
+        for (const segment of o.excludeSegments || [])
+            for (const partyId of segments.matchesOf(ctx, segment)) included.delete(partyId)
+        return included.size ? classifyOf(Array.from(included)) : []
+    }
+    const people = []
+    let lastPartyId = null,
+        pages = 0
+    for (;;) {
+        let query = find(CLP, {contactListId: topic.contactListId})
+            .conditionDate("fromDate", "thruDate", asOf)
+            .selectField("partyId")
+            .distinct(true)
+            .orderBy("partyId")
+            .limit(pageSize)
+        if (lastPartyId != null) query = query.condition("partyId", "greater", lastPartyId)
+        const page = Array.from(query.list()).map(row => row.partyId)
+        if (!page.length) break
+        pages += 1
+        lastPartyId = page[page.length - 1]
+        const ctx = segments.context(o.userScope, org, asOf, page)
+        let included
+        if (onTopicOnly) included = new Set(page)
+        else {
+            included = memberOf(listIds, page)
+            for (const segment of o.segments || []) for (const partyId of segments.matchesOf(ctx, segment)) included.add(partyId)
+        }
+        for (const partyId of memberOf(excludeListIds, page)) included.delete(partyId)
+        for (const segment of o.excludeSegments || [])
+            for (const partyId of segments.matchesOf(ctx, segment)) included.delete(partyId)
+        if (included.size) {
+            const found = classifyOf(Array.from(included))
+            people.push(...found)
+            // the people of the selection who are not on the topic at the addresses this page may send to (P8 review): a
+            // withdrawal of theirs blocks the address as the preview's does (F147, F155: anyone matched at the address)
+            const keys = new Map()
+            for (const person of found)
+                if ((person.bucket === "eligible" || person.bucket === "evidence") && person.key)
+                    keys.set(person.key, person.contactMechId)
+            if (keys.size) people.push(...sharersOf(keys))
+        }
+        if (page.length < pageSize) break
+    }
+    const result = summarize(settle(people), {purposeEnumId, channelEnumId: channel})
+    const eligibleRows = result.rows.filter(row => row.bucket === "eligible")
+    return {
+        rows: eligibleRows,
+        counts: result.counts,
+        untrackedEligible: result.untrackedEligible,
+        matchedCount: result.rows.length,
+        resultDigest: digestOf(eligibleRows),
+        purposeEnumId,
+        channelEnumId: channel,
+        pages
+    }
+}
+// The digest of who is eligible: by the address's record, not its text (P5 review).
+const digestOf = eligibleRows => lib.hash(eligibleRows.map(row => [row.partyId, row.contactMechId, row.tracked]))
 
 const operations = {previewAudience, classifyRecipients}
 ;({
     buckets,
     reasonTexts,
     classify,
+    evaluateSend,
+    purposeOf,
+    channelOfList,
+    listTypes,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown eligibility operation " + op)
         return operations[op](parameters || {})

@@ -99,7 +99,8 @@ function orderReached(shop, p) {
 // recurring base).
 function ownOrder(shop, order, partyId) {
     if (!order || order.productStoreId !== shop.productStoreId || hiddenOrderStatuses.includes(order.statusId)) return false
-    if (order.recurCronExpression) return false
+    // a recurring base, also once its contract is cancelled and its schedule cleared (impl-sales P16)
+    if (order.recurCronExpression || order.orderPurposeEnumId === "OrpRecurringTemplate") return false
     const parts = rows(PART, {orderId: order.orderId})
     return (
         parts.length > 0 &&

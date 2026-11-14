@@ -52,6 +52,7 @@ const policyRow = row =>
               recipientRetentionDays: row.recipientRetentionDays,
               statisticsRetentionDays: row.statisticsRetentionDays,
               explanation: row.explanation || "",
+              testAddresses: row.testAddresses || "",
               fromDateText: lib.dateText(row.fromDate),
               thruDateText: lib.dateText(row.thruDate)
           }
@@ -73,8 +74,24 @@ function settingsOf(p) {
         values[field] = number
     }
     values.explanation = text(p.explanation) || null
+    // P8: the test allowlist, a line an address, at most testAddressLimit, each one address
+    const addresses = Array.from(
+        new Set(
+            String(p.testAddresses || "")
+                .split(/[\s,;]+/)
+                .map(address => address.trim().toLowerCase())
+                .filter(Boolean)
+        )
+    )
+    if (addresses.length > testAddressLimit)
+        denied("VALUE_INVALID", "The test list holds at most " + testAddressLimit + " addresses")
+    for (const address of addresses)
+        if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address) || address.length > 254)
+            denied("VALUE_INVALID", "The test list takes addresses only: " + address.slice(0, 60))
+    values.testAddresses = addresses.length ? addresses.join("\n") : null
     return values
 }
+const testAddressLimit = 10
 
 // ===== get#MarketingPolicy =====
 function get(p) {

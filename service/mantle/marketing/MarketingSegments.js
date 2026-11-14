@@ -660,8 +660,8 @@ const filterAt = (marketSegmentId, asOf) =>
 
 // ===== evaluation =====
 // An evaluation context: the caller's scope, the organization and the time, with the Sales scope read once when a source needs it.
-function context(userScope, organizationPartyId, asOf) {
-    return {userScope, organizationPartyId, asOf: asOf || ec.user.nowTimestamp, segments: new Map()}
+function context(userScope, organizationPartyId, asOf, candidates = null) {
+    return {userScope, organizationPartyId, asOf: asOf || ec.user.nowTimestamp, segments: new Map(), candidates}
 }
 // Whether a party may be evaluated: it exists, is not disabled or merged and is not another user's personal contact. Map by id.
 function inScopeParties(partyIds) {
@@ -809,7 +809,9 @@ function evaluate(ctx, segment, path = []) {
     const rule = kindOf(segment) === kinds.rule
     const filterRow = rule ? filterAt(segment.marketSegmentId, ctx.asOf) : null
     const tree = filterRow ? parseFilter(filterRow.filterJson, ctx) : null
-    const candidates = universe(ctx, explicit.include, tree)
+    // a send's paged evaluation (P8, §4 Nov 14) gives the candidates, a page of its topic's members, in place of the organization's
+    // audience: a party's match does not depend on who else is evaluated, so a page's matches are the whole match within the page
+    const candidates = ctx.candidates ? Array.from(inScopeParties(ctx.candidates).keys()) : universe(ctx, explicit.include, tree)
     const reasons = new Map()
     if (rule) {
         const families = nativeMatches(ctx, segment, candidates)

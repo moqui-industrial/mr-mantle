@@ -247,3 +247,77 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
         r.sends === 0
     }
 })
+
+// impl-marketing P8 (F13): a source's build gives its own subject, body and text alternative, which go out as given (the subject is
+// never expanded again); a promotional delivery never names a transactional-only sending profile
+feature("a source's own subject, body and text go out as given; a promotional delivery refuses a transactional profile", {
+    when() {
+        capture.clear()
+        const base = "dbresource://mantle/spec-ledger/own/"
+        ec.resource.getLocationReference(base + "body.html.fancy-locked").putText("<p>Own body for ${firstName}</p>")
+        ec.resource.getLocationReference(base + "text.fancy-locked").putText("Own text for ${firstName}")
+        call("create#mantle.party.Party", {partyId: "MDL_ORG", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.MessageTemplate", {
+            messageTemplateId: "MDL_OWN",
+            organizationPartyId: "MDL_ORG",
+            templateName: "Own content",
+            channelEnumId: "MdcEmail",
+            purposeEnumId: "MtpTransactional",
+            emailTemplateId: ids.sent,
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        call("create#mantle.party.MessageTemplateContent", {
+            messageTemplateId: "MDL_OWN",
+            contentSeqId: "001",
+            // the escape is the literal text ${own}: what the source answers is never a template again
+            subject: "Own \\${own} for ${firstName}",
+            bodyLocation: base + "body.html.fancy-locked",
+            bodyTextLocation: base + "text.fancy-locked",
+            variablesJson: JSON.stringify([{name: "firstName", label: "First name", fallback: "you"}]),
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        const own = queue({
+            sourceEnumId: "MdsrcMessageTemplate",
+            eventKey: "spec:own-1",
+            recipientPartyId: ids.buyer,
+            toAddress: "buyer@ledger.example.test",
+            organizationPartyId: "MDL_ORG",
+            bodyParameters: {firstName: "Lee"},
+            sendNow: true
+        })
+        const message = Array.from(capture.getMessages()).find(m =>
+            Array.from(m.toList || []).includes("buyer@ledger.example.test")
+        )
+        call("create#mantle.party.MessageSendingProfile", {
+            sendingProfileId: "MDL_NOTICES",
+            organizationPartyId: "MDL_ORG",
+            channelEnumId: "MdcEmail",
+            emailServerId: "MDL_SMTP",
+            fromAddress: "notices@ledger.example.test",
+            purposeEnumId: "MtpTransactional",
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        let refused = ""
+        try {
+            queue({
+                eventKey: "spec:promo-1",
+                recipientPartyId: ids.reader,
+                toAddress: "reader@ledger.example.test",
+                sendingProfileId: "MDL_NOTICES",
+                transactional: false,
+                marketingPurposeEnumId: "PcpMarketingEmail"
+            })
+        } catch (error) {
+            refused = String(error.message)
+        }
+        ec.message.clearErrors()
+        return {own, message: message || {}, refused, promo: list("mantle.party.MessageDelivery", {eventKey: "spec:promo-1"})}
+    },
+    then({own, message, refused, promo}) {
+        own.stateEnumId == "MdsSent"
+        message.subject == "Own ${own} for Lee"
+        String(message.body).includes("Own body for Lee")
+        refused.includes("PROFILE_PURPOSE")
+        promo.length == 0
+    }
+})

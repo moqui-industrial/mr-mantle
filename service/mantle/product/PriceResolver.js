@@ -693,4 +693,8 @@ function finalize(p) {
 function execute(op, p) {
     return {resolve, byType, applyList, finalize}[op](p)
 }
-;({execute})
+;({
+    execute,
+    // impl-sales P16: the recurrence worker checks a base's agreement by the same rule at each occurrence
+    agreementApplies
+})

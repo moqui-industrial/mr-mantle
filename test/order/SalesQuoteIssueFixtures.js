@@ -158,7 +158,8 @@ function setup(prefix) {
         make("moqui.security.ArtifactGroup", {artifactGroupId: prefix + "_SERVICES", description: "Quote issue spec services"})
         make("moqui.security.ArtifactGroupMember", {
             artifactGroupId: prefix + "_SERVICES",
-            artifactName: "mantle\\.(order\\.Sales(Quote|Approval|QuoteIssue|Order)Services|sales\\.SalesWorkspaceServices)\\..*",
+            artifactName:
+                "mantle\\.(order\\.Sales(Quote|Approval|QuoteIssue|Order|Recurrence)Services|sales\\.SalesWorkspaceServices)\\..*",
             artifactTypeEnumId: "AT_SERVICE",
             nameIsPattern: "Y",
             inheritAuthz: "Y"

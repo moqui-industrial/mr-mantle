@@ -519,6 +519,177 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P7 ===== -->
 
+    <!-- ===== Marketing P8: sends and the composer (impl-marketing P8; design-marketing §5 Sends, SendDetail, Compose, §14.1, §18) ===== -->
+    <!-- A send's test allowlist (design §5 Compose TestSend): the policy's bounded list of addresses a test message may go to, each a
+        valid address, at most ten (mantle.marketing.CampaignServices store#MarketingPolicy); a test goes nowhere else. -->
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="testAddresses" type="text-long" enable-audit-log="true"><description>The addresses a send's test message may go
+            to, one a line, at most ten</description></field>
+    </extend-entity>
+    <!-- One prepared promotional delivery intent of a campaign (design §5 SendDetail, §14.1 CampaignSend): its topic list (a Marketing
+        list of the campaign's organization: the subscription the recipients hold), its audience (the lists and segments that find
+        them, and those that exclude), its sending profile, its own content (copied from a template, then edited: a later change of
+        the template never reaches it) and its schedule; the state is a flow of its own (CampaignSend status), apart from the
+        campaign's and a communication's. sendRevision is the revision an approval is bound to (MarketingDecision targetRevision): a
+        change of the subject, body, sender, audience or schedule raises it, ends the approval and returns the send to draft
+        (mantle.marketing.CampaignSendServices). Preparing records the recipients (CampaignRecipient), the content as a rendered
+        resource of its own (prepared*: what a later read returns) and the content and policy time; a prepared send's preparation
+        holds for the revision it was made at only. -->
+    <entity entity-name="CampaignSend" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignSendId" type="id" is-pk="true"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The campaign's organization when the send was made (a send never moves
+            between organizations)</description></field>
+        <field name="sendName" type="text-medium" enable-audit-log="update"/>
+        <field name="channelEnumId" type="id"/>
+        <field name="contactListId" type="id" enable-audit-log="update"><description>The topic: the Marketing list whose accepted
+            members, with its purpose's consent, may receive the send</description></field>
+        <field name="purposeEnumId" type="id"><description>The consent purpose checked (PartyConsentPurpose; the topic's)</description></field>
+        <field name="audienceJson" type="text-long" enable-audit-log="update"><description>The audience: {listIds, segmentIds,
+            excludeListIds, excludeSegmentIds}, ids of the organization's Marketing lists and segments (none: the topic's members)</description></field>
+        <field name="messageTemplateId" type="id"><description>The template its content was copied from, if any</description></field>
+        <field name="sendingProfileId" type="id" enable-audit-log="update"/>
+        <field name="replyToAddress" type="text-medium" enable-audit-log="update"/>
+        <field name="subject" type="text-medium" enable-audit-log="update"/>
+        <field name="preheader" type="text-medium" enable-audit-log="update"/>
+        <field name="bodyLocation" type="text-medium" enable-audit-log="update"><description>The draft body, a .html.fancy-locked
+            file of its own per change</description></field>
+        <field name="bodyTextLocation" type="text-medium" enable-audit-log="update"/>
+        <field name="variablesJson" type="text-long" enable-audit-log="update"><description>The declared variables: [{name, label,
+            fallback, required}]</description></field>
+        <field name="localeId" type="id"/>
+        <field name="scheduledDate" type="date-time" enable-audit-log="update"><description>When the send may go out once released
+            (empty: at its release)</description></field>
+        <field name="scheduleTimeZone" type="text-short" enable-audit-log="update"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="sendRevision" type="number-integer"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="revisedByUserId" type="id"><description>Who made the current revision's change: an author of it, whose own
+            approval the separation policy refuses</description></field>
+        <field name="duplicatedFromSendId" type="id"/>
+        <!-- the preparation (prepare#Send) -->
+        <field name="preparedRevision" type="number-integer"><description>The sendRevision the preparation was made at</description></field>
+        <field name="preparedDate" type="date-time"/>
+        <field name="preparedByUserId" type="id"/>
+        <field name="contentDate" type="date-time"><description>The content's effective time: when the prepared content was taken</description></field>
+        <field name="marketingPolicyId" type="id"/>
+        <field name="policyFromDate" type="date-time"/>
+        <field name="preparedSubject" type="text-medium"/>
+        <field name="preparedPreheader" type="text-medium"/>
+        <field name="preparedBodyLocation" type="text-medium"><description>The prepared body, a resource of its own that no later
+            change touches</description></field>
+        <field name="preparedTextLocation" type="text-medium"/>
+        <field name="preparedVariablesJson" type="text-long"/>
+        <field name="previewKey" type="text-medium"/>
+        <field name="resultDigest" type="text-medium"/>
+        <field name="eligibleCount" type="number-integer"/>
+        <field name="untrackedCount" type="number-integer"/>
+        <field name="bucketCountsJson" type="text-long"/>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party"><key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Topic" related="mantle.marketing.contact.ContactList"><key-map field-name="contactListId"/></relationship>
+        <relationship type="one" related="mantle.party.MessageTemplate"/>
+        <relationship type="one" related="mantle.party.MessageSendingProfile"/>
+        <relationship type="one" title="CampaignSend" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Channel" related="moqui.basic.Enumeration"><key-map field-name="channelEnumId"/></relationship>
+        <index name="CMP_SEND_CAMPAIGN"><index-field name="marketingCampaignId"/></index>
+        <index name="CMP_SEND_ORG_STATUS"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Campaign Send" statusTypeId="CampaignSend"/>
+            <moqui.basic.StatusItem statusId="CsDraft" statusTypeId="CampaignSend" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="CsAwaitingApproval" statusTypeId="CampaignSend" sequenceNum="2" description="Awaiting approval"/>
+            <moqui.basic.StatusItem statusId="CsApproved" statusTypeId="CampaignSend" sequenceNum="3" description="Approved"/>
+            <moqui.basic.StatusItem statusId="CsScheduled" statusTypeId="CampaignSend" sequenceNum="4" description="Scheduled"/>
+            <moqui.basic.StatusItem statusId="CsSending" statusTypeId="CampaignSend" sequenceNum="5" description="Sending"/>
+            <moqui.basic.StatusItem statusId="CsPaused" statusTypeId="CampaignSend" sequenceNum="6" description="Paused"/>
+            <moqui.basic.StatusItem statusId="CsCompleted" statusTypeId="CampaignSend" sequenceNum="7" description="Completed"/>
+            <moqui.basic.StatusItem statusId="CsCompletedFailures" statusTypeId="CampaignSend" sequenceNum="8" description="Completed with failures"/>
+            <moqui.basic.StatusItem statusId="CsCancelled" statusTypeId="CampaignSend" sequenceNum="9" description="Cancelled"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsDraft" toStatusId="CsAwaitingApproval" transitionName="Ask for approval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsAwaitingApproval" toStatusId="CsApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsAwaitingApproval" toStatusId="CsDraft" transitionName="Refuse or change"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsApproved" toStatusId="CsDraft" transitionName="Change after approval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsApproved" toStatusId="CsScheduled" transitionName="Release for later"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsApproved" toStatusId="CsSending" transitionName="Release"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsScheduled" toStatusId="CsSending" transitionName="Start sending"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsPaused" transitionName="Pause"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsScheduled" toStatusId="CsPaused" transitionName="Pause"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsPaused" toStatusId="CsSending" transitionName="Resume"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsCompleted" transitionName="Complete"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsCompletedFailures" transitionName="Complete with failures"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsDraft" toStatusId="CsCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsAwaitingApproval" toStatusId="CsCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsApproved" toStatusId="CsCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsScheduled" toStatusId="CsCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsCancelled" transitionName="Cancel"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsPaused" toStatusId="CsCancelled" transitionName="Cancel"/>
+        </seed-data>
+    </entity>
+    <!-- One recipient of a prepared send (design §14.1 CampaignRecipient): the person, the address chosen and its normalized key, when
+        selected, the tracking flag and an execution key of its own (a random value, the delivery's natural key in P9); the selection
+        is a fact of the preparation, never a live query. A later preparation (at a new revision, before any hand-off) replaces the
+        earlier one's rows (CrsReplaced), which stay; one preparation holds one row per address. P9 records the ledger delivery and
+        the outcome; attempts and receipts are the ledger's. -->
+    <entity entity-name="CampaignRecipient" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignRecipientId" type="id" is-pk="true"/>
+        <field name="campaignSendId" type="id"/>
+        <field name="preparedRevision" type="number-integer"/>
+        <field name="partyId" type="id"/>
+        <field name="contactMechId" type="id"/>
+        <field name="destinationKey" type="text-medium"/>
+        <field name="channelEnumId" type="id"/>
+        <field name="selectedDate" type="date-time"/>
+        <field name="tracked" type="text-indicator"/>
+        <field name="executionKey" type="text-short"/>
+        <field name="statusId" type="id"/>
+        <field name="messageDeliveryId" type="id"><description>The ledger delivery (P9)</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignSend"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.party.contact.ContactMech"/>
+        <relationship type="one" title="CampaignRecipient" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Delivery" related="mantle.party.MessageDelivery">
+            <key-map field-name="messageDeliveryId" related="deliveryId"/></relationship>
+        <index name="CMP_RCPT_SEND"><index-field name="campaignSendId"/><index-field name="statusId"/></index>
+        <index name="CMP_RCPT_EXEC" unique="true"><index-field name="executionKey"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Campaign Recipient" statusTypeId="CampaignRecipient"/>
+            <moqui.basic.StatusItem statusId="CrsSelected" statusTypeId="CampaignRecipient" sequenceNum="1" description="Selected"/>
+            <moqui.basic.StatusItem statusId="CrsReplaced" statusTypeId="CampaignRecipient" sequenceNum="9" description="Replaced by a later preparation"/>
+        </seed-data>
+    </entity>
+    <!-- A send's files (design §14.3 CampaignSendContent): the RecordFiles host association of CampaignSend, and the message's assets:
+        a file of the send or of its campaign named for use in the message (usage attachment), with its label; dated, ended never
+        deleted (mantle.marketing.CampaignSendServices store#SendAssets). -->
+    <entity entity-name="CampaignSendContent" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignSendContentId" type="id" is-pk="true"/>
+        <field name="campaignSendId" type="id"/>
+        <field name="contentTypeEnumId" type="id"/>
+        <field name="contentLocation" type="text-medium"/>
+        <field name="description" type="text-long"/>
+        <field name="assetUsageEnumId" type="id"><description>How the message uses the file (empty: a file of the send, not in the
+            message)</description></field>
+        <field name="assetLabel" type="text-medium"/>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="contentDate" type="date-time" default="ec.user.nowTimestamp"/>
+        <field name="userId" type="id" default="ec.user.userId"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignSend"/>
+        <relationship type="one" title="CampaignSendContentType" related="moqui.basic.Enumeration">
+            <key-map field-name="contentTypeEnumId"/></relationship>
+        <relationship type="one" title="CampaignSendAssetUsage" related="moqui.basic.Enumeration">
+            <key-map field-name="assetUsageEnumId"/></relationship>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Campaign Send Content Type" enumTypeId="CampaignSendContentType"/>
+            <moqui.basic.Enumeration description="Creative" enumId="CscCreative" enumTypeId="CampaignSendContentType" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Document" enumId="CscDocument" enumTypeId="CampaignSendContentType" sequenceNum="2"/>
+            <moqui.basic.EnumerationType description="Campaign Send Asset Usage" enumTypeId="CampaignSendAssetUsage"/>
+            <moqui.basic.Enumeration description="Attachment" enumId="CsaAttachment" enumTypeId="CampaignSendAssetUsage" sequenceNum="1"/>
+        </seed-data>
+    </entity>
+    <!-- ===== end of Marketing P8 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
