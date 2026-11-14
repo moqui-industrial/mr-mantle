@@ -2519,7 +2519,7 @@ General Order Placement and eCommerce Usage
                 <econdition field-name="orderId" from="baseOrderId"/><order-by field-name="orderItemSeqId"/></entity-find>
             <!-- every line copied (impl-sales follow-up 2): a child line (a discount, a tax line) keeps its own parent, whose id in the
                 copy differs from the source's where the source's ids have gaps (each retax deletes and adds tax lines) -->
-            <script>globalThis.copiedSeqIds = {}</script>
+            <script>const copiedSeqIds = {}</script>
             <iterate list="valueList" entry="value">
                 <if condition="productItemsOnly &amp;&amp; (!value.productId || !productItemTypes.includes(value.itemTypeEnumId))"><continue/></if>
                 <set field="sourceSeqId" from="value.orderItemSeqId"/>

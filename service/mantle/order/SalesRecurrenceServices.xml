@@ -171,7 +171,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Internal (impl-sales follow-up 2; §4 Nov 14): run by the SalesRecurrenceApprovedInvoice SECA once an order's
             approval commits, by the job's automatic approval or a person's. An order the worker made for an occurrence of a base whose
             auto-invoice is on (recurAutoInvoice Y), not a Shop contract's base, has each approved sale part with nothing billed invoiced
-            through Accounting's create#FulfillmentInvoice (the ordered basis, one invoice for a source), each in its own transaction;
+            through Accounting's create#FulfillmentInvoice (the ordered basis, one invoice for a source), each part of the base's seller in its own
+            transaction under the part's lock, read again there (two approvals' rules at once bill it once);
             any other order is left as it is, so it bills once. Reads only the records (no supplied party or flag); a part that cannot
             be billed is logged naming the order and never fails the approval.</description>
         <in-parameters>

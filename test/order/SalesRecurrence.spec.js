@@ -591,7 +591,25 @@ feature("a base repeats the source's charge and discount lines; each order is ta
         committed("mantle.order.OrderServices.approve#Order", {orderId: plain})
         const plainInvoices = committed(svc + "invoice#RecurringOrder", {orderId: plain}).invoiceIds || []
         const plainBillings = count("mantle.order.OrderItemBilling", {orderId: plain})
+        // the review: a base whose order the gateway cannot tax (its rate ended) fails its occurrence, named on the base, and
+        // makes no order
+        const untaxed = as(
+            users.financeC,
+            svc + "store#SalesRecurrence",
+            monthly({orderId: chargedOrder(), recurAutoInvoice: "Y"})
+        ).baseOrderId
+        system(() =>
+            call("update#mantle.other.tax.TaxAuthorityRate", {
+                taxAuthorityRateId: f.prefix + "_RATE",
+                thruDate: String(Date.now() - 60 * dayMs - 1000)
+            })
+        )
+        system(() => call("mantle.order.OrderServices.create#RecurringOrders", {}))
+        const untaxedBase = header(untaxed)
+        const untaxedCount = children(untaxed).length
         return {
+            untaxedBase,
+            untaxedCount,
             sourceTax,
             baseLines,
             made,
@@ -620,7 +638,9 @@ feature("a base repeats the source's charge and discount lines; each order is ta
         again,
         billingsAgain,
         plainInvoices,
-        plainBillings
+        plainBillings,
+        untaxedBase,
+        untaxedCount
     }) {
         sourceTax.compare(0) > 0
         // the base: the product, the shipping charge and the discount, each child under its own parent
@@ -666,5 +686,8 @@ feature("a base repeats the source's charge and discount lines; each order is ta
         billingsAgain == billings
         plainInvoices.length == 0
         plainBillings == 0
+        untaxedBase.recurFailureDate != null
+        String(untaxedBase.recurFailureMessage).includes("No sales tax rate")
+        untaxedCount == 0
     }
 })

@@ -828,7 +828,8 @@ function recurrenceSourceOptions(term, selected) {
 // an occurrence (recurOccurrenceDate) of a base that asks to bill it (recurAutoInvoice Y, which needed the finance right to turn on)
 // and is no Shop contract's (Shop bills its renewals itself) has each approved sale part with nothing billed yet invoiced through
 // Accounting's create#FulfillmentInvoice (the internal split of create#InvoiceFromSource that Shop's renewals use: the ordered
-// basis, a recurring base or template refused, one invoice for a source), each part in its own transaction. Any other order, or an
+// basis, a recurring base or template refused, one invoice for a source), each part of the base's seller in its own transaction
+// under the part's lock (follow-up 2's review: two approvals' rules at once bill it once). Any other order, or an
 // order billed already, is left as it is: so the job's automatic approval and a person's later one bill it the same way, once. A
 // part that cannot be billed is logged naming the order and never fails the approval.
 function invoiceRecurringOrder(p) {
@@ -838,25 +839,28 @@ function invoiceRecurringOrder(p) {
     if (!base || base.recurAutoInvoice !== "Y" || !base.recurCronExpression) return {invoiceIds: []}
     if (find(CONTRACT).condition("baseOrderId", base.orderId).count() > 0) return {invoiceIds: []}
     const invoiceIds = []
-    for (const part of Array.from(find(PART).condition("orderId", order.orderId).orderBy("orderPartSeqId").list())) {
-        if (part.statusId !== "OrderApproved" || !salesAccess.isInternal(part.vendorPartyId)) continue
-        const billed = find("mantle.order.OrderItemBillingDetail", {
-            orderId: order.orderId,
-            orderPartSeqId: part.orderPartSeqId
-        }).count()
-        if (billed > 0) continue
+    for (const listed of Array.from(find(PART).condition("orderId", order.orderId).orderBy("orderPartSeqId").list())) {
+        // a part of the base's seller, as the worker copied it (the base's part of the same id and seller)
+        const basePart = one(PART, {orderId: base.orderId, orderPartSeqId: listed.orderPartSeqId})
+        if (!basePart || basePart.vendorPartyId !== listed.vendorPartyId) continue
         ec.message.pushErrors()
         try {
-            const made =
-                ec.service
-                    .sync()
-                    .name("mantle.account.InvoiceServices.create#FulfillmentInvoice")
-                    .parameters({orderId: order.orderId, orderPartSeqId: part.orderPartSeqId})
-                    .disableAuthz()
-                    .requireNewTransaction(true)
-                    .call() || {}
-            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
-            if (made.invoiceId) invoiceIds.push(made.invoiceId)
+            // each part in its own transaction under its lock, read again there: two approvals' rules (a re-approval, two at
+            // once on the service workers) bill it once
+            ec.transaction.runRequireNew(null, "Invoicing recurring order " + order.orderId + " failed", () => {
+                const part = find(PART, {orderId: order.orderId, orderPartSeqId: listed.orderPartSeqId}).forUpdate(true).one()
+                if (!part || part.statusId !== "OrderApproved" || !salesAccess.isInternal(part.vendorPartyId)) return
+                const billed = find("mantle.order.OrderItemBillingDetail", {
+                    orderId: order.orderId,
+                    orderPartSeqId: part.orderPartSeqId
+                }).count()
+                if (billed > 0) return
+                const made = call("mantle.account.InvoiceServices.create#FulfillmentInvoice", {
+                    orderId: order.orderId,
+                    orderPartSeqId: part.orderPartSeqId
+                })
+                if (made.invoiceId) invoiceIds.push(made.invoiceId)
+            })
         } catch (error) {
             ec.logger.error(
                 "Recurring order " +
@@ -864,9 +868,9 @@ function invoiceRecurringOrder(p) {
                     ": order " +
                     order.orderId +
                     " part " +
-                    part.orderPartSeqId +
+                    listed.orderPartSeqId +
                     " was not invoiced on approval: " +
-                    String(error.message || error).split("\n")[0]
+                    String(ec.message.hasError() ? ec.message.getErrorsString() : error.message || error).split("\n")[0]
             )
         } finally {
             ec.message.clearErrors()
