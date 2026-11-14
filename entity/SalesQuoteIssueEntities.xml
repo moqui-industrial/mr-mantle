@@ -113,4 +113,13 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="reminderTextLocation" type="text-medium" enable-audit-log="true"><description>The reminder's text (a
             .html.fancy-locked resource); empty for Mantle's default</description></field>
     </extend-entity>
+    <!-- Sales P13 (design-sales §10 CustomerQuote, QuoteResponse; F36): the customer's own response on PASS (SqsPortal) keeps who
+        answered: the bearer link's capability, or the signed-in account (recordedByUserId, contactPartyId), and the acceptor's name
+        and title as the customer gave them (evidence, not a verified signature) -->
+    <extend-entity entity-name="SalesQuoteResponse" package="mantle.sales.quote">
+        <field name="capabilityId" type="id"><description>The ExternalAccessCapability of the bearer link the customer answered
+            by; empty for staff and a signed-in contact</description></field>
+        <field name="acceptorName" type="text-medium"/>
+        <field name="acceptorTitle" type="text-medium"/>
+    </extend-entity>
 </entities>
