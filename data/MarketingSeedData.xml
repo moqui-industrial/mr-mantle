@@ -92,4 +92,11 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingLifecycleServicesALL" userGroupId="ALL_USERS"
             artifactGroupId="MantleMarketingLifecycleServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
     <!-- ===== end of Marketing P2 ===== -->
+
+    <!-- ===== Marketing P7: PASS Marketing, subscription and preferences (impl-marketing P7) ===== -->
+    <!-- The ledger's source of a public request's verification message (mantle.marketing.MarketingPortalServices): its build makes the
+        confirmation link of each attempt -->
+    <moqui.basic.Enumeration enumId="MdsrcSubscriptionVerify" description="Subscription verification" sequenceNum="40"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.MarketingPortalServices.build#VerificationDelivery"/>
+    <!-- ===== end of Marketing P7 ===== -->
 </entity-facade-xml>

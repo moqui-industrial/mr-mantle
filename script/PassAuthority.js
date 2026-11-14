@@ -74,6 +74,10 @@ const TOKEN_WRITES = [
     'recoverCart',
     // IronStone Sales P13: a quote link's acceptance or decline (input.token)
     'respondSalesQuote',
+    // IronStone Marketing P7: a subscription request (anonymous: PASS's request key, its limits and the neutral receipt bound it)
+    // and its confirmation link's POST (input.token)
+    'requestSubscription',
+    'verifySubscription',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */

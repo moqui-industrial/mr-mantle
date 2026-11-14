@@ -134,7 +134,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="SubscriptionPolicy" allow-remote="false">
-        <description>A list's subscription policy (design §4 SubscriptionPolicy; F6), dated: the one in effect, named by its revision (expectedRevision, required once one exists), is ended and the new one starts now. Public offer (offered on a published page, P7, apart from the legacy public flag), confirmation required (Y unless N: a request waits for the recipient's confirmation), purpose (a PartyConsentPurpose; empty is the channel's), the evidence text the offer shows, and the confirmation and notice templates. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, REVISION_REQUIRED, STALE_REVISION, PURPOSE_INVALID and TEMPLATE_INVALID.</description>
+        <description>A list's subscription policy (design §4 SubscriptionPolicy; F6), dated: the one in effect, named by its revision (expectedRevision, required once one exists), is ended and the new one starts now. Public offer (offered on a published page, P7, apart from the legacy public flag), confirmation required (Y unless N: a request waits for the recipient's confirmation), purpose (a PartyConsentPurpose; empty is the channel's), the evidence text the offer shows, and the confirmation and notice templates. P7: a public offer names its site and opening interval (publicSiteId, offerFromDate, offerThruDate) and is offered only there, while it is open (PASS Subscribe, mantle.marketing.MarketingPortalServices); the confirmation template is the EmailTemplate of a Comms message template of the list's organization. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, LIST_ARCHIVED, REVISION_REQUIRED, STALE_REVISION, PURPOSE_INVALID, TEMPLATE_INVALID, SITE_INVALID and OFFER_INTERVAL_INVALID (an offer with no site is offered nowhere).</description>
         <in-parameters>
             <parameter name="contactListId" required="true"/>
             <parameter name="expectedRevision"/>
@@ -144,6 +144,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="evidenceText"/>
             <parameter name="confirmEmailTemplateId"/>
             <parameter name="noticeEmailTemplateId"/>
+            <parameter name="publicSiteId"><description>P7: the PASS site whose Marketing mount offers the list, one whose mount targets
+                the list's organization (SITE_INVALID); a public offer with none is offered nowhere</description></parameter>
+            <parameter name="offerFromDate" type="Timestamp"><description>P7: the public offer opens (empty: now)</description></parameter>
+            <parameter name="offerThruDate" type="Timestamp"><description>P7: the public offer closes (empty: open while the policy is;
+                not before it opens, OFFER_INTERVAL_INVALID)</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="contactListId"/>

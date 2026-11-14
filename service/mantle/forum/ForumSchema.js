@@ -1720,4 +1720,29 @@
         service: 'mantle.order.SalesPortalServices.get#OrderDocument',
         fields: ['siteId', 'token', 'orderId'],
     },
+    // IronStone Marketing P7 (impl-marketing P7; design-marketing §13): PASS Marketing's public subscription
+    // (mantle.marketing.MarketingPortalServices)
+    getMarketingPublication: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Publication',
+        fields: ['siteId', 'contactListId'],
+    },
+    requestSubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.request#Subscription',
+        fields: [
+            'siteId',
+            'emailAddress',
+            'displayName',
+            'contactListIds',
+            'consent',
+            'operationId',
+        ],
+    },
+    getSubscriptionRequest: {
+        service: 'mantle.marketing.MarketingPortalServices.get#SubscriptionRequest',
+        fields: ['siteId', 'token'],
+    },
+    verifySubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.verify#Subscription',
+        fields: ['siteId', 'token', 'operationId'],
+    },
 })

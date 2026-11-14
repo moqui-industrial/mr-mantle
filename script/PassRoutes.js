@@ -302,6 +302,12 @@
     ['GET', 'sales/orders', 'findSalesOrders'],
     ['GET', 'sales/order', 'getSalesOrder'],
     ['GET', 'sales/order/document', 'getSalesOrderDocument'],
+    // IronStone Marketing P7: PASS Marketing's subscription (the request an anonymous write PASS's request key and the limits
+    // bound; the confirmation a bearer write)
+    ['GET', 'marketing/publication', 'getMarketingPublication'],
+    ['POST', 'marketing/subscription', 'requestSubscription'],
+    ['GET', 'marketing/subscription/request', 'getSubscriptionRequest'],
+    ['POST', 'marketing/subscription/verification', 'verifySubscription'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],
