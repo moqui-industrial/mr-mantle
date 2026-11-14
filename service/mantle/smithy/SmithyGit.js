@@ -23,16 +23,21 @@ kit => {
         return {out, problem}
     }
     /* What the git host refused that the checks before the call did not see (a change made meanwhile, a rule of
-       another component): its text read as the operation's refusal. The framework gives these no code, so this reads
-       its words, after refState has decided what it can. */
+       another component), by the code its text starts with (docs/interfaces/Git-Hosting.md, Error codes), read as the
+       operation's refusal. */
     function refuseWrite(problem) {
-        if (/^protected branch:|^declined:/.test(problem)) fail("Unauthorized", "accessDenied: A branch rule does not allow that")
-        if (/already exists$/.test(problem)) fail("Conflict", "That name is taken by a branch or a tag")
-        if (/default branch cannot be deleted/.test(problem)) fail("Conflict", "The default branch is not deleted")
-        if (/is archived$/.test(problem)) archived()
-        if (/^no branch or tag /.test(problem)) missing()
+        const code = (/^([A-Za-z]+): /.exec(problem) || [])[1]
+        if (code === "GitProtectedBranch") fail("Unauthorized", "accessDenied: A branch rule does not allow that")
+        if (code === "GitRefExists") fail("Conflict", "That name is taken by a branch or a tag")
+        if (code === "GitDefaultBranch") fail("Conflict", "The default branch is not deleted")
+        if (code === "GitArchived") archived()
+        if (code === "GitNoSuchRef") missing()
+        if (code === "GitStaleRef") fail("Conflict", "That branch or tag changed meanwhile; reload and try again")
+        if (code === "GitBadRefName") invalid("nameInvalid[name]: That is no name git takes for a branch or a tag")
         invalid(problem.slice(0, 200))
     }
+    kit.refuseWrite = refuseWrite
+    kit.called = called
     /* A ref as the framework has it now, asked before a write so its refusals are Smithy's own: whether it is there,
        whether it is the default branch, and what the branch rules that name it ask together. */
     function refState(repositoryId, refType, name) {
@@ -148,6 +153,8 @@ kit => {
             })
             if (problem != null) invalid(problem.slice(0, 200))
             maintainerAudit(p, "storeBranchRule", text(p.refPattern).trim())
+            // where the agreement is required a rule that asks for a merge request asks for its status too (§9.4)
+            kit.agreement.keepRules(p.repositoryId)
             return {branchRuleId: out.branchRuleId}
         }
         // with an id an edit of that rule of this repository; without one a create, which needs operationId
@@ -160,6 +167,8 @@ kit => {
         const {problem} = called(GIT + "delete#GitBranchRule", {branchRuleId: p.branchRuleId})
         if (problem != null) invalid(problem.slice(0, 200))
         maintainerAudit(p, "deleteBranchRule", rule.refPattern)
+        // the default branch of a repository whose agreement is required keeps a rule
+        kit.agreement.keepRules(p.repositoryId)
         return {deleted: true}
     }
 
@@ -357,8 +366,7 @@ kit => {
                 publicKey: text(p.publicKey).trim(),
                 description: text(p.name).trim().slice(0, 255) || null
             })
-            // the framework gives this refusal no code: its words are read
-            if (problem != null && /already in use$/.test(problem)) fail("Conflict", "That key is in use")
+            if (problem != null && /^KeyInUse: /.test(problem)) fail("Conflict", "That key is in use")
             if (problem != null || !out?.sshKeyId) invalid(text(problem || "That is no SSH public key").slice(0, 200))
             credentialAudit(p.siteId, "addSshKey", out.fingerprint)
             return {sshKeyId: out.sshKeyId, fingerprint: out.fingerprint || null}
@@ -479,12 +487,76 @@ kit => {
         const refused = refusedAccount(repo, c.userId, "A push")
         if (refused) return [refused]
         const packBytes = Math.max(0, Number(c.packBytes || 0))
+        const reviewRefs = Array.from(c.refUpdates || []).filter(ref => ref && ref.forReview)
+        if (c.forReview === true || reviewRefs.length) {
+            const answer = checkReviewPush(repo, c, packBytes, reviewRefs)
+            if (answer) return answer
+        }
         if (packBytes === 0) return []
         const limits = quota.repositoryQuota(repo)
         const used = quota.usageOf([repo.repositoryId])
         if (!used) return [UNKNOWN]
         if (Number(used.get(repo.repositoryId).storedBytes || 0) + packBytes > limits.repositoryBytes)
             return ["quotaExceeded: This push takes the repository past its size limit of " + limits.repositoryBytes + " bytes"]
+        return []
+    }
+    /* A push to refs/for/<branch>, or a page's proposal, which the git host runs through the same rule (§9.3): the
+       problems that refuse it, [] to accept it with nothing more asked, or null to go on to the repository's own size
+       limit. The pusher views the repository, which takes merge requests, and is not silenced there. An account without
+       Developer could not push a branch, so what it brings is held to caps of its own and counted against it, never
+       against the repository's quota: REVIEW_PUSH_BYTES a push, and a day's pushes for review, over every repository,
+       REVIEW_DAY_BYTES and no more than one repository of its own may hold; and it opens no more merge requests a day
+       than its trust level allows (a push that goes to a merge request it has open opens none). A Developer's push for
+       review is held as a push of a branch is. */
+    const REVIEW_PUSH_BYTES = 50 * 1048576
+    const REVIEW_DAY_BYTES = 200 * 1048576
+    function checkReviewPush(repo, c, packBytes, reviewRefs) {
+        const a = core.actor(c.userId || null)
+        const r = core.repositoryRights(repo, a)
+        if (!r.canView) return ["Repository not found"]
+        if (repo.mergeRequestsEnabled === "N") return ["This repository takes no merge requests"]
+        if (sanctioned(repo.siteId, a.partyId, core.scopeCategory(repo), "silence")) return ["Your account may not post on this site"]
+        if (r.rank >= core.RANK.SmrDeveloper) return null
+        if (packBytes > REVIEW_PUSH_BYTES)
+            return ["quotaExceeded: A push for review is at most " + REVIEW_PUSH_BYTES + " bytes; this one is " + packBytes]
+        const dayBytes = Array.from(
+            find("moqui.resource.GitUpdate", {userId: a.userId, reviewPush: "Y"})
+                .condition("updateDate", "greater", stamp(millis(now()) - 86400000))
+                .selectField("packBytes")
+                .limit(5000)
+                .list()
+        ).reduce((sum, row) => sum + Number(row.packBytes || 0), 0)
+        const dayLimit = Math.min(REVIEW_DAY_BYTES, quota.accountLimits(repo.siteId, a.partyId).repositoryBytes)
+        if (dayBytes + packBytes > dayLimit)
+            return ["quotaExceeded: Your pushes for review are at most " + dayLimit + " bytes a day; try again tomorrow"]
+        if (!r.access.staff) {
+            // a push opens a merge request unless the account has one open for the same branch and topic (-o topic=,
+            // none: the one with no topic), which it then updates
+            const topic =
+                Array.from(c.pushOptions || [])
+                    .map(option => /^topic=(.*)$/.exec(text(option)))
+                    .filter(match => !!match)
+                    .map(match => match[1].trim().slice(0, 60))[0] || null
+            const opens = reviewRefs.filter(
+                ref =>
+                    !Array.from(
+                        find("moqui.resource.GitMergeRequest", {
+                            repositoryId: repo.repositoryId,
+                            authorUserId: a.userId,
+                            targetRef: ref.targetBranch,
+                            pushedForReview: "Y"
+                        })
+                            .condition("statusId", "in", ["GmrDraft", "GmrOpen"])
+                            .limit(200)
+                            .list()
+                    ).some(open => (open.reviewTopic || null) === topic)
+            ).length
+            const state = one("mantle.forum.ForumMemberState", {siteId: repo.siteId, partyId: a.partyId})
+            const today = state?.dayKey === forum.dayKey() ? Number(forum.json(state.dailyCounts, {}).mergeRequest || 0) : 0
+            const allowed = (forum.TRUST_EFFECTS[state?.trustLevel || "new"] || forum.TRUST_EFFECTS.new).mergeRequest
+            if (opens > 0 && today + opens > allowed)
+                return ["limitReached: You have opened as many merge requests today as your account may; try again tomorrow"]
+        }
         return []
     }
     /* The LFS upload check (§11 Quotas, N-LFS-HOOK): LFS uploads do not pass pre-receive, so the same account rules

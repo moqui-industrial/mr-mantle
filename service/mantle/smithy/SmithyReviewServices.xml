@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Smithy's merge requests, forks and page edits (mr-pass plan/design-smithy.md §9, §15.5, DG4; SmithyReviews.js). Each
+        operation takes PASS's input map (its fields are SmithySchema.js's, siteId among them) and answers result. A merge
+        request the caller may not read is Not Found, exactly as one that is not there. -->
+    <service verb="find" noun="MergeRequests" authenticate="anonymous-all" allow-remote="false">
+        <description>The merge requests of a repository (repositoryId) or of a group's repositories (groupId) that the caller may read, newest first, paged, with the counts of the open (drafts among them), merged and closed ones under the same filters: state (open, draft, merged, closed, all), authorHandle, reviewerHandle, targetRef, query (in the title). One whose first post is held is listed for its author and its moderators only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findMergeRequests", input)</script></actions>
+    </service>
+    <service verb="get" noun="MergeRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>A merge request by its number: its projection, the reviewers and their decisions, the checks of its head (required ones marked), what keeps it from merging (missingList), the target's branch rules with the role a merge needs (mergeRole: maintainer for a protected branch, developer for any other), the agreement panel, the issues it is linked to, the caller's capabilities, and pending (its text waits for review: then it is Not Found to all but its author and its moderators).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getMergeRequest", input)</script></actions>
+    </service>
+    <service verb="get" noun="MergeRequestChanges" authenticate="anonymous-all" allow-remote="false">
+        <description>What a merge request changes: its commits (each with signed, whether its author has signed the agreement, null where none is required), the files, with withDiffs the diffs (of path alone when given), and the line threads the caller reads, of both shapes (posts with an anchor; the Comment events Projects wrote before, for a Developer). With agent true (set by the callers that serve an agent's tool) a merge request whose agreement is required and unsigned or pending gives no diff: diffRefused true, with its title and description only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getMergeRequestChanges", input)</script></actions>
+    </service>
+    <service verb="create" noun="MergeRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>Open a merge request into a branch of the repository (the default branch when targetRef is empty) from a branch of it, or of a fork (sourceRepositoryId), by an account with a confirmed address that may push to the source (a Developer there) and view the target. The title and the text pass the post gate: its refusals, or state pending for a held text, which hides the merge request until a moderator lets it through. Conflict when the same source and target have an open one; Unprocessable when the source has nothing the target lacks; reviewerHandles are a Developer's of the target. The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("createMergeRequest", input)</script></actions>
+    </service>
+    <service verb="update" noun="MergeRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>Change an open merge request by its author or a Developer: the title (through the gate), the target branch, draft, the merge method and whether the source branch goes after the merge.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("updateMergeRequest", input)</script></actions>
+    </service>
+    <service verb="set" noun="Reviewers" authenticate="anonymous-all" allow-remote="false">
+        <description>The reviewers of a merge request, by a Developer: each handle an account that may view the repository, else Unprocessable.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setMergeRequestReviewers", input)</script></actions>
+    </service>
+    <service verb="submit" noun="Review" authenticate="anonymous-all" allow-remote="false">
+        <description>A review at the merge request's head by an account with a confirmed address: comment by any viewer; approve and request_changes by a Developer (accessDenied to anyone else), and nobody approves their own. The summary is a post of the conversation through the gate, the pending line comments (commentList) posts with their anchors, and a decision a line of the conversation.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("submitReview", input)</script></actions>
+    </service>
+    <service verb="create" noun="ReviewComment" authenticate="anonymous-all" allow-remote="false">
+        <description>A line comment by an account with a confirmed address: a post of the merge request's conversation, through the gate, with its anchor (commitId, path, oldLine or newLine: a line of the diff, else Unprocessable), or a reply to a thread (threadId, its first post).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("createReviewComment", input)</script></actions>
+    </service>
+    <service verb="resolve" noun="ReviewThread" authenticate="anonymous-all" allow-remote="false">
+        <description>Resolve a line thread, or reopen it (resolved false): by the thread's author, the merge request's author or a Developer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("resolveReviewThread", input)</script></actions>
+    </service>
+    <service verb="set" noun="MergeRequestState" authenticate="anonymous-all" allow-remote="false">
+        <description>Close a merge request or reopen it, by its author or a Reporter; Conflict for a merged one. The change is a line of the conversation.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setMergeRequestState", input)</script></actions>
+    </service>
+    <service verb="merge" noun="MergeRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>Merge an open merge request by a method the branch rules allow: by a Maintainer when the target branch is protected by a rule, by a Developer when it is not (Smithy's own rule; the git host asks only for the update right). Refused: Conflict when the head moved since expectedHeadCommitId or it does not merge cleanly; checksRequired; agreementUnsigned where the agreement is required and not signed by everyone; squashFoldsSignature for a squash that would put one person's signature in another's commit; Unprocessable for a method the rules do not allow or missing approvals; and while its text is held.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("mergeMergeRequest", input)</script></actions>
+    </service>
+    <service verb="fork" noun="Repository" authenticate="anonymous-all" allow-remote="false">
+        <description>Fork a repository the caller may view into the caller's namespace, or a group where the caller is a Maintainer (targetGroupId), by the site's fork policy and within the namespace's count: a new repository that names its parent and shares its objects, with issues, pipelines, forum and docs off and merge requests on. Its visibility is the narrowest of the parent's effective one, the namespace's ceiling and what is asked. Refused: nameInvalid, nameTaken, policyRefused, quotaExceeded, repositoryArchived.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("forkRepository", input)</script></actions>
+    </service>
+    <service verb="find" noun="Forks" authenticate="anonymous-all" allow-remote="false">
+        <description>The forks of a repository that the caller may view, paged.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findForks", input)</script></actions>
+    </service>
+    <service verb="get" noun="EditContext" authenticate="anonymous-all" allow-remote="false">
+        <description>What a page needs to edit a file at a refPath (editAction update, create, rename, delete or upload): the file's blob and text, whether it is editable and why not (notBranch, archived, mirror, lfs, tooLarge, binary), where the caller may save with the default first (branch, newBranch, proposal), whether a rule protects the branch, whether it is the agreement file, and a name for a new branch.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getEditContext", input)</script></actions>
+    </service>
+    <service verb="commit" noun="File" authenticate="anonymous-all" allow-remote="false">
+        <description>Save one file as one commit by an account with a confirmed address (action create, update, rename, delete or upload of a staged attachment): to the branch (a Developer, when the rules allow a direct push), to a new branch with a merge request (a Developer), or as a proposal with no branch and no fork (any viewer). The author is the account by its name and address, the committer the server. baseBlobId is the blob the edit began from: Conflict (fileChanged) when the file is another now. notEditable for a file kept in Git LFS or over the site's maxEditBytes; accessDenied for a destination the caller does not have; the gate's refusals for the message, as a merge request's text when the save opens one.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("commitFile", input)</script></actions>
+    </service>
+
+    <!-- Not operations: what the rules and Projects call. -->
+    <service verb="ensure" noun="MergeRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>The SmithyMergeRequest row and the conversation of a merge request of a repository Smithy keeps, when it has none (design-smithy §9.1, §9.3): the text is the host's title and description, through the post gate as its author; a held text keeps the merge request hidden in the git host. Nothing for any other repository.</description>
+        <in-parameters><parameter name="mergeRequestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="rootCommEventId"/></out-parameters>
+        <actions><script>rootCommEventId = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").ensureMergeRequest(mergeRequestId)?.rootCommEventId || null</script></actions>
+    </service>
+    <service verb="handle" noun="MergeRequestEvent" authenticate="anonymous-all" allow-remote="false">
+        <description>The git host's events of a merge request (service/Smithy.secas.xml), for a repository Smithy keeps: opened makes the row and the conversation (ensure#MergeRequest); a new head, a new target and a reopening compute the agreement again; closed, reopened and merged are lines of the conversation.</description>
+        <in-parameters>
+            <parameter name="mergeRequestId" required="true"/>
+            <parameter name="action" required="true"/>
+        </in-parameters>
+        <actions><script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").handleMergeRequestEvent({mergeRequestId, action})</script></actions>
+    </service>
+    <service verb="sync" noun="MergeRequestHidden" authenticate="anonymous-all" allow-remote="false">
+        <description>A post's visibility changed (entity/Smithy.eecas.xml): when it is the first post of a merge request, the git host hides the merge request while the post is not approved (its head is fetched by nobody, its commits not read by id) and shows it once it is.</description>
+        <in-parameters><parameter name="communicationEventId" required="true"/></in-parameters>
+        <actions><script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").syncMergeRequestHidden(communicationEventId)</script></actions>
+    </service>
+    <service verb="post" noun="ReviewComment" authenticate="anonymous-all" allow-remote="false">
+        <description>A comment of Projects' Code on a merge request that has a conversation (not a reply to a thread of the older shape, a Comment event, which the caller writes the old way: handled false) (mantle.work.GitServices.create#ReviewComment calls this): written as a post of the conversation by the current user, through the post gate, with its anchor on a line or as a reply to its thread, so Projects and Smithy show one set of threads. No communicationEventId for a merge request Smithy does not keep.</description>
+        <in-parameters>
+            <parameter name="mergeRequestId" required="true"/>
+            <parameter name="body" required="true" allow-html="any"/>
+            <parameter name="path"/>
+            <parameter name="oldLine" type="Integer"/>
+            <parameter name="newLine" type="Integer"/>
+            <parameter name="lineText" allow-html="any"/>
+            <parameter name="parentCommEventId"/>
+        </in-parameters>
+        <out-parameters><parameter name="communicationEventId"/><parameter name="handled" type="Boolean"/><parameter name="held" type="Boolean"/></out-parameters>
+        <actions><script><![CDATA[
+            const posted = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").reviewCommentPost({mergeRequestId, body, path, oldLine, newLine, lineText, parentCommEventId})
+            handled = !!posted
+            communicationEventId = posted?.communicationEventId || null
+            held = !!posted?.held
+        ]]></script></actions>
+    </service>
+</services>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- The contributor agreement (mr-pass plan/design-smithy.md §9.4, §15.5; Dogfood §10; SmithyAgreements.js): a setting of
+        a group or a repository, off by default, and the status agreement/authors of a merge request's head. -->
+    <service verb="get" noun="Agreement" authenticate="anonymous-all" allow-remote="false">
+        <description>The contributor agreement setting of a repository or a group (inherit, off, required), the one in effect and where it is inherited from, the file's path, and for a repository whether the caller (or, for a Developer, the account of handle) has signed at the default branch and what is missing (copyright, patent, or either with NotOwn for a line no commit of the account added).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getAgreement", input)</script></actions>
+    </service>
+    <service verb="set" noun="Agreement" authenticate="anonymous-all" allow-remote="false">
+        <description>Set the agreement of a repository or a group, by an Owner: inherit, off or required, and the file's path. The branch rules of each repository it reaches are made to require the status agreement/authors, or not (the default branch's rule, made when there is none, and every rule that requires a merge request), and its open merge requests are checked again. Unprocessable when a repository's own setting is required and the file is not at the path.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setAgreement", input)</script></actions>
+    </service>
+    <service verb="sign" noun="Agreement" authenticate="anonymous-all" allow-remote="false">
+        <description>Add the caller's line to both lists of the agreement file as one commit by the account: on the merge request's source branch when the account may push there (mergeRequestNum), else as a merge request of its own into the default branch (a new branch for a Developer, a proposal for anyone else). Conflict when already signed there.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("signAgreement", input)</script></actions>
+    </service>
+    <service verb="recheck" noun="Agreement" authenticate="anonymous-all" allow-remote="false">
+        <description>Compute the agreement of a merge request again, with the target branch's signatures read anew (after an account confirmed an address or linked a login): by its author or a Developer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("recheckAgreement", input)</script></actions>
+    </service>
+    <service verb="declare" noun="BotOperator" authenticate="anonymous-all" allow-remote="false">
+        <description>The operator of the bot account that opened a merge request says it runs it: Unprocessable when the author is no bot or the caller is not its operator.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("declareBotOperator", input)</script></actions>
+    </service>
+    <service verb="confirm" noun="BotOperator" authenticate="anonymous-all" allow-remote="false">
+        <description>A Maintainer confirms the operator's word; Conflict when nothing is declared. The bot then counts as signed when its operator has signed.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("confirmBotOperator", input)</script></actions>
+    </service>
+
+    <!-- Not operations. -->
+    <service verb="compute" noun="Agreement" authenticate="anonymous-all" allow-remote="false">
+        <description>The agreement check of an open merge request for its head (design-smithy §9.4): its author and the author of each of its commits have a line in both lists of the agreement file at the target branch or in the merge request itself, each added by a commit of that account (its confirmed addresses, or its linked GitHub login in a noreply address). Kept on the SmithyMergeRequest row and written as the commit status agreement/authors, with authorization disabled: success, pending for a bot whose operator is not confirmed, else failure naming who is missing what. Off, and no status, where the agreement is not required.</description>
+        <in-parameters><parameter name="mergeRequestId" required="true"/></in-parameters>
+        <out-parameters><parameter name="required" type="Boolean"/><parameter name="state"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").computeAgreement(mergeRequestId))</script></actions>
+    </service>
+    <service verb="check" noun="TargetBranch" authenticate="anonymous-all" allow-remote="false">
+        <description>A branch moved (service/Smithy.gitecas.xml): where the agreement is required and the agreement file at the branch is another than the one last read, each open merge request into the branch is checked again.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions><script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").agreementTargetMoved({repositoryId, refName, changeType})</script></actions>
+    </service>
+    <service verb="check" noun="Write" authenticate="anonymous-all" allow-remote="false">
+        <description>Pre-ref-update (service/Smithy.gitecas.xml), for a push and for every write through the git host (design-smithy §9.4, N-WRITE-ECA): the one place unsigned code is kept off a guarded branch (the default branch, and any branch a rule makes change through a merge request) of a repository whose agreement is required. The commits are the event's newCommits, and a merge is known by the event's merge context. The merge of a merge request (mergeRequestId, whoever calls the git host's merge#MergeRequest) is checked as that merge request: its head, which must be mergeSourceCommitId, signed by everyone who wrote it (agreementUnsigned, naming who is missing what), and a squash folding no signature into another person's commit (squashFoldsSignature). A merge with no merge request (merge#GitRefs) is checked by the commits of its source (those mergeSourceCommitId reaches and the branch does not), a squash and a rebase too, and a squash by the same rule. Else, and for those source commits, each commit that is no merge must be its author's own (the author's confirmed address, and brought by that account) by an account that has signed at the branch, or be a commit of an open merge request into the branch that is signed for its head. An error refuses the ref. It fails closed: newCommitsTruncated, too many commits, a commit it cannot read and its own failure refuse. Not called for a mirror's fetch or an import.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions><script><![CDATA[
+            for (const problem of ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").agreementWrite({repositoryId, userId, refName, refType, shortName, oldId, changeType,
+                    isDefaultBranch, forReview, newCommitIds, newCommits, newCommitsTruncated, isMerge, mergeRequestId, mergeMethodEnumId, mergeSourceCommitId})) ec.message.addError(problem)
+        ]]></script></actions>
+    </service>
+    <service verb="check" noun="Brought" authenticate="anonymous-all" allow-remote="false">
+        <description>Post-receive: the git host has recorded who brought the commits of a change; the open merge requests of the repository (as target or as source) that waited on that are checked again.</description>
+        <implements service="org.moqui.GitServices.process#GitEca"/>
+        <actions><script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").agreementBrought({repositoryId})</script></actions>
+    </service>
+    <service verb="get" noun="AuthorSigned" authenticate="anonymous-all" allow-remote="false">
+        <description>Whether an author has signed a repository's agreement file at its default branch (the Dev AIDE's check, design F18): by account (userId) or by a commit's author address (emailAddress), a line of its own in both lists. missing names what is not there: copyright, patent, either with NotOwn for a line no commit of the account added, or account for an address that is no account's. known is false for a repository Smithy does not keep; required says whether the repository asks for it.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="userId"/>
+            <parameter name="emailAddress"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="known" type="Boolean"/>
+            <parameter name="required" type="Boolean"/>
+            <parameter name="signed" type="Boolean"/>
+            <parameter name="missing" type="List"/>
+            <parameter name="agreementPath"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").authorSigned({repositoryId, userId, emailAddress}))</script></actions>
+    </service>
+    <service verb="get" noun="Signed" authenticate="anonymous-all" allow-remote="false">
+        <description>get#AuthorSigned under the name design-smithy §9.4 gives it.</description>
+        <implements service="mantle.smithy.SmithyAgreementServices.get#AuthorSigned"/>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").authorSigned({repositoryId, userId, emailAddress}))</script></actions>
+    </service>
+</services>

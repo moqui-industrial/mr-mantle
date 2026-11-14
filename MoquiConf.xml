@@ -9,7 +9,15 @@
     <llm-facade><constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/></llm-facade>
     <!-- Smithy's quota for Git LFS (mr-pass plan/design-smithy.md §11 Quotas): asked before an upload is accepted; it
         returns at once for a repository with no SmithyRepository row -->
-    <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"/>
+    <!-- Smithy over the git host (design-smithy §9.1, §9.3, N-HOOKS): the status contexts agreement/ and ci/ are the
+        system's (the agreement check and the engine write them with authorization disabled, a user never); a merge
+        request pushed for review, proposed on a page or opened from a fork starts hidden until Smithy's handler of its
+        opened event has passed its text through the post gate (SmithyReviewServices.handle#MergeRequestEvent); and the
+        answer to a push names the merge request's page under a root Smithy mount (a path: the host is the server's
+        public URL) -->
+    <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
+            reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
+            merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>

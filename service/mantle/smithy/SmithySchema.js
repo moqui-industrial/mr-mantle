@@ -269,5 +269,224 @@
             "reason",
             "expectedRevision"
         ]
+    },
+    // DG3 (§15.4): issues
+    findIssues: {
+        service: "mantle.smithy.SmithyIssueServices.find#Issues",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "groupId",
+            "state",
+            "labelIds",
+            "milestoneId",
+            "assigneeHandle",
+            "authorHandle",
+            "query",
+            "confidential",
+            "sort",
+            "limit",
+            "cursor"
+        ]
+    },
+    getIssue: {
+        service: "mantle.smithy.SmithyIssueServices.get#Issue",
+        fields: ["siteId", "repositoryId", "issueNumber"]
+    },
+    createIssue: {
+        service: "mantle.smithy.SmithyIssueServices.create#Issue",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "title",
+            "body",
+            "sourceFormat",
+            "confidential",
+            "labelIds",
+            "assigneeHandles",
+            "milestoneId",
+            "attachmentIds",
+            "draftId",
+            "operationId"
+        ]
+    },
+    updateIssue: {
+        service: "mantle.smithy.SmithyIssueServices.update#Issue",
+        fields: ["siteId", "repositoryId", "issueNumber", "title", "expectedRevision"]
+    },
+    setIssueState: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueState",
+        fields: ["siteId", "repositoryId", "issueNumber", "state", "reason", "duplicateOfNumber", "expectedRevision"]
+    },
+    setIssueLabels: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueLabels",
+        fields: ["siteId", "repositoryId", "issueNumber", "labelIds", "expectedRevision"]
+    },
+    setIssueAssignees: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueAssignees",
+        fields: ["siteId", "repositoryId", "issueNumber", "assigneeHandles", "expectedRevision"]
+    },
+    setIssueMilestone: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueMilestone",
+        fields: ["siteId", "repositoryId", "issueNumber", "milestoneId", "expectedRevision"]
+    },
+    setIssueConfidential: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueConfidential",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "issueNumber",
+            "confidential",
+            "asNewIssue",
+            "title",
+            "body",
+            "sourceFormat",
+            "expectedRevision",
+            "operationId"
+        ]
+    },
+    findLabels: {
+        service: "mantle.smithy.SmithyIssueServices.find#Labels",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeLabel: {
+        service: "mantle.smithy.SmithyIssueServices.store#Label",
+        fields: ["siteId", "repositoryId", "labelId", "name", "color", "description", "expectedRevision", "operationId"]
+    },
+    deleteLabel: {
+        service: "mantle.smithy.SmithyIssueServices.delete#Label",
+        fields: ["siteId", "repositoryId", "labelId"]
+    },
+    findMilestones: {
+        service: "mantle.smithy.SmithyIssueServices.find#Milestones",
+        fields: ["siteId", "repositoryId", "state"]
+    },
+    storeMilestone: {
+        service: "mantle.smithy.SmithyIssueServices.store#Milestone",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "milestoneId",
+            "name",
+            "description",
+            "dueDate",
+            "state",
+            "expectedRevision",
+            "operationId"
+        ]
+    },
+    findAssignees: {
+        service: "mantle.smithy.SmithyIssueServices.find#Assignees",
+        fields: ["siteId", "repositoryId", "query", "limit"]
+    },
+    // DG4 (§15.5): merge requests, forks, editing a file on its page, the contributor agreement
+    findMergeRequests: {
+        service: "mantle.smithy.SmithyReviewServices.find#MergeRequests",
+        fields: ["siteId", "repositoryId", "groupId", "state", "authorHandle", "reviewerHandle", "targetRef", "query", "limit", "cursor"]
+    },
+    getMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.get#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum"]
+    },
+    getMergeRequestChanges: {
+        service: "mantle.smithy.SmithyReviewServices.get#MergeRequestChanges",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "path", "withDiffs", "agent"]
+    },
+    createMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.create#MergeRequest",
+        fields: ["siteId", "repositoryId", "sourceRepositoryId", "sourceRef", "targetRef", "title", "body", "sourceFormat", "draft", "reviewerHandles", "operationId"]
+    },
+    updateMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.update#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "title", "targetRef", "draft", "mergeMethod", "deleteSourceBranch", "expectedRevision"]
+    },
+    setMergeRequestReviewers: {
+        service: "mantle.smithy.SmithyReviewServices.set#Reviewers",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "reviewerHandles", "expectedRevision"]
+    },
+    submitReview: {
+        service: "mantle.smithy.SmithyReviewServices.submit#Review",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "decision", "body", "sourceFormat", "commentList", "operationId"]
+    },
+    createReviewComment: {
+        service: "mantle.smithy.SmithyReviewServices.create#ReviewComment",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "threadId", "commitId", "path", "oldLine", "newLine", "body", "sourceFormat", "operationId"]
+    },
+    resolveReviewThread: {
+        service: "mantle.smithy.SmithyReviewServices.resolve#ReviewThread",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "threadId", "resolved"]
+    },
+    setMergeRequestState: {
+        service: "mantle.smithy.SmithyReviewServices.set#MergeRequestState",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "state", "expectedRevision"]
+    },
+    mergeMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.merge#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "mergeMethod", "message", "deleteSourceBranch", "expectedHeadCommitId", "expectedRevision"]
+    },
+    forkRepository: {
+        service: "mantle.smithy.SmithyReviewServices.fork#Repository",
+        fields: ["siteId", "repositoryId", "targetGroupId", "slug", "name", "visibility", "operationId"]
+    },
+    findForks: {
+        service: "mantle.smithy.SmithyReviewServices.find#Forks",
+        fields: ["siteId", "repositoryId", "limit", "cursor"]
+    },
+    getEditContext: {
+        service: "mantle.smithy.SmithyReviewServices.get#EditContext",
+        fields: ["siteId", "repositoryId", "refPath", "editAction"]
+    },
+    commitFile: {
+        service: "mantle.smithy.SmithyReviewServices.commit#File",
+        fields: ["siteId", "repositoryId", "branch", "action", "path", "newPath", "content", "attachmentId", "baseBlobId", "message", "destination", "newBranchName", "mergeRequestTitle", "operationId"]
+    },
+    getAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.get#Agreement",
+        fields: ["siteId", "repositoryId", "groupId", "handle"]
+    },
+    setAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.set#Agreement",
+        fields: ["siteId", "repositoryId", "groupId", "setting", "agreementPath", "expectedRevision"]
+    },
+    signAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.sign#Agreement",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "legalName", "years", "operationId"]
+    },
+    recheckAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.recheck#Agreement",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "operationId"]
+    },
+    declareBotOperator: {
+        service: "mantle.smithy.SmithyAgreementServices.declare#BotOperator",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "operationId"]
+    },
+    confirmBotOperator: {
+        service: "mantle.smithy.SmithyAgreementServices.confirm#BotOperator",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "expectedRevision"]
+    },
+    // DG6 (§15.7): the forum inside Smithy, Report and Hide, a topic made an issue, the report address
+    setScopeForum: {
+        service: "mantle.smithy.SmithyServices.set#ScopeForum",
+        fields: ["siteId", "repositoryId", "groupId", "enabled", "contactListId", "expectedRevision"]
+    },
+    reportSmithyTarget: {
+        service: "mantle.smithy.SmithyServices.report#Target",
+        fields: ["siteId", "targetType", "targetId", "reason", "note", "operationId"]
+    },
+    hideSmithyTarget: {
+        service: "mantle.smithy.SmithyServices.hide#Target",
+        fields: ["siteId", "targetType", "targetId", "hidden", "reason", "expectedRevision"]
+    },
+    convertTopicToIssue: {
+        service: "mantle.smithy.SmithyIssueServices.convert#TopicToIssue",
+        fields: ["siteId", "repositoryId", "rootCommEventId", "postIds", "title", "confidential", "operationId"]
+    },
+    storeIssueMailRoute: {
+        service: "mantle.smithy.SmithyIssueServices.store#MailRoute",
+        fields: ["siteId", "groupId", "repositoryId", "address", "enabled", "expectedRevision"]
+    },
+    claimHeldReport: {
+        service: "mantle.smithy.SmithyIssueServices.claim#HeldReport",
+        fields: ["siteId", "token", "operationId"]
     }
 })

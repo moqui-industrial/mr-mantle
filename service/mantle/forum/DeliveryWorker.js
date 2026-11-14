@@ -82,9 +82,87 @@ const mentioned = (box, event) => {
     }
     return out
 }
+const core = () =>
+    ec.resource.script('component://mr-mantle/service/mantle/forum/ForumCore.js')
+/* The record topic (an issue's conversation) of an outbox item's post, or null. */
+function recordOf(box) {
+    const st = one(F + 'ForumPostState', {
+        communicationEventId: box.communicationEventId,
+    })
+    const t = st
+        ? one(F + 'ForumTopic', { rootCommEventId: st.rootCommEventId })
+        : null
+    return t?.kind === 'record' ? t : null
+}
+/* A record's post: the topic's and the scope category's watchers, the mentioned and the parent post's author, each
+   kept only while that party may read the record (recordAccess) and that post (postAccess: a staff post is its
+   Owners'). Site membership is not asked: a role on the repository is what lets an account read. */
+function recordAudience(box, partyId, t) {
+    const event = one(E + 'CommunicationEvent', {
+            communicationEventId: box.communicationEventId,
+        }),
+        st = one(F + 'ForumPostState', {
+            communicationEventId: box.communicationEventId,
+        })
+    if (!event || !st || !['approved', 'staff'].includes(st.visibility))
+        return null
+    const own = event.fromPartyId === partyId
+    if (own) return null
+    if (policy().memberMutes(box.siteId, partyId, event.fromPartyId))
+        return null
+    // postAccess also refuses while the record's first post is held or removed, but for its author and moderators:
+    // nobody is told of an issue that is not reviewed yet, by a mention or a watch.
+    const a = core().recordAccess(t.rootCommEventId, partyId)
+    if (!a?.canRead || !core().postAccess(box.communicationEventId, partyId))
+        return null
+    const pref = effective(box.siteId, partyId, [
+        ['topic', st.rootCommEventId],
+        ['category', t.contactListId],
+    ])
+    if (pref.watch === 'Muted') return null
+    const isRoot = st.communicationEventId === st.rootCommEventId
+    const parent = event.parentCommEventId
+        ? one(E + 'CommunicationEvent', {
+              communicationEventId: event.parentCommEventId,
+          })
+        : null
+    const reason =
+        parent?.fromPartyId === partyId && !isRoot
+            ? 'reply'
+            : mentioned(box, event).has(partyId)
+              ? 'mention'
+              : pref.watch === 'Watching'
+                ? 'watching'
+                : pref.watch === 'WatchingFirstPost' && isRoot
+                  ? 'first-post'
+                  : // the Owners of a confidential record hear of what is filed there, whatever they watch
+                    a.confidential && a.canReadStaff
+                    ? 'watching'
+                    : null
+    if (!reason) return null
+    return {
+        event,
+        st,
+        private: false,
+        record: core().recordPage(t.rootCommEventId, partyId),
+        listId: t.contactListId,
+        reason,
+        inApp: true,
+        email: ['Notifications', 'EveryPost'].includes(pref.email),
+        everyPost: false,
+        scope:
+            pref.watch.startsWith('Watching') &&
+            pref.watchScope &&
+            pref.watchScope.scopeType !== 'site'
+                ? pref.watchScope
+                : { scopeType: 'topic', scopeId: st.rootCommEventId },
+    }
+}
 /* Whether and how one member hears about one post, decided again at send time. The answer names the reason, whether
    an in-app notice is due, whether email is due, and the scope an opt-out link stops. */
 function audience(box, partyId) {
+    const record = recordOf(box)
+    if (record) return recordAudience(box, partyId, record)
     const membership = one(S + 'PublicSiteParty', {
         siteId: box.siteId,
         partyId,
@@ -253,6 +331,35 @@ function candidateSources(box) {
         ).map((row) => row.partyId)
     const watchers = (scopeType, scopeId, watchLevel) =>
         paged('ForumPreference', { scopeType, scopeId, watchLevel })
+    // A record: the parent post's author, the mentioned, and the watchers of the topic and of its scope category.
+    const record = recordOf(box)
+    if (record)
+        return [
+            (after) =>
+                after
+                    ? []
+                    : [
+                          ...new Set([
+                              ...(parent?.fromPartyId
+                                  ? [parent.fromPartyId]
+                                  : []),
+                              ...mentioned(box, event),
+                          ]),
+                      ].sort(),
+            (after) =>
+                after ? [] : core().recordOwners(record.rootCommEventId),
+            watchers('topic', st.rootCommEventId, 'Watching'),
+            watchers('category', record.contactListId, 'Watching'),
+            ...(isRoot
+                ? [
+                      watchers(
+                          'category',
+                          record.contactListId,
+                          'WatchingFirstPost',
+                      ),
+                  ]
+                : []),
+        ]
     const subscribers = (scopeType, scopeId) =>
         paged('ForumDeliveryPreference', {
             scopeType,
@@ -418,20 +525,39 @@ function deliver(p) {
         replyTo: policy().replyAddress(
             v.siteId,
             st.rootCommEventId,
-            event.contactListId,
+            event.contactListId || allowed.listId || null,
             v.partyId,
+            // the post this mail is about: a reply to an Owners only post of a record is posted Owners only
+            st.communicationEventId,
         ),
+        listId: allowed.record?.listId || null,
+        // a mailing list's own headers, by the category's address (a topic of a category in list mode)
+        listHeaders:
+            allowed.record || allowed.private || urls.forumBase == null
+                ? null
+                : policy().listHeaders(
+                      v.siteId,
+                      event.contactListId,
+                      urls.origin + urls.forumBase,
+                  ),
         inReplyTo: parentRef || rootRef,
         references: [rootRef, parentRef].filter(Boolean).join(' '),
         bodyParameters: {
             unsubscribeUrl: urls.unsubscribeUrl,
-            postUrl:
-                urls.origin +
-                urls.forumBase +
-                '/p/' +
-                encodeURIComponent(st.communicationEventId),
-            // Private conversation mail is a minimal notice: no subject or text leaves the site.
-            title: allowed.private ? 'New private message' : event.subject,
+            // A record's post is on its record's page (an issue's), not in the forum.
+            postUrl: allowed.record
+                ? urls.origin + allowed.record.path
+                : urls.origin +
+                  urls.forumBase +
+                  '/p/' +
+                  encodeURIComponent(st.communicationEventId),
+            // Private conversation mail is a minimal notice: no subject or text leaves the site. A record's title is
+            // its page's (a confidential issue's names only its number).
+            title: allowed.private
+                ? 'New private message'
+                : allowed.record
+                  ? allowed.record.title
+                  : event.subject,
             // Mailing-list mode carries the sanitized post; other notices link to it.
             body: allowed.everyPost
                 ? StringUtilities.cleanHtml(event.body || '')
@@ -441,12 +567,12 @@ function deliver(p) {
             rootCommEventId: st.rootCommEventId,
             postId: st.communicationEventId,
         },
-    }))
+    }), !allowed.record)
 }
 /* One email to the member of delivery v through the site's registered settings and verified address, with an opt-out
    token for scope. build(urls) supplies the template parameters and thread references. The provider outcome is kept:
    sent, retry with backoff, failed, or uncertain when acceptance is unknown. */
-function mail(v, scope, build) {
+function mail(v, scope, build, needsForum = true) {
     const settings = one(F + 'ForumMailSettings', { siteId: v.siteId }),
         ua = Array.from(
             find('moqui.security.UserAccount', { partyId: v.partyId })
@@ -483,7 +609,7 @@ function mail(v, scope, build) {
         },
         accountBase = mountBase('account'),
         forumBase = mountBase('forum')
-    if (!host || accountBase == null || forumBase == null) {
+    if (!host || accountBase == null || (needsForum && forumBase == null)) {
         set(v, {
             state: 'failed',
             lastError:
@@ -521,7 +647,10 @@ function mail(v, scope, build) {
             extraHeaders: {
                 'List-Unsubscribe': '<' + oneClickUrl + '>',
                 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-                'List-Id': v.siteId + '.' + host.hostname,
+                // a record's mail names its repository, so a filter can tell a repository's mail; a mailing list's
+                // names the list, with where to post to it and where its archive is
+                'List-Id': (built.listId || v.siteId) + '.' + host.hostname,
+                ...(built.listHeaders || {}),
             },
             ...(built.inReplyTo ? { inReplyTo: built.inReplyTo } : {}),
             ...(built.references ? { references: built.references } : {}),

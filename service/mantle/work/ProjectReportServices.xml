@@ -297,6 +297,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="visibleProjectIds" type="List"/>
             <parameter name="managedProjectIds" type="List"/>
             <parameter name="restrictedItemIds" type="List"/>
+            <parameter name="hiddenItemIds" type="List"><description>The confidential issues' tasks the user is no Owner of
+                (get#VisibleProjectInfo): in no report, for a manager of their project either</description></parameter>
             <parameter name="seesAllTime" type="Boolean"/>
             <parameter name="timePartyIds" type="List"/>
             <parameter name="moneyShown" type="Boolean"/>
@@ -308,6 +310,7 @@ along with this software (see the LICENSE.md file). If not, see
             visibleProjectIds = Array.from(vis.visibleProjectIds || [])
             managedProjectIds = Array.from(vis.managedProjectIds || [])
             restrictedItemIds = Array.from(vis.restrictedItemIds || [])
+            hiddenItemIds = Array.from(vis.hiddenItemIds || [])
             const isAdmin = !!ec.user.userId && ec.user.isInGroup('ADMIN')
             moneyShown = !!ec.user.userId && (isAdmin || ec.user.hasPermission('TIME_ENTRY_RATE'))
             timePartyIds = []
@@ -493,8 +496,10 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 const restricted = new Set(Array.from(scope.restrictedItemIds || []))
                 const managedSet = new Set(managed)
-                const hidden = (row) => !scope.allProjects && row && ['WevRestricted', 'WevConfidential'].includes(row.visibilityEnumId)
-                        && !restricted.has(row.workEffortId) && !managedSet.has(row.rootWorkEffortId)
+                const hiddenItems = new Set(Array.from(scope.hiddenItemIds || []))
+                const hidden = (row) => !scope.allProjects && row && (hiddenItems.has(row.workEffortId) ||
+                        (['WevRestricted', 'WevConfidential'].includes(row.visibilityEnumId)
+                        && !restricted.has(row.workEffortId) && !managedSet.has(row.rootWorkEffortId)))
                 const itemLabel = (id) => {
                     if (!id) return L('None')
                     const row = efforts[id]
@@ -728,7 +733,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (purposeEnumId) itemFind = itemFind.condition('purposeEnumId', purposeEnumId)
                 const items = Array.from(itemFind.selectField('workEffortId').selectField('rootWorkEffortId').selectField('statusId').selectField('purposeEnumId')
                         .selectField('priority').selectField('visibilityEnumId').selectField('estimatedCompletionDate').selectField('actualCompletionDate').limit(50000).list())
-                        .filter((item) => all || !['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId) || managed.has(item.rootWorkEffortId) || restricted.has(item.workEffortId))
+                        .filter((item) => all || (!Array.from(vis.hiddenItemIds || []).includes(item.workEffortId) &&
+                            (!['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId) || managed.has(item.rootWorkEffortId) || restricted.has(item.workEffortId))))
                 itemCount = items.length
                 if (!items.length) return
                 const ids = items.map((item) => item.workEffortId)
@@ -1428,7 +1434,9 @@ along with this software (see the LICENSE.md file). If not, see
                 project = {workEffortId: row.workEffortId, workEffortName: row.workEffortName || row.workEffortId, statusId: row.statusId}
                 const restricted = new Set(Array.from(scope.restrictedItemIds || []))
                 const managed = new Set(Array.from(scope.managedProjectIds || []))
-                const seen = (item) => scope.allProjects || !['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId) || managed.has(workEffortId) || restricted.has(item.workEffortId)
+                const hiddenItems = new Set(Array.from(scope.hiddenItemIds || []))
+                const seen = (item) => scope.allProjects || (!hiddenItems.has(item.workEffortId) &&
+                        (!['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId) || managed.has(workEffortId) || restricted.has(item.workEffortId)))
                 const itemOf = (id) => {
                     const item = id ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', id).one() : null
                     return item && item.rootWorkEffortId === workEffortId && item.workEffortTypeEnumId === 'WetTask' && seen(item) ? item : null

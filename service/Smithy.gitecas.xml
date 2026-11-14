@@ -1,10 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
-<!-- Smithy's push gate (mr-pass plan/design-smithy.md §5.5): before a push is accepted, to any repository; the service
-    returns at once for one with no SmithyRepository row. A write through Moqui (a page's commit, create#GitRef) is not a
-    push: the operation that makes it has checked its caller. -->
+<!-- Smithy's rules on the git host's events. Each names its sources: a rule with none covers push, fetch and import only.
+
+    The push gate (mr-pass plan/design-smithy.md §5.5): before a push is accepted, to any repository; the service returns at
+    once for one with no SmithyRepository row. Source push only: it asks who pushes (a role, a confirmed address) and how
+    much (the quota), and a page's proposal is run by the git host as a push to refs/for/[branch] (transport internal), so
+    the gate's rule for a push to review holds it too (§9.3). Not write: a write through Moqui (a page's commit,
+    create#GitRef, a merge) is made by an operation that has checked its caller. Not fetch or import: a mirror's fetch
+    has no pusher (a job runs it), and an import is an operator's act; neither is an account's push to refuse. -->
 <gitecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/git-eca-3.xsd">
     <giteca rule-name="SmithyPushGate" source="push" event="pre-receive">
         <actions><service-call name="mantle.smithy.SmithyGitServices.check#Push" in-map="context"/></actions>
+    </giteca>
+    <!-- The one enforcement point of the contributor agreement (design-smithy §9.4, N-WRITE-ECA): what comes to a guarded
+        branch by a push or by any write through the git host (a page's commit, a merge by Smithy, by Projects or of two
+        refs, create#GitRef, the release notes, a write through a git:// location). The event has the new commits with
+        their authors and says when it is a merge (its merge request, method and source), so the one rule checks all of
+        them; it returns at once for a repository whose agreement is not required. Sources push and write, and not:
+        - fetch: a mirror (a remote repository Smithy keeps) holds another server's history, which nobody here wrote or
+          brought; a fetch the gate refused would stop the mirror. Mirrors are exempt.
+        - import: an operator's act (import#GitRepository, the GitHub import), for history made elsewhere; exempt. Its
+          commits are nobody's own afterwards unless the repository is marked importedHistory (SmithyAgreements.js). -->
+    <giteca rule-name="SmithyAgreementGate" source="push,write" event="pre-ref-update" ref-type="branch">
+        <actions><service-call name="mantle.smithy.SmithyAgreementServices.check#Write" in-map="context"/></actions>
+    </giteca>
+    <!-- After a branch changed, by any source (an import and a mirror's fetch change the agreement file as a push does):
+        when the file at the branch is another, the open merge requests into the branch are checked again. -->
+    <giteca rule-name="SmithyAgreementFile" source="push,fetch,import,write" event="ref-update" ref-type="branch">
+        <actions><service-call name="mantle.smithy.SmithyAgreementServices.check#TargetBranch" in-map="context"/></actions>
+    </giteca>
+    <!-- After a change whose commits an account brought (a push, a write; an import's and a fetch's commits are brought by
+        nobody): the merge requests that waited to learn who brought their commits are checked again. -->
+    <giteca rule-name="SmithyAgreementBrought" source="push,write" event="post-receive">
+        <actions><service-call name="mantle.smithy.SmithyAgreementServices.check#Brought" in-map="context"/></actions>
     </giteca>
 </gitecas>

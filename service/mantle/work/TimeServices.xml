@@ -1636,6 +1636,11 @@ along with this software (see the LICENSE.md file). If not, see
                 // ===== the find
                 const conds = []
                 if (seen.length) conds.push(cf.makeCondition(seen, 'or'))
+                // time on a confidential issue's task is not listed for one who does not see the task (hiddenItemIds), a
+                // manager of its project and an approver of all time among them
+                const hiddenItems = Array.from(vis.hiddenItemIds || [])
+                if (hiddenItems.length) conds.push(cf.makeCondition([cf.makeCondition('workEffortId', 'equals', null),
+                    cf.makeCondition('workEffortId', 'not-in', hiddenItems)], 'or'))
                 if (partyId) conds.push(cf.makeCondition('partyId', 'equals', partyId))
                 if (rootWorkEffortId) conds.push(cf.makeCondition([cf.makeCondition('rootWorkEffortId', 'equals', rootWorkEffortId),
                     cf.makeCondition('workEffortId', 'equals', rootWorkEffortId)], 'or'))
@@ -1950,8 +1955,9 @@ along with this software (see the LICENSE.md file). If not, see
                     const root = item.workEffortTypeEnumId === 'WetProject' ? item.workEffortId : item.rootWorkEffortId
                     const rootItem = root ? ec.entity.find('mantle.work.effort.WorkEffort').condition('workEffortId', root).one() : null
                     const seen = !!vis.allProjects || (root && visible.has(root))
-                    const hidden = item.workEffortTypeEnumId === 'WetTask' && ['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId)
-                            && !vis.allProjects && !managed.has(root) && !restricted.has(item.workEffortId)
+                    const hidden = item.workEffortTypeEnumId === 'WetTask' && !vis.allProjects &&
+                            (Array.from(vis.hiddenItemIds || []).includes(item.workEffortId) || (['WevRestricted', 'WevConfidential'].includes(item.visibilityEnumId)
+                            && !managed.has(root) && !restricted.has(item.workEffortId)))
                     if (!root || !seen || hidden) result = {error: L('Work item ${key} is not available', {key: text})}
                     else if (rootItem?.isTemplate === 'Y') result = {error: L('${key} is in a template', {key: text})}
                     // impl-maintenance P6 (F111): managed work (a work order's tree, a procedure's) takes time only through its own

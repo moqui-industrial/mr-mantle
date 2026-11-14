@@ -57,14 +57,20 @@
         memberStateFor,
         memberBlocks,
     } = core
+    /* What a decision on a held message does: ForumLists.js gives it (Forum.js, once both are made). */
+    let heldDecider = null
     methods.flagPost = (p) =>
         receipt(p, 'flagPost', () => {
             const st = one(F + 'ForumPostState', {
                 communicationEventId: p.postId,
             })
             if (!st) missing()
-            const { a } = topic(st.rootCommEventId, p.siteId)
-            if (!a.canFlag) fail('Unauthorized', 'Reporting is not permitted')
+            const { a } = topic(st.rootCommEventId, p.siteId, false, true)
+            if (!a.canFlag)
+                fail(
+                    'Unauthorized',
+                    a.writeRefusal || 'Reporting is not permitted',
+                )
             const event = one(E + 'CommunicationEvent', {
                 communicationEventId: p.postId,
             })
@@ -166,20 +172,97 @@
         }
         return { internal: true, scopeList: out }
     }
+    /* The scope of a moderation read: a category and what is below it, as a set of ids, or null. */
+    function moderationScope(p) {
+        if (p.scopeContactListId == null || p.scopeContactListId === '')
+            return null
+        if (p.contactListId && p.contactListId !== p.scopeContactListId)
+            invalid('Give a category or a scope, not both')
+        const c = one(F + 'ForumCategory', {
+            contactListId: p.scopeContactListId,
+        })
+        if (!c || c.siteId !== p.siteId) missing()
+        return core.categorySubtree(p.siteId, p.scopeContactListId)
+    }
     methods.findReviews = (p) => {
         site(p.siteId)
-        staff(p.siteId, p.contactListId)
+        // The queue is the scope's staff's. An Owner of a record who is not staff of the scope asked for (a personal
+        // repository's, or a repository whose Owner is not its group's) has a queue of their own: the items of the
+        // records they moderate, found before the page is cut.
+        // A scope (scopeContactListId): the queue of a category and of what is below it, for one who moderates that
+        // category, as an Owner does the category of their group or repository.
+        const scope = moderationScope(p)
+        let own = null
+        try {
+            staff(p.siteId, scope ? p.scopeContactListId : p.contactListId)
+        } catch (e) {
+            if (!['Unauthorized', 'NotFound'].includes(e.moquiErrorKind) || !me())
+                throw e
+            own = core
+                .recordScopes(p.siteId)
+                .filter((id) => !p.contactListId || id === p.contactListId)
+                .filter((id) => !scope || scope.has(id))
+            if (!own.length) throw e
+        }
         const pg = page(
             p,
-            'reviews:' + p.siteId + ':' + (p.contactListId || ''),
+            'reviews:' +
+                p.siteId +
+                ':' +
+                (p.contactListId || '') +
+                ':' +
+                (p.scopeContactListId || ''),
         )
-        const list = Array.from(
-            find(F + 'ForumReviewItem', {
+        // A post of a record is its moderators' by recordAccess who may read that post: the Owners alone for a
+        // confidential issue and for a staff post, never the category's or the site's staff who may not view it.
+        const shownTo = (r) => {
+            // a report on a repository or a group, and a held report: by its app's rule
+            const scoped = core.reviewScoped(r)
+            if (scoped != null) return scoped
+            const record = core.reviewRecord(r)
+            if (record) return core.reviewReadable(r, record)
+            return (
+                !own &&
+                (!r.contactListId ||
+                    categoryAccess(r.contactListId)?.canModerate)
+            )
+        }
+        const fields =
+            'reviewId targetType targetId targetRevision reasonFamily state revision claimedByPartyId claimExpiresAt createdAt linkedReviewId'
+        const query = () => {
+            let q = find(F + 'ForumReviewItem', {
                 siteId: p.siteId,
                 ...(p.contactListId ? { contactListId: p.contactListId } : {}),
-            })
-                .condition('state', 'in', ['pending', 'claimed'])
-                .orderBy('createdAt,reviewId')
+            }).condition('state', 'in', ['pending', 'claimed'])
+            if (own) q = q.condition('contactListId', 'in', own)
+            else if (scope) q = q.condition('contactListId', 'in', [...scope])
+            return q.orderBy('createdAt,reviewId')
+        }
+        if (own) {
+            // each row is decided before it counts toward the page; the cursor is the place to go on from
+            const shown = []
+            let from = pg.offset,
+                nextCursor = null
+            scan: for (;;) {
+                const batch = Array.from(query().offset(from).limit(100).list())
+                for (const [index, r] of batch.entries()) {
+                    if (!shownTo(r)) continue
+                    if (shown.length === pg.limit) {
+                        nextCursor = pg.next(from + index)
+                        break scan
+                    }
+                    shown.push(r)
+                }
+                if (batch.length < 100) break
+                from += 100
+            }
+            return {
+                reviewList: shown.map((r) => pick(r, fields)),
+                nextCursor,
+            }
+        }
+        const list = Array.from(
+            query()
                 .offset(pg.offset)
                 .limit(pg.limit + 1)
                 .list(),
@@ -187,17 +270,8 @@
         return {
             reviewList: list
                 .slice(0, pg.limit)
-                .filter(
-                    (r) =>
-                        !r.contactListId ||
-                        categoryAccess(r.contactListId)?.canModerate,
-                )
-                .map((r) =>
-                    pick(
-                        r,
-                        'reviewId targetType targetId targetRevision reasonFamily state revision claimedByPartyId claimExpiresAt createdAt linkedReviewId',
-                    ),
-                ),
+                .filter(shownTo)
+                .map((r) => pick(r, fields)),
             nextCursor:
                 list.length > pg.limit ? pg.next(pg.offset + pg.limit) : null,
         }
@@ -208,7 +282,7 @@
             siteId: p.siteId,
         })
         if (!r) missing()
-        staff(p.siteId, r.contactListId)
+        core.reviewStaff(p.siteId, r)
         return {
             review: pick(
                 r,
@@ -250,6 +324,20 @@
                               : null
                       })()
                     : null,
+            // a repository or a group (its path, name and whether it is hidden), as its app gives it
+            target: core.TARGET_TYPES.includes(r.targetType)
+                ? core.scopeAnswer('targetInfo', r.targetType, r.targetId)
+                : null,
+            // a held message: who sent it and what it waits for; its text is the item's detail
+            held: (() => {
+                const held = core.heldMail(r)
+                return held
+                    ? pick(
+                          held,
+                          'targetType senderAddress senderName subject state createdAt expiresAt',
+                      )
+                    : null
+            })(),
             notes: rows(
                 F + 'ForumReviewNote',
                 { reviewId: r.reviewId },
@@ -267,7 +355,7 @@
                 reviewId: p.reviewId,
             })
             if (!r) missing()
-            staff(p.siteId, r.contactListId)
+            core.reviewStaff(p.siteId, r)
             if (!p.body || p.body.length > 10000)
                 invalid('A note of at most 10000 characters is required')
             const noteId = id()
@@ -300,7 +388,7 @@
             true,
         )
         if (!r) missing()
-        staff(p.siteId, r.contactListId)
+        core.reviewStaff(p.siteId, r)
         revision(r, p.expectedRevision)
         if (!['pending', 'claimed'].includes(r.state))
             fail('Conflict', 'Review has ended')
@@ -328,7 +416,7 @@
             true,
         )
         if (!r) missing()
-        staff(p.siteId, r.contactListId)
+        core.reviewStaff(p.siteId, r)
         revision(r, p.expectedRevision)
         if (!['pending', 'claimed'].includes(r.state))
             fail('Conflict', 'Review has ended')
@@ -390,11 +478,13 @@
                         approvedContributions:
                             Number(m.approvedContributions) + 1,
                     })
-                allocateInternal(
-                    r.targetId,
-                    event.contactListId,
-                    event.fromPartyId,
-                )
+                // A record's post has no category of its own and no internal mailbox.
+                if (t.kind !== 'record')
+                    allocateInternal(
+                        r.targetId,
+                        event.contactListId,
+                        event.fromPartyId,
+                    )
                 create(F + 'ForumOutbox', {
                     outboxId: id(),
                     siteId: p.siteId,
@@ -431,6 +521,18 @@
                     stateSetByPartyId: me(),
                     revision: Number(m.revision) + 1,
                 })
+        } else if (core.TARGET_TYPES.includes(r.targetType)) {
+            // A report on a repository or a group: rejected hides it (its app's Hide, as the decider), and dismissed or
+            // approved leaves it as it is.
+            core.scopeAnswer(
+                'decideTarget',
+                r.targetType,
+                r.targetId,
+                p.decision,
+                p.reason,
+            )
+        } else if (r.targetType === 'mail') {
+            if (heldDecider) heldDecider(r, p.decision)
         }
         audit(
             p.siteId,
@@ -693,13 +795,19 @@
         return { revision: Number(t.revision) }
     }
     methods.findActions = (p) => {
-        staff(p.siteId, p.contactListId)
-        const pg = page(p, 'actions:' + p.siteId)
+        const scope = moderationScope(p)
+        staff(p.siteId, scope ? p.scopeContactListId : p.contactListId)
+        const pg = page(
+            p,
+            'actions:' + p.siteId + ':' + (p.scopeContactListId || ''),
+        )
+        let actions = find(F + 'ForumModerationAction', {
+            siteId: p.siteId,
+            ...(p.contactListId ? { contactListId: p.contactListId } : {}),
+        })
+        if (scope) actions = actions.condition('contactListId', 'in', [...scope])
         const candidates = Array.from(
-            find(F + 'ForumModerationAction', {
-                siteId: p.siteId,
-                ...(p.contactListId ? { contactListId: p.contactListId } : {}),
-            })
+            actions
                 .orderBy('-createdAt,actionId')
                 .offset(pg.offset)
                 .limit(pg.limit + 1)
@@ -735,7 +843,10 @@
                         const root =
                             state?.rootCommEventId ||
                             (v.targetType === 'topic' ? v.targetId : null)
-                        return !root || topic(root, p.siteId).a.canModerate
+                        return (
+                            !root ||
+                            topic(root, p.siteId, false, true).a.canModerate
+                        )
                     } catch (error) {
                         if (error.moquiErrorKind === 'NotFound') return false
                         throw error
@@ -758,7 +869,10 @@
                 ? { owner: 4, moderator: 3 }[m.role] || 0
                 : 0
         const lm = contactListId ? listMember(contactListId, partyId) : null
-        const listRole = { ListOwner: 2, ListModerator: 1 }[lm?.roleTypeId] || 0
+        // an Owner of the group or repository a category is bound to ranks as the list's owner there
+        const listRole =
+            { ListOwner: 2, ListModerator: 1 }[lm?.roleTypeId] ||
+            (contactListId && core.scopeOwner(contactListId, partyId) ? 2 : 0)
         return Math.max(siteRole, listRole)
     }
     function requireHigherRank(siteId, contactListId, targetPartyId) {
@@ -1387,7 +1501,7 @@
             update(t, { acceptedAnswerId: null })
         systemAudit(
             siteId,
-            event.contactListId,
+            event.contactListId || t.contactListId,
             'post',
             st.communicationEventId,
             'auto-hide',
@@ -1406,7 +1520,15 @@
             event = one(E + 'CommunicationEvent', {
                 communicationEventId: box.communicationEventId,
             })
-        if (!service || !st || !event || st.visibility === 'deleted') {
+        // A confidential record's text is never sent to the classifier, whenever its item was queued.
+        if (
+            !service ||
+            !st ||
+            !event ||
+            st.visibility === 'deleted' ||
+            st.visibility === 'staff' ||
+            !core.classifiable(st.rootCommEventId)
+        ) {
             update(box, { state: 'complete' })
             return { classified: false }
         }
@@ -1445,7 +1567,10 @@
         if (result?.decision === 'review') {
             const r = review(
                 box.siteId,
-                event.contactListId,
+                event.contactListId ||
+                    one(F + 'ForumTopic', {
+                        rootCommEventId: st.rootCommEventId,
+                    })?.contactListId,
                 'post',
                 box.communicationEventId,
                 Number(st.revision),
@@ -1869,6 +1994,8 @@
         // The scope is checked when the timer fires: a moved topic or a creator who lost moderation cancels it.
         if (!t || t.contactListId !== timer.contactListId)
             return end('cancelled', 'Topic moved or removed')
+        if (t.kind === 'record')
+            return end('cancelled', 'A record conversation has no timers')
         if (
             !categoryAccess(t.contactListId, timer.createdByPartyId)
                 ?.canModerate
@@ -1981,7 +2108,9 @@
             true,
         )
         if (!r || r.targetType !== 'post') missing()
-        staff(p.siteId, r.contactListId)
+        core.reviewStaff(p.siteId, r)
+        // Escalation shows a private conversation's context to the site's owner: a record has none to show.
+        if (core.reviewRecord(r)) core.notForRecord()
         if (!p.reason) invalid('A reason is required')
         const detail = json(r.detail, {})
         if (p.active === true) {
@@ -2035,6 +2164,9 @@
         return total
     }
     return {
+        onHeld: (decide) => {
+            heldDecider = decide
+        },
         recount,
         recomputeTrust,
         recomputeMemberTrust,
