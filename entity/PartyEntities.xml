@@ -366,7 +366,14 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="userId" type="id"><description>The user who recorded it; empty for the anonymous unsubscribe
             page</description></field>
         <field name="comments" type="text-medium"/>
+        <field name="organizationPartyId" type="id"><description>The organization a grant or withdrawal of a purpose is for
+            (impl-marketing P3, F9); empty is global, for every organization. A party's state of a purpose for an organization is its
+            latest row of that organization unless its latest global row withdraws it: a scoped grant never undoes a global
+            withdrawal (mantle.party.ConsentServices get#PartyConsentState). A list's row needs none: the list's owner is its
+            organization.</description></field>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
         <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
         <relationship type="one" title="PartyConsentPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
             <key-map field-name="purposeEnumId"/></relationship>

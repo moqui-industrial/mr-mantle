@@ -11,6 +11,8 @@ const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle
 const adoption = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAdoption.js")
 const approvals = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingApprovals.js")
 const {find, one, rows, denied} = lib
+// loaded when the audience card runs, so Home's other sources do not depend on it
+const audiences = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAudiences.js")
 
 // The places a finding or a row names, as route keys of the app that shows them (Admin's mount: Admin.js settingsRoutes; the
 // Marketing root resolves the same keys to its own paths).
@@ -22,7 +24,9 @@ const routes = {
     approvals: "marketingApprovals",
     campaign: "marketingCampaign",
     campaignDefaults: "marketingCampaignDefaults",
-    vocabularies: "marketingVocabularies"
+    vocabularies: "marketingVocabularies",
+    // P3
+    lists: "marketingLists"
 }
 const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
 const upcomingDays = 60
@@ -110,7 +114,13 @@ const cardSources = [
     {key: "dueSends", title: "Sends due", phase: "P8"},
     {key: "failedDeliveries", title: "Failed or uncertain deliveries", phase: "P9"},
     {key: "registrations", title: "Registrations against capacity", phase: "P17"},
-    {key: "audienceChanges", title: "Audience changes", phase: "P3"}
+    // P3: the subscription requests of the last seven days for the organizations' lists (a count, no person)
+    {
+        key: "audienceChanges",
+        title: "Audience changes",
+        phase: "P3",
+        run: context => ({value: audiences().recentRequestCount(context.organizationPartyIds), linkPath: routes.lists})
+    }
 ]
 function home(p) {
     const context = reader(p)

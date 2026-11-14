@@ -409,12 +409,12 @@ feature("Home answers each source by name, those not built yet shown not availab
         Array.from(home.cards)
             .map(card => card.cardKey)
             .join(",") == "campaigns,approvals,dueSends,failedDeliveries,registrations,audienceChanges"
-        // P2 counts the running campaigns and pending approvals; the others are not built yet
+        // P2 counts the running campaigns and pending approvals, P3 the audience changes; the others are not built yet
         Array.from(home.cards)
-            .filter(card => !["campaigns", "approvals"].includes(card.cardKey))
+            .filter(card => !["campaigns", "approvals", "audienceChanges"].includes(card.cardKey))
             .every(card => card.state == "notAvailable" && card.value == null)
         Array.from(home.cards)
-            .filter(card => ["campaigns", "approvals"].includes(card.cardKey))
+            .filter(card => ["campaigns", "approvals", "audienceChanges"].includes(card.cardKey))
             .every(card => card.state == "available" && card.value == 0)
         home.failedSources.length == 0
         // the approvals awaiting a decision are an approver's (P2): the administrator holds no approval

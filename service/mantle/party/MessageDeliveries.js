@@ -11,12 +11,15 @@
  *   other needs its purpose granted (get#PartyConsentState) at the hand-off, else it is suppressed. A topic's delivery
  *   (consentContactListId: a store's review requests, Commerce P9 follow-up) needs the recipient's latest consent of its
  *   purpose on that list granted instead. The snapshot is kept.
+ * - Suppressions (impl-marketing P3): a destination blocked for every organization or the delivery's is suppressed at the
+ *   attempt, after the consent and before the hand-off (MessageSuppressions.js).
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, call, ms} = lib
+const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
 const D = "mantle.party.MessageDelivery"
 const ATTEMPT = "mantle.party.MessageDeliveryAttempt"
 const limits = {tries: 5, batch: 200, maxBackoffMinutes: 60}
@@ -142,6 +145,15 @@ function consentOf(delivery) {
         queued.contactListId ? {contactListId: queued.contactListId} : {}
     )
 }
+// Whether the address is suppressed for the delivery: a block of every organization, or of the delivery's organization (its
+// store's, when it names one; P9 adds a campaign delivery's own).
+function suppressedFor(delivery, toAddress) {
+    const store = delivery.productStoreId
+        ? one("mantle.product.store.ProductStore", {productStoreId: delivery.productStoreId})
+        : null
+    const found = suppressions.suppressedOf(delivery.channelEnumId || "MdcEmail", [toAddress], store?.organizationPartyId || null)
+    return found.suppressed.length > 0
+}
 // attempt#Delivery: the delivery locked; a queued or retrying one is built by its source, its consent snapshotted, and
 // handed to send#EmailTemplate; the outcome recorded with the attempt. A sent, failed, suppressed or uncertain one is left.
 function attemptStep(p) {
@@ -188,6 +200,9 @@ function attemptStep(p) {
     if (built.suppress) return record("MdsSuppressed", "suppressed", {lastError: text(built.suppress).slice(0, 255) || null})
     const toAddress = text(built.toAddress) || text(delivery.toAddress)
     if (!toAddress) return record("MdsFailed", "permanent", {lastError: "The recipient has no address"})
+    // a suppressed destination is never handed off (impl-marketing P3, F13): its block of every organization, or of the
+    // delivery's (its store's organization), whatever the message; a subscription never ends one
+    if (suppressedFor(delivery, toAddress)) return record("MdsSuppressed", "suppressed", {lastError: "The address is suppressed"})
     let out
     try {
         out =

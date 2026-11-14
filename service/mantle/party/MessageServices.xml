@@ -41,7 +41,8 @@
     </service>
     <service verb="attempt" noun="Delivery" allow-remote="false" operation="message.delivery.attempt">
         <description>One attempt of a queued or retrying delivery, under its lock: its source builds the message, the consent
-            is snapshotted, send#EmailTemplate hands it off, and its outcome is recorded (sent; retryable, again later;
+            is snapshotted, a suppressed destination is refused (impl-marketing P3: the delivery suppressed, nothing handed off),
+            send#EmailTemplate hands it off, and its outcome is recorded (sent; retryable, again later;
             permanent, failed; anything else uncertain, kept for review). Another state is left as it is.</description>
         <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
         <out-parameters><parameter name="stateEnumId"/></out-parameters>
@@ -119,6 +120,108 @@
             <set field="reasonCode" from="done.reasonCode"/>
             <set field="reason" from="done.reason"/>
             <set field="ownerStateText" from="done.ownerStateText"/>
+        </actions>
+    </service>
+    <!-- ===== Comms' suppressions (impl-marketing P3, F13, F16; design-marketing §4 Suppressions; MessageSuppressions.js) ===== -->
+    <service verb="find" noun="Suppressions" allow-remote="false" read-only="true">
+        <description>The suppressions the caller may read, newest first, filtered in the query: channel, reason, organization, state
+            (active, the default; ended; all) and text (part of the address, for a reader who sees addresses); a page at a time
+            (suppressionList with its page fields). A holder of MESSAGE_SUPPRESSION_REVIEW or CONTACT_ADMIN reads every block; a
+            Marketing audience reader or configurer the blocks of every organization and of the organizations of their scope, another
+            organization's left out. The address is masked for a reader who is no reviewer, contact administrator or audience reader.
+            Each row: channel, destination, organization, reason, source, evidence, dates, state and whether the caller may end it;
+            canAdd and canEnd for the caller. Refuses a caller who reads none (PERMISSION_DENIED) and an organization outside the scope
+            (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="reasonEnumId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="state"><description>active (the default), ended or all</description></parameter>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppressionList" type="List"/>
+            <parameter name="suppressionListCount" type="Integer"/>
+            <parameter name="suppressionListPageIndex" type="Integer"/>
+            <parameter name="suppressionListPageSize" type="Integer"/>
+            <parameter name="suppressionListPageMaxIndex" type="Integer"/>
+            <parameter name="suppressionListPageRangeLow" type="Integer"/>
+            <parameter name="suppressionListPageRangeHigh" type="Integer"/>
+            <parameter name="canAdd" type="Boolean"/>
+            <parameter name="canEnd" type="Boolean"/>
+            <parameter name="unmasked" type="Boolean"/>
+            <parameter name="everyOrganization" type="Boolean"><description>Whether the caller may add a block for every organization</description></parameter>
+            <parameter name="organizationOptions" type="List"><description>The organizations the caller may add a block for, {value, label}</description></parameter>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageSuppressions.js').execute('find', context)"/>
+            <set field="suppressionList" from="found.suppressionList"/>
+            <set field="suppressionListCount" from="found.suppressionListCount"/>
+            <set field="suppressionListPageIndex" from="found.suppressionListPageIndex"/>
+            <set field="suppressionListPageSize" from="found.suppressionListPageSize"/>
+            <set field="suppressionListPageMaxIndex" from="found.suppressionListPageMaxIndex"/>
+            <set field="suppressionListPageRangeLow" from="found.suppressionListPageRangeLow"/>
+            <set field="suppressionListPageRangeHigh" from="found.suppressionListPageRangeHigh"/>
+            <set field="canAdd" from="found.canAdd"/>
+            <set field="canEnd" from="found.canEnd"/>
+            <set field="unmasked" from="found.unmasked"/>
+            <set field="everyOrganization" from="found.everyOrganization"/>
+            <set field="organizationOptions" from="found.organizationOptions"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Suppression" allow-remote="false">
+        <description>Adds a suppression (action add, the default) or ends one (action end). Add: a destination of a channel (an
+            email address, kept trimmed and in lower case), the organization it is for (empty: every organization, a reviewer's,
+            contact administrator's or the bounce intake's alone; a Marketing audience editor names an organization of their scope),
+            its reason (MessageSuppressionReason, staff by default), source (MessageSuppressionSource, staff for a user) and evidence
+            (required); an active block of the same destination, organization and reason is answered (created false), never doubled.
+            End: a holder of MESSAGE_SUPPRESSION_REVIEW alone, with new evidence (required); the row stays with its source and the
+            reviewer's evidence. A subscription never ends a suppression. Refuses PERMISSION_DENIED, ORGANIZATION_DENIED,
+            EVIDENCE_REQUIRED, DESTINATION_INVALID, CHANNEL_INVALID, VALUE_INVALID, RECORD_UNAVAILABLE and ALREADY_ENDED.</description>
+        <in-parameters>
+            <parameter name="action"/>
+            <parameter name="suppressionId"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="destination"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="reasonEnumId"/>
+            <parameter name="sourceEnumId"/>
+            <parameter name="sourceRef"/>
+            <parameter name="evidenceText"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppressionId"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="done" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageSuppressions.js').execute('store', context)"/>
+            <set field="suppressionId" from="done.suppressionId"/>
+            <set field="created" from="done.created"/>
+            <set field="ended" from="done.ended"/>
+        </actions>
+    </service>
+    <service verb="check" noun="Suppressions" allow-remote="false" read-only="true">
+        <description>Internal: which of the destinations of a channel are suppressed now for an organization (its own blocks and
+            every organization's), with each one's reason; the ledger's attempt and the audience services ask it. No
+            permission.</description>
+        <in-parameters>
+            <parameter name="channelEnumId" default-value="MdcEmail"/>
+            <parameter name="destinationList" type="List" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppressed" type="List"/>
+            <parameter name="reasons" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageSuppressions.js').execute('check', context)"/>
+            <set field="suppressed" from="found.suppressed"/>
+            <set field="reasons" from="found.reasons"/>
         </actions>
     </service>
 </services>
