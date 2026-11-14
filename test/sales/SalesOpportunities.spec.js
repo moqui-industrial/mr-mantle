@@ -364,7 +364,10 @@ feature("a stale move is refused naming the stamp; a manual probability is kept 
 
 feature("Lost needs a reason; a closed deal is not moved; a reopen clears the outcome and keeps the close history", {
     when() {
-        const reason = system(() => rowsOf("moqui.basic.Enumeration", {enumTypeId: "SalesLostReason"})[0].enumId)
+        // a current reason (the intake purge's, P6, is ended from the start and offered to no one)
+        const reason = system(
+            () => rowsOf("moqui.basic.Enumeration", {enumTypeId: "SalesLostReason"}).filter(row => !row.thruDate)[0].enumId
+        )
         const noReason = as(users.mate, "close#Opportunity", {
             salesOpportunityId: deals.mate,
             statusId: "SalesOppLost",

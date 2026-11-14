@@ -1,0 +1,79 @@
+{
+  "id": "mantle-sales-pipeline",
+  "type": "dataset",
+  "title": "Sales pipeline",
+  "body": {
+    "folder": "Sales",
+    "description": "Leads and opportunities with their type, outcome, organization, pipeline, stage, owner, team, account, source, campaign, amounts and dates, by when each was created. Each viewer reads the deals of their sales scope: their organizations' deals assigned to them or a team of theirs, or the organizations' whole pipeline for a holder of SALES_TEAM_VIEW.",
+    "documentType": "MantleSalesOpportunity",
+    "timeField": "createdDate",
+    "signal": "business",
+    "rowFilterService": "mantle.sales.SalesWorkspaceServices.get#PipelineRowFilter",
+    "fieldDefaults": {
+      "typeEnumId": {
+        "enumTypeId": "SalesOpportunityType"
+      },
+      "statusId": {
+        "statusTypeId": "SalesOpportunity"
+      },
+      "lostReasonEnumId": {
+        "enumTypeId": "SalesLostReason"
+      },
+      "organizationPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "teamPartyId": {
+        "lookup": {
+          "entityName": "mantle.party.Organization",
+          "keyField": "partyId",
+          "displayField": "organizationName"
+        }
+      },
+      "salesPipelineId": {
+        "lookup": {
+          "entityName": "mantle.sales.opportunity.SalesPipeline",
+          "keyField": "salesPipelineId",
+          "displayField": "pipelineName"
+        }
+      },
+      "opportunityStageId": {
+        "lookup": {
+          "entityName": "mantle.sales.opportunity.SalesOpportunityStage",
+          "keyField": "opportunityStageId",
+          "displayField": "description"
+        }
+      },
+      "dataSourceId": {
+        "lookup": {
+          "entityName": "moqui.basic.DataSource",
+          "keyField": "dataSourceId",
+          "displayField": "description"
+        }
+      },
+      "currencyUomId": {
+        "lookup": {
+          "entityName": "moqui.basic.Uom",
+          "keyField": "uomId",
+          "displayField": "description"
+        }
+      },
+      "estimatedAmount": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      },
+      "recurringAmount": {
+        "unit": "USD",
+        "unitField": "currencyUomId",
+        "decimals": 2
+      },
+      "estimatedProbability": {
+        "decimals": 0
+      }
+    }
+  }
+}

@@ -4,7 +4,9 @@
 // the default; a repeated operation key answers the first result and another request under it is refused; a campaign and tracking
 // code reach the lead; a second inquiry from the same email joins the open lead; a rep without the edit permission and another
 // organization are refused; an unverified intake whose lead never qualified is purged after its days, a qualified and a verified
-// one kept; a call is logged on the lead by its team's rep and refused to another team's. Standalone: spec-local organizations, teams, users and records, users' services run with artifact authorization on
+// one kept, and (P6, the user's call of Nov 13) its lead cleared and closed Lost when untouched since the intake, one a rep worked
+// on kept whole; a mail rule's createLead files nothing for an owner without SALES_OPPORTUNITY_EDIT and such a rule is not saved
+// (P6); a call is logged on the lead by its team's rep and refused to another team's. Standalone: spec-local organizations, teams, users and records, users' services run with artifact authorization on
 // under a spec grant of the sales services.
 // Run: ./moq test mr-mantle --spec SalesLeadIntake
 const prefix = "SLI"
@@ -150,6 +152,26 @@ function mail(emailMessageId, messageId) {
     })
 }
 const idsOf = found => Array.from(found.opportunityList || []).map(row => row.salesOpportunityId)
+// A lead as its intake made it days ago: its creation and stamp set back (a stamp given to an update is kept) and its party rows
+// started then, as a lead made then and not touched since.
+function age(salesOpportunityId, days) {
+    system(() => {
+        const at = new Date(Date.now() - days * 86400000)
+        const lead = ec.entity.find(OPPORTUNITY).condition("salesOpportunityId", salesOpportunityId).disableAuthz().one()
+        lead.set("createdDate", at)
+        lead.set("lastUpdatedStamp", at)
+        lead.update()
+        for (const row of rowsOf("mantle.sales.opportunity.SalesOpportunityParty", {salesOpportunityId})) {
+            call("delete#mantle.sales.opportunity.SalesOpportunityParty", row.getPrimaryKeys())
+            call("create#mantle.sales.opportunity.SalesOpportunityParty", {
+                salesOpportunityId,
+                partyId: row.partyId,
+                roleTypeId: row.roleTypeId,
+                fromDate: at
+            })
+        }
+    })
+}
 
 spec({
     setupSpec() {
@@ -478,9 +500,20 @@ feature("an unverified intake whose lead never qualified is purged after its day
         const stale = intake("stale")
         const qualified = intake("qualified")
         const verified = intake("verified", {verified: true})
+        const worked = intake("worked")
+        // P6: the stale and worked leads made forty days ago; the rep works on the second one since
+        age(stale.salesOpportunityId, 40)
+        age(worked.salesOpportunityId, 40)
+        const workedRevision = as(users.rep, "get#Opportunity", {salesOpportunityId: worked.salesOpportunityId}).opportunity
+            ?.revision
+        const edited = as(users.rep, "update#Opportunity", {
+            salesOpportunityId: worked.salesOpportunityId,
+            expectedRevision: workedRevision,
+            nextStep: "Call back on Monday"
+        })
         // received forty days ago
         system(() => {
-            for (const made of [stale, qualified, verified])
+            for (const made of [stale, qualified, verified, worked])
                 call("update#" + INTAKE, {
                     salesLeadIntakeId: made.salesLeadIntakeId,
                     receivedDate: new Date(Date.now() - 40 * 86400000)
@@ -491,6 +524,7 @@ feature("an unverified intake whose lead never qualified is purged after its day
         const purge = asSystem("purge#LeadIntakes", {retentionDays: 30})
         const read = made => system(() => one(INTAKE, {salesLeadIntakeId: made.salesLeadIntakeId}))
         const again = intake("stale")
+        const lead = made => system(() => one(OPPORTUNITY, {salesOpportunityId: made.salesOpportunityId}))
         return {
             notConfigurer,
             purge,
@@ -498,7 +532,12 @@ feature("an unverified intake whose lead never qualified is purged after its day
             qualified: read(qualified),
             verified: read(verified),
             again,
-            staleLead: stale.salesOpportunityId
+            staleLead: stale.salesOpportunityId,
+            edited,
+            staleDeal: lead(stale),
+            workedIntake: read(worked),
+            workedDeal: lead(worked),
+            qualifiedDeal: lead(qualified)
         }
     },
     then(r) {
@@ -515,5 +554,66 @@ feature("an unverified intake whose lead never qualified is purged after its day
         r.verified.submittedName == "Old verified"
         r.again.alreadyApplied == true
         r.again.salesOpportunityId == r.staleLead
+        // P6: the untouched lead blanked and closed Lost with the purge's reason; the worked one purged of its intake details only
+        r.purge.leadsClosedCount >= 1
+        r.staleDeal.statusId == "SalesOppLost"
+        r.staleDeal.lostReasonEnumId == "SlrIntakePurged"
+        r.staleDeal.opportunityName == null
+        r.staleDeal.description == null
+        r.edited.refused == ""
+        r.workedIntake.purgedDate != null
+        r.workedDeal.statusId == "SalesOppOpen"
+        r.workedDeal.opportunityName != null
+        r.workedDeal.nextStep == "Call back on Monday"
+        r.qualifiedDeal.statusId == "SalesOppOpen"
+    }
+})
+
+// P6 (the user's call of Nov 13, F121): a mail rule's createLead needs its owner to hold SALES_OPPORTUNITY_EDIT, when it runs (an
+// owner who works for the team's organization without it files nothing) and when it is saved (the framework's create#EmailRule
+// refused by check#LeadRuleOwner); a rule of an editor saves, and a rule without the action is not looked at.
+feature("a createLead rule files nothing for an owner without SALES_OPPORTUNITY_EDIT, and is not saved by one", {
+    when() {
+        system(() => mail(prefix + "_M3", "<shelving-777@prospect.example>"))
+        const run = asSystem("create#LeadFromEmail", {emailMessageId: prefix + "_M3", ruleOwnerUserId: users.reader})
+        const saveAs = (username, action) => {
+            login(username)
+            const was = ec.artifactExecution.disableAuthz()
+            ec.message.pushErrors()
+            try {
+                ec.service
+                    .sync()
+                    .name("org.moqui.mail.EmailClientServices.create#EmailRule")
+                    .parameters({
+                        ruleName: "Leads " + username,
+                        conditionList: [{field: "to", operator: "contains", value: "sales+leads@"}],
+                        actionList: [{action, value: ""}]
+                    })
+                    .requireNewTransaction(true)
+                    .call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                if (!was) ec.artifactExecution.enableAuthz()
+                login("john.doe")
+            }
+        }
+        return {
+            run,
+            filed: system(() => rowsOf(INTAKE, {sourceId: "mid:shelving-777@prospect.example"}).length),
+            readerSave: saveAs(users.reader, "createLead"),
+            readerOther: saveAs(users.reader, "markRead"),
+            repSave: saveAs(users.rep, "createLead")
+        }
+    },
+    then(r) {
+        r.run.refused.includes("RULE_NOT_ALLOWED")
+        r.filed == 0
+        r.readerSave.includes("RULE_NOT_ALLOWED")
+        r.readerOther == ""
+        r.repSave == ""
     }
 })

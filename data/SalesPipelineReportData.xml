@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a 
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The pipeline dataset's document and feed (impl-sales P6, §4 "the pipeline dataset and its document and feed are Mantle's"; design-sales
+    §1.4 CX-OPS-REPORTS, §8; F66), beside Mantle's sales documents (MantleDocumentSalesData.xml): MantleSalesOpportunity, a lead or
+    opportunity with its type, outcome, organization, pipeline, stage (its name, order and a label that sorts by the order), owner,
+    team, account, source, campaign, amounts, probability and dates, indexed by the MantleSalesPipeline push feed as each deal and
+    its people are written, and read by report/mantle-sales-pipeline.json, whose row filter is Sales' scope (the ReportScopePolicy
+    MantleSalesScope, SalesWorkspaceData.xml), never the organization alone. Granted here to ADMIN; an application grants its own
+    groups the document and the dataset's artifact (mr-boss data/BossSetupSalesData.xml). -->
+<entity-facade-xml type="seed-initial">
+    <dataDocuments dataDocumentId="MantleSalesOpportunity" indexName="mantle_sales" documentName="Sales Opportunity"
+            primaryEntityName="mantle.sales.opportunity.SalesOpportunity" documentTitle="${salesOpportunityId}">
+        <fields fieldSeqId="01" fieldPath="salesOpportunityId"/>
+        <fields fieldSeqId="02" fieldPath="opportunityName"/>
+        <fields fieldSeqId="03" fieldPath="typeEnumId"/>
+        <fields fieldSeqId="04" fieldPath="statusId"/>
+        <fields fieldSeqId="05" fieldPath="organizationPartyId"/>
+        <fields fieldSeqId="06" fieldPath="salesPipelineId"/>
+        <fields fieldSeqId="07" fieldPath="opportunityStageId"/>
+        <fields fieldSeqId="08" fieldPath="accountPartyId"/>
+        <fields fieldSeqId="09" fieldPath="dataSourceId"/>
+        <fields fieldSeqId="10" fieldPath="marketingCampaignId"/>
+        <fields fieldSeqId="11" fieldPath="estimatedAmount"/>
+        <fields fieldSeqId="12" fieldPath="currencyUomId"/>
+        <fields fieldSeqId="13" fieldPath="estimatedProbability"/>
+        <fields fieldSeqId="14" fieldPath="recurringAmount"/>
+        <fields fieldSeqId="15" fieldPath="lostReasonEnumId"/>
+        <fields fieldSeqId="16" fieldPath="estimatedCloseDate"/>
+        <fields fieldSeqId="17" fieldPath="createdDate"/>
+        <fields fieldSeqId="18" fieldPath="stageEnteredDate"/>
+        <fields fieldSeqId="19" fieldPath="convertedDate"/>
+        <fields fieldSeqId="20" fieldPath="closedDate"/>
+        <fields fieldSeqId="31" fieldPath="stage:description" fieldNameAlias="stageName"/>
+        <fields fieldSeqId="32" fieldPath="stage:sequenceNum" fieldNameAlias="stageSequence"/>
+        <!-- the stage's order and name in one value, so a funnel's terms sort by the pipeline's order -->
+        <fields fieldSeqId="33" fieldPath="((stageSequence == null ? '99' : String(stageSequence).padStart(2, '0')) + ' ' + (stageName || 'No stage'))"
+                fieldNameAlias="stageLabel"/>
+        <fields fieldSeqId="41" fieldPath="parties:partyId" fieldNameAlias="assignedPartyId"/>
+        <fields fieldSeqId="42" fieldPath="parties:roleTypeId" fieldNameAlias="assignedRoleTypeId"/>
+        <fields fieldSeqId="43" fieldPath="parties:thruDate" fieldNameAlias="assignedThruDate"/>
+        <!-- the current owner and team: the party rows of those roles not ended -->
+        <fields fieldSeqId="51" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesRepresentative' &amp;&amp; !it.assignedThruDate)?.assignedPartyId)"
+                fieldNameAlias="ownerPartyId"/>
+        <fields fieldSeqId="52" fieldPath="(parties?.find((it) =&gt; it.assignedRoleTypeId == 'SalesTeam' &amp;&amp; !it.assignedThruDate)?.assignedPartyId)"
+                fieldNameAlias="teamPartyId"/>
+    </dataDocuments>
+    <moqui.entity.feed.DataFeed dataFeedId="MantleSalesPipeline" dataFeedTypeEnumId="DTFDTP_RT_PUSH"
+            feedName="Mantle Sales Pipeline" feedReceiveServiceName="org.moqui.search.SearchServices.index#DataDocuments"
+            feedDeleteServiceName="org.moqui.search.SearchServices.delete#DataDocument">
+        <documents dataDocumentId="MantleSalesOpportunity"/>
+    </moqui.entity.feed.DataFeed>
+    <moqui.entity.document.DataDocumentUserGroup dataDocumentId="MantleSalesOpportunity" userGroupId="ADMIN"/>
+</entity-facade-xml>

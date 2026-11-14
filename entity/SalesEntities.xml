@@ -65,13 +65,17 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="convertedByUserId" type="id"/>
         <field name="closedDate" type="date-time" enable-audit-log="true"/>
         <field name="closedByUserId" type="id"/>
+        <!-- impl-sales P6 (design-sales §3 OpportunityImport, §16): the source system and row key an import made or matched the deal
+            by (OpportunityServices apply#OpportunityImportRow), one deal of the organization a key, so a file imported again changes
+            or skips the same deal and never makes a second one -->
+        <field name="importSourceKey" type="text-medium"/>
         <relationship type="one" title="SalesOpportunityType" related="moqui.basic.Enumeration">
             <key-map field-name="typeEnumId"/></relationship>
         <relationship type="one" title="Account" related="mantle.party.Party">
             <key-map field-name="accountPartyId"/></relationship>
         <relationship type="one" title="Currency" related="moqui.basic.Uom">
             <key-map field-name="currencyUomId"/></relationship>
-        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunityStage">
+        <relationship type="one" related="mantle.sales.opportunity.SalesOpportunityStage" short-alias="stage">
             <key-map field-name="opportunityStageId"/></relationship>
         <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
@@ -85,7 +89,11 @@ along with this software (see the LICENSE.md file). If not, see
         <relationship type="one" title="RecurringPlan" related="moqui.basic.Enumeration">
             <key-map field-name="recurringPlanEnumId"/></relationship>
         <relationship type="one" related="moqui.basic.DataSource"/>
+        <!-- P6: the deal's dated parties (owner, team, contacts, organization), which the pipeline dataset's document reads -->
+        <relationship type="many" related="mantle.sales.opportunity.SalesOpportunityParty" short-alias="parties">
+            <key-map field-name="salesOpportunityId"/></relationship>
         <index name="SALES_OPP_ORG_TYPE" unique="false"><index-field name="organizationPartyId"/><index-field name="typeEnumId"/></index>
+        <index name="SALES_OPP_IMPORT_KEY" unique="false"><index-field name="organizationPartyId"/><index-field name="importSourceKey"/></index>
     </entity>
     <!-- impl-sales P4 (design-sales §12.2 Chatter / RecordFiles, F69): a file of an opportunity, its content host on People's
         pattern; get#RecordLinkInfo and RecordFiles admit it to a Sales reader of the opportunity
