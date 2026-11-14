@@ -352,6 +352,26 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P3 ===== -->
 
+    <!-- ===== Marketing P5: segments and audience preview (impl-marketing P5, F5; design-marketing §4 Segments, SegmentDetail,
+        AudiencePreview, §14.1) ===== -->
+    <!-- A segment's saved filter (design §4 SavedFilter): a typed, bounded predicate tree over the registered projections of
+        mantle.marketing.SegmentServices (MarketingSegments.js sources: party, contact, purchase, engagement and Sales' leads,
+        opportunities and accounts), stored as JSON that names only a source, a field, an operator and a value of each condition, in
+        ALL and ANY groups; never an entity name, SQL or script. Dated: the filter in effect is ended when the next starts, never
+        deleted. The other columns of MarketSegment and its native rule rows stay as they were (F5). -->
+    <entity entity-name="MarketSegmentFilter" package="mantle.marketing.segment" cache="never">
+        <field name="marketSegmentId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="filterJson" type="text-very-long"><description>{match: all|any, conditions: [{source, field, operator, value} or a
+            nested group]}, at most three levels and twenty conditions</description></field>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" title="ChangedBy" related="moqui.security.UserAccount">
+            <key-map field-name="changedByUserId" related="userId"/></relationship>
+    </entity>
+    <!-- ===== end of Marketing P5 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
@@ -580,8 +600,19 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="description" type="text-medium"/>
         <field name="productStoreId" type="id"/>
         <field name="ownerPartyId" type="id" enable-audit-log="update" default="'_NA_'"/>
+        <!-- impl-marketing P5 (design-marketing §4 Segments, SegmentDetail; F5): a segment's name, how it is defined (MskRule: the native
+            rules and the saved filter with its explicit members; MskExplicit: its explicit members alone; empty is a rule segment), who
+            started it, when it was archived (no new use; history kept), and the revision of its definition, raised by each change of
+            its rules, filter or parent (mantle.marketing.SegmentServices) -->
+        <field name="segmentName" type="text-medium"/>
+        <field name="segmentKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="archivedDate" type="date-time" enable-audit-log="update"/>
+        <field name="definitionRevision" type="number-integer"/>
         <relationship type="one" title="MarketSegmentType" related="moqui.basic.Enumeration">
             <key-map field-name="marketSegmentTypeEnumId"/></relationship>
+        <relationship type="one" title="MarketSegmentKind" related="moqui.basic.Enumeration" short-alias="kind">
+            <key-map field-name="segmentKindEnumId"/></relationship>
         <relationship type="one" related="mantle.product.store.ProductStore"/>
         <relationship type="one" title="Parent" related="mantle.marketing.segment.MarketSegment" short-alias="parent">
             <key-map field-name="parentMarketSegmentId"/></relationship>
@@ -592,6 +623,10 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.EnumerationType description="Market Segment Type" enumTypeId="MarketSegmentType"/>
             <moqui.basic.Enumeration enumId="MARKET_SEGMENT" description="Market Segment" enumTypeId="MarketSegmentType"/>
             <moqui.basic.Enumeration enumId="SALES_SEGMENT" description="Sales Segment" enumTypeId="MarketSegmentType"/>
+            <!-- impl-marketing P5 -->
+            <moqui.basic.EnumerationType description="Market segment kind" enumTypeId="MarketSegmentKind"/>
+            <moqui.basic.Enumeration enumId="MskRule" description="Rules" sequenceNum="1" enumTypeId="MarketSegmentKind"/>
+            <moqui.basic.Enumeration enumId="MskExplicit" description="Explicit members" sequenceNum="2" enumTypeId="MarketSegmentKind"/>
         </seed-data>
     </entity>
     <entity entity-name="MarketSegmentClassification" package="mantle.marketing.segment">
@@ -605,9 +640,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Define the segment in terms of PartyDimension values</description>
         <field name="marketSegmentId" type="id" is-pk="true"/>
         <field name="uomDimensionTypeId" type="id" is-pk="true"/>
-        <field name="uomId" type="id"/>
-        <field name="minValue" type="number-decimal"/>
-        <field name="maxValue" type="number-decimal"/>
+        <field name="uomId" type="id" enable-audit-log="update"/>
+        <field name="minValue" type="number-decimal" enable-audit-log="update"/>
+        <field name="maxValue" type="number-decimal" enable-audit-log="update"/>
         <relationship type="one" related="mantle.marketing.segment.MarketSegment" short-alias="marketSegment"/>
         <relationship type="one" related="moqui.basic.UomDimensionType" short-alias="type"/>
         <relationship type="one" related="moqui.basic.Uom" short-alias="uom"/>
@@ -623,9 +658,23 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="marketSegmentId" type="id" is-pk="true"/>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="roleTypeId" type="id" is-pk="true"/>
+        <!-- impl-marketing P5 (F5; design-marketing §4 ExplicitMembers): an explicit member is dated and includes or excludes the party
+            (MspInclude, the default for a legacy row; MspExclude, which wins over every match); a row is ended, never deleted, and a
+            party added again after its end takes the same row with new dates, the audit log keeping the earlier ones -->
+        <field name="fromDate" type="date-time" enable-audit-log="update"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="memberKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="comments" type="text-medium"/>
         <relationship type="one" related="mantle.marketing.segment.MarketSegment"/>
+        <relationship type="one" title="MarketSegmentMemberKind" related="moqui.basic.Enumeration" short-alias="memberKind">
+            <key-map field-name="memberKindEnumId"/></relationship>
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" related="mantle.party.RoleType"/>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Market segment member kind" enumTypeId="MarketSegmentMemberKind"/>
+            <moqui.basic.Enumeration enumId="MspInclude" description="Include" sequenceNum="1" enumTypeId="MarketSegmentMemberKind"/>
+            <moqui.basic.Enumeration enumId="MspExclude" description="Exclude" sequenceNum="2" enumTypeId="MarketSegmentMemberKind"/>
+        </seed-data>
     </entity>
 
     <!-- ========================================================= -->
