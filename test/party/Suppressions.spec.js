@@ -14,6 +14,8 @@ const orgA = prefix + "_ORG_A",
 const ids = {source: "MdsrcSpecSuppress", template: prefix + "_TPL", buyer: prefix + "_BUYER"}
 const users = {}
 let blockId, listId
+// the spec's own blocks among those found (a demo instance holds others)
+const ownBlocks = found => Array.from(found.suppressionList).filter(block => /suppress\.example\.test$/.test(block.destinationText))
 
 spec({
     setupSpec() {
@@ -191,10 +193,10 @@ feature("an audience editor blocks for an organization of their scope only, and 
         mine.refusal == "" && mine.created == true
         theirs.refusal.includes("ORGANIZATION_DENIED")
         everyone.refusal.includes("ORGANIZATION_DENIED")
-        // A's editor: A's block and the provider-level one; B's editor: the provider-level one alone
-        Array.from(foundA.suppressionList).length == 2
-        Array.from(foundB.suppressionList).length == 1
-        Array.from(foundB.suppressionList)[0].organizationText == "Every organization"
+        // A's editor: A's block and the provider-level one; B's editor: the provider-level one alone (the spec's blocks only)
+        ownBlocks(foundA).length == 2
+        ownBlocks(foundB).length == 1
+        ownBlocks(foundB)[0].organizationText == "Every organization"
         // a configurer without the audience read sees the addresses masked
         Array.from(configurer.suppressionList).every(block => block.destinationText.includes("***@"))
         otherOrg.refusal.includes("ORGANIZATION_DENIED")

@@ -8,7 +8,7 @@
 // Run: ./moq test mr-mantle --spec Audiences
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
 const {make, row, rows, system, organization, user, as} = lib
-const prefix = "MKA"
+const prefix = "MKU"
 const orgA = prefix + "_ORG_A",
     orgB = prefix + "_ORG_B"
 const L = "mantle.marketing.AudienceServices."
