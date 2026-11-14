@@ -44,6 +44,13 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="expectedRevenue" type="currency-amount"/>
         <field name="numSent" type="number-integer"/>
         <field name="startDate" type="date-time"/>
+        <!-- the owning organization (impl-marketing P1, X12; design-marketing §1.1): an audit-logged copy of the effective
+            MarketingCampaignParty row of role MarketingOrganization, kept equal to it by mantle.marketing.CampaignServices (its
+            adoption, P1; the campaign services, P2), so the organization filters (MANTLE_USER_ORG_MCMP, MANTLE_ACTIVE_ORG_MCMP) can
+            bound what an app root's user reads. Empty on a legacy campaign until an administrator adopts it. -->
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId"/></relationship>
         <relationship type="one" title="Parent" related="mantle.marketing.campaign.MarketingCampaign">
             <key-map field-name="parentCampaignId" related="marketingCampaignId"/></relationship>
         <relationship type="one" title="MarketingCampaign" related="moqui.basic.StatusItem"/>
@@ -98,7 +105,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="singleUse" type="text-indicator">
             <description>Parties in the list should be contacted only once.</description>
         </field>
-        <field name="ownerPartyId" type="id"/>
+        <!-- the organization the list belongs to, its organization filter field (MANTLE_USER_ORG_CLST; impl-marketing P1), audited
+            on change: an unowned (_NA_ or empty) list that is not a mailbox is no organization's until an administrator adopts it
+            (mantle.marketing.CampaignServices apply#Adoption) -->
+        <field name="ownerPartyId" type="id" enable-audit-log="update"/>
         <field name="verifyEmailFrom" type="text-medium"/>
         <field name="verifyEmailScreen" type="text-medium"/>
         <field name="verifyEmailSubject" type="text-long"/>

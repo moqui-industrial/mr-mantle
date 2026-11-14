@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.CampaignServices (C, IronStone Marketing design §14.2): the campaign lifecycle, parties, budgets, approvals,
+    policies and vocabularies. P1 (design §15.4): the adoption of the campaigns, lists and segments that belong to no organization
+    (MarketingAdoption.js), the rule that keeps MarketingCampaign.organizationPartyId equal to its effective MarketingOrganization
+    party row starting there; P2 adds the campaign services. Each checks its permission and the organization itself
+    (mantle/marketing/MarketingAccess.js). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== P1: adoption (design §15.4) ===== -->
+    <service verb="preview" noun="Adoption" allow-remote="false" read-only="true">
+        <description>The records awaiting adoption: the campaigns with no organization, the lists that are not mailboxes and the
+            segments whose owner is empty or _NA_, at most 200 of each, each with recordKind (campaign, list, segment), kindName,
+            recordId, label, detail (status or type), lastUpdatedStamp (the revision apply#Adoption names) and revision (the same as
+            millis, for a form); counts by kind.
+            Changes nothing. Refuses a caller without MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
+        <out-parameters>
+            <parameter name="records" type="List"/>
+            <parameter name="counts" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAdoption.js').execute('preview', context)"/>
+            <set field="records" from="found.records"/>
+            <set field="counts" from="found.counts"/>
+        </actions>
+    </service>
+    <service verb="apply" noun="Adoption" allow-remote="false">
+        <description>Assigns each record of assignments (maps of recordKind, recordId, organizationPartyId and the lastUpdatedStamp
+            read) to an organization of the administrator's scope, each on its own transaction with one result: a list's or a
+            segment's ownerPartyId, or a campaign's organizationPartyId with its dated MarketingOrganization MarketingCampaignParty
+            row, each audited with the change reason "Adopted by" the administrator. Unknown historical consent stays unknown:
+            nothing but the owner changes. A result is adopted, or refused by reasonCode with the others applied: UNKNOWN_KIND;
+            RECORD_UNAVAILABLE for a record that is missing or a mailbox; ALREADY_OWNED for a record that belongs to an
+            organization (an adoption applies once per record, the record read locked); REVISION_REQUIRED for an assignment that
+            names no revision; REVISION_CHANGED for a revision that is not the one read, naming
+            the current one; ORGANIZATION_DENIED for an organization outside the scope. Refuses a caller without
+            MARKETING_CONFIGURE (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="assignments" type="List" required="true"><description>Maps of recordKind, recordId,
+                organizationPartyId and lastUpdatedStamp (a Timestamp or its millis; required)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="results" type="List"/>
+            <parameter name="adoptedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAdoption.js').execute('apply', context)"/>
+            <set field="results" from="found.results"/>
+            <set field="adoptedCount" from="found.adoptedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+        </actions>
+    </service>
+</services>
