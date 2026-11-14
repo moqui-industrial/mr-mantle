@@ -503,6 +503,8 @@ const operations = {find: findProfiles, get: getProfile, store: storeProfile, ch
     organizationReadiness,
     forDelivery,
     bounceAccount,
+    // P11 (impl-marketing): an automation's send step waits out the quiet hours with its due time shown
+    quietMinutes,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown sending profile operation " + op)
         return operations[op](parameters || {})

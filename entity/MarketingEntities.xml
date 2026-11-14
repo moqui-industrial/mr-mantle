@@ -817,6 +817,283 @@ along with this software (see the LICENSE.md file). If not, see
     </extend-entity>
     <!-- ===== end of Marketing P10 ===== -->
 
+    <!-- ===== Marketing P11: automation (impl-marketing P11, §4; design-marketing §6, §14.1, §15.3) ===== -->
+    <!-- A drip sequence of a campaign (design §6 AutomationDetail, §14.1 MarketingAutomation): its topic (a Marketing list of email of
+        the campaign's organization: every send step goes to the topic's accepted, evidenced members only), its sending profile, its
+        enrollment rule (the trigger and its source: a confirmed subscription to the topic, a newly matched segment member, staff
+        enrollment with evidence, an order placed or a cart abandoned at a store of the organization; a goal segment that ends an
+        enrollment; the re-entry rule) and the time zone its waits are counted in; its ordered steps are MarketingAutomationStep rows.
+        The state is a flow of its own (Draft, Awaiting approval, Approved, Active, Paused, Ended); automationRevision is the revision an
+        approval is bound to (MarketingDecision MdtAutomation): a change of the rule, the topic, the sender or the steps raises it, ends
+        the approval and returns an automation that is not ended to draft (mantle.marketing.AutomationServices). Activation is apart from
+        approval: a dispatcher who is none of its authors nor its approver activates it, at the approval of its current revision. -->
+    <entity entity-name="MarketingAutomation" package="mantle.marketing.automation" cache="never">
+        <field name="marketingAutomationId" type="id" is-pk="true"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"><description>The campaign's organization when the automation
+            was made (an automation never moves between organizations)</description></field>
+        <field name="automationName" type="text-medium" enable-audit-log="update"/>
+        <field name="description" type="text-long"/>
+        <field name="channelEnumId" type="id"/>
+        <field name="contactListId" type="id" enable-audit-log="update"><description>The topic: the Marketing list whose accepted
+            members, with its purpose's consent, a send step may reach</description></field>
+        <field name="purposeEnumId" type="id"/>
+        <field name="sendingProfileId" type="id" enable-audit-log="update"/>
+        <field name="triggerEnumId" type="id" enable-audit-log="update"/>
+        <field name="triggerSegmentId" type="id" enable-audit-log="update"><description>The segment whose newly matched members are
+            enrolled (trigger AtrSegment)</description></field>
+        <field name="productStoreId" type="id" enable-audit-log="update"><description>The store an order or cart trigger reads (a
+            cart trigger needs one; an order trigger without one reads every order the organization sells)</description></field>
+        <field name="goalSegmentId" type="id" enable-audit-log="update"><description>A participant matched by it has met the goal: the
+            enrollment ends</description></field>
+        <field name="reentryEnumId" type="id" enable-audit-log="update"/>
+        <field name="reentryCooldownDays" type="number-integer" enable-audit-log="update"/>
+        <field name="timeZone" type="text-short" enable-audit-log="update"><description>The rule's zone: waits in days or business days
+            keep their local time in it</description></field>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="automationRevision" type="number-integer"/>
+        <field name="definitionDate" type="date-time"><description>When the current definition (rule and steps) took effect: an
+            enrollment follows the steps in effect at its admission</description></field>
+        <field name="createdByUserId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="revisedByUserId" type="id"><description>Who made the current revision's change: an author of it</description></field>
+        <field name="activatedDate" type="date-time" enable-audit-log="update"/>
+        <field name="activatedByUserId" type="id"/>
+        <field name="activationDecisionId" type="id"><description>The approval (MarketingDecision) it was activated under</description></field>
+        <field name="unsubscribeBaseUrl" type="text-medium"><description>The conf webapp's root at the activation, for the /u/ page
+            when the sending profile has no site with Account and no configured root (as CampaignSend's)</description></field>
+        <field name="pausedDate" type="date-time"/>
+        <field name="pauseNote" type="text-medium" enable-audit-log="update"><description>Why it is paused: the dispatcher's reason, or
+            a change outside its approval the step run found (its campaign closed, its sending profile ended)</description></field>
+        <field name="endedDate" type="date-time"/>
+        <field name="endReason" type="text-medium" enable-audit-log="update"/>
+        <field name="admissionCursorDate" type="date-time"><description>How far the admission run read the trigger's source events
+            (a subscription's acceptance)</description></field>
+        <field name="lastAdmissionDate" type="date-time"/>
+        <field name="admissionNote" type="text-medium"><description>Why the last admission run admitted nothing (a segment that could
+            not be evaluated)</description></field>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party"><key-map field-name="organizationPartyId"/></relationship>
+        <relationship type="one" title="Topic" related="mantle.marketing.contact.ContactList"><key-map field-name="contactListId"/></relationship>
+        <relationship type="one" related="mantle.party.MessageSendingProfile"/>
+        <relationship type="one" title="AutomationTrigger" related="moqui.basic.Enumeration"><key-map field-name="triggerEnumId"/></relationship>
+        <relationship type="one" title="TriggerSegment" related="mantle.marketing.segment.MarketSegment">
+            <key-map field-name="triggerSegmentId" related="marketSegmentId"/></relationship>
+        <relationship type="one" title="GoalSegment" related="mantle.marketing.segment.MarketSegment">
+            <key-map field-name="goalSegmentId" related="marketSegmentId"/></relationship>
+        <relationship type="one" related="mantle.product.store.ProductStore"/>
+        <relationship type="one" title="AutomationReentry" related="moqui.basic.Enumeration"><key-map field-name="reentryEnumId"/></relationship>
+        <relationship type="one" title="MarketingAutomation" related="moqui.basic.StatusItem"/>
+        <relationship type="one" title="Activation" related="mantle.marketing.campaign.MarketingDecision">
+            <key-map field-name="activationDecisionId" related="marketingDecisionId"/></relationship>
+        <index name="MKT_AUTO_CAMPAIGN"><index-field name="marketingCampaignId"/></index>
+        <index name="MKT_AUTO_ORG_STATUS"><index-field name="organizationPartyId"/><index-field name="statusId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Automation trigger" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrSubscription" description="Confirmed subscription" sequenceNum="1" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrSegment" description="Newly matched segment member" sequenceNum="2" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrStaff" description="Staff enrollment with evidence" sequenceNum="3" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrOrderPlaced" description="Order placed" sequenceNum="4" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrCartAbandoned" description="Cart abandoned" sequenceNum="5" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.EnumerationType description="Automation re-entry" enumTypeId="AutomationReentry"/>
+            <moqui.basic.Enumeration enumId="ArOnce" description="Once per person" sequenceNum="1" enumTypeId="AutomationReentry"/>
+            <moqui.basic.Enumeration enumId="ArPerEvent" description="Once per new event, after a cooldown" sequenceNum="2" enumTypeId="AutomationReentry"/>
+            <moqui.basic.StatusType description="Marketing automation" statusTypeId="MarketingAutomation"/>
+            <moqui.basic.StatusItem statusId="MaDraft" statusTypeId="MarketingAutomation" sequenceNum="1" description="Draft"/>
+            <moqui.basic.StatusItem statusId="MaAwaitingApproval" statusTypeId="MarketingAutomation" sequenceNum="2" description="Awaiting approval"/>
+            <moqui.basic.StatusItem statusId="MaApproved" statusTypeId="MarketingAutomation" sequenceNum="3" description="Approved"/>
+            <moqui.basic.StatusItem statusId="MaActive" statusTypeId="MarketingAutomation" sequenceNum="4" description="Active"/>
+            <moqui.basic.StatusItem statusId="MaPaused" statusTypeId="MarketingAutomation" sequenceNum="5" description="Paused"/>
+            <moqui.basic.StatusItem statusId="MaEnded" statusTypeId="MarketingAutomation" sequenceNum="6" description="Ended"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaDraft" toStatusId="MaAwaitingApproval" transitionName="Ask for approval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaAwaitingApproval" toStatusId="MaApproved" transitionName="Approve"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaAwaitingApproval" toStatusId="MaDraft" transitionName="Refuse or change"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaApproved" toStatusId="MaDraft" transitionName="Change after approval"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaApproved" toStatusId="MaActive" transitionName="Activate"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaActive" toStatusId="MaPaused" transitionName="Pause"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaPaused" toStatusId="MaActive" transitionName="Resume"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaActive" toStatusId="MaDraft" transitionName="Change while active"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaPaused" toStatusId="MaDraft" transitionName="Change while paused"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaDraft" toStatusId="MaEnded" transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaAwaitingApproval" toStatusId="MaEnded" transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaApproved" toStatusId="MaEnded" transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaActive" toStatusId="MaEnded" transitionName="End"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MaPaused" toStatusId="MaEnded" transitionName="End"/>
+        </seed-data>
+    </entity>
+    <!-- One step of an automation (design §6 Steps, §14.1 MarketingAutomationStep): dated rows, ended never deleted; store#Steps ends
+        the rows in effect and starts the new set, so an enrollment admitted earlier finishes the steps in effect at its admission. A
+        step is Send email (its content a CampaignSend of the automation, status CsAutomation, copied from a template and prepared when
+        the step is stored: a later change of the template never reaches it), Wait (an elapsed duration, or days or business days that
+        keep their local time in the rule's zone) or Condition (a segment the participant must match: else the next send step is
+        skipped or the enrollment ends). No loop or jump. -->
+    <entity entity-name="MarketingAutomationStep" package="mantle.marketing.automation" cache="never">
+        <field name="automationStepId" type="id" is-pk="true"/>
+        <field name="marketingAutomationId" type="id"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="stepKindEnumId" type="id"/>
+        <field name="stepName" type="text-medium"/>
+        <field name="campaignSendId" type="id"><description>A send step's content (a CampaignSend of status CsAutomation)</description></field>
+        <field name="messageTemplateId" type="id"><description>The template a send step's content was copied from</description></field>
+        <field name="waitAmount" type="number-integer"/>
+        <field name="waitUnitEnumId" type="id"/>
+        <field name="conditionSegmentId" type="id"/>
+        <field name="conditionFalseEnumId" type="id"><description>What a condition not met does: skip the next send step, or end</description></field>
+        <field name="automationRevision" type="number-integer"><description>The automation's revision this set of steps made</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomation"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignSend"/>
+        <relationship type="one" related="mantle.party.MessageTemplate"/>
+        <relationship type="one" title="AutomationStepKind" related="moqui.basic.Enumeration"><key-map field-name="stepKindEnumId"/></relationship>
+        <relationship type="one" title="AutomationWaitUnit" related="moqui.basic.Enumeration"><key-map field-name="waitUnitEnumId"/></relationship>
+        <relationship type="one" title="ConditionSegment" related="mantle.marketing.segment.MarketSegment">
+            <key-map field-name="conditionSegmentId" related="marketSegmentId"/></relationship>
+        <relationship type="one" title="AutomationConditionFalse" related="moqui.basic.Enumeration"><key-map field-name="conditionFalseEnumId"/></relationship>
+        <index name="MKT_AUTO_STEP"><index-field name="marketingAutomationId"/><index-field name="fromDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Automation step kind" enumTypeId="AutomationStepKind"/>
+            <moqui.basic.Enumeration enumId="AskSendEmail" description="Send email" sequenceNum="1" enumTypeId="AutomationStepKind"/>
+            <moqui.basic.Enumeration enumId="AskWait" description="Wait" sequenceNum="2" enumTypeId="AutomationStepKind"/>
+            <moqui.basic.Enumeration enumId="AskCondition" description="Condition" sequenceNum="3" enumTypeId="AutomationStepKind"/>
+            <moqui.basic.EnumerationType description="Automation wait unit" enumTypeId="AutomationWaitUnit"/>
+            <moqui.basic.Enumeration enumId="AwuMinutes" description="Minutes" sequenceNum="1" enumTypeId="AutomationWaitUnit"/>
+            <moqui.basic.Enumeration enumId="AwuHours" description="Hours" sequenceNum="2" enumTypeId="AutomationWaitUnit"/>
+            <moqui.basic.Enumeration enumId="AwuDays" description="Days" sequenceNum="3" enumTypeId="AutomationWaitUnit"/>
+            <moqui.basic.Enumeration enumId="AwuBusinessDays" description="Business days" sequenceNum="4" enumTypeId="AutomationWaitUnit"/>
+            <moqui.basic.EnumerationType description="Automation condition not met" enumTypeId="AutomationConditionFalse"/>
+            <moqui.basic.Enumeration enumId="AcfSkipNextSend" description="Skip the next send step" sequenceNum="1" enumTypeId="AutomationConditionFalse"/>
+            <moqui.basic.Enumeration enumId="AcfEnd" description="End the enrollment" sequenceNum="2" enumTypeId="AutomationConditionFalse"/>
+        </seed-data>
+    </entity>
+    <!-- An admission event of an automation (design §6, §15.3 Automation admission): one per automation and source identity
+        (sourceKey: a subscription's acceptance, a segment's new match, an order, a cart's visit, a staff enrollment's operation key),
+        filed by the admission run, the order-placed handler or staff, and admitted once (an enrollment) or refused with its reason. A
+        duplicate event finds the row already filed and changes nothing. -->
+    <entity entity-name="AutomationSourceEvent" package="mantle.marketing.automation" cache="never">
+        <field name="automationSourceEventId" type="id" is-pk="true"/>
+        <field name="marketingAutomationId" type="id"/>
+        <field name="triggerEnumId" type="id"/>
+        <field name="sourceKey" type="text-medium"/>
+        <field name="sourceId" type="id"><description>The source record: a subscription request, an order, a cart (its order)</description></field>
+        <field name="partyId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <field name="filedDate" type="date-time"/>
+        <field name="statusEnumId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="automationEnrollmentId" type="id"/>
+        <field name="processedDate" type="date-time"/>
+        <field name="filedByUserId" type="id"/>
+        <field name="evidenceText" type="text-long"><description>A staff enrollment's evidence</description></field>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomation"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" title="AutomationSourceEventStatus" related="moqui.basic.Enumeration"><key-map field-name="statusEnumId"/></relationship>
+        <index name="MKT_AUTO_EVENT_KEY" unique="true"><index-field name="marketingAutomationId"/><index-field name="sourceKey"/></index>
+        <index name="MKT_AUTO_EVENT_STATUS"><index-field name="statusEnumId"/><index-field name="filedDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Automation source event status" enumTypeId="AutomationSourceEventStatus"/>
+            <moqui.basic.Enumeration enumId="AseFiled" description="Filed" sequenceNum="1" enumTypeId="AutomationSourceEventStatus"/>
+            <moqui.basic.Enumeration enumId="AseAdmitted" description="Admitted" sequenceNum="2" enumTypeId="AutomationSourceEventStatus"/>
+            <moqui.basic.Enumeration enumId="AseRefused" description="Not admitted" sequenceNum="3" enumTypeId="AutomationSourceEventStatus"/>
+            <moqui.basic.Enumeration enumId="AseBaseline" description="Matched at activation" sequenceNum="4" enumTypeId="AutomationSourceEventStatus"/>
+        </seed-data>
+    </entity>
+    <!-- One participant's run through an automation (design §6 EnrollmentDetail, §14.1 AutomationEnrollment): the person, the event
+        that admitted them, the definition's effective time it follows, the next step and when it is due (dueNote: why it waits longer,
+        quiet hours or the frequency cap), its state (Active, Completed, Stopped) and why it ended. One per automation, person and source
+        identity; never two active for the same automation and person. A stopped enrollment is never made active again. -->
+    <entity entity-name="AutomationEnrollment" package="mantle.marketing.automation" cache="never">
+        <field name="automationEnrollmentId" type="id" is-pk="true"/>
+        <field name="marketingAutomationId" type="id"/>
+        <field name="partyId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="automationSourceEventId" type="id"/>
+        <field name="sourceKey" type="text-medium"/>
+        <field name="triggerEnumId" type="id"/>
+        <field name="definitionDate" type="date-time"/>
+        <field name="admittedDate" type="date-time"/>
+        <field name="admittedByUserId" type="id"/>
+        <field name="statusId" type="id" enable-audit-log="true"/>
+        <field name="nextSequenceNum" type="number-integer"><description>The step to run next (its sequenceNum)</description></field>
+        <field name="nextDueDate" type="date-time"/>
+        <field name="dueNote" type="text-medium"/>
+        <field name="skipNextSend" type="text-indicator"><description>Y: a condition not met skips the next send step</description></field>
+        <field name="lastStepDate" type="date-time"/>
+        <field name="endReasonCode" type="text-short"/>
+        <field name="endReason" type="text-medium"/>
+        <field name="endedDate" type="date-time"/>
+        <field name="endedByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomation"/>
+        <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one" related="mantle.marketing.automation.AutomationSourceEvent"/>
+        <relationship type="one" title="AutomationEnrollment" related="moqui.basic.StatusItem"/>
+        <index name="MKT_AUTO_ENR_KEY" unique="true"><index-field name="marketingAutomationId"/><index-field name="partyId"/>
+            <index-field name="sourceKey"/></index>
+        <index name="MKT_AUTO_ENR_DUE"><index-field name="statusId"/><index-field name="nextDueDate"/></index>
+        <seed-data>
+            <moqui.basic.StatusType description="Automation enrollment" statusTypeId="AutomationEnrollment"/>
+            <moqui.basic.StatusItem statusId="AenActive" statusTypeId="AutomationEnrollment" sequenceNum="1" description="Active"/>
+            <moqui.basic.StatusItem statusId="AenCompleted" statusTypeId="AutomationEnrollment" sequenceNum="2" description="Completed"/>
+            <moqui.basic.StatusItem statusId="AenStopped" statusTypeId="AutomationEnrollment" sequenceNum="3" description="Stopped"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AenActive" toStatusId="AenCompleted" transitionName="Complete"/>
+            <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="AenActive" toStatusId="AenStopped" transitionName="Stop"/>
+        </seed-data>
+    </entity>
+    <!-- One step an enrollment ran (design §6 StepHistory, §14.1 AutomationStepExecution): unique by enrollment and step, so a step is
+        never run twice for one enrollment (a restart after a completed send step finds its row and goes on); its outcome (handed off,
+        skipped with its reason, waiting until, a condition met or not), and a send step's recipient of the step's send and its ledger
+        delivery. -->
+    <entity entity-name="AutomationStepExecution" package="mantle.marketing.automation" cache="never">
+        <field name="automationStepExecutionId" type="id" is-pk="true"/>
+        <field name="automationEnrollmentId" type="id"/>
+        <field name="marketingAutomationId" type="id"><description>The enrollment's automation, for its counts</description></field>
+        <field name="automationStepId" type="id"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="stepKindEnumId" type="id"/>
+        <field name="outcomeEnumId" type="id"/>
+        <field name="reasonCode" type="text-short"/>
+        <field name="executedDate" type="date-time"/>
+        <field name="dueDate" type="date-time"><description>A wait's end, in the rule's zone</description></field>
+        <field name="campaignSendId" type="id"/>
+        <field name="campaignRecipientId" type="id"/>
+        <field name="messageDeliveryId" type="id"/>
+        <relationship type="one" related="mantle.marketing.automation.AutomationEnrollment"/>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomationStep"/>
+        <relationship type="one" title="AutomationStepOutcome" related="moqui.basic.Enumeration"><key-map field-name="outcomeEnumId"/></relationship>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignRecipient"/>
+        <relationship type="one" title="Delivery" related="mantle.party.MessageDelivery">
+            <key-map field-name="messageDeliveryId" related="deliveryId"/></relationship>
+        <index name="MKT_AUTO_EXEC_KEY" unique="true"><index-field name="automationEnrollmentId"/><index-field name="automationStepId"/></index>
+        <index name="MKT_AUTO_EXEC_OUTCOME"><index-field name="marketingAutomationId"/><index-field name="outcomeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Automation step outcome" enumTypeId="AutomationStepOutcome"/>
+            <moqui.basic.Enumeration enumId="AsoHandedOff" description="Handed off" sequenceNum="1" enumTypeId="AutomationStepOutcome"/>
+            <moqui.basic.Enumeration enumId="AsoSkipped" description="Skipped" sequenceNum="2" enumTypeId="AutomationStepOutcome"/>
+            <moqui.basic.Enumeration enumId="AsoWaiting" description="Waiting" sequenceNum="3" enumTypeId="AutomationStepOutcome"/>
+            <moqui.basic.Enumeration enumId="AsoConditionMet" description="Condition met" sequenceNum="4" enumTypeId="AutomationStepOutcome"/>
+            <moqui.basic.Enumeration enumId="AsoConditionNotMet" description="Condition not met" sequenceNum="5" enumTypeId="AutomationStepOutcome"/>
+        </seed-data>
+    </entity>
+    <!-- A send step's content (P11): a CampaignSend of an automation (its marketingAutomationId and automationStepId), status
+        CsAutomation, which the send services neither list, edit, prepare, approve nor release: it is prepared when its step is stored,
+        approved with the automation, and each participant who reaches the step becomes one of its CampaignRecipient rows, handed to the
+        ledger by the step run (MarketingAutomations.js) through the dispatch's checks. The automation's steps also have a policy bound:
+        MarketingPolicy automationMaxSteps (ten when none). -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="marketingAutomationId" type="id"/>
+        <field name="automationStepId" type="id"/>
+        <relationship type="one" related="mantle.marketing.automation.MarketingAutomation"/>
+        <index name="CMP_SEND_AUTOMATION"><index-field name="marketingAutomationId"/></index>
+        <seed-data>
+            <moqui.basic.StatusItem statusId="CsAutomation" statusTypeId="CampaignSend" sequenceNum="20" description="Automation step"/>
+        </seed-data>
+    </extend-entity>
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="automationMaxSteps" type="number-integer" enable-audit-log="true"><description>The most steps an automation may
+            have (ten when empty)</description></field>
+    </extend-entity>
+    <!-- ===== end of Marketing P11 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

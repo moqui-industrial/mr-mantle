@@ -4,8 +4,7 @@
 // decisions, and the author never decides their own draft but under the one-person team's flag.
 //
 // - A target is a campaign (P2), a send (P8) or an automation (P11): targetKinds below says how each is read, its revision, its
-//   author, its organization, its recipients and what an approval or a refusal does to it. P2 builds the campaign; the other two
-//   are added by their phases (KIND_UNAVAILABLE until then).
+//   author, its organization, its recipients and what an approval or a refusal does to it.
 // - request: the author asks for approval at the target's current revision (APPROVAL_PENDING when one is pending at it); the
 //   holders of MARKETING_APPROVE who work for its organization are told (the kind's topic), the author left out where they may
 //   not decide. A failure to notify is logged and the request stays.
@@ -136,10 +135,32 @@ const targetKinds = {
         approved: row => sendKind().approved(row),
         refused: row => sendKind().refused(row),
         linkFields: row => ({campaignSendId: row.campaignSendId})
+    },
+    // P11: an automation (MarketingAutomation), its rules in MarketingAutomations.js automationKind: requested while a draft, approved to
+    // Approved (a dispatcher activates it), refused back to draft; what approval needs is an approved campaign, a ready promotional
+    // profile, a send step and the trigger's source; it has no recipient count, so it is never self-approved (selfApprovalAdmits)
+    automation: {
+        name: "Automation",
+        enumId: "MdtAutomation",
+        topic: "MarketingAutomationApproval",
+        entity: "mantle.marketing.automation.MarketingAutomation",
+        read: (targetId, lock) => automationKind().read(targetId, lock),
+        revision: row => automationKind().revision(row),
+        organization: row => row.organizationPartyId,
+        authors: row => automationKind().authors(row),
+        label: row => row.automationName || row.marketingAutomationId,
+        recipientCount: () => null,
+        requestable: row => automationKind().requestable(row),
+        problems: row => automationKind().problems(row),
+        requested: row => automationKind().requested(row),
+        approved: row => automationKind().approved(row),
+        refused: row => automationKind().refused(row),
+        linkFields: row => ({marketingAutomationId: row.marketingAutomationId})
     }
-    // automation (P11) joins here
 }
 const sendKind = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingSends.js").sendKind
+const automationKind = () =>
+    ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAutomations.js").automationKind
 const kindOf = kindKey => {
     if (!Object.hasOwn(targetKinds, kindKey)) denied("KIND_UNAVAILABLE", "Approval of " + kindKey + " is not available")
     return targetKinds[kindKey]
@@ -264,7 +285,7 @@ function request(p) {
     const userScope = marketingAccess.scope()
     const kindKey = text(p.targetKind) || "campaign"
     const kind = kindOf(kindKey)
-    // the author's: the edit permission of the kind (P2: a campaign)
+    // the author's: the edit permission of the kind (P2: a campaign; P8 a send and P11 an automation, both an author's sends)
     marketingAccess.requireCapability(userScope, kindKey === "campaign" ? "campaignEdit" : "sendEdit")
     const targetId = text(p.targetId)
     const {row} = targetOf(userScope, kindKey, targetId, true)
