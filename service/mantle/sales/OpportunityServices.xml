@@ -856,7 +856,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Whether the mail rule being saved may carry the createLead action (ErActCreateLead): when the save gives the
             actions (actionList or actionsJson) and they name createLead, the rule's owner (the caller on create, the stored rule's
             owner on update) must hold SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, and the save is not made). A rule without
-            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at.</description>
+            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at. P8: a
+            createQuoteRequest action (ErActCreateQuoteRequest) likewise needs the owner to hold SALES_QUOTE_EDIT.</description>
         <in-parameters>
             <parameter name="emailRuleId"/>
             <parameter name="actionList" type="List"/>

@@ -1444,6 +1444,8 @@ along with this software (see the LICENSE.md file). If not, see
                 if (request == null || request.statusId !== 'ReqSubmitted') return
                 // a confidential case (IronStone People P21, F20) is never triaged: no name or filer reaches a triager
                 if (request.requestTypeEnumId === 'RqtHrCase') return
+                // a customer's request for quote (IronStone Sales P8, F63) is its sales team's, never Projects' triage
+                if (request.requestTypeEnumId === 'RqtQuote') return
                 // once per request and project
                 try {
                     const told = ec.cache.getCache('mantle.request.triage.notified')
@@ -1553,7 +1555,8 @@ along with this software (see the LICENSE.md file). If not, see
             Fixed for a bug, else Completed. The followers of the request and its Reporter's and Assignee's users are told on the
             topic RequestUpdate. Run by the WorkEffort status rule of entity/Work.eecas.xml for the item whose status changed;
             each request on its own, a failure logged. A purchase request (RqtPurchase with its organization as an OrgInternal
-            RequestParty, as Purchasing's are), purchase RFQ (RqtPurchaseRfq) or stock request (RqtInventory) is left alone: its
+            RequestParty, as Purchasing's are), purchase RFQ (RqtPurchaseRfq), customer RFQ (RqtQuote, IronStone Sales P8) or stock
+            request (RqtInventory) is left alone: its
             progress is its sourcing or movements (CX-REQUEST, R-XC-40); a Purchase-type request of Commons or Projects with no
             organization follows its work as before. A support case (one with a CaseProfile, impl-customer-service P2), a
             project's among them, is never moved by its work: a linked item done or cancelled tells only its assignee (the
@@ -1577,6 +1580,8 @@ along with this software (see the LICENSE.md file). If not, see
                         // CX-REQUEST (R-XC-40, impl-purchasing P10): a purchase, purchase RFQ or stock request follows its
                         // sourcing or its movements (get#PurchaseRequestProgress, get#InventoryRequestProgress), never its work
                         if (['RqtPurchaseRfq', 'RqtInventory'].includes(request.requestTypeEnumId)) continue
+                        // a customer's request for quote (IronStone Sales P8, F63) follows its quotes, never its work
+                        if (request.requestTypeEnumId === 'RqtQuote') continue
                         // a confidential case (IronStone People P21, F20) is decided by its handlers alone, never by its work
                         if (request.requestTypeEnumId === 'RqtHrCase') continue
                         // a purchase request is Purchasing's when it names its organization (an OrgInternal RequestParty);

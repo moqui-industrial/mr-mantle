@@ -106,7 +106,8 @@ along with this software (see the LICENSE.md file). If not, see
             evidence (product, quantity, fault, serial and its owner and status, order, invoice, agreement, prior claims on the
             serial), its revision and state, the coverage as get#WarrantyCoverage reads it, its decisions (current or not), its
             repairs with their tasks and its returns, and what the user may do (save, decide, approve, link a repair, with the
-            reason when not). A case of another type is answered with isClaim false, so its evidence can be recorded. Requires
+            reason when not), and (IronStone Sales P8, the chargeable repair's handoff) the sales quotes made from its lines with
+            their state, total and validity. A case of another type is answered with isClaim false, so its evidence can be recorded. Requires
             SUPPORT_CASE_EDIT, SUPPORT_CASE_MANAGE or WARRANTY_APPROVE; refuses a missing case and another organization's alike
             (RECORD_UNAVAILABLE).</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
@@ -117,6 +118,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="currentDecision" type="Map"/>
             <parameter name="repairs" type="List"/>
             <parameter name="returns" type="List"/>
+            <parameter name="salesQuotes" type="List"/>
             <parameter name="actions" type="Map"/>
         </out-parameters>
         <actions>

@@ -373,6 +373,80 @@ function requireQuote(userScope, orderId, edit = false) {
     return found
 }
 
+// ===== P8: requests for quote (impl-sales P8; design-sales §1.1, §5 QuoteRequests) =====
+// A request for quote (RFQ) is a Request of type RqtQuote whose current OrgInternal RequestParty is its selling organization; its
+// customer and contact are its Customer and Contact rows, its owner and team its SalesRepresentative and SalesTeam rows, as a quote's
+// part has them. Inside an organization of the scope a Sales reader sees the RFQs assigned to them or a team of theirs and a holder
+// of SALES_TEAM_VIEW the organization's every one; a customer link never widens it. A change needs SALES_QUOTE_EDIT. One outside the
+// scope answers as a missing one (RECORD_UNAVAILABLE). A warranty claim (RqtWarranty, Customer Service's) is a quote's source only
+// while its current decision is a chargeable repair (repairSourceOf, in SalesQuoteRequests.js): it is never an RFQ here.
+const quoteRequestType = "RqtQuote"
+const quoteRequestRoles = {
+    organization: "OrgInternal",
+    customer: "Customer",
+    contact: "Contact",
+    owner: "SalesRepresentative",
+    team: "SalesTeam"
+}
+// The current RequestParty rows of a request.
+function requestParties(requestId) {
+    return lib.rows("mantle.request.RequestParty", {requestId}).filter(row => lib.active(row))
+}
+// The ids of the RFQs assigned now to the caller or a team of theirs, or null for a reader of the organizations' every one
+// (teamRead).
+function assignedQuoteRequestIds(userScope) {
+    if (userScope.capabilities.teamRead) return null
+    const partyIds = assignmentParties(userScope)
+    if (!partyIds.length) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.request.RequestParty")
+                    .condition("partyId", "in", partyIds)
+                    .condition("roleTypeId", "in", [quoteRequestRoles.owner, quoteRequestRoles.team])
+                    .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                    .selectField("requestId")
+                    .list()
+            ).map(row => row.requestId)
+        )
+    )
+}
+// The RFQ as the caller may see it, or null: {request, parties, organizationPartyId, customerPartyId, canEdit}.
+function quoteRequestOf(userScope, requestId) {
+    if (!requestId || !userScope.capabilities.anyRead) return null
+    const request = lib.one("mantle.request.Request", {requestId})
+    if (!request || request.requestTypeEnumId !== quoteRequestType) return null
+    const parties = requestParties(requestId)
+    const partyOf = roleTypeId => parties.find(row => row.roleTypeId === roleTypeId)?.partyId || null
+    const organizationPartyId = partyOf(quoteRequestRoles.organization)
+    if (!organizationPartyId || !covers(userScope, organizationPartyId) || !isInternal(organizationPartyId)) return null
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned = parties.some(
+            row => [quoteRequestRoles.owner, quoteRequestRoles.team].includes(row.roleTypeId) && partyIds.includes(row.partyId)
+        )
+        if (!assigned) return null
+    }
+    return {
+        request,
+        parties,
+        organizationPartyId,
+        customerPartyId: partyOf(quoteRequestRoles.customer),
+        contactPartyId: partyOf(quoteRequestRoles.contact),
+        ownerPartyId: partyOf(quoteRequestRoles.owner),
+        teamPartyId: partyOf(quoteRequestRoles.team),
+        canEdit: !!userScope.capabilities.quoteEdit
+    }
+}
+// The RFQ or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for a change without SALES_QUOTE_EDIT.
+function requireQuoteRequest(userScope, requestId, edit = false) {
+    const found = quoteRequestOf(userScope, requestId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Request for quote " + (requestId || "") + " is not available")
+    if (edit) requireCapability(userScope, "quoteEdit")
+    return found
+}
+
 ;({
     permissions,
     reads,
@@ -407,5 +481,12 @@ function requireQuote(userScope, orderId, edit = false) {
     quotePurpose,
     assignedQuoteOrderIds,
     quoteOf,
-    requireQuote
+    requireQuote,
+    // P8: requests for quote
+    quoteRequestType,
+    quoteRequestRoles,
+    requestParties,
+    assignedQuoteRequestIds,
+    quoteRequestOf,
+    requireQuoteRequest
 })

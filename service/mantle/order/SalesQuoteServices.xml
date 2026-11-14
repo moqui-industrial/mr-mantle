@@ -16,8 +16,10 @@ along with this software (see the LICENSE.md file). If not, see
     P7, SAL-QUOTE): quote drafts over the native order (service/mantle/order/SalesQuotes.js; the scope in
     service/mantle/sales/SalesAccess.js quoteOf). Each checks its own permission, the selling organization and the assignment, and
     every party, opportunity, store, address and product given; each change names the order revision it read. Issue, send, the
-    response, revise and clone are P10's. P9: the approvals a quote needs are SalesApprovalServices' (preview#Quote, decide#Quote),
-    get#Quote answers them, a free line follows the approval rules and propose#Quote is guarded by them. -->
+    response, revise and clone are P10's. P8: the requests for quote (RFQs, design §5 QuoteRequests and QuoteRequestDetail;
+    SalesQuoteRequests.js, the scope in SalesAccess.js quoteRequestOf), in a block of their own at the end. P9: the approvals a quote
+    needs are SalesApprovalServices' (preview#Quote, decide#Quote), get#Quote answers them, a free line follows the approval rules
+    and propose#Quote is guarded by them. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="Quotes" allow-remote="false" read-only="true">
         <description>The one scoped list of quotes (design §5 QuoteList, Home and the palette): orders of purpose SalesQuote whose
@@ -245,6 +247,315 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="explanation" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('explainLine', context).explanation"/>
         </actions>
     </service>
+
+    <!-- ===== P8: requests for quote (impl-sales P8; design-sales §5 QuoteRequests, QuoteRequestDetail, §6 the chargeable repair) ===== -->
+    <service verb="find" noun="QuoteRequests" allow-remote="false" read-only="true">
+        <description>The one scoped list of requests for quote (design §5 QuoteRequestList, Home's counter): Requests of type RqtQuote
+            whose organization (the OrgInternal party) is of the caller's scope, the caller's and their teams' (or the organization's
+            every one for SALES_TEAM_VIEW); filtered by organization, customer, owner (mine Y: the caller) or team, state (open, the
+            default: Submitted, Reviewed and In progress; awaiting: not quoted yet; quoted; declined; completed; all), overdue (the
+            response wanted by a past date) and text (id or name, ignoring case), paged in the query. Each row's customer (unnamed
+            when the caller may not see the account), owner, team, received and wanted dates, source and quotes. With kind repair:
+            the open warranty claims of the scope whose current decision is a chargeable repair, or that a quote was made from, for a
+            caller who makes quotes (SALES_QUOTE_EDIT) or reads the organization's (SALES_TEAM_VIEW), each named by its product only.
+            Needs a Sales read (PERMISSION_DENIED); an organization outside the scope is refused (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="kind"><description>rfq (the default) or repair</description></parameter>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="mine"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="state"/>
+            <parameter name="overdue"/>
+            <parameter name="text"/>
+            <parameter name="orderByField"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="quoteRequestList" type="List"/>
+            <parameter name="quoteRequestListCount" type="Integer"/>
+            <parameter name="quoteRequestListPageIndex" type="Integer"/>
+            <parameter name="quoteRequestListPageSize" type="Integer"/>
+            <parameter name="quoteRequestListPageMaxIndex" type="Integer"/>
+            <parameter name="quoteRequestListPageRangeLow" type="Integer"/>
+            <parameter name="quoteRequestListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('findQuoteRequests', context)"/>
+            <set field="quoteRequestList" from="found.quoteRequestList"/>
+            <set field="quoteRequestListCount" from="found.quoteRequestListCount"/>
+            <set field="quoteRequestListPageIndex" from="found.quoteRequestListPageIndex"/>
+            <set field="quoteRequestListPageSize" from="found.quoteRequestListPageSize"/>
+            <set field="quoteRequestListPageMaxIndex" from="found.quoteRequestListPageMaxIndex"/>
+            <set field="quoteRequestListPageRangeLow" from="found.quoteRequestListPageRangeLow"/>
+            <set field="quoteRequestListPageRangeHigh" from="found.quoteRequestListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="QuoteRequest" allow-remote="false" read-only="true">
+        <description>QuoteRequestDetail's request (design §5) as the caller may see it (SalesAccess.js quoteRequestOf), else
+            requestFound false: its name, description, state, organization, customer (unnamed when the caller may not see the
+            account), contact, owner, team, received and wanted dates and source; its lines (product, quantity, description, required
+            date, the quotes each is in); the quotes made from it (a total only for a quote the caller sees); its revision and what the
+            caller may do (change it, make a quote, decline it). A chargeable repair source (a warranty claim, see find#QuoteRequests)
+            answers its customer and its lines' products and quantities alone: never its decision, diagnosis, fault text, people or
+            conversation.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="requestFound" type="Boolean"/>
+            <parameter name="quoteRequest" type="Map"/>
+            <parameter name="items" type="List"/>
+            <parameter name="quotes" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('getQuoteRequest', context)"/>
+            <set field="requestFound" from="!!found.requestFound"/>
+            <set field="quoteRequest" from="found.quoteRequest || null"/>
+            <set field="items" from="found.items || []"/>
+            <set field="quotes" from="found.quotes || []"/>
+        </actions>
+    </service>
+    <service verb="create" noun="QuoteRequest" allow-remote="false">
+        <description>A customer's request for quote (design §5 NewQuoteRequest; "Create RFQ" on a message in Comms) over
+            create#Request: an RqtQuote request, Submitted, of an organization of the caller's scope (the one given, else the active
+            or only one), its customer an account of it or a shared one and its contact one of the customer's (else those the sender's
+            address belongs to: a contact of exactly one account, or an account; never a new party), the caller its owner when they work
+            for the organization and the team given (a current team of it, one of the caller's unless SALES_TEAM_MANAGE) or their only
+            team there, its name, description, wanted date and lines. From a message (emailMessageId, communicationEventId, or
+            chatRoomId and eventSeq): the message read as the caller may read it before anything is written (a message of a mailbox,
+            room or thread they may not read answers RECORD_UNAVAILABLE, as a missing one), its subject and text the defaults, and the
+            message with its files filed on the request; the same message again answers the request it made (alreadyApplied), or
+            REQUEST_TAKEN when the caller cannot open it. Needs SALES_QUOTE_EDIT and a Sales read (PERMISSION_DENIED); refuses an
+            organization outside the scope (ORGANIZATION_DENIED), another organization's account (CUSTOMER_INVALID), a contact of
+            another (CONTACT_INVALID), another team (TEAM_UNAVAILABLE) and no owner or team (TEAM_REQUIRED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="salesChannelEnumId"/>
+            <parameter name="emailMessageId"/>
+            <parameter name="communicationEventId"/>
+            <parameter name="chatRoomId"/>
+            <parameter name="eventSeq" type="Integer"/>
+            <parameter name="items" type="List"><description>Each {productId, quantity, description, requiredByDate}</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="made" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('createQuoteRequest', context)"/>
+            <set field="requestId" from="made.requestId"/>
+            <set field="alreadyApplied" from="!!made.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="create" noun="QuoteRequestFromEmail" authenticate="anonymous-all" allow-remote="false">
+        <description>The createQuoteRequest action of the mail client's rules (EmailRuleAction ErActCreateQuoteRequest,
+            CX-MAIL-INTAKE): a received message to a sales team's plus-tag address, or to the team the action's value names, becomes
+            an RqtQuote request of that team's organization in that team's queue: its subject the name, its text the description, the
+            sender matched to an account or a contact of the organization (never a new party), and the message with its files filed on
+            it. The message's Message-ID is its identity, so the same mail delivered twice makes one request. A team is taken only when
+            the rule's owner works for its organization (TEAM_UNAVAILABLE otherwise) and holds SALES_QUOTE_EDIT (RULE_NOT_ALLOWED
+            otherwise, nothing filed; check#LeadRuleOwner refuses such a rule when it is saved too). Answers stopProcessing, so a later
+            rule (the lead intake's) does not take the same mail.</description>
+        <in-parameters>
+            <parameter name="emailMessageId" required="true"/>
+            <parameter name="emailAccountId"/>
+            <parameter name="emailRuleId"/>
+            <parameter name="ruleOwnerUserId"/>
+            <parameter name="value"><description>The team (partyId), or empty for the plus tag</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+            <parameter name="stopProcessing" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="made" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('quoteRequestFromEmail', context)"/>
+            <set field="requestId" from="made.requestId"/>
+            <set field="alreadyApplied" from="!!made.alreadyApplied"/>
+            <set field="stopProcessing" from="!!made.stopProcessing"/>
+        </actions>
+    </service>
+    <service verb="store" noun="QuoteRequestItem" allow-remote="false">
+        <description>An open request for quote's line, new or changed (requestItemSeqId), or removed (cancel Y: Cancelled, kept): a
+            product the organization may sell (check#ProductUsable, PRODUCT_NOT_USABLE) or none with a description (ITEM_REQUIRED), a
+            positive quantity (1 when not given), a description and a required date. Needs SALES_QUOTE_EDIT on a request the caller sees
+            (RECORD_UNAVAILABLE, PERMISSION_DENIED); refuses a closed request (REQUEST_CLOSED), a stale revision (REVISION_CHANGED,
+            naming the current one) and a line not on it (ITEM_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestRevision" required="true"/>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="productId"/>
+            <parameter name="quantity" type="BigDecimal"/>
+            <parameter name="description"/>
+            <parameter name="requiredByDate" type="Timestamp"/>
+            <parameter name="cancel"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="requestItemSeqId"/>
+            <parameter name="requestRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('storeQuoteRequestItem', context)"/>
+            <set field="requestId" from="stored.requestId"/>
+            <set field="requestItemSeqId" from="stored.requestItemSeqId"/>
+            <set field="requestRevision" from="stored.requestRevision"/>
+        </actions>
+    </service>
+    <service verb="update" noun="QuoteRequest" allow-remote="false">
+        <description>An open request for quote's name, description, wanted date, customer and contact, and its assignment (design
+            §5 QuoteRequestDetail's Assign): the owner one who works for the organization (the caller or, unless SALES_TEAM_MANAGE, a
+            member of a team of theirs; OWNER_INVALID), the team a current team of it (one of theirs unless SALES_TEAM_MANAGE;
+            TEAM_UNAVAILABLE), the customer an account of it or a shared one (CUSTOMER_INVALID) and the contact one of its contacts
+            (CONTACT_INVALID); the replaced party row ended, never deleted. Needs SALES_QUOTE_EDIT on a request the caller sees;
+            refuses a closed request (REQUEST_CLOSED) and a stale revision (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestRevision" required="true"/>
+            <parameter name="requestName"/>
+            <parameter name="description"/>
+            <parameter name="responseRequiredDate" type="Timestamp"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="contactPartyId"/>
+            <parameter name="ownerPartyId"/>
+            <parameter name="teamPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="requestRevision"/>
+        </out-parameters>
+        <actions>
+            <set field="updated" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('updateQuoteRequest', context)"/>
+            <set field="requestId" from="updated.requestId"/>
+            <set field="requestRevision" from="updated.requestRevision"/>
+        </actions>
+    </service>
+    <service verb="create" noun="QuoteFromRequest" allow-remote="false">
+        <description>A draft quote from a request's selected lines (design §5 QuoteRequestDetail's Create quote): one quote through
+            create#Quote and store#QuoteLine (every quote rule: the seller of the caller's scope, the customer an account of it, the
+            caller its owner, the seller's price for the customer or an entered price with its reason), each line linked to its request
+            line (RequestItemOrder), all in one transaction; the operation key answers a retry with the first quote (alreadyApplied),
+            another request under it OPERATION_KEY_CONFLICT. The source: a request for quote the caller may change, open; or a warranty
+            claim whose current decision is a chargeable repair (Customer Service's, see find#QuoteRequests), kept as it is, its quote
+            named "Repair estimate" and its lines carrying none of the claim's fault text or decision. A first quote puts an RFQ In
+            progress; nothing completes it. Needs SALES_QUOTE_EDIT on a request the caller sees (RECORD_UNAVAILABLE,
+            PERMISSION_DENIED); refuses a closed request (REQUEST_CLOSED), a stale revision (REVISION_CHANGED), no lines
+            (ITEMS_REQUIRED), a removed or unknown line (ITEM_UNAVAILABLE), a line with no product (ITEM_PRODUCT_REQUIRED) and a request
+            with no customer (CUSTOMER_REQUIRED), and whatever the quote rules refuse.</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestRevision" required="true"/>
+            <parameter name="operationKey" required="true"/>
+            <parameter name="requestItemSeqIdList" type="List"/>
+            <parameter name="items" type="List"><description>Each {requestItemSeqId, productId, quantity, unitAmount, overrideReason}: a
+                line's product or quantity other than the request line's, an entered price with its reason</description></parameter>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="validThruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="made" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('createQuoteFromRequest', context)"/>
+            <set field="orderId" from="made.orderId"/>
+            <set field="orderRevision" from="made.orderRevision"/>
+            <set field="alreadyApplied" from="!!made.alreadyApplied"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="QuoteRequestDecline" allow-remote="false" read-only="true">
+        <description>What declining a request for quote tells its requester (design §5 Decline RFQ): whether it can be told from here
+            (the request came in by a mailbox still active, and has an address), the address (its first message's sender, else the
+            contact's or the customer's email), the mailbox it goes from, the subject and the default text. Changes nothing. Needs
+            SALES_QUOTE_EDIT on an open request the caller sees.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="canNotify" type="Boolean"/>
+            <parameter name="toAddress"/>
+            <parameter name="fromAddress"/>
+            <parameter name="subject"/>
+            <parameter name="messageText"/>
+            <parameter name="notifyText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('previewDecline', context)"/>
+            <set field="canNotify" from="!!found.canNotify"/>
+            <set field="toAddress" from="found.toAddress"/>
+            <set field="fromAddress" from="found.fromAddress"/>
+            <set field="subject" from="found.subject"/>
+            <set field="messageText" from="found.messageText"/>
+            <set field="notifyText" from="found.notifyText"/>
+        </actions>
+    </service>
+    <service verb="decline" noun="QuoteRequest" allow-remote="false">
+        <description>A request for quote declined (design §5 Decline RFQ): the reason as a note (REASON_REQUIRED), the request
+            Cancelled with the resolution Rejected. With notify Y the requester is told, only at the address the preview showed
+            (toAddress; RECIPIENT_CHANGED otherwise, to preview again), from the mailbox the request came in by (NOTIFY_UNAVAILABLE when
+            none), with the caller's text (else the default): a mail answering the request's first message, filed on its conversation;
+            a send that does not go waits in the mailbox's Outbox. Needs SALES_QUOTE_EDIT on a request the caller sees; refuses a closed
+            request (REQUEST_CLOSED) and a stale revision (REVISION_CHANGED).</description>
+        <in-parameters>
+            <parameter name="requestId" required="true"/>
+            <parameter name="requestRevision" required="true"/>
+            <parameter name="reason"/>
+            <parameter name="notify"/>
+            <parameter name="toAddress"/>
+            <parameter name="messageText"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="requestId"/>
+            <parameter name="notified" type="Boolean"/>
+            <parameter name="emailMessageId"/>
+        </out-parameters>
+        <actions>
+            <set field="declined" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('declineQuoteRequest', context)"/>
+            <set field="requestId" from="declined.requestId"/>
+            <set field="notified" from="!!declined.notified"/>
+            <set field="emailMessageId" from="declined.emailMessageId"/>
+        </actions>
+    </service>
+    <service verb="check" noun="QuoteRequestAccess" allow-remote="false" read-only="true">
+        <description>Whether the caller sees a request for quote (SalesAccess.js quoteRequestOf: an organization of their sales scope,
+            and the request assigned to them or a team of theirs, or SALES_TEAM_VIEW) and may change it (SALES_QUOTE_EDIT, open): the
+            record visibility of get#RecordLinkInfo and RecordFiles for an RqtQuote request and its files, in every app. A call with no
+            user sees none.</description>
+        <in-parameters><parameter name="requestId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="recordVisible" type="Boolean"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('quoteRequestAccess', context)"/>
+            <set field="recordVisible" from="!!found.recordVisible"/>
+            <set field="canEdit" from="!!found.canEdit"/>
+        </actions>
+    </service>
+    <service verb="notify" noun="RepairToQuote" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (service/SalesQuoteRequest.secas.xml, on decide#WarrantyClaim's commit; the user's call of Nov 13,
+            2026): a warranty decision that is a chargeable repair (a charge estimate above zero), current on an open claim, tells the
+            organization's default Sales team (its SalesPolicy in effect, Sales P9) on the topic SalesRepairToQuote: its current members
+            who work for the organization and hold SALES_QUOTE_EDIT or SALES_TEAM_VIEW. The notice names the claim, its customer and
+            a product, never its fault text, diagnosis, decision or the charge. No default team, no notice. Never fails: an error
+            is logged.</description>
+        <in-parameters><parameter name="warrantyDecisionId"/></in-parameters>
+        <out-parameters><parameter name="sentCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('notifyRepairToQuote', context)"/>
+            <set field="sentCount" from="found.sentCount"/>
+        </actions>
+    </service>
+    <!-- ===== end of P8 ===== -->
     <!-- ===== Sales P9: the approval guard of a quote's proposal ===== -->
     <service verb="propose" noun="Quote" allow-remote="false">
         <description>Propose a draft quote (design §5; impl-sales P9 builds its approval guard, P10 the issue's checks): a draft the
