@@ -104,7 +104,18 @@ function analysis(p) {
     let orderQuery = stampRange(
         find("mantle.order.OrderHeaderAndPart", {vendorPartyId: org})
             .condition("statusId", "in", PLACED)
-            .condition("partStatusId", "in", PLACED),
+            .condition("partStatusId", "in", PLACED)
+            // a recurring base or a quote template is never a sale, with or without a date span (impl-sales P16 review)
+            .condition(
+                ec.entity.conditionFactory.makeCondition(
+                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "is-null", null),
+                    "or",
+                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "not-in", [
+                        "OrpRecurringTemplate",
+                        "OrpSalesQuoteTemplate"
+                    ])
+                )
+            ),
         "placedDate",
         p
     )
