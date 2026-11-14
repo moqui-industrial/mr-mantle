@@ -706,7 +706,15 @@ function findCustomerOrders(p) {
     const limit = Math.min(Math.max(Number(p.limit) || 20, 1), LIST_CAP)
     const offset = Math.max(Number(p.cursor) || 0, 0)
     if (!customers.length) return {orderList: [], count: 0, nextCursor: null, actingFor: 0}
-    const partFind = find(PART).condition("vendorPartyId", organizationPartyId).condition("customerPartyId", "in", customers)
+    // the candidates by the order's header and part together, newest first, so the cap never fills with a store's orders, drafts
+    // or older orders (Sales P17 review)
+    const statuses = p.state === "open" ? orderStatuses.filter(id => id !== "OrderCompleted") : orderStatuses
+    const partFind = find("mantle.order.OrderHeaderAndPart")
+        .condition("vendorPartyId", organizationPartyId)
+        .condition("customerPartyId", "in", customers)
+        .condition("productStoreId", "is-null", null)
+        .condition("statusId", "in", statuses)
+        .condition("placedDate", "is-not-null", null)
     const reference = text(String(p.reference ?? "").slice(0, 60))
     if (reference) {
         const like = "%" + reference.replace(/[\\%_]/g, character => "\\" + character) + "%"
@@ -726,6 +734,8 @@ function findCustomerOrders(p) {
             Array.from(
                 partFind
                     .selectField("orderId")
+                    .orderBy("-placedDate")
+                    .orderBy("-orderId")
                     .limit(ORDER_LIST_CAP * 2)
                     .list()
             ).map(row => row.orderId)
@@ -736,7 +746,7 @@ function findCustomerOrders(p) {
         find(ORDER)
             .condition("orderId", "in", ids)
             .condition("productStoreId", "is-null", null)
-            .condition("statusId", "in", p.state === "open" ? orderStatuses.filter(id => id !== "OrderCompleted") : orderStatuses)
+            .condition("statusId", "in", statuses)
             .orderBy("-placedDate")
             .orderBy("-orderId")
             .limit(ORDER_LIST_CAP)
