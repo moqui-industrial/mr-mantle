@@ -1546,7 +1546,7 @@ function attachToPost(siteId, postId, attachmentIds) {
             att.siteId === siteId &&
             ((att.ownerPartyId === me() && !att.communicationEventId) ||
                 att.communicationEventId === postId) &&
-            att.purpose !== 'avatar' &&
+            !['avatar', 'repositoryFile'].includes(att.purpose) &&
             att.scanState === 'clean' &&
             !(att.expiresAt && millis(att.expiresAt) <= millis(now()))
         if (!usable)
@@ -2456,6 +2456,7 @@ methods.applyOptOut = (p) => {
 }
 
 methods.stageAttachment = (p) => {
+    let repositoryBytes = null
     if (p.purpose === 'avatar') {
         site(p.siteId)
         const membership = member(p.siteId, requireUser())
@@ -2468,6 +2469,14 @@ methods.stageAttachment = (p) => {
                 'Unauthorized',
                 'Active membership is required for avatar uploads',
             )
+    } else if (p.purpose === 'repositoryFile') {
+        // A file for a page's commit to a repository (Smithy's Upload, mr-pass plan/design-smithy.md §9.5): the app
+        // that keeps the repository says who may stage one and how large; it is read by that app's commit and released.
+        site(p.siteId)
+        const upload = core.recordUpload(p.siteId, p.repositoryId, requireUser())
+        if (!upload) missing()
+        if (upload.refusal) fail('Unauthorized', upload.refusal)
+        repositoryBytes = upload.maxBytes
     } else {
         if (p.purpose && p.purpose !== 'post') invalid('Unknown upload purpose')
         const a = p.rootCommEventId
@@ -2482,11 +2491,16 @@ methods.stageAttachment = (p) => {
         if (draft && (draft.partyId !== partyId || draft.siteId !== p.siteId))
             missing()
     }
-    const maxBytes = Math.min(10485760, policy(p.siteId).mediaMaxBytes)
+    const maxBytes =
+        repositoryBytes == null
+            ? Math.min(10485760, policy(p.siteId).mediaMaxBytes)
+            : Math.min(10485760, repositoryBytes)
     if (!file || Number(file.size) > maxBytes || Number(file.size) < 1)
         invalid('Upload must contain 1 byte to ' + maxBytes + ' bytes')
     const type = String(file.contentType || 'application/octet-stream')
+    // A repository's file is of any type: it is committed, never served as a post's media.
     if (
+        repositoryBytes == null &&
         ![
             'image/png',
             'image/jpeg',
@@ -4414,7 +4428,7 @@ const editWindowMs = (siteId) => policy(siteId).editWindowHours * 3600000
 /* Reading telemetry is measured on the server from the reader's own position updates, never from client counters. */
 function recordReading(siteId, partyId, newlyRead, firstVisit) {
     const m = memberStateFor(siteId, partyId),
-        day = String(now()).slice(0, 10),
+        day = core.dayKey(),
         gap = m.lastReadAt ? millis(now()) - millis(m.lastReadAt) : 0
     update(m, {
         postsRead: Number(m.postsRead || 0) + Math.min(100, newlyRead),

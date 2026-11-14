@@ -13,17 +13,25 @@
             past its namespace's size limit for one repository (the account's, or its nearest group's, else the site's
             default). What the repository stores is the framework's count (get#GitRepositoryUsage), asked for this
             repository alone; a push is refused when it cannot be read. A push that adds nothing (packBytes 0, deletes
-            only) is not held to the size.</description>
+            only) is not held to the size. A push to refs/for/[branch] (forReview; a page's proposal runs the same rule)
+            needs view of a repository that takes merge requests and an account that is not silenced there; by an
+            account without Developer it is at most 50 MiB, with at most 200 MiB of such pushes a day over every
+            repository (and no more than one repository of the account's own may hold), counted against the pusher and
+            not against the repository's limit, and it opens no more merge requests a day than the account's trust
+            level allows (limitReached).</description>
         <in-parameters>
             <parameter name="repositoryId" required="true"/>
             <parameter name="userId"/>
             <parameter name="packBytes" type="Long"/>
+            <parameter name="forReview" type="Boolean"><description>A ref of the push is refs/for/[branch]</description></parameter>
+            <parameter name="pushOptions" type="List"><description>The push's options: topic=[name] names the merge request a push to review goes to</description></parameter>
+            <parameter name="refUpdates" type="List"><description>The refs of the push: each with forReview and targetBranch for refs/for/[branch]</description></parameter>
             <parameter name="source"/>
             <parameter name="transport"/>
         </in-parameters>
         <actions>
             <script><![CDATA[
-                for (const problem of ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkPush({repositoryId, userId, packBytes}))
+                for (const problem of ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").checkPush({repositoryId, userId, packBytes, forReview, refUpdates, pushOptions}))
                     ec.message.addError(problem)
             ]]></script>
         </actions>

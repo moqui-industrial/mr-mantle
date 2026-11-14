@@ -378,5 +378,90 @@
     findAssignees: {
         service: "mantle.smithy.SmithyIssueServices.find#Assignees",
         fields: ["siteId", "repositoryId", "query", "limit"]
+    },
+    // DG4 (§15.5): merge requests, forks, editing a file on its page, the contributor agreement
+    findMergeRequests: {
+        service: "mantle.smithy.SmithyReviewServices.find#MergeRequests",
+        fields: ["siteId", "repositoryId", "groupId", "state", "authorHandle", "reviewerHandle", "targetRef", "query", "limit", "cursor"]
+    },
+    getMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.get#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum"]
+    },
+    getMergeRequestChanges: {
+        service: "mantle.smithy.SmithyReviewServices.get#MergeRequestChanges",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "path", "withDiffs", "agent"]
+    },
+    createMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.create#MergeRequest",
+        fields: ["siteId", "repositoryId", "sourceRepositoryId", "sourceRef", "targetRef", "title", "body", "sourceFormat", "draft", "reviewerHandles", "operationId"]
+    },
+    updateMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.update#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "title", "targetRef", "draft", "mergeMethod", "deleteSourceBranch", "expectedRevision"]
+    },
+    setMergeRequestReviewers: {
+        service: "mantle.smithy.SmithyReviewServices.set#Reviewers",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "reviewerHandles", "expectedRevision"]
+    },
+    submitReview: {
+        service: "mantle.smithy.SmithyReviewServices.submit#Review",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "decision", "body", "sourceFormat", "commentList", "operationId"]
+    },
+    createReviewComment: {
+        service: "mantle.smithy.SmithyReviewServices.create#ReviewComment",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "threadId", "commitId", "path", "oldLine", "newLine", "body", "sourceFormat", "operationId"]
+    },
+    resolveReviewThread: {
+        service: "mantle.smithy.SmithyReviewServices.resolve#ReviewThread",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "threadId", "resolved"]
+    },
+    setMergeRequestState: {
+        service: "mantle.smithy.SmithyReviewServices.set#MergeRequestState",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "state", "expectedRevision"]
+    },
+    mergeMergeRequest: {
+        service: "mantle.smithy.SmithyReviewServices.merge#MergeRequest",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "mergeMethod", "message", "deleteSourceBranch", "expectedHeadCommitId", "expectedRevision"]
+    },
+    forkRepository: {
+        service: "mantle.smithy.SmithyReviewServices.fork#Repository",
+        fields: ["siteId", "repositoryId", "targetGroupId", "slug", "name", "visibility", "operationId"]
+    },
+    findForks: {
+        service: "mantle.smithy.SmithyReviewServices.find#Forks",
+        fields: ["siteId", "repositoryId", "limit", "cursor"]
+    },
+    getEditContext: {
+        service: "mantle.smithy.SmithyReviewServices.get#EditContext",
+        fields: ["siteId", "repositoryId", "refPath", "editAction"]
+    },
+    commitFile: {
+        service: "mantle.smithy.SmithyReviewServices.commit#File",
+        fields: ["siteId", "repositoryId", "branch", "action", "path", "newPath", "content", "attachmentId", "baseBlobId", "message", "destination", "newBranchName", "mergeRequestTitle", "operationId"]
+    },
+    getAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.get#Agreement",
+        fields: ["siteId", "repositoryId", "groupId", "handle"]
+    },
+    setAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.set#Agreement",
+        fields: ["siteId", "repositoryId", "groupId", "setting", "agreementPath", "expectedRevision"]
+    },
+    signAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.sign#Agreement",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "legalName", "years", "operationId"]
+    },
+    recheckAgreement: {
+        service: "mantle.smithy.SmithyAgreementServices.recheck#Agreement",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "operationId"]
+    },
+    declareBotOperator: {
+        service: "mantle.smithy.SmithyAgreementServices.declare#BotOperator",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "operationId"]
+    },
+    confirmBotOperator: {
+        service: "mantle.smithy.SmithyAgreementServices.confirm#BotOperator",
+        fields: ["siteId", "repositoryId", "mergeRequestNum", "expectedRevision"]
     }
 })

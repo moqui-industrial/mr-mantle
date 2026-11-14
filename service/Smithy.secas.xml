@@ -20,4 +20,17 @@
         <actions><service-call name="mantle.smithy.SmithyIssueServices.note#TaskStatus"
                 in-map="{workEffortId:workEffortId, oldStatusId:context.oldStatusId}" ignore-error="true" disable-authz="true"/></actions>
     </seca>
+    <!-- Merge requests (design-smithy §9.1, §9.3): every event the git host queues for a merge request (opened by a page, by
+        a push to refs/for/[branch], by a proposal or by Projects; a new head; closed, reopened; merged by a push) and a
+        merge through the host reach Smithy, which makes the merge request's row and conversation, hides it while its
+        text is held, computes the agreement and writes the state lines. It returns at once for a repository with no
+        SmithyRepository row. -->
+    <seca id="SmithyMergeRequestEvent" service="org.moqui.git.GitReviewServices.queue#MergeRequestEvent" when="post-service">
+        <actions><service-call name="mantle.smithy.SmithyReviewServices.handle#MergeRequestEvent" in-map="{mergeRequestId:mergeRequestId, action:action}"
+                ignore-error="true" disable-authz="true"/></actions>
+    </seca>
+    <seca id="SmithyMergeRequestMerged" service="org.moqui.git.GitReviewServices.merge#MergeRequest" when="post-service">
+        <actions><service-call name="mantle.smithy.SmithyReviewServices.handle#MergeRequestEvent" in-map="{mergeRequestId:mergeRequestId, action:'merged'}"
+                ignore-error="true" disable-authz="true"/></actions>
+    </seca>
 </secas>

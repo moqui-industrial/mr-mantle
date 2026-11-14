@@ -760,6 +760,8 @@ kit => {
             fields.pinnedSequence = wholeNumber(p.pinnedSequence, "pinnedSequence")
         }
         if (Object.keys(hostedFields).length) hosted("update#GitRepository", {repositoryId: repo.repositoryId, ...hostedFields})
+        // another default branch: where the agreement is required it is the one whose rule asks for a merge request
+        if (hostedFields.branch) kit.agreement.keepRules(repo.repositoryId)
         audit(
             p.siteId,
             null,
@@ -781,6 +783,9 @@ kit => {
         const rank = core.visibilityRank(visibilityEnumId)
         const ceiling = Math.max(1, ...r.chain.map(g => core.visibilityRank(g.visibilityEnumId)))
         if (rank < ceiling) invalid("policyRefused[visibility]: A repository is no wider than its group")
+        // a fork is no wider than its parent's effective visibility while it names the parent (§9.2)
+        const forkCeiling = core.forkCeiling(repo.repositoryId)
+        if (rank < forkCeiling) invalid("policyRefused[visibility]: A fork is no wider than the repository it was forked from")
         update(repo, {visibilityEnumId, revision: before + 1})
         audit(
             p.siteId,
@@ -794,7 +799,7 @@ kit => {
         )
         return {
             visibility: VISIBILITY_CODES[visibilityEnumId],
-            effectiveVisibility: VISIBILITY_CODES[VISIBILITY_IDS[rank]],
+            effectiveVisibility: VISIBILITY_CODES[VISIBILITY_IDS[Math.max(rank, forkCeiling)]],
             revision: before + 1
         }
     }
@@ -867,6 +872,8 @@ kit => {
         const oldPath = repo.repositoryPath
         const newPath = namespace + "/" + repo.slug
         const groupId = target?.group.groupId || null
+        // the scope category its conversations have now, which they leave with the repository (§12.1)
+        const oldScope = repo.contactListId || from?.contactListId || (repo.ownerPartyId ? s.row?.accountContactListId : null) || null
         if (!pathFree(p.siteId, groupId, target ? null : partyId, repo.slug, newPath, partyId, access, repo.repositoryId))
             invalid("nameTaken[slug]: That name is taken there")
         core.setPath(repo, {
@@ -880,6 +887,9 @@ kit => {
         // the group it left no longer has it as its tracker
         const left = from ? one(M + "SmithyGroup", {groupId: from.groupId}, true) : null
         if (left?.issueRepositoryId === repo.repositoryId) update(left, {issueRepositoryId: null, revision: revisionOf(left) + 1})
+        kit.reviews.moveScope(one(M + "SmithyRepository", {repositoryId: repo.repositoryId}), oldScope)
+        // the agreement of where it is now: its branch rules follow (§9.4)
+        kit.agreement.keepRules(repo.repositoryId)
         audit(
             p.siteId,
             null,
@@ -922,7 +932,10 @@ kit => {
         const before = revisionOf(repo)
         fresh(before, p.expectedRevision)
         if (text(p.confirmPath).toLowerCase() !== repo.repositoryPath) invalid("confirmPath must be the repository's path")
-        // forks (DG4) and release assets (DG7) will refuse here; neither is there yet
+        // a repository others were forked from stays (§9.2: its forks read its objects): delete them first, or archive it;
+        // release assets (DG7) will refuse here too
+        if (find("moqui.resource.GitRepository", {forkOfRepositoryId: repo.repositoryId}).count() > 0)
+            fail("Conflict", "This repository has forks; delete them first, or archive it")
         audit(p.siteId, null, "repository", repo.repositoryId, "deleteRepository", repo.repositoryPath, before, null)
         find(M + "SmithyRepositoryParty", {repositoryId: repo.repositoryId}).deleteAll()
         for (const group of find(M + "SmithyGroup", {siteId: p.siteId, issueRepositoryId: repo.repositoryId}).list())
@@ -939,8 +952,11 @@ kit => {
                 find(entity).condition("mergeRequestId", "in", requestIds).deleteAll()
         for (const entity of ["WorkEffortGitRef", "WorkEffortGitCommit", "WorkEffortGitRepository"])
             find(W + entity, {repositoryId}).deleteAll()
+        for (const entity of ["SmithyMergeRequest", "SmithyAgreementSignature"]) find(M + entity, {repositoryId}).deleteAll()
         // the hosted repository last: what it refuses rolls the rows back
-        hosted("delete#GitRepository", {repositoryId})
+        const gone = kit.reviews.hosted(GIT + "delete#GitRepository", {repositoryId})
+        if (/^GitHasForks: /.test(text(gone.problem))) fail("Conflict", "This repository has forks; delete them first, or archive it")
+        if (gone.problem != null) invalid(gone.problem.slice(0, 200))
         return {deleted: true}
     }
 

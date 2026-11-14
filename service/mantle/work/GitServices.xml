@@ -926,7 +926,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A comment on a merge request by the current user, who may view its repository: a CommunicationEvent of type
             Comment (markdown) filed on the merge request (CommunicationEventRecord), on a line of its diff when path and a
             line are given (store#ReviewAnchor), or a reply to a thread (parentCommEventId). The author and reviewers are
-            told (MergeRequestUpdate, commented).</description>
+            told (MergeRequestUpdate, commented). For a merge request of a repository Smithy keeps the comment is instead a
+            post of the merge request's conversation with the same anchor (mantle.smithy.SmithyReviewServices.post#ReviewComment:
+            the post gate applies, so the user needs a confirmed address and a held post waits for a moderator), and
+            communicationEventId is that post.</description>
         <in-parameters>
             <parameter name="mergeRequestId" required="true"/>
             <parameter name="body" required="true" allow-html="safe"/>
@@ -936,8 +939,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lineText"/>
             <parameter name="parentCommEventId"/>
         </in-parameters>
-        <out-parameters><parameter name="communicationEventId"/></out-parameters>
+        <out-parameters>
+            <parameter name="communicationEventId"/>
+            <parameter name="held" type="Boolean"><description>The post it wrote waits for a moderator (a merge request with a
+                conversation): its author sees it, the thread list does not have it yet</description></parameter>
+        </out-parameters>
         <actions><script><![CDATA[
+            held = false
             const mr = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', mergeRequestId).disableAuthz().one()
             const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             // a client contact (PROJECT_CLIENT) only views a shared repository: review comments are the team's notes (impl-projects.md P10b)
@@ -945,6 +953,22 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.message.addError(ec.resource.expand('Merge request ${mergeRequestId} not found', '', {mergeRequestId})); return }
             const text = String(body || '').trim()
             if (!text) { ec.message.addError(ec.l10n.localize('A comment needs some text')); return }
+            // a merge request of a repository Smithy keeps has a conversation (mr-pass design-smithy §9.1): the comment is a post of
+            // it, through the post gate, with its anchor, so Projects' Code and Smithy show the same threads
+            const posted = ec.service.sync().name('mantle.smithy.SmithyReviewServices.post#ReviewComment').parameters({mergeRequestId, body: text,
+                path: path || null, oldLine: oldLine ?? null, newLine: newLine ?? null, lineText: lineText || null,
+                parentCommEventId: parentCommEventId || null}).disableAuthz().call()
+            if (ec.message.hasError()) return
+            if (posted?.handled) {
+                communicationEventId = posted.communicationEventId
+                held = !!posted.held
+                ec.message.pushErrors()
+                try {
+                    ec.service.sync().name('mantle.work.GitServices.notify#MergeRequest').parameters({mergeRequestId, kind: 'update', change: 'commented'}).disableAuthz().call()
+                } catch (err) { ec.logger.error(`Merge request ${mergeRequestId}: the comment notice not sent: ${err}`) }
+                finally { ec.message.clearErrors(); ec.message.popErrors() }
+                return
+            }
             let parent = null
             if (parentCommEventId) {
                 parent = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', parentCommEventId).disableAuthz().one()
@@ -1021,13 +1045,20 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script><![CDATA[
             const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).disableAuthz().one()
             rootCommEventId = event ? (event.rootCommEventId || event.communicationEventId) : null
+            // a post of a merge request's conversation: its thread is the post with the anchor, itself or the one it answers
+            if (event && ec.entity.find('mantle.forum.ForumPostState').condition('communicationEventId', communicationEventId).disableAuthz().count() > 0) {
+                const own = ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor').condition('communicationEventId', communicationEventId).disableAuthz().count() > 0
+                rootCommEventId = own ? communicationEventId : event.parentCommEventId
+            }
             const anchor = rootCommEventId ? ec.entity.find('mantle.party.communication.CommunicationEventGitAnchor').condition('communicationEventId', rootCommEventId).disableAuthz().one() : null
             const mr = anchor ? ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', anchor.mergeRequestId).disableAuthz().one() : null
             const access = mr ? ec.service.sync().name('org.moqui.git.GitServices.get#GitRepositoryAccess').parameters({repositoryId: mr.repositoryId}).call() : null
             if (!access?.canView || !ec.user.userId || ec.user.hasPermission('PROJECT_CLIENT')) {
                 ec.message.addError(ec.resource.expand('Review thread ${communicationEventId} not found', '', {communicationEventId})); return }
             const root = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', rootCommEventId).disableAuthz().one()
-            const statusId = resolved ? 'CeResolved' : 'CeSent'
+            // a thread whose first comment is a post of a conversation (a Smithy merge request) goes back to a post's status
+            const isPost = ec.entity.find('mantle.forum.ForumPostState').condition('communicationEventId', rootCommEventId).disableAuthz().count() > 0
+            const statusId = resolved ? 'CeResolved' : (isPost ? 'CeReceived' : 'CeSent')
             if (root.statusId === statusId) return
             root.statusId = statusId
             root.update()
@@ -1035,8 +1066,11 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="get" noun="ReviewThreads">
         <description>The line comments of a merge request, for a user who may view its repository: each thread (its first
-            comment with the anchor) with path, oldLine, newLine, lineText, commitId, outdated, resolved, and its comments in
-            order (communicationEventId, fromPartyId, authorName, entryDate, body). With path, the threads of that file.</description>
+            comment with the anchor) with path, oldLine, newLine, lineText, commitId, outdated, resolved, isPost, and its comments in
+            order (communicationEventId, fromPartyId, authorName, entryDate, body, bodyFormat). With path, the threads of that
+            file. Threads of both shapes are read: a Comment event filed on the merge request (bodyFormat markdown), and a post of
+            the conversation of a merge request Smithy keeps (isPost; bodyFormat html, the post's cleaned text; approved posts
+            only).</description>
         <in-parameters>
             <parameter name="mergeRequestId" required="true"/>
             <parameter name="path"/>
@@ -1061,16 +1095,31 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 return names[partyId]
             }
-            const entry = (event) => ({communicationEventId: event.communicationEventId, parentCommEventId: event.parentCommEventId || null,
-                fromPartyId: event.fromPartyId, authorName: nameOf(event.fromPartyId), entryDate: event.entryDate, body: event.body || ''})
+            // two shapes (mr-pass design-smithy §9.1): a Comment event filed on the merge request, whose replies have it as their
+            // root (bodyFormat markdown); and a post of the merge request's conversation (a repository Smithy keeps), whose
+            // replies are the posts that answer it (bodyFormat html: the cleaned text). Of a conversation only approved posts
+            // are given here: a held one is its author's and the moderators' on Smithy's page.
+            const entry = (event, bodyFormat) => ({communicationEventId: event.communicationEventId, parentCommEventId: event.parentCommEventId || null,
+                fromPartyId: event.fromPartyId, authorName: nameOf(event.fromPartyId), entryDate: event.entryDate, body: event.body || '', bodyFormat})
+            const approved = (id) => ec.entity.find('mantle.forum.ForumPostState').condition('communicationEventId', id).disableAuthz().one()?.visibility === 'approved'
             for (const anchor of Array.from(find.orderBy('path').orderBy('newLine').orderBy('oldLine').list())) {
                 const root = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', anchor.communicationEventId).disableAuthz().one()
                 if (root == null) continue
+                const isPost = ec.entity.find('mantle.forum.ForumPostState').condition('communicationEventId', root.communicationEventId).disableAuthz().count() > 0
+                if (isPost) {
+                    if (!approved(root.communicationEventId)) continue
+                    const answers = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent').condition('parentCommEventId', root.communicationEventId)
+                            .orderBy('entryDate').disableAuthz().list()).filter((reply) => approved(reply.communicationEventId))
+                    threadList.push({communicationEventId: root.communicationEventId, path: anchor.path, oldLine: anchor.oldLine, newLine: anchor.newLine,
+                        lineText: anchor.lineText, commitId: anchor.commitId, outdated: anchor.outdated === 'Y', resolved: root.statusId === 'CeResolved',
+                        isPost: true, commentList: [entry(root, 'html')].concat(answers.map((reply) => entry(reply, 'html')))})
+                    continue
+                }
                 const replies = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent').condition('rootCommEventId', root.communicationEventId)
                         .condition('communicationEventId', 'not-equals', root.communicationEventId).orderBy('entryDate').disableAuthz().list())
                 threadList.push({communicationEventId: root.communicationEventId, path: anchor.path, oldLine: anchor.oldLine, newLine: anchor.newLine,
                     lineText: anchor.lineText, commitId: anchor.commitId, outdated: anchor.outdated === 'Y', resolved: root.statusId === 'CeResolved',
-                    commentList: [entry(root)].concat(replies.map(entry))})
+                    isPost: false, commentList: [entry(root, 'markdown')].concat(replies.map((reply) => entry(reply, 'markdown')))})
             }
         ]]></script></actions>
     </service>

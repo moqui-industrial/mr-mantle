@@ -294,7 +294,7 @@ feature("an edit is counted and ruled as a new post is; an archived repository a
             "mantle.forum.ForumMemberState",
             {siteId: SITE, partyId: "SMI_AUTHOR"},
             {
-                dayKey: String(ec.user.nowTimestamp).slice(0, 10),
+                dayKey: ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js").dayKey(),
                 dailyCounts: JSON.stringify({issue: 10}),
                 lastPostedAt: null
             }

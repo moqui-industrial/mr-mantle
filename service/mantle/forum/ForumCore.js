@@ -8,6 +8,9 @@ const F = 'mantle.forum.',
     E = 'mantle.party.communication.'
 const now = () => ec.user.nowTimestamp
 const millis = (value) => (value == null ? 0 : ec.user.timestampMillis(value))
+/* The day (UTC) that the day's counters of a member are of: yyyy-MM-dd. A timestamp is text of epoch milliseconds, whose
+   first ten characters are the second, not the day. */
+const dayKey = () => new Date(millis(now())).toISOString().slice(0, 10)
 /* A time stamp for an entity condition from epoch milliseconds. */
 const stamp = (ms) => new Date(ms)
 const id = () => ec.user.randomString(32)
@@ -995,6 +998,15 @@ function recordText(html, rootCommEventId) {
     }
     return html
 }
+/* Whether a party may stage a file for a page's commit to a repository an app keeps, and how large: {maxBytes}, or
+   {refusal} for one who views it and may not write; null when no app keeps the repository for that party to view. */
+function recordUpload(siteId, repositoryId, actor = me()) {
+    for (const scope of scopes()) {
+        const out = scope.fileUpload ? scope.fileUpload(siteId, repositoryId, actor) : null
+        if (out) return out
+    }
+    return null
+}
 /* The first post of a record changed: its app keeps what it copies of the text. */
 function recordChanged(rootCommEventId) {
     for (const scope of scopes()) scope.postChanged(rootCommEventId)
@@ -1252,7 +1264,7 @@ function gate(g) {
         }
         // 4. The day's limit for the kind at the actor's trust level.
         if (counter && !mod) {
-            const day = String(now()).slice(0, 10),
+            const day = dayKey(),
                 same = memberState.dayKey === day,
                 daily = !same
                     ? 0
@@ -1374,7 +1386,7 @@ function gate(g) {
 function gateCommit(result, { pending } = {}) {
     const m = result?.memberState
     if (!m) return
-    const day = String(now()).slice(0, 10),
+    const day = dayKey(),
         same = m.dayKey === day,
         counter = result.counter,
         counts = same ? json(m.dailyCounts, {}) : {}
@@ -1415,6 +1427,7 @@ function privateTopic(t) {
     E,
     now,
     millis,
+    dayKey,
     stamp,
     id,
     hash,
@@ -1485,6 +1498,7 @@ function privateTopic(t) {
     recordPage,
     recordOwners,
     recordText,
+    recordUpload,
     recordTopic,
     recordChanged,
     notForRecord,

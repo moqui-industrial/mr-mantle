@@ -19,18 +19,33 @@ function privileged(work) {
         if (!was) ec.artifactExecution.enableAuthz()
     }
 }
-/* The issue of a record topic with what a party holds on it, or null: the party on a page when it is the caller. */
+/* The issue or the merge request of a record topic with what a party holds on it, or null: the party on a page when it
+   is the caller. authorPartyId is who filed it, whose own it is while its first post is held. */
 function held(rootCommEventId, actorPartyId) {
     const issue = one(M + "SmithyIssue", {rootCommEventId})
-    const repo = issue ? one(M + "SmithyRepository", {repositoryId: issue.repositoryId}) : null
+    const request = issue ? null : one(M + "SmithyMergeRequest", {rootCommEventId})
+    const record = issue || request
+    const repo = record ? one(M + "SmithyRepository", {repositoryId: record.repositoryId}) : null
     if (!repo) return null
     const a = core.actorOfParty(actorPartyId)
     const r = core.repositoryRights(repo, a)
     const topic = one(F + "ForumTopic", {rootCommEventId})
     // a site that no longer mounts Smithy has no pages: nobody reads a conversation there
-    const access = core.issueAccess(r, issue, a, topic?.contactListId || null)
+    const access = issue
+        ? core.issueAccess(r, issue, a, topic?.contactListId || null)
+        : core.mergeRequestAccess(r, request, a, topic?.contactListId || null)
     if (!core.mounted(repo.siteId)) access.canRead = access.writable = access.canModerate = false
-    return {issue, repo, r, a, topic, access}
+    return {
+        issue,
+        request,
+        rootCommEventId,
+        authorPartyId: issue ? issue.reporterPartyId : request.authorPartyId,
+        repo,
+        r,
+        a,
+        topic,
+        access
+    }
 }
 /* recordAccess: the evaluator's shape for the conversation of an issue, or null for a topic that is no issue's. */
 function recordAccess(rootCommEventId, actorPartyId = me()) {
@@ -84,8 +99,8 @@ function postAccess(postId, actorPartyId = me()) {
 /* While an issue's first post is held, or was removed, the issue is its author's and its moderators': nobody else reads
    a post of it or is told of one, whatever they watch or are mentioned in. */
 function rootReadable(h, actorPartyId) {
-    const root = one(F + "ForumPostState", {communicationEventId: h.issue.rootCommEventId})
-    return root?.visibility === "approved" || (!!actorPartyId && h.issue.reporterPartyId === actorPartyId) || h.access.canModerate
+    const root = one(F + "ForumPostState", {communicationEventId: h.rootCommEventId})
+    return root?.visibility === "approved" || (!!actorPartyId && h.authorPartyId === actorPartyId) || h.access.canModerate
 }
 /* ownedScopes: the scope categories of the repositories of a site that a party is an Owner of by a repository's own
    row or as its namespace's account: where the review items of the records it moderates are, when it is no staff of
@@ -179,9 +194,21 @@ const base = siteId => publicApps().mount(siteId, "smithy")?.base
 function recordPage(rootCommEventId) {
     return privileged(() => {
         const issue = one(M + "SmithyIssue", {rootCommEventId})
-        const repo = issue ? one(M + "SmithyRepository", {repositoryId: issue.repositoryId}) : null
+        const request = issue ? null : one(M + "SmithyMergeRequest", {rootCommEventId})
+        const record = issue || request
+        const repo = record ? one(M + "SmithyRepository", {repositoryId: record.repositoryId}) : null
         const mount = repo ? base(repo.siteId) : null
         if (mount == null) return null
+        const listId = String(repo.repositoryPath).replace(/\//g, ".")
+        if (request) {
+            const hosted = one("moqui.resource.GitMergeRequest", {mergeRequestId: request.mergeRequestId})
+            const number = Number(hosted?.mergeRequestNum || 0)
+            return {
+                path: mount + "/" + repo.repositoryPath + "/-/merge-requests/" + number,
+                title: (hosted?.title || "Merge request") + " (!" + number + ")",
+                listId
+            }
+        }
         const task = one("mantle.work.effort.WorkEffort", {workEffortId: issue.workEffortId})
         return {
             path: mount + "/" + repo.repositoryPath + "/-/issues/" + Number(issue.issueNumber),
@@ -189,7 +216,7 @@ function recordPage(rootCommEventId) {
                 issue.confidential === "Y"
                     ? "Confidential issue #" + Number(issue.issueNumber)
                     : (task?.workEffortName || "Issue") + " (#" + Number(issue.issueNumber) + ")",
-            listId: String(repo.repositoryPath).replace(/\//g, ".")
+            listId
         }
     })
 }
@@ -204,19 +231,48 @@ function linkText(html, rootCommEventId) {
         const h = held(rootCommEventId, me())
         if (!h) return null
         const mount = base(h.repo.siteId)
-        if (mount == null || !/[#@]/.test(html)) return html
+        if (mount == null || !/[#@!]/.test(html)) return html
         const issueLinks = new Map()
         const issueLink = number => {
             if (!issueLinks.has(number)) {
-                const other = one(M + "SmithyIssue", {repositoryId: h.repo.repositoryId, issueNumber: number})
+                const other =
+                    h.repo.issuesEnabled === "Y"
+                        ? one(M + "SmithyIssue", {repositoryId: h.repo.repositoryId, issueNumber: number})
+                        : null
                 const state = other ? one(F + "ForumPostState", {communicationEventId: other.rootCommEventId}) : null
                 const readable =
                     !!other &&
                     core.issueAccess(h.r, other, h.a, null).canRead &&
                     (state?.visibility === "approved" || other.reporterPartyId === h.a.partyId || h.access.canModerate)
-                issueLinks.set(number, readable ? mount + "/" + h.repo.repositoryPath + "/-/issues/" + number : null)
+                // a number that is no issue's names the merge request of that number (§8.4)
+                issueLinks.set(
+                    number,
+                    readable
+                        ? mount + "/" + h.repo.repositoryPath + "/-/issues/" + number
+                        : other
+                          ? null
+                          : requestLink(number)
+                )
             }
             return issueLinks.get(number)
+        }
+        const requestLinks = new Map()
+        const requestLink = number => {
+            if (!requestLinks.has(number)) {
+                const hosted = Array.from(
+                    find("moqui.resource.GitMergeRequest", {repositoryId: h.repo.repositoryId, mergeRequestNum: number})
+                        .limit(1)
+                        .list()
+                )[0]
+                const other = hosted ? one(M + "SmithyMergeRequest", {mergeRequestId: hosted.mergeRequestId}) : null
+                const state = other ? one(F + "ForumPostState", {communicationEventId: other.rootCommEventId}) : null
+                const readable =
+                    !!other &&
+                    core.mergeRequestAccess(h.r, other, h.a, null).canRead &&
+                    (state?.visibility === "approved" || other.authorPartyId === h.a.partyId || h.access.canModerate)
+                requestLinks.set(number, readable ? mount + "/" + h.repo.repositoryPath + "/-/merge-requests/" + number : null)
+            }
+            return requestLinks.get(number)
         }
         const handles = new Map()
         const handleLink = handle => {
@@ -239,12 +295,16 @@ function linkText(html, rootCommEventId) {
                         else if (/^<\/(a|code|pre)\s*>/i.test(part)) depth = Math.max(0, depth - 1)
                         return part
                     }
-                    if (depth || !/[#@]/.test(part)) return part
+                    if (depth || !/[#@!]/.test(part)) return part
                     return part.replace(
-                        /(^|[^A-Za-z0-9_\/&#@.-])(#([1-9][0-9]{0,8})|@([A-Za-z0-9][A-Za-z0-9_-]{2,31}))(?![A-Za-z0-9_])/g,
-                        (whole, before, reference, number, handle) => {
+                        /(^|[^A-Za-z0-9_\/&#@!.-])(#([1-9][0-9]{0,8})|!([1-9][0-9]{0,8})|@([A-Za-z0-9][A-Za-z0-9_-]{2,31}))(?![A-Za-z0-9_])/g,
+                        (whole, before, reference, number, request, handle) => {
                             if (links >= 100) return whole
-                            const href = number ? issueLink(Number(number)) : handleLink(handle)
+                            const href = number
+                                ? issueLink(Number(number))
+                                : request
+                                  ? requestLink(Number(request))
+                                  : handleLink(handle)
                             if (!href) return whole
                             links++
                             return before + '<a href="' + escapeHtml(href) + '">' + reference + "</a>"
@@ -255,14 +315,39 @@ function linkText(html, rootCommEventId) {
         )
     })
 }
-/* postChanged: the first post of an issue was edited: the task's description is a plain-text copy of it (§8.1). */
+/* postChanged: the first post of an issue or a merge request was edited: the task's description, or the hosted merge
+   request's, is a plain-text copy of it (§8.1, §9.1). */
 function postChanged(rootCommEventId) {
     privileged(() => {
-        const issue = one(M + "SmithyIssue", {rootCommEventId})
-        if (!issue) return
         const event = one("mantle.party.communication.CommunicationEvent", {communicationEventId: rootCommEventId})
-        const task = one("mantle.work.effort.WorkEffort", {workEffortId: issue.workEffortId})
-        if (event && task) update(task, {description: plainText(event.body || "").slice(0, 30000)})
+        if (!event) return
+        const copy = plainText(event.body || "").slice(0, 30000)
+        const issue = one(M + "SmithyIssue", {rootCommEventId})
+        if (issue) {
+            const task = one("mantle.work.effort.WorkEffort", {workEffortId: issue.workEffortId})
+            if (task) update(task, {description: copy})
+            return
+        }
+        const request = one(M + "SmithyMergeRequest", {rootCommEventId})
+        const hosted = request ? one("moqui.resource.GitMergeRequest", {mergeRequestId: request.mergeRequestId}) : null
+        if (hosted) update(hosted, {description: copy || null})
     })
 }
-;({ownedScopes, recordAccess, postAccess, categoryOwner, confidential, recordOwners, recordPage, linkText, postChanged})
+/* fileUpload: whether a party may stage a file for commitFile's upload to a repository (§9.5), and how large: a viewer
+   with a confirmed address who is not suspended, of a repository that is not archived; the site's maxEditBytes. Null
+   for a repository the party may not view, or that Smithy does not keep on that site. */
+function fileUpload(siteId, repositoryId, actorPartyId = me()) {
+    return privileged(() => {
+        const repo = typeof repositoryId === "string" && repositoryId ? one(M + "SmithyRepository", {repositoryId}) : null
+        if (!repo || repo.siteId !== siteId || !core.mounted(siteId)) return null
+        const a = core.actorOfParty(actorPartyId)
+        const r = core.repositoryRights(repo, a)
+        if (!r.canView) return null
+        if (!a.userId || !core.confirmed(a.userId)) return {refusal: "addressUnconfirmed: Confirm your email address to continue"}
+        if (r.access.suspended) return {refusal: "accessDenied: Your account is suspended on this site"}
+        if (one("moqui.resource.GitRepository", {repositoryId})?.archivedDate)
+            return {refusal: "repositoryArchived: This repository is archived"}
+        return {maxBytes: core.settings(siteId).maxEditBytes}
+    })
+}
+;({fileUpload, ownedScopes, recordAccess, postAccess, categoryOwner, confidential, recordOwners, recordPage, linkText, postChanged})

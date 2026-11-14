@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Smithy (mr-pass plan/design-smithy.md §9.1, §9.3): a merge request whose first post is held is hidden in the git host, so
+    its head is fetched by nobody but through Smithy's own reads for its author and its moderators. When the visibility of
+    a post changes (a moderator approves it, hides it or removes it) the merge request it is the first post of follows.
+    The service returns at once for any other post. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="SmithyMergeRequestPostVisibility" entity="mantle.forum.ForumPostState" on-update="true" get-original-value="true" run-on-error="false">
+        <condition><expression>originalValue != null &amp;&amp; visibility != null &amp;&amp; visibility != originalValue.visibility</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyReviewServices.sync#MergeRequestHidden"
+                in-map="{communicationEventId:communicationEventId}" disable-authz="true"/></actions>
+    </eeca>
+</eecas>

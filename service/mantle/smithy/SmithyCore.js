@@ -386,7 +386,7 @@ function groupRights(group, a) {
 }
 /* What an actor holds on a repository (a SmithyRepository row): the effective role's rank among its own row, its
    groups' rows, its personal namespace and its projects' roles, and whether it may be viewed. */
-function repositoryRights(repo, a) {
+function repositoryRights(repo, a, depth = 0) {
     const access = siteAccess(repo.siteId, a)
     const chain = repo.groupId ? groupChain(repo.groupId) : repo.ownerPartyId ? [] : null
     const whole = chain && chain.every(g => g.siteId === repo.siteId) ? chain : null
@@ -401,7 +401,11 @@ function repositoryRights(repo, a) {
     }
     if (access.operator) rank = RANK.SmrOwner
     const visibility = whole
-        ? Math.max(visibilityRank(repo.visibilityEnumId), ...whole.map(g => visibilityRank(g.visibilityEnumId)))
+        ? Math.max(
+              visibilityRank(repo.visibilityEnumId),
+              ...whole.map(g => visibilityRank(g.visibilityEnumId)),
+              forkCeiling(repo.repositoryId)
+          )
         : 3
     const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt))
     return {
@@ -411,12 +415,41 @@ function repositoryRights(repo, a) {
         rank,
         visibility,
         hidden,
-        canView: viewable(access, a, whole, rank, visibility, hidden)
+        canView: viewable(access, a, whole, rank, visibility, hidden) && parentViewable(repo.repositoryId, a, depth)
     }
+}
+/* While a fork names a parent that is not public, viewing the fork also needs view of the parent (§9.2): the fork shares
+   the parent's code, so a role on the fork gives nothing the parent does not, and a forker who loses the parent loses the
+   fork's pages and its git (Not Found, to its Owner too: the repository is kept, and an operator sees it and can delete
+   it or hand it back). A public parent, and one Smithy does not keep, ask nothing. */
+function parentViewable(repositoryId, a, depth) {
+    if (depth >= 8) return false
+    const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+    const parent = parentId ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+    if (!parent) return true
+    const rights = repositoryRights(parent, a, depth + 1)
+    return rights.visibility === 1 || rights.canView
+}
+/* A fork is no wider than its parent's effective visibility while it names the parent (§5.1, §9.2): the order of the
+   narrowest visibility of the repositories a hosted repository was forked from, each with its groups', so a fork
+   narrows when its parent does; 1 (no ceiling) for one that is no fork, or whose parent Smithy does not keep. */
+function forkCeiling(repositoryId, depth = 0) {
+    return remember("fork|" + repositoryId, () => {
+        const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+        const parent = parentId && depth < 8 ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+        if (!parent) return 1
+        const chain = parent.groupId ? groupChain(parent.groupId) : []
+        return Math.max(
+            visibilityRank(parent.visibilityEnumId),
+            ...(chain || []).map(g => visibilityRank(g.visibilityEnumId)),
+            chain ? 1 : 3,
+            forkCeiling(parentId, depth + 1)
+        )
+    })
 }
 /* Whether an actor may view a repository of a list, without reading its role rows when it is public in effect. */
 function repositoryViewable(repo, a) {
-    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1) {
+    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1 && forkCeiling(repo.repositoryId) === 1) {
         const group = one(M + "SmithyGroup", {groupId: repo.groupId})
         const rights = group && group.siteId === repo.siteId ? groupRights(group, a) : null
         if (rights && rights.canView && rights.visibility === 1 && !rights.hidden) return true
@@ -570,6 +603,45 @@ function issueAccess(r, issue, a, scopeContactListId) {
         writable: canRead && !!a.partyId && !writeRefusal,
         writeRefusal,
         canModerate: canRead && !r.access.suspended && (owner || (!confidential && (r.access.staff || listStaff())))
+    }
+}
+
+/* What an actor holds on a merge request (§5.3, §9.1), from the rights it holds on the target repository (r) and the
+   SmithyMergeRequest row:
+   - read: a viewer of a repository whose merge requests are on;
+   - write (comment, review, react, flag): a reader with a confirmed address who is not suspended or silenced, in a
+     repository that is not archived; writeRefusal says which of these refused;
+   - moderate: a reader who is an Owner, the site's staff, or a moderator of the scope category. */
+function mergeRequestAccess(r, request, a, scopeContactListId) {
+    const canRead = r.canView && r.repo.mergeRequestsEnabled !== "N"
+    const isConfirmed = !!a.userId && confirmedAddress().confirmed(a.userId)
+    const silenced = !!a.partyId && sanctioned(r.repo.siteId, a.partyId, scopeContactListId || null, "silence")
+    const archived = !!(r.git || one("moqui.resource.GitRepository", {repositoryId: r.repo.repositoryId}))?.archivedDate
+    const writeRefusal =
+        !canRead || !a.partyId
+            ? null
+            : !isConfirmed
+              ? "addressUnconfirmed: Confirm your email address to continue"
+              : r.access.suspended || silenced
+                ? "accessDenied: Your account may not post on this site"
+                : archived
+                  ? "repositoryArchived: This repository is archived"
+                  : null
+    const listStaff = () => {
+        const row = scopeContactListId && a.partyId ? forum.listMember(scopeContactListId, a.partyId) : null
+        return !!row && ["ListOwner", "ListModerator"].includes(row.roleTypeId)
+    }
+    const owner = r.rank >= RANK.SmrOwner
+    return {
+        request,
+        confidential: false,
+        owner,
+        author: !!a.partyId && request.authorPartyId === a.partyId,
+        canRead,
+        limited: false,
+        writable: canRead && !!a.partyId && !writeRefusal,
+        writeRefusal,
+        canModerate: canRead && !r.access.suspended && (owner || r.access.staff || listStaff())
     }
 }
 
@@ -825,6 +897,8 @@ function resolvePath(siteId, path) {
     ensureAccountCategory,
     scopeCategory,
     issueAccess,
+    mergeRequestAccess,
+    forkCeiling,
     GROUP_REPOSITORY_LIMIT,
     mounted,
     // of an account by its userId (none: false), and of the signed-in account

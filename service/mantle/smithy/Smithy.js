@@ -162,9 +162,7 @@ function repositoryView(r) {
         archived: !!hosted?.archivedDate,
         mirror: hosted?.repositoryKind === "remote",
         hidden: r.hidden,
-        // forks are DG4's
-        forkOf: null,
-        forkCount: 0,
+        ...forkView(repo, hosted),
         features: {
             issues: repo.issuesEnabled === "Y",
             mergeRequests: repo.mergeRequestsEnabled !== "N",
@@ -177,6 +175,23 @@ function repositoryView(r) {
         component: repo.componentName ? {name: repo.componentName, version: repo.componentVersion || null} : null,
         lastPushAt: hosted?.lastUpdateDate || null,
         revision: Number(repo.revision || 1)
+    }
+}
+/* A repository's place among forks (§9.2): the parent it names, when the caller may view it, and how many of its forks
+   the caller may view. A repository in no fork network asks nothing. */
+function forkView(repo, hosted) {
+    if (!hosted?.forkNetworkId) return {forkOf: null, forkCount: 0}
+    const a = core.actor()
+    const viewable = repositoryId => {
+        const other = one(M + "SmithyRepository", {repositoryId})
+        return other && other.siteId === repo.siteId && core.repositoryViewable(other, a) ? other : null
+    }
+    const parent = hosted.forkOfRepositoryId ? viewable(hosted.forkOfRepositoryId) : null
+    return {
+        forkOf: parent ? {repositoryPath: parent.repositoryPath, name: parent.name} : null,
+        forkCount: Array.from(
+            find(GIT_REPOSITORY, {forkOfRepositoryId: repo.repositoryId}).selectField("repositoryId").limit(SCAN_LIMIT).list()
+        ).filter(fork => !!viewable(fork.repositoryId)).length
     }
 }
 /* What the caller may do in a repository (§5.3), so a page shows only the controls that would be accepted. */
@@ -229,15 +244,33 @@ function commitViews(repositoryId, commits) {
                   a
               )
             : new Map()
-    const states = list.length
-        ? git("get#GitCommitStatuses", {repositoryId, commitIdList: list.map(commit => commit.commitId)}).stateByCommit || {}
-        : {}
+    const ids = list.map(commit => commit.commitId)
+    // a commit of a merge request that is still hidden has no answer here for its checks
+    const states = list.length ? reviews.soft("get#GitCommitStatuses", {repositoryId, commitIdList: ids}).stateByCommit || {} : {}
+    // the author's handle is told only for the account that brought the commit and wrote it (N-PUSHER): the pusher,
+    // when the author's address is that account's own, and its profile is shown to the caller
+    const handles = new Map()
+    if (repo && list.length)
+        for (const pusher of Array.from(
+            reviews.soft("get#GitCommitPushers", {repositoryId, commitIdList: ids.slice(0, 500)}).pusherList || []
+        )) {
+            const commit = list.find(one => one.commitId === pusher.commitId)
+            const account = pusher.userId ? one("moqui.security.UserAccount", {userId: pusher.userId}) : null
+            if (!commit?.authorEmail || !account?.partyId) continue
+            if (
+                text(account.emailAddress).toLowerCase() !== text(commit.authorEmail).toLowerCase() ||
+                !core.confirmed(account.userId)
+            )
+                continue
+            const profile = one(S + "PublicSiteProfile", {siteId: repo.siteId, partyId: account.partyId})
+            if (profile && core.profileShown(profile, a)) handles.set(commit.commitId, profile.handle)
+        }
     return list.map(commit => ({
         commitId: commit.commitId,
         summary: commit.summary || "",
         message: commit.message || "",
         authorName: commit.authorName || "",
-        authorHandle: null,
+        authorHandle: handles.get(commit.commitId) || null,
         authorDate: commit.authorDate || null,
         committerName: commit.committerName || "",
         commitDate: commit.committerDate || null,
@@ -502,9 +535,14 @@ methods.getRepository = p => {
         counts: {
             // issues are DG3's
             openIssues: 0,
-            openMergeRequests: find("moqui.resource.GitMergeRequest", {repositoryId: p.repositoryId})
-                .condition("statusId", "in", ["GmrDraft", "GmrOpen"])
-                .count()
+            // one whose text is held is not counted
+            openMergeRequests:
+                r.repo.mergeRequestsEnabled === "N"
+                    ? 0
+                    : find("moqui.resource.GitMergeRequest", {repositoryId: p.repositoryId})
+                          .condition("statusId", "in", ["GmrDraft", "GmrOpen"])
+                          .condition("hiddenDate", null)
+                          .count()
         }
     }
 }
@@ -698,8 +736,17 @@ methods.getCommit = p => {
     const statuses = git("get#GitCommitStatuses", {repositoryId: p.repositoryId, commitId})
     // the issues the commit names that the caller may read, and a count of the other items it names (§8.2)
     const named = issues.linkedIssues(r, commitId, core.actor())
+    // the branches and tags that contain it (N-CONTAINS), the default branch first
+    const contained = reviews.soft("get#GitCommitRefs", {repositoryId: p.repositoryId, commitId, limit: 50})
     return {
         commit: commitViews(p.repositoryId, [found.commit])[0],
+        refList: Array.from(contained.refList || []).map(ref => ({
+            kind: ref.refType,
+            name: ref.shortName,
+            fullName: ref.refName,
+            isDefaultBranch: !!ref.isDefaultBranch
+        })),
+        refsTruncated: !!contained.truncated,
         fileList: fileViews(files),
         insertions: Number(found.insertions || 0),
         deletions: Number(found.deletions || 0),
@@ -707,31 +754,40 @@ methods.getCommit = p => {
         truncated: diffs.truncated || tooMany,
         statusList: Array.from(statuses.statusList || []),
         linkedIssues: named.linkedIssues,
-        // merge request links are DG4's
-        linkedMergeRequests: [],
+        // the merge requests it names (!n, or #n where no issue has the number), or whose head or merge it is
+        linkedMergeRequests: reviews.commitRequests(r, found.commit, core.actor()),
         hiddenItemCount: named.hiddenItemCount
     }
 }
 methods.getCompare = p => {
     const r = core.repository(p.repositoryId, p.siteId)
-    // a fork's ref as the head is DG4's
-    if (p.headRepositoryPath && text(p.headRepositoryPath).toLowerCase() !== r.repo.repositoryPath)
-        notBuilt("A compare across repositories")
+    // the head may be a branch of another repository of the fork network (a fork against its parent, §9.2), which the
+    // caller views too
+    let headRepository = r.repo
+    if (p.headRepositoryPath && text(p.headRepositoryPath).toLowerCase() !== r.repo.repositoryPath) {
+        const other = one(M + "SmithyRepository", {repositoryPath: text(p.headRepositoryPath).toLowerCase()})
+        if (!other || other.siteId !== p.siteId || !core.repositoryRights(other, core.actor()).canView) missing()
+        headRepository = other
+    }
+    const across = headRepository.repositoryId !== r.repo.repositoryId
     if (!p.head) invalid("head is required")
     // each side is a branch, a tag or a commit id (as a refPath's ref is found), and the compare is of their commits
     const refs = git("get#GitRefs", {repositoryId: p.repositoryId})
-    const head = core.refOf(p.repositoryId, p.head, refs)
+    const head = core.refOf(headRepository.repositoryId, p.head, across ? undefined : refs)
     const base = core.refOf(p.repositoryId, p.base || "", refs)
     if (base.empty) missing()
-    const out = git("get#GitCompare", {
+    const compared = reviews.hosted(core.GIT + "get#GitCompare", {
         repositoryId: p.repositoryId,
         base: base.commitId,
-        head: head.commitId,
+        head: across ? head.fullName : head.commitId,
+        ...(across ? {headRepositoryId: headRepository.repositoryId} : {}),
         withDiffs: flag(p.withDiffs),
         // a trial merge only when the page asks for it
         checkMergeable: flag(p.checkMergeable)
     })
-    if (!out.headCommitId || !out.baseCommitId) missing()
+    if (/^GitNotInNetwork: /.test(text(compared.problem))) invalid("Those repositories are not forks of one repository")
+    const out = compared.out
+    if (compared.problem != null || !out.headCommitId || !out.baseCommitId) missing()
     const diffs = boundedDiffs(flag(p.withDiffs) ? out.fileList : [])
     const open =
         head.kind === "branch" && base.kind === "branch"
@@ -739,9 +795,11 @@ methods.getCompare = p => {
                   find("moqui.resource.GitMergeRequest", {
                       repositoryId: p.repositoryId,
                       sourceRef: head.name,
-                      targetRef: base.name
+                      targetRef: base.name,
+                      sourceRepositoryId: across ? headRepository.repositoryId : null
                   })
                       .condition("statusId", "in", ["GmrDraft", "GmrOpen"])
+                      .condition("hiddenDate", null)
                       .limit(1)
                       .list()
               )[0]
@@ -752,7 +810,7 @@ methods.getCompare = p => {
         mergeBaseId: out.mergeBaseId || null,
         aheadBy: Number(out.aheadBy || 0),
         behindBy: Number(out.behindBy || 0),
-        commitList: commitViews(p.repositoryId, out.commitList),
+        commitList: commitViews(headRepository.repositoryId, out.commitList),
         commitsTruncated: !!out.commitsTruncated,
         fileList: fileViews(out.fileList),
         fileDiffList: diffs.shown,
@@ -972,6 +1030,17 @@ function makeRepository(r) {
     if (repositoryId) {
         if (!one(GIT_REPOSITORY, {repositoryId}) || one(M + "SmithyRepository", {repositoryId}))
             invalid("repositoryId names no hosted repository that Smithy does not have")
+    } else if (r.forkOfRepositoryId) {
+        // a fork (§9.2): the git host makes it of its parent's kind, with the parent's branches and tags, sharing its objects
+        do repositoryId = "smr" + ec.entity.sequencedIdPrimary(M + "SmithyRepository", 0, 50)
+        while (one(GIT_REPOSITORY, {repositoryId}))
+        const forked = reviews.hosted(core.GIT + "fork#GitRepository", {
+            sourceRepositoryId: r.forkOfRepositoryId,
+            repositoryId,
+            description: text(r.description).slice(0, 255) || null
+        })
+        if (/^GitArchived: /.test(text(forked.problem))) fail("Conflict", "repositoryArchived: This repository is archived")
+        if (forked.problem != null) fail("Unprocessable", "The fork could not be made")
     } else {
         const repositoryKind = r.repositoryKind || "local"
         if (!["local", "db"].includes(repositoryKind)) invalid("repositoryKind must be local or db")
@@ -1014,6 +1083,8 @@ function makeRepository(r) {
         revision: 1
     })
     core.setPath(created, {repositoryPath})
+    // a repository made, bound or forked where the agreement is required has its branch rules from the start (§9.4)
+    agreements.keepRules(repositoryId)
     return {repositoryId, repositoryPath}
 }
 /* Whether a repository's name is free in its group (among its subgroups and repositories) or its personal namespace,
@@ -1062,13 +1133,21 @@ const kit = {
     makeRepository,
     pathFree,
     MERGE_METHODS,
-    GIT_REPOSITORY
+    GIT_REPOSITORY,
+    commitViews,
+    fileViews,
+    boundedDiffs
 }
 // issues (§15.4): its own module; what the other modules need of it is in the kit
 const issues = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyIssues.js")(kit)
 kit.issues = issues
 ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyManage.js")(kit)
 const gitModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyGit.js")(kit)
+// merge requests, forks and page edits (§15.5), and the contributor agreement (§9.4): each names the other through the kit
+const reviews = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyReviews.js")(kit)
+kit.reviews = reviews
+const agreements = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyAgreements.js")(kit)
+kit.agreement = agreements
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1090,11 +1169,18 @@ const NUMBERS = [
     "maxLfsBytes",
     "runnerMinutesMonthly",
     "issueNumber",
-    "duplicateOfNumber"
+    "duplicateOfNumber",
+    "mergeRequestNum",
+    "oldLine",
+    "newLine"
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
-const LISTS = ["labelIds", "assigneeHandles", "attachmentIds"]
+const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles"]
 const TEXTS = ["body"]
+/* A file's text as a page's editor sends it: bounded here well above the site's maxEditBytes, which commitFile holds. */
+const FILE_TEXTS = ["content"]
+/* A review's pending line comments: at most 50 maps of a line comment's own fields. */
+const COMMENT_FIELDS = ["threadId", "commitId", "path", "oldLine", "newLine", "body", "sourceFormat"]
 const FLAGS = [
     "mine",
     "includeSubgroups",
@@ -1117,7 +1203,11 @@ const FLAGS = [
     "active",
     "bot",
     "confidential",
-    "asNewIssue"
+    "asNewIssue",
+    "draft",
+    "deleteSourceBranch",
+    "resolved",
+    "agent"
 ]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
@@ -1136,6 +1226,23 @@ function execute(operation, p) {
             if (kind !== "string" || value.length > 200000) invalid("Invalid field type: " + field)
             continue
         }
+        if (FILE_TEXTS.includes(field)) {
+            if (kind !== "string" || value.length > 8388608) invalid("Invalid field type: " + field)
+            continue
+        }
+        if (field === "commentList") {
+            const plain = item =>
+                !!item &&
+                typeof item === "object" &&
+                !Array.isArray(item) &&
+                Object.entries(item).every(
+                    ([name, entry]) =>
+                        COMMENT_FIELDS.includes(name) &&
+                        (entry == null || (["string", "number"].includes(typeof entry) && String(entry).length <= 200000))
+                )
+            if (!Array.isArray(value) || value.length > 50 || !value.every(plain)) invalid("Invalid list field: " + field)
+            continue
+        }
         if (
             NUMBERS.includes(field)
                 ? !["number", "string"].includes(kind)
@@ -1152,6 +1259,15 @@ function execute(operation, p) {
     return out
 }
 const ROLE_CHANGES = ["setGroupMember", "leaveGroup", "setRepositoryMember", "transferRepository", "decideGroupRequest"]
+function guardedCheck(work) {
+    try {
+        return privileged(() => core.withMemo(work))
+    } catch (error) {
+        ec.logger.error("The contributor agreement could not be checked: " + (error?.message || error))
+        ec.message.clearErrors()
+        return ["agreementUnsigned: The contributor agreement could not be checked now, so nothing is taken; try again"]
+    }
+}
 function privileged(work) {
     const was = ec.artifactExecution.disableAuthz()
     try {
@@ -1182,6 +1298,19 @@ function privileged(work) {
     taskHidden: (workEffortId, userId) => privileged(() => core.withMemo(() => issues.taskHidden(workEffortId, userId))),
     taskReference: p => privileged(() => core.withMemo(() => issues.taskReference(p || {}))),
     issueReferences: p => privileged(() => core.withMemo(() => issues.issueReferences(p || {}))),
+    // what the rules call of merge requests and the agreement (SmithyReviewServices.xml, SmithyAgreementServices.xml)
+    ensureMergeRequest: mergeRequestId => privileged(() => core.withMemo(() => reviews.ensure(mergeRequestId))),
+    handleMergeRequestEvent: p => privileged(() => core.withMemo(() => reviews.handleEvent(p || {}))),
+    syncMergeRequestHidden: communicationEventId =>
+        privileged(() => core.withMemo(() => reviews.syncHidden(communicationEventId))),
+    reviewCommentPost: p => privileged(() => core.withMemo(() => reviews.reviewCommentPost(p || {}))),
+    computeAgreement: mergeRequestId => privileged(() => core.withMemo(() => agreements.compute(mergeRequestId))),
+    agreementTargetMoved: context => privileged(() => core.withMemo(() => agreements.targetMoved(context || {}))),
+    authorSigned: p => privileged(() => core.withMemo(() => agreements.authorSigned(p || {}))),
+    // the agreement's enforcement (Smithy.gitecas.xml): the problems that refuse, none to accept. It fails closed: its own
+    // error refuses
+    agreementWrite: context => guardedCheck(() => agreements.checkWrite(context || {})),
+    agreementBrought: context => privileged(() => core.withMemo(() => agreements.brought(context || {}))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

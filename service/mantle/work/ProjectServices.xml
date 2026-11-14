@@ -1945,8 +1945,12 @@ along with this software (see the LICENSE.md file). If not, see
                     text = lines.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n*$/, '\n')
                 }
                 repositoryId = target
+                // the application's own write of the release notes: the user's update right was checked above, and a branch rule
+                // of the default branch (a protected branch changes through a merge request) does not hold it, as before the
+                // framework checked the rules in commit#GitFiles (bypassBranchRules is taken with authorization disabled only)
                 commitId = ec.service.sync().name('org.moqui.git.GitServices.commit#GitFiles').parameters({repositoryId: target,
-                    message: ec.resource.expand('Release notes for ${version}', '', {version}), fileMap: {'CHANGELOG.md': text}}).call()?.commitId || null
+                    message: ec.resource.expand('Release notes for ${version}', '', {version}), fileMap: {'CHANGELOG.md': text},
+                    bypassBranchRules: true}).disableAuthz().call()?.commitId || null
             })
             if (notify) step('followers', () => {
                 const followers = Array.from(ec.entity.find('mantle.party.communication.RecordFollower').condition('recordEntityName', 'mantle.work.effort.WorkEffort')

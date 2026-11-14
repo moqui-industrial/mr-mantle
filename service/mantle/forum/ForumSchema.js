@@ -390,6 +390,7 @@
             'altText',
             'purpose',
             'rootCommEventId',
+            'repositoryId',
         ],
     },
     removeStagedAttachment: {

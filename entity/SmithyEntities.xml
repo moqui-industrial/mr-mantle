@@ -122,6 +122,9 @@
         <field name="nextIssueNumber" type="number-integer"><description>Starts at 1</description></field>
         <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
         <field name="agreementPath" type="text-medium"><description>Empty: inherited</description></field>
+        <field name="importedHistory" type="text-indicator"><description>Y: the repository's history was imported (DG8 sets it).
+            Only then does the agreement check take a commit that no push or write of an account brought (it came by the
+            import) as its author's own, by the author's confirmed address or linked GitHub login</description></field>
         <field name="pinnedSequence" type="number-integer"><description>Pinned on its group's Overview when set</description></field>
         <field name="componentName" type="text-medium"><description>From component.xml</description></field>
         <field name="componentVersion" type="text-short"/>
@@ -234,6 +237,54 @@
         <alias entity-alias="T" name="visiblePostCount"/>
         <alias entity-alias="P" name="rootVisibility" field="visibility"/>
     </view-entity>
+    <entity entity-name="SmithyMergeRequest" package="mantle.smithy">
+        <description>What Smithy keeps beside a merge request of the git host (moqui.resource.GitMergeRequest, which has its
+            number, branches, reviewers and merge): the site, the conversation (a ForumTopic of kind record whose first
+            post is the merge request's text; GitMergeRequest.description is a plain-text copy) and the result of the
+            contributor agreement check for its head. While the first post is held, GitMergeRequest.hiddenDate is set
+            (design-smithy §9.1, §9.3, §9.4).</description>
+        <field name="mergeRequestId" type="id" is-pk="true"><description>The moqui.resource.GitMergeRequest</description></field>
+        <field name="siteId" type="id"/>
+        <field name="repositoryId" type="id"><description>The target</description></field>
+        <field name="rootCommEventId" type="id"><description>The record topic</description></field>
+        <field name="authorPartyId" type="id"/>
+        <field name="agreementStateEnumId" type="id"><description>SmithyAgreementState</description></field>
+        <field name="agreementDetail" type="text-long"><description>JSON: who is missing what</description></field>
+        <field name="agreementCommitId" type="text-short"><description>The head it was computed for; while it is not the merge
+            request's head the result is not that head's, and reads as unsigned</description></field>
+        <field name="agreementCheckedAt" type="date-time"><description>When recheckAgreement last ran: once a minute</description></field>
+        <field name="botOperatorPartyId" type="id"><description>The operator who declared</description></field>
+        <field name="botConfirmedByPartyId" type="id"><description>The Maintainer who confirmed</description></field>
+        <field name="runApprovedByPartyId" type="id"><description>"Approve and run" (DG5)</description></field>
+        <field name="runApprovedAt" type="date-time"/>
+        <field name="createdAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one-nofk" related="moqui.resource.GitMergeRequest"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.forum.ForumTopic">
+            <key-map field-name="rootCommEventId"/></relationship>
+        <index name="SMITHY_MR_TOPIC" unique="true"><index-field name="rootCommEventId"/></index>
+        <index name="SMITHY_MR_REPO"><index-field name="siteId"/><index-field name="repositoryId"/></index>
+    </entity>
+    <entity entity-name="SmithyAgreementSignature" package="mantle.smithy">
+        <description>A cache of the contributor agreement check (design-smithy §9.4, step 3): a signature line of a list of
+            the agreement file at a branch, with the commit that added it and that commit's author when it is an account.
+            Rebuilt from the file when its blob at the branch is another.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="refName" type="text-medium" is-pk="true"><description>The branch</description></field>
+        <field name="listEnumId" type="id" is-pk="true"><description>SmithyAgreementList</description></field>
+        <field name="login" type="text-medium" is-pk="true"><description>Lower case</description></field>
+        <field name="siteId" type="id"/>
+        <field name="lineText" type="text-medium"/>
+        <field name="commitId" type="text-short"><description>The commit that added the line; empty when none was found</description></field>
+        <field name="authorPartyId" type="id"><description>That commit's author, when an account</description></field>
+        <field name="authorEmail" type="text-medium"><description>The address that commit's author gave, lower case: the row counts
+            only while it is still a confirmed address of authorPartyId</description></field>
+        <field name="unverified" type="text-indicator"><description>Y: the history read was cut at its bound before the
+            commit that added the line was found, so whose it is cannot be said</description></field>
+        <field name="blobId" type="text-short"><description>The file's blob the row was read from</description></field>
+        <field name="checkedAt" type="date-time"/>
+    </entity>
     <entity entity-name="SmithyAccount" package="mantle.smithy">
         <description>An account's Smithy settings in a site, made when first needed: its limits (each the site's default
             when empty), the bot mark and the GitHub login.</description>

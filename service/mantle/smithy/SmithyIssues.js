@@ -512,7 +512,7 @@ kit => {
                 attachment.siteId === siteId &&
                 attachment.ownerPartyId === partyId &&
                 !attachment.communicationEventId &&
-                attachment.purpose !== "avatar" &&
+                !["avatar", "repositoryFile"].includes(attachment.purpose) &&
                 attachment.scanState === "clean" &&
                 !(attachment.expiresAt && millis(attachment.expiresAt) <= millis(now()))
             if (!usable) invalid("Attachment is unavailable or has not passed scanning")
@@ -1486,6 +1486,28 @@ kit => {
             hiddenItemCount: named.hiddenItemCount
         }
     }
+    /* The issues of this repository among the work items a merge request is linked to (WorkEffortGitMergeRequest rows),
+       for its page: those the caller may read, each with whether it completes on the merge. */
+    function issueSummaries(r, links, a) {
+        const found = []
+        for (const link of links) {
+            const issue = one(M + "SmithyIssue", {workEffortId: link.workEffortId})
+            if (issue && issue.repositoryId === r.repo.repositoryId && r.repo.issuesEnabled === "Y" && heldIssue(r, issue, a))
+                found.push({issue, completeOnMerge: link.completeOnMerge === "Y"})
+        }
+        const items = publicItems(
+            found.map(entry => entry.issue.workEffortId),
+            false
+        )
+        return found
+            .map(({issue, completeOnMerge}) => ({
+                issueNumber: Number(issue.issueNumber),
+                title: items.get(issue.workEffortId)?.title || "",
+                state: items.get(issue.workEffortId)?.state || "open",
+                completeOnMerge
+            }))
+            .sort((left, right) => left.issueNumber - right.issueNumber)
+    }
     /* get#TaskIssue: the issue of a task, for Projects: nothing for a task that is no issue's, and nothing for a
        confidential issue's task when the user is no Owner of its repository by its Smithy rows (an operator sees it). */
     function taskIssue(workEffortId, userId) {
@@ -1519,6 +1541,7 @@ kit => {
         hiddenTaskIds,
         issueReferences,
         commitIssues,
-        linkedIssues
+        linkedIssues,
+        issueSummaries
     }
 }
