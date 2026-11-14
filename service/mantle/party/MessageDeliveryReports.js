@@ -380,10 +380,10 @@ function receipts(p) {
     )
         lib.denied("PERMISSION_DENIED", "Reading delivery receipts needs MESSAGE_DELIVERY_REVIEW")
     const delivery = one(D, {deliveryId: text(p.deliveryId)})
-    // a reader other than the ledger's reviewer reads the deliveries of the organizations they work for (every internal one with
-    // MARKETING_ALL_ORGANIZATIONS); another's answers as missing (P6 review)
-    const everyOrganization =
-        access.systemAdmin() || access.has("MESSAGE_DELIVERY_REVIEW") || access.has("MARKETING_ALL_ORGANIZATIONS")
+    // a reader reads the deliveries of the organizations they work for (every internal one with MARKETING_ALL_ORGANIZATIONS); another's
+    // answers as missing (P6 review). Marketing P9: MESSAGE_DELIVERY_REVIEW, now a dispatcher's too, reads every organization's for a
+    // system administrator only
+    const everyOrganization = access.systemAdmin() || access.has("MARKETING_ALL_ORGANIZATIONS")
     const reachable =
         !!delivery &&
         (everyOrganization ||
