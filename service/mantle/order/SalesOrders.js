@@ -866,6 +866,30 @@ function emailOf(partyId) {
         .sort((a, b) => (b.contactMechPurposeId === "EmailPrimary" ? 1 : 0) - (a.contactMechPurposeId === "EmailPrimary" ? 1 : 0))
     return text(mechs[ordered[0]?.contactMechId]?.infoString)
 }
+// Sales P17 (impl-sales §4, F42, F48; design-sales §10 CustomerOrder): the recipient's bearer link to the order's PASS Sales page,
+// the SalesOrder kind's OrderView capability (as Shop's checkout issues its own; a storeless order's opens the organization's Sales
+// mount, ExternalAccess.js recordPage), made for each attempt as a quote's is (the ledger keeps no token) and lasting as Shop's
+// order link does; null with no published Sales site, and the mail then carries none.
+const orderLinkDays = 366
+function orderLink(order, part) {
+    const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+    if (!apps.sitesFor("sales", part.vendorPartyId).length) return null
+    try {
+        return (
+            ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").create({
+                recordType: "SalesOrder",
+                recordId: order.orderId,
+                scopes: "OrderView",
+                validDays: orderLinkDays,
+                issuerKind: "organization"
+            }).url || null
+        )
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.error("No PASS link for order " + order.orderId + ": " + String(error.message).split("\n")[0])
+        return null
+    }
+}
 // build#OrderConfirmationMessage (each attempt): the stored confirmation as placed (store#PlacedOrderConfirmation's document, made
 // once), from the selling organization's own email (never a person's; none fails the delivery, sent again once it has one), to the
 // recipient's current email; suppressed once the order is cancelled or no longer confirmable.
@@ -897,7 +921,9 @@ function buildConfirmation(p) {
         sellerName: partyName(part.vendorPartyId),
         placedText: lib.dateText(order.placedDate),
         reference: part.otherPartyOrderId || "",
-        totalText: moneyText(order.grandTotal ?? 0, order.currencyUomId)
+        totalText: moneyText(order.grandTotal ?? 0, order.currencyUomId),
+        // P17: this recipient's own link to the order's page
+        orderUrl: orderLink(order, part) || ""
     })
     return Object.assign(toAddress ? {toAddress} : {}, {
         bodyParameters: {subject, fromAddress, fromName: partyName(part.vendorPartyId)},

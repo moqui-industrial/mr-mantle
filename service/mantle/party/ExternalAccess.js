@@ -153,6 +153,9 @@ const records = {
     // ends no later than the offer, is issued under SALES_QUOTE_SEND and opens the organization's Sales mount (CustomerQuote),
     // while OrderView keeps Shop's page; a signed-in contact reaches a quote by a grant of the sales app. The quote's issue,
     // response and receipt rules are SalesPortal.js'.
+    // Sales P17 (impl-sales §4, F42, F48; design-sales §10 CustomerOrder): OrderView's page goes by the order's store: a storeless
+    // order's link opens the organization's Sales mount (CustomerOrder; the storeless confirmation's link, SalesOrders.js), a
+    // store order's keeps Shop's page on the store's site. One order has one public page.
     SalesOrder: {
         permissions: ["SUPPORT_CASE_EDIT"],
         scopes: ["OrderView", "Download", "RenewalAction", "QuoteView", "QuoteRespond"],
@@ -166,6 +169,12 @@ const records = {
         self: true,
         // Shop P6 (F82): the link's site is the order's store's Shop site (a Shop mount targets a store, not the organization)
         siteTarget: recordId => one("mantle.order.OrderHeader", {orderId: recordId})?.productStoreId || null,
+        // Sales P17: a storeless order's OrderView opens the Sales mount targeting the organization; a store order's, Shop's page
+        recordPage(recordId, scopes) {
+            if (!scopes.includes("OrderView")) return null
+            const order = one("mantle.order.OrderHeader", {orderId: recordId})
+            return order && !order.productStoreId ? {app: "sales", path: "/CustomerOrder?token=", target: "organization"} : null
+        },
         resolve(recordId, scope) {
             const order = one("mantle.order.OrderHeader", {orderId: recordId})
             if (!order) return null
@@ -184,10 +193,13 @@ const records = {
 }
 // Sales P13: the scopes of a customer's quote (the SalesOrder kind), which never share a capability with an order's
 const quoteScopes = ["QuoteView", "QuoteRespond"]
-// The page of a scope: its own (scopePages: app, path, and the site's target, the record's organization), else the kind's.
-function pageOf(kind, scopes) {
+// The page of a scope: its own (scopePages: app, path, and the site's target, the record's organization), else the record's (Sales
+// P17: recordPage, a storeless order's OrderView), else the kind's.
+function pageOf(kind, scopes, recordId) {
     const scope = (scopes || []).find(name => kind.scopePages?.[name])
     if (scope) return kind.scopePages[scope]
+    const own = recordId && kind.recordPage ? kind.recordPage(recordId, scopes || []) : null
+    if (own) return own
     return {app: kind.page.app, path: pagePath(kind, scopes || []), target: null}
 }
 // The app whose contact grants reach a scope of a kind (Sales P13: a quote's, the sales app's; else the kind's page's).
@@ -264,7 +276,7 @@ function create(p) {
     // the link: the record's page of the organization's first published site with the app (Sales P13: a scope's own page, on a
     // site whose mount of its app targets the organization)
     const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
-    const page = pageOf(kind, scopes)
+    const page = pageOf(kind, scopes, p.recordId)
     const target = page.target === "organization" || !kind.siteTarget ? record.organizationPartyId : kind.siteTarget(p.recordId)
     const siteId = apps.sitesFor(page.app, target)[0]
     const url = siteId ? apps.pageUrl(siteId, page.app, page.path + encodeURIComponent(token)) : null

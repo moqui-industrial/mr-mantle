@@ -298,6 +298,10 @@
     ['GET', 'sales/quote/document', 'getSalesQuoteDocument'],
     ['POST', 'sales/quote/response', 'respondSalesQuote'],
     ['GET', 'sales/quote/response', 'getSalesQuoteResponse'],
+    // IronStone Sales P17: PASS Sales' orders
+    ['GET', 'sales/orders', 'findSalesOrders'],
+    ['GET', 'sales/order', 'getSalesOrder'],
+    ['GET', 'sales/order/document', 'getSalesOrderDocument'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],
