@@ -836,6 +836,9 @@ function explainLine(p) {
     const current = resolvedPrice(quote, item.productId, item.quantity ?? 1, item.quantityUomId)
     const list = item.priceListId ? one("mantle.product.ProductPriceList", {priceListId: item.priceListId}) : null
     const product = one("mantle.product.Product", {productId: item.productId})
+    // P15: a price row of a customer agreement (the seller's authority applies one only while the agreement is active and dated)
+    const priceRow = item.productPriceId ? one("mantle.product.ProductPrice", {productPriceId: item.productPriceId}) : null
+    const agreement = priceRow?.agreementId ? one("mantle.party.agreement.Agreement", {agreementId: priceRow.agreementId}) : null
     return {
         explanation: {
             orderId: quote.order.orderId,
@@ -852,9 +855,13 @@ function explainLine(p) {
                 item.calculatedUnitAmount == null ? L("No price set") : moneyText(item.calculatedUnitAmount, currencyUomId),
             listText: item.unitListPrice == null ? "" : moneyText(item.unitListPrice, currencyUomId),
             priceListName: list ? list.priceListName || list.priceListId : "",
-            customerPrice:
-                !!item.productPriceId &&
-                !!one("mantle.product.ProductPrice", {productPriceId: item.productPriceId})?.customerPartyId,
+            customerPrice: !!priceRow?.customerPartyId,
+            agreementId: agreement?.agreementId || null,
+            agreementItemSeqId: agreement ? priceRow.agreementItemSeqId || null : null,
+            agreementName: agreement ? agreement.description || agreement.agreementId : "",
+            agreementIntervalText: agreement
+                ? [dayText(agreement.fromDate) || L("open"), dayText(agreement.thruDate) || L("no end")].join(" – ")
+                : "",
             overridden: ["manual", "free"].includes(item.priceSource),
             overrideReason: item.priceOverrideReason || "",
             currentText: current.priceAvailable ? moneyText(current.price, currencyUomId) : L("No price set"),

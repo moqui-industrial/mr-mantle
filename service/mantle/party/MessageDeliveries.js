@@ -15,6 +15,13 @@
  *   attempt, after the consent and before the hand-off (MessageSuppressions.js): a hard bounce stops every delivery, any other
  *   block (a complaint, a staff block) a promotional one only (transactional N), never a transactional notice (the user's call,
  *   Nov 14).
+ * - Sending profiles (impl-marketing P6, F13): a delivery that names one goes out through its relay, from its sender and reply-to,
+ *   with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce domain (VERP: the bounce intake finds the delivery by it,
+ *   and only with its random key, so a forged report cannot name a delivery by a guessed id; P6 review), within its
+ *   throttle and quiet hours (the delivery waits, no try counted); a profile that is not ready is a retryable outcome (its tries
+ *   counted, then failed), so nothing goes out before its readiness. A delivery that names none is sent as before.
+ * - Receipts (P6, F14): the later facts of a delivery (delivered, a soft or hard bounce, a complaint) are MessageDeliveryReceipt
+ *   rows apart from its hand-off state (MessageDeliveryReports.js); record#DeliveryReceipt below stays the outcome of an attempt.
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
@@ -22,6 +29,14 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, call, ms} = lib
 const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
+// loaded when a delivery names a sending profile, so the built sources do not depend on it
+const profiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
+// The random key of a delivery's VERP bounce address (P6 review): letters and digits only, so it never meets the address's dot.
+const newBounceKey = () =>
+    ec.user
+        .randomString(24)
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 16) || ec.user.randomCode(16)
 const D = "mantle.party.MessageDelivery"
 const ATTEMPT = "mantle.party.MessageDeliveryAttempt"
 const limits = {tries: 5, batch: 200, maxBackoffMinutes: 60}
@@ -43,6 +58,16 @@ function queue(p) {
     if (!source || source.enumTypeId !== "MessageDeliverySource") throw new Error("Unknown delivery source " + p.sourceEnumId)
     const existing = one(D, key)
     if (existing) return {deliveryId: existing.deliveryId, created: false, stateEnumId: existing.stateEnumId}
+    // P6: a sending profile of the delivery's organization (its own when none is given)
+    const sendingProfileId = text(p.sendingProfileId) || null
+    let organizationPartyId = text(p.organizationPartyId) || null
+    if (sendingProfileId) {
+        const profile = one("mantle.party.MessageSendingProfile", {sendingProfileId})
+        if (!profile) throw new Error("Unknown sending profile " + sendingProfileId)
+        if (organizationPartyId && organizationPartyId !== profile.organizationPartyId)
+            throw new Error("The sending profile " + sendingProfileId + " is another organization's")
+        organizationPartyId = profile.organizationPartyId
+    }
     // the delivery is kept in a transaction of its own, so its attempts (each their own) see it; a source whose event does
     // not hold by then answers suppress from its build
     const made = createApart(
@@ -52,7 +77,9 @@ function queue(p) {
             toAddress: text(p.toAddress) || null,
             siteId: p.siteId || null,
             productStoreId: p.productStoreId || null,
-            organizationPartyId: text(p.organizationPartyId) || null,
+            organizationPartyId,
+            sendingProfileId,
+            bounceKey: sendingProfileId ? newBounceKey() : null,
             transactional: p.transactional === false || p.transactional === "N" ? "N" : "Y",
             consentJson: p.marketingPurposeEnumId
                 ? JSON.stringify(
@@ -189,6 +216,29 @@ function attemptStep(p) {
     }
     if (!consent.transactional && !consent.granted)
         return record("MdsSuppressed", "suppressed", {lastError: "No consent for this message"})
+    // P6: the sending profile's relay, sender and bounce address; its quiet hours and throttle make the delivery wait, untried,
+    // and a profile that is not ready is a retryable outcome (nothing goes out before its readiness)
+    let profileSend = {}
+    if (delivery.sendingProfileId) {
+        // a delivery queued before it had a key (none is sent without one)
+        let bounceKey = text(delivery.bounceKey)
+        if (!bounceKey) {
+            bounceKey = newBounceKey()
+            call("update#" + D, {deliveryId: delivery.deliveryId, bounceKey})
+        }
+        const decided = profiles().forDelivery(delivery.sendingProfileId, delivery.deliveryId, bounceKey)
+        if (decided.wait) {
+            call("update#" + D, {
+                deliveryId: delivery.deliveryId,
+                nextAttemptDate: new Date(nowMs() + decided.wait.minutes * 60000),
+                lastError: decided.wait.reason
+            })
+            return {stateEnumId: delivery.stateEnumId}
+        }
+        if (decided.refuse)
+            return recordOutcome(delivery, attempts, {deliveryOutcome: "retryable", sendError: decided.refuse}, record)
+        profileSend = decided.send
+    }
     const source = one("moqui.basic.Enumeration", {enumId: delivery.sourceEnumId})
     let built
     try {
@@ -224,6 +274,10 @@ function attemptStep(p) {
                     emailTemplateId: delivery.templateKey,
                     toAddresses: toAddress,
                     bodyParameters: built.bodyParameters || {},
+                    // a source that makes its own subject (Comms' templates, P6), and the sending profile's relay, sender, reply-to
+                    // and VERP bounce address (send#EmailTemplate's per-call values, F17)
+                    ...(built.subject ? {subject: built.subject} : {}),
+                    ...profileSend,
                     ...(built.extraHeaders ? {extraHeaders: built.extraHeaders} : {}),
                     // a source that makes its own body and attachments (Sales' quote and reminder, impl-sales P10: the issued PDF)
                     ...(built.body ? {body: built.body} : {}),

@@ -430,24 +430,29 @@ function findOrders(p) {
     const withRole = (roleTypeId, partyId) =>
         Array.from(find(PART_PARTY, {roleTypeId, partyId}).selectField("orderId").list()).map(row => row.orderId)
     const approverReach = ids != null && salesAccess.orderApprover(userScope) && !ownerPartyId
+    // P14: a change operator also the organization's placed, approved and held orders, read only (SalesAccess.js orderOf)
+    const changeReach = ids != null && !!userScope.capabilities.orderChange && !ownerPartyId
     if (ownerPartyId) narrow(withRole(salesAccess.quoteRoles.owner, ownerPartyId))
     if (text(p.salesOpportunityId)) {
         const linked = rows(ORDER_LINK, {salesOpportunityId: text(p.salesOpportunityId)}).map(row => row.orderId)
-        if (ids == null || !approverReach) narrow(linked)
+        if (ids == null || !(approverReach || changeReach)) narrow(linked)
         else {
             ids = ids.filter(id => linked.includes(id))
             add("orderId", "in", linked.length ? linked : ["_NONE_"])
         }
     }
     if (ids != null) {
-        if (approverReach) {
+        if (approverReach || changeReach) {
             // P12 (the user's call of Nov 14): and the orders the approver decided, read only, once approved (SalesAccess.js orderOf)
-            const decided = salesAccess.decidedOrderIds()
-            or(
-                factory.makeCondition("orderId", "in", ids.length ? ids : ["_NONE_"]),
-                factory.makeCondition("statusId", "in", ["OrderPlaced", "OrderHold"]),
-                factory.makeCondition("orderId", "in", decided.length ? decided : ["_NONE_"])
-            )
+            const decided = approverReach ? salesAccess.decidedOrderIds() : []
+            const reach = [factory.makeCondition("orderId", "in", ids.length ? ids : ["_NONE_"])]
+            if (approverReach)
+                reach.push(
+                    factory.makeCondition("statusId", "in", ["OrderPlaced", "OrderHold"]),
+                    factory.makeCondition("orderId", "in", decided.length ? decided : ["_NONE_"])
+                )
+            if (changeReach) reach.push(factory.makeCondition("statusId", "in", salesAccess.changeStatuses))
+            or(...reach)
         } else if (!ids.length) none = true
         else add("orderId", "in", ids)
     }

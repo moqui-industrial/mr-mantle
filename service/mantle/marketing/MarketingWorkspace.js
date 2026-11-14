@@ -26,8 +26,15 @@ const routes = {
     campaignDefaults: "marketingCampaignDefaults",
     vocabularies: "marketingVocabularies",
     // P3
-    lists: "marketingLists"
+    lists: "marketingLists",
+    // P6: Comms' sending profiles and templates under Marketing's mount
+    sendingProfiles: "marketingSendingProfiles",
+    templates: "marketingTemplates",
+    consent: "marketingConsent",
+    suppressions: "marketingSuppressions"
 }
+// loaded when the sending readiness runs (P6)
+const sendingProfiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
 const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
 const upcomingDays = 60
 const dayMs = 24 * 60 * 60 * 1000
@@ -301,6 +308,54 @@ const settingsEntries = [
         route: routes.vocabularies,
         readiness: () => "Dated values by organization"
     },
+    // P6: Comms' sending profiles and templates, mounted under Marketing's Settings and Sends (design §12 Settings' links)
+    {
+        entryKey: "sendingProfiles",
+        title: "Sending profiles",
+        description: "The senders, relays, limits and bounce addresses campaign mail goes out from, with their readiness",
+        category: "Sending",
+        owner: "Comms",
+        route: routes.sendingProfiles,
+        readiness: userScope => {
+            const ids = marketingAccess.organizationIds(userScope)
+            let count = 0,
+                ready = 0
+            for (const partyId of ids.slice(0, 50)) {
+                const found = sendingProfiles().organizationReadiness(partyId)
+                count += found.count
+                ready += found.ready
+            }
+            return count ? ready + " of " + count + " ready" : "No sending profile yet"
+        }
+    },
+    {
+        entryKey: "templates",
+        title: "Message templates",
+        description: "The shared template library: content with declared variables, published by date",
+        category: "Sending",
+        owner: "Comms",
+        route: routes.templates,
+        readiness: () => "Dated content by organization"
+    },
+    // P6: the links design §12 Settings names, to the screens P3 mounted under Audiences
+    {
+        entryKey: "consent",
+        title: "Consent",
+        description: "The consent of each contact by purpose and organization, with its history",
+        category: "Audiences",
+        owner: "Comms",
+        route: routes.consent,
+        readiness: () => "Recorded by evidence"
+    },
+    {
+        entryKey: "suppressions",
+        title: "Suppressions",
+        description: "The addresses no message may reach: hard bounces, complaints and staff blocks",
+        category: "Audiences",
+        owner: "Comms",
+        route: routes.suppressions,
+        readiness: () => "Kept until a reviewer ends one"
+    },
     {
         entryKey: "adoption",
         title: "Adoption of existing records",
@@ -349,6 +404,39 @@ const readinessChecks = [
                 reasonCode: "NO_POLICY",
                 message: "No campaign defaults: campaigns use the default approval rules and the accounting currency",
                 fixRoute: routes.campaignDefaults
+            }
+        }
+    },
+    // P6: the organization's sending profiles (design §12; impl-marketing §4: a check of Marketing's provider), read through
+    // check#SendingProfile's rule as the viewer: none, or none ready, is a warning with the profiles as the fix
+    {
+        checkKey: "marketing.sending",
+        title: "Sending profiles",
+        run: organizationPartyId => {
+            if (!organizationPartyId) return {state: "ready", message: "Asked per organization"}
+            const found = sendingProfiles().organizationReadiness(organizationPartyId)
+            if (!found.count)
+                return {
+                    state: "warning",
+                    reasonCode: "NO_SENDING_PROFILE",
+                    message: "No sending profile: campaign mail cannot be released",
+                    fixRoute: routes.sendingProfiles
+                }
+            if (!found.ready)
+                return {
+                    state: "warning",
+                    reasonCode: "SENDING_NOT_READY",
+                    message: "No sending profile is ready: " + found.notReady.slice(0, 3).join(" | "),
+                    fixRoute: routes.sendingProfiles
+                }
+            return {
+                state: "ready",
+                message:
+                    found.ready +
+                    " of " +
+                    found.count +
+                    " sending profiles ready" +
+                    (found.notReady.length ? "; not ready: " + found.notReady.slice(0, 2).join(" | ") : "")
             }
         }
     },
