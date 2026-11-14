@@ -46,7 +46,8 @@ const ruleKinds = {
     SarOverride: "manual price"
 }
 const results = {requested: "SdrRequested", approved: "SdrApproved", refused: "SdrRefused"}
-const draftStatuses = ["OrderOpen"]
+// P10: a quote being revised (Proposed to Being changed, revise#Quote) is a draft again
+const draftStatuses = ["OrderOpen", "OrderBeingChanged"]
 const taxTypes = ["ItemSalesTax", "ItemVatTax"]
 const policyFields = [
     "defaultTeamPartyId",
@@ -58,7 +59,10 @@ const policyFields = [
     "orderApprovalRequired",
     "approveNetTermsOrders",
     "intakeRetentionDays",
-    "reminderDays"
+    "reminderDays",
+    // P10: the stored text of the quote's cover and terms and of its reminder (F70)
+    "quoteTextLocation",
+    "reminderTextLocation"
 ]
 const flagFields = ["responsePoRequired", "orderApprovalRequired", "approveNetTermsOrders"]
 const dayFields = ["quoteValidityDays", "intakeRetentionDays", "reminderDays"]
@@ -1019,21 +1023,6 @@ function requireApproved(userScope, quote) {
         )
     return approval
 }
-// propose#Quote (the approval half, impl-sales P9; P10 adds the issue's checks): a draft the caller may edit, at its revision, with
-// every approval current, moved to Proposed through the native propose#Order.
-function proposeQuote(p) {
-    const userScope = salesAccess.scope()
-    const quote = salesAccess.requireQuote(userScope, text(p.orderId), true)
-    if (!draftStatuses.includes(quote.order.statusId))
-        denied("QUOTE_NOT_DRAFT", "Quote " + quote.order.orderId + " is not a draft")
-    requireRevision(quote.order, p.orderRevision)
-    if (!linesOf(quote.order.orderId).length) denied("LINES_REQUIRED", "Add a line before proposing the quote")
-    requireApproved(userScope, quote)
-    call("mantle.order.OrderServices.propose#Order", {orderId: quote.order.orderId})
-    const order = one(ORDER, {orderId: quote.order.orderId})
-    return {orderId: order.orderId, statusId: order.statusId, orderRevision: revisionOf(order)}
-}
-
 // ===== rules on the native order =====
 // handle#SalesApprovalRevision, the SECA on increment#OrderRevision: a commercial change of a quote supersedes the decisions of its
 // earlier revisions (invalidatedDate) and reads their notices, so a stale approval leaves the approvers' lists. Any other order
@@ -1095,7 +1084,6 @@ const operations = {
     decide,
     approveMessage: p => decideMessage(p, "approve"),
     refuseMessage: p => decideMessage(p, "refuse"),
-    proposeQuote,
     revisionChanged,
     preApproveWarnings
 }
@@ -1104,6 +1092,9 @@ const operations = {
     policyOf,
     freeLineCovered,
     summary,
+    // P10: propose#Quote's approval guard and the quote's product lines (SalesQuoteIssues.js)
+    requireApproved,
+    linesOf,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales approval operation " + op)
         return operations[op](parameters || {})

@@ -18,7 +18,7 @@
 // - Freight on a storeless quote is a shipping charge line the rep enters (design §19 item 1, impl-sales §4 Nov 13); tax is X1's
 //   (calculate#OrderSalesTax through the store's or the seller's gateway), recalculated by the native rules on each change.
 // - Every change names the order revision it read (orderRevision, REVISION_CHANGED naming the current one) and is refused once the
-//   quote is no longer a draft (QUOTE_NOT_DRAFT); issue, revise and the response are P10's.
+//   quote is no longer a draft (QUOTE_NOT_DRAFT); issue, revise and the response are SalesQuoteIssues.js' (P10).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
 const {find, one, rows, denied, call, ms} = lib
@@ -32,12 +32,13 @@ const PART_PARTY = "mantle.order.OrderPartParty"
 const ORDER_LINK = "mantle.sales.opportunity.SalesOpportunityOrder"
 const purpose = salesAccess.quotePurpose
 const roles = salesAccess.quoteRoles
-const draftStatuses = ["OrderOpen"]
+// P10: a quote being revised (revise#Quote: Proposed to Being changed) is a draft again until it is proposed
+const draftStatuses = ["OrderOpen", "OrderBeingChanged"]
 const states = {
-    draft: ["OrderOpen"],
+    draft: ["OrderOpen", "OrderBeingChanged"],
     requested: ["OrderRequested"],
     proposed: ["OrderProposed"],
-    open: ["OrderOpen", "OrderRequested", "OrderProposed"],
+    open: ["OrderOpen", "OrderBeingChanged", "OrderRequested", "OrderProposed"],
     cancelled: ["OrderCancelled"],
     all: null
 }
@@ -345,7 +346,14 @@ function createQuote(p) {
             call("create#" + PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId})
     }
     assign(userScope.partyId, roles.owner)
-    assign(teamFor(userScope, organizationPartyId, salesOpportunityId), roles.team)
+    // Sales P10: a quote made from an RFQ takes the RFQ's team (create#QuoteFromRequest's own value, never a service parameter)
+    const requestTeam = text(p.requestTeamPartyId)
+    assign(
+        requestTeam && salesAccess.teamOrganization(requestTeam) === organizationPartyId
+            ? requestTeam
+            : teamFor(userScope, organizationPartyId, salesOpportunityId),
+        roles.team
+    )
     assign(contactPartyId, roles.contact)
     if (salesOpportunityId) call("create#" + ORDER_LINK, {salesOpportunityId, orderId: created.orderId})
     const order = one(ORDER, {orderId: created.orderId})
