@@ -212,8 +212,9 @@ along with this software (see the LICENSE.md file). If not, see
             caller does not see (RECORD_UNAVAILABLE), an ended one (AGREEMENT_CLOSED), a stale revision (REVISION_REQUIRED,
             REVISION_CHANGED), an item not on it (ITEM_UNAVAILABLE), another item type (ITEM_TYPE_INVALID), a pricing item or price
             without a product (PRODUCT_REQUIRED), another organization's product (PRODUCT_NOT_USABLE), an active item's product
-            change (PRODUCT_LOCKED), a new pricing price missing (PRICE_REQUIRED), a negative amount (AMOUNT_INVALID) and dates out of
-            order or outside the agreement's (DATE_INVALID).</description>
+            change (PRODUCT_LOCKED), a new pricing price missing (PRICE_REQUIRED), a negative amount (AMOUNT_INVALID), dates out of
+            order or outside the agreement's (DATE_INVALID) and a product added to an active agreement that another active agreement
+            with the customer prices in its dates (AGREEMENT_OVERLAP).</description>
         <in-parameters>
             <parameter name="agreementId" required="true"/>
             <parameter name="agreementRevision"/>
@@ -247,8 +248,9 @@ along with this software (see the LICENSE.md file). If not, see
             parties). A renewal ends the agreement it renews at its start (closed when that is now). Refuses a caller without
             SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see (RECORD_UNAVAILABLE), a stale revision
             (REVISION_REQUIRED, REVISION_CHANGED), a template (TEMPLATE_NO_ACTIVATE), one that is not a draft (STATUS_INVALID), and
-            by its first missing need PARTIES_REQUIRED, DATE_INVALID, EVIDENCE_REQUIRED, TERMS_REQUIRED, PRICE_REQUIRED or
-            PRICE_INVALID, naming each.</description>
+            by its first missing need PARTIES_REQUIRED, DATE_INVALID, EVIDENCE_REQUIRED, TERMS_REQUIRED, PRICE_REQUIRED,
+            PRICE_INVALID or AGREEMENT_OVERLAP (another active agreement with the customer in these dates prices one of its products;
+            a renewal's predecessor is not counted), naming each.</description>
         <in-parameters>
             <parameter name="agreementId" required="true"/>
             <parameter name="agreementRevision"/>
@@ -295,9 +297,11 @@ along with this software (see the LICENSE.md file). If not, see
             passed), for the same length when it had one, linked to it through AgreementAssoc (AatRenewal); its activation ends the
             predecessor. Refuses a caller without SALES_AGREEMENT_EDIT (PERMISSION_DENIED), an agreement the caller does not see
             (RECORD_UNAVAILABLE), a template (TEMPLATE_NO_ACTIVATE), a draft, closed or cancelled one (STATUS_INVALID), one renewed
-            already by an agreement not cancelled (SUCCESSOR_EXISTS) and dates out of order (DATE_INVALID).</description>
+            already by an agreement not cancelled (SUCCESSOR_EXISTS), a stale revision (REVISION_REQUIRED, REVISION_CHANGED; the
+            predecessor's revision is counted) and dates out of order (DATE_INVALID).</description>
         <in-parameters>
             <parameter name="agreementId" required="true"/>
+            <parameter name="agreementRevision"/>
             <parameter name="description"/>
             <parameter name="fromDate"/>
             <parameter name="thruDate"/>
@@ -306,6 +310,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="agreementId"/>
             <parameter name="agreementRevision" type="Integer"/>
             <parameter name="predecessorAgreementId"/>
+            <parameter name="predecessorRevision" type="Integer"/>
         </out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('renewAgreement', context))</script>

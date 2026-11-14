@@ -17,6 +17,23 @@ const status = agreementId => one("mantle.party.agreement.Agreement", {agreement
 const lineOf = (orderId, productId) =>
     system(() => Array.from(ec.entity.find("mantle.order.OrderItem").condition({orderId, productId}).list())[0])
 const num = value => (value == null ? null : Number(String(value)))
+// a call as the user with artifact authorization off (its own permission checks still apply): its result, or the refusal (refused)
+function asUser(username, verb, parameters) {
+    login(username)
+    const was = ec.artifactExecution.disableAuthz()
+    ec.message.pushErrors()
+    try {
+        const out = ec.service.sync().name(verb).parameters(parameters).requireNewTransaction(true).call() || {}
+        return ec.message.hasError() ? {refused: ec.message.getErrorsString()} : Object.assign({refused: ""}, out)
+    } catch (error) {
+        return {refused: String(error.message || error)}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        if (!was) ec.artifactExecution.enableAuthz()
+        login("john.doe")
+    }
+}
 // a quote of the rep for the account with a line of each product
 function quote(products) {
     const orderId = as(f.users.rep, Q + "create#Quote", {
@@ -192,6 +209,30 @@ feature(
                 orderItemSeqId: line.orderItemSeqId
             })
             const listed = as(f.users.rep, G + "find#SalesAgreements", {customerPartyId: f.accounts.a})
+            // the rep (no PRICE_VIEW) naming the agreement and its customer to the general price service gets no agreement price
+            const crafted = asUser(f.users.rep, "mantle.product.PriceServices.get#ProductPrice", {
+                productId: f.product,
+                vendorPartyId: f.orgA,
+                customerPartyId: f.accounts.a,
+                agreementId: t.agreement,
+                priceUomId: "USD"
+            })
+            // Products' price editor changes no customer agreement's price (it changes on the agreement)
+            const agreementRow = system(
+                () =>
+                    Array.from(
+                        ec.entity
+                            .find("mantle.product.ProductPrice")
+                            .condition({agreementId: t.agreement, productId: f.product})
+                            .list()
+                    )[0]
+            )
+            const editorChange = asUser("john.doe", "mantle.product.PriceServices.store#ProductPrice", {
+                productPriceId: agreementRow.productPriceId,
+                productId: f.product,
+                price: "1",
+                changeReason: "Cheaper"
+            }).refused
             const byOrder = as(t.reader, G + "find#SalesAgreements", {orderId: t.agreedQuote, state: "all"})
             const noReason = as(t.keeper, G + "end#SalesAgreement", {
                 agreementId: t.agreement,
@@ -206,7 +247,18 @@ feature(
             // the quote lines priced from it, for a reader who sees the quotes (the keeper sees none of the rep's)
             const connections = as(t.reader, G + "get#SalesAgreement", {agreementId: t.agreement}).connections
             const keeperConnections = as(t.keeper, G + "get#SalesAgreement", {agreementId: t.agreement}).connections
-            return {explained, listed, byOrder, noReason, ended, afterQuote, connections, keeperConnections}
+            return {
+                explained,
+                listed,
+                crafted,
+                editorChange,
+                byOrder,
+                noReason,
+                ended,
+                afterQuote,
+                connections,
+                keeperConnections
+            }
         },
         then(r) {
             num(lineOf(t.agreedQuote, f.product).unitAmount) == 80
@@ -214,6 +266,8 @@ feature(
             r.explained.explanation.agreementId == t.agreement
             r.explained.explanation.agreementName == "Account A supply terms"
             r.listed.agreementList.map(row => row.agreementId).includes(t.agreement)
+            num(r.crafted.price) != 80
+            r.editorChange.includes("changes on the agreement")
             r.byOrder.agreementList.length == 1
             r.noReason.includes("REASON_REQUIRED")
             r.ended.statusId == "AgmStClosed"
@@ -253,9 +307,44 @@ feature(
                 agreementRevision: agreementRevision(second),
                 acceptanceEvidence: "Accepted on the call"
             })
-            const renewed = as(t.keeper, G + "renew#SalesAgreement", {agreementId: second})
-            const again = as(t.keeper, G + "renew#SalesAgreement", {agreementId: second}).refused
+            // a second active agreement with the customer pricing the same product is refused
+            const overlapping = as(t.keeper, G + "create#SalesAgreement", {
+                organizationPartyId: f.orgA,
+                customerPartyId: f.accounts.a,
+                description: "Overlapping terms"
+            }).agreementId
+            as(t.keeper, G + "store#AgreementItem", {
+                agreementId: overlapping,
+                agreementRevision: agreementRevision(overlapping),
+                productId: t.second,
+                price: "40"
+            })
+            as(t.keeper, G + "store#AgreementParty", {
+                agreementId: overlapping,
+                agreementRevision: agreementRevision(overlapping),
+                partyId: f.accounts.a
+            })
+            const overlap = as(t.keeper, G + "activate#SalesAgreement", {
+                agreementId: overlapping,
+                agreementRevision: agreementRevision(overlapping),
+                acceptanceEvidence: "Accepted on the call"
+            }).refused
+            const read = agreementRevision(second)
+            const unnamed = as(t.keeper, G + "renew#SalesAgreement", {agreementId: second}).refused
+            const renewed = as(t.keeper, G + "renew#SalesAgreement", {agreementId: second, agreementRevision: read})
+            const stale = as(t.keeper, G + "renew#SalesAgreement", {agreementId: second, agreementRevision: read}).refused
+            const again = as(t.keeper, G + "renew#SalesAgreement", {
+                agreementId: second,
+                agreementRevision: agreementRevision(second)
+            }).refused
             const renewal = as(t.keeper, G + "get#SalesAgreement", {agreementId: renewed.agreementId})
+            // the renewal prices the same product; activated from before the predecessor's end, it ends the predecessor at its start
+            const renewalActivated = as(t.keeper, G + "activate#SalesAgreement", {
+                agreementId: renewed.agreementId,
+                agreementRevision: agreementRevision(renewed.agreementId),
+                fromDate: new Date(Date.now() + 43200000).toISOString(),
+                acceptanceEvidence: "Renewal accepted"
+            })
             const otherOrg = as(t.keeper, G + "get#SalesAgreement", {agreementId: t.agreementB}).agreementFound
             const otherEdit = as(t.keeper, G + "store#SalesAgreement", {
                 agreementId: t.agreementB,
@@ -268,18 +357,37 @@ feature(
                 fx.call("update#mantle.party.agreement.Agreement", {agreementId: second, thruDate: new Date(Date.now() - 1000)})
             )
             const expired = system(() => fx.call(G + "expire#SalesAgreements", {}))
-            return {second, activated, renewed, again, renewal, otherOrg, otherEdit, otherFind, expired}
+            return {
+                second,
+                activated,
+                overlap,
+                unnamed,
+                renewed,
+                stale,
+                again,
+                renewal,
+                renewalActivated,
+                otherOrg,
+                otherEdit,
+                otherFind,
+                expired
+            }
         },
         then(r) {
             r.activated.refused == ""
+            r.overlap.includes("AGREEMENT_OVERLAP")
+            r.unnamed.includes("REVISION_REQUIRED")
             r.renewed.refused == ""
             r.renewed.predecessorAgreementId == r.second
+            r.stale.includes("REVISION_CHANGED")
             r.again.includes("SUCCESSOR_EXISTS")
             r.renewal.agreement.statusId == "AgmStDraft"
             r.renewal.agreement.predecessorAgreementId == r.second
             r.renewal.items.length == 1
             num(r.renewal.items[0].price) == 50
             r.renewal.parties.length == 1
+            r.renewalActivated.refused == ""
+            r.renewalActivated.predecessorEnded == r.second
             r.otherOrg == false
             r.otherEdit.includes("RECORD_UNAVAILABLE")
             !r.otherFind.agreementList.some(row => row.agreementId == t.agreement)

@@ -186,6 +186,52 @@ function organizationCurrency(organizationPartyId) {
     )
 }
 
+// Another active customer agreement of the organization with the same customer, in effect at some time from `from` (or now, when
+// later) to `thru`, that prices one of the products given (an open pricing item of it): two would leave the customer's price to
+// whichever started later (PriceResolver.js sellerAgreementIds), so activation and a priced item added to an active agreement
+// refuse it (AGREEMENT_OVERLAP). A renewal's predecessor (exceptId), which the renewal's activation ends at its start, is not counted.
+function overlapOf(agreement, from, thru, productIds, exceptId = null) {
+    if (!agreement.otherPartyId || !productIds.length) return null
+    const start = Math.max(from ?? now(), now())
+    const others = Array.from(
+        find(AGREEMENT, {
+            organizationPartyId: agreement.organizationPartyId,
+            otherPartyId: agreement.otherPartyId,
+            statusId: "AgmStActive"
+        })
+            .condition("agreementTypeEnumId", "in", types)
+            .list()
+    ).filter(row => {
+        if (row.agreementId === agreement.agreementId || row.agreementId === exceptId || row.isTemplate === "Y") return false
+        const otherFrom = ms(row.fromDate),
+            otherThru = ms(row.thruDate)
+        return (otherThru == null || otherThru > start) && (thru == null || otherFrom == null || otherFrom < thru)
+    })
+    for (const other of others) {
+        const productId = itemsOf(other.agreementId).find(
+            item =>
+                item.productId &&
+                productIds.includes(item.productId) &&
+                (item.agreementItemTypeEnumId || "AitPricing") === "AitPricing" &&
+                (item.thruDate == null || ms(item.thruDate) > now())
+        )?.productId
+        if (productId) return {agreement: other, productId}
+    }
+    return null
+}
+const overlapText = overlap =>
+    L("Agreement") +
+    " " +
+    (overlap.agreement.description || overlap.agreement.agreementId) +
+    " (" +
+    overlap.agreement.agreementId +
+    ") " +
+    L("already prices product") +
+    " " +
+    overlap.productId +
+    " " +
+    L("for this customer in these dates; end it, remove its item or renew it instead")
+
 // ===== what activation needs =====
 // Each reason the agreement cannot be activated now, as [code, text]; none when it can (the evidence given at activation counts).
 function activationIssues(agreement, evidenceGiven = false, fromDate = null) {
@@ -211,6 +257,16 @@ function activationIssues(agreement, evidenceGiven = false, fromDate = null) {
         if (!priceAt(agreement.agreementId, item.agreementItemSeqId))
             issues.push(["PRICE_REQUIRED", L("Item") + " " + item.agreementItemSeqId + " " + L("has no negotiated price")])
     }
+    const overlap = overlapOf(
+        agreement,
+        from,
+        thru,
+        items
+            .filter(item => item.productId && (item.agreementItemTypeEnumId || "AitPricing") === "AitPricing")
+            .map(item => item.productId),
+        predecessorOf(agreement.agreementId)?.agreementId
+    )
+    if (overlap) issues.push(["AGREEMENT_OVERLAP", overlapText(overlap)])
     for (const row of priceRows(agreement.agreementId)) {
         if (
             row.priceUomId !== agreement.currencyUomId ||
@@ -880,6 +936,11 @@ function storeItem(p) {
     const price = given(p, "price") && !blank(p.price) ? decimal(p.price, "price") : null
     const minQuantity = given(p, "minQuantity") && !blank(p.minQuantity) ? decimal(p.minQuantity, "minimum quantity") : null
     if (price != null && !productId) denied("PRODUCT_REQUIRED", "Choose the product the price is for")
+    // a product priced anew on an active agreement: not one another current agreement with the customer prices
+    if (!draft && !item && type === "AitPricing") {
+        const overlap = overlapOf(agreement, agreementFrom, agreementThru, [productId])
+        if (overlap) denied("AGREEMENT_OVERLAP", overlapText(overlap))
+    }
     if (!item) {
         const created = withReason(Object.keys(values), reason, () =>
             call("create#" + ITEM, Object.assign({agreementId: agreement.agreementId, agreementItemTypeEnumId: type}, values))
@@ -1026,6 +1087,7 @@ function endAgreement(p) {
 function renewAgreement(p) {
     const userScope = salesAccess.scope()
     const source = salesAccess.requireAgreement(userScope, text(p.agreementId), true).agreement
+    requireRevision(source, p.agreementRevision)
     if (source.isTemplate === "Y") denied("TEMPLATE_NO_ACTIVATE", "A template is not renewed; start an agreement from it")
     if (!["AgmStActive", "AgmStExpired"].includes(source.statusId))
         denied("STATUS_INVALID", "Only an active or expired agreement is renewed; this one is " + statusText(source.statusId))
@@ -1063,7 +1125,14 @@ function renewAgreement(p) {
         toAgreementId: target.agreementId,
         agreementAssocTypeEnumId: renewalAssoc
     })
-    return {agreementId: target.agreementId, agreementRevision: 1, predecessorAgreementId: source.agreementId}
+    // the predecessor's revision counted, so a second renewal from the same read is refused as stale
+    const predecessorRevision = revise(source, {}, L("Renewed by") + " " + target.agreementId)
+    return {
+        agreementId: target.agreementId,
+        agreementRevision: 1,
+        predecessorAgreementId: source.agreementId,
+        predecessorRevision
+    }
 }
 
 // ===== expire#SalesAgreements =====
