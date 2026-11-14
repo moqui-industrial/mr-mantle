@@ -12,7 +12,7 @@
 // - decide: a holder of MARKETING_APPROVE in the target's organization approves or refuses (a refusal needs its reason,
 //   REASON_REQUIRED) the pending request at the revision named: a revision that is not the current one STALE_REVISION (naming
 //   it), none pending APPROVAL_NOT_REQUESTED, one already decided ALREADY_DECIDED (the request read locked, so two concurrent
-//   decisions decide once), the author SELF_APPROVAL unless the organization's MarketingPolicy has the one-person-team flag on
+//   decisions decide once), an author (its creator, the maker of its revision's material change, the requester) SELF_APPROVAL unless the organization's MarketingPolicy has the one-person-team flag on
 //   and, for a send, it has fewer than 500 recipients; such a decision is recorded as a self-approval (selfApproval Y).
 // - supersede: a material change of a target (CampaignServices: a campaign's organization, parent, dates, currency, budget or
 //   manager) marks the earlier revision's live requests and decisions superseded and reads their notices.
@@ -93,7 +93,9 @@ const targetKinds = {
         },
         revision: row => Number(row.campaignRevision || 1),
         organization: row => row.organizationPartyId,
-        authors: row => [row.createdByUserId].filter(Boolean),
+        // its creator and whoever made the current revision's material change (P2 review): an approver who changed the budget
+        // does not approve that budget
+        authors: row => Array.from(new Set([row.createdByUserId, row.revisedByUserId].filter(Boolean))),
         label: row => row.campaignName || row.marketingCampaignId,
         recipientCount: () => null,
         // approval is asked of a planned campaign only

@@ -4,7 +4,7 @@
 // - A cost is manual (a description and an amount) or an Accounting source line of the campaign's organization, never both
 //   (COST_SOURCE_INVALID): a purchase invoice item (the invoice billed to the organization, not cancelled), read with the caller's
 //   PAYABLE_VIEW or ACCOUNTING_VIEW, or a posted ledger debit of the organization, read with ACCOUNTING_VIEW (SOURCE_FORBIDDEN
-//   without it). Neither carries a campaign: the link is the CampaignCost row alone. No Accounting budget applies (F81).
+//   without it), each in Accounting's own scope of the organization (the books the user reads there). Neither carries a campaign: the link is the CampaignCost row alone. No Accounting budget applies (F81).
 // - A source line's allocations, over every campaign, never pass its amount (ALLOCATION_EXCEEDS), and one campaign counts a line
 //   once (SOURCE_ALREADY_COUNTED) until that row is reversed. The amount is in the campaign's currency, which the source must be in
 //   (CURRENCY_MISMATCH: no conversion is made).
@@ -27,14 +27,33 @@ const text = value => (value == null ? "" : String(value).trim())
 const money = (value, currencyUomId) =>
     value == null ? "" : currencyUomId ? ec.l10n.formatCurrency(value, currencyUomId) || String(value) : String(value)
 
-// The read permission of each source kind.
-const readsInvoice = () => ec.user.hasPermission("PAYABLE_VIEW") || ec.user.hasPermission("ACCOUNTING_VIEW")
-const readsLedger = () => ec.user.hasPermission("ACCOUNTING_VIEW")
-// A source line of the organization: {eligible, currencyUomId, label}, or a refusal.
+// Whether Accounting's own scope covers the organization for the user (AccountingPolicy access: the organizations the user works
+// in, every internal one for its administrator), so a Marketing scope wider than the user's books (MARKETING_ALL_ORGANIZATIONS)
+// reads no line Accounting would not show them (P2 review).
+function accountingCovers(organizationPartyId) {
+    let ids = []
+    const found = lib.check(() => {
+        ids = Array.from(
+            ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js").access("read")
+                .organizationPartyIds || []
+        )
+    })
+    return found.allowed && ids.includes(organizationPartyId)
+}
+// The read permission of each source kind, in the organization's books.
+const readsInvoice = organizationPartyId =>
+    (ec.user.hasPermission("PAYABLE_VIEW") || ec.user.hasPermission("ACCOUNTING_VIEW")) && accountingCovers(organizationPartyId)
+const readsLedger = organizationPartyId => ec.user.hasPermission("ACCOUNTING_VIEW") && accountingCovers(organizationPartyId)
+// A source line of the organization: {eligible, currencyUomId, label}, or a refusal. The line is read locked, so two campaigns
+// allocating it at once stay within its amount.
 function invoiceLine(organizationPartyId, invoiceId, invoiceItemSeqId) {
-    if (!readsInvoice()) denied("SOURCE_FORBIDDEN", "Reading a purchase invoice needs Accounting's payable view")
+    if (!readsInvoice(organizationPartyId))
+        denied("SOURCE_FORBIDDEN", "Reading a purchase invoice needs Accounting's payable view")
     const invoice = invoiceId ? one("mantle.account.invoice.Invoice", {invoiceId}) : null
-    const item = invoice && invoiceItemSeqId ? one("mantle.account.invoice.InvoiceItem", {invoiceId, invoiceItemSeqId}) : null
+    const item =
+        invoice && invoiceItemSeqId
+            ? find("mantle.account.invoice.InvoiceItem", {invoiceId, invoiceItemSeqId}).forUpdate(true).one()
+            : null
     // another organization's line answers as missing
     if (!item || invoice.toPartyId !== organizationPartyId || invoice.statusId === "InvoiceCancelled")
         denied("RECORD_UNAVAILABLE", "Invoice item " + invoiceId + " " + invoiceItemSeqId + " is not available")
@@ -47,11 +66,11 @@ function invoiceLine(organizationPartyId, invoiceId, invoiceItemSeqId) {
     }
 }
 function ledgerLine(organizationPartyId, acctgTransId, acctgTransEntrySeqId) {
-    if (!readsLedger()) denied("SOURCE_FORBIDDEN", "Reading a ledger entry needs Accounting view")
+    if (!readsLedger(organizationPartyId)) denied("SOURCE_FORBIDDEN", "Reading a ledger entry needs Accounting view")
     const trans = acctgTransId ? one("mantle.ledger.transaction.AcctgTrans", {acctgTransId}) : null
     const entry =
         trans && acctgTransEntrySeqId
-            ? one("mantle.ledger.transaction.AcctgTransEntry", {acctgTransId, acctgTransEntrySeqId})
+            ? find("mantle.ledger.transaction.AcctgTransEntry", {acctgTransId, acctgTransEntrySeqId}).forUpdate(true).one()
             : null
     if (!entry || trans.organizationPartyId !== organizationPartyId || trans.isPosted !== "Y")
         denied("RECORD_UNAVAILABLE", "Ledger entry " + acctgTransId + " " + acctgTransEntrySeqId + " is not available")
@@ -209,12 +228,14 @@ function summary(userScope, campaign, asOf = ec.user.nowTimestamp) {
         found.map(row => one("moqui.security.UserAccount", {userId: row.createdByUserId})?.partyId).filter(Boolean)
     )
     let total = toDecimal(0)
+    const invoiceReadable = readsInvoice(campaign.organizationPartyId)
+    const ledgerReadable = readsLedger(campaign.organizationPartyId)
     const costs = found.map(row => {
         total = total.add(toDecimal(row.amount ?? 0))
         const readable =
             row.costSourceEnumId === "CcsManual" ||
-            (row.costSourceEnumId === "CcsInvoiceItem" && readsInvoice()) ||
-            (row.costSourceEnumId === "CcsLedgerEntry" && readsLedger())
+            (row.costSourceEnumId === "CcsInvoiceItem" && invoiceReadable) ||
+            (row.costSourceEnumId === "CcsLedgerEntry" && ledgerReadable)
         const creator = one("moqui.security.UserAccount", {userId: row.createdByUserId})
         return {
             campaignCostId: row.campaignCostId,

@@ -24,6 +24,8 @@ spec({
             users.author = user(prefix, "author", [orgA], edit)
             users.finance = user(prefix, "finance", [orgA], edit.concat(["ACCOUNTING_VIEW"]))
             users.authorB = user(prefix, "authorB", [orgB], edit)
+            // Marketing in every organization, Accounting in B's books only (P2 review)
+            users.financeB = user(prefix, "financeB", [orgB], edit.concat(["ACCOUNTING_VIEW", "MARKETING_ALL_ORGANIZATIONS"]))
             users.reader = user(prefix, "reader", [orgA], view)
             users.configurer = user(prefix, "configurer", [orgA], ["MARKETING_VIEW", "MARKETING_CONFIGURE"])
             users.approver = user(prefix, "approver", [orgA], ["MARKETING_VIEW", "MARKETING_APPROVE"])
@@ -305,7 +307,7 @@ feature("the organization's successor is mirrored to organizationPartyId; a link
             .map(found => found.partyId)
             .join() == orgB
         linked.refusal == "" && !!linked.campaignAssociationId
-        foreign.refusal.includes("ORGANIZATION_MISMATCH")
+        foreign.refusal.includes("RECORD_UNAVAILABLE")
         mailbox.refusal.includes("RECORD_UNAVAILABLE")
         event.refusal.includes("KIND_UNAVAILABLE")
         // its links are B's: the organization stays
@@ -337,7 +339,11 @@ feature(
             const reversal = cost(users.author, {reversalOfCostId: manual.campaignCostId})
             const again = cost(users.author, {reversalOfCostId: manual.campaignCostId})
             const recount = cost(users.finance, Object.assign({amount: "250"}, ledger))
+            // A's line is outside the books financeB reads, whatever their Marketing scope
+            const outsideBooks = cost(users.financeB, Object.assign({amount: "1"}, ledger), other)
             return {
+                outsideBooks,
+                asFinanceB: as(users.financeB, C + "find#CampaignCosts", {marketingCampaignId: id}),
                 both,
                 forbidden,
                 linked,
@@ -356,6 +362,8 @@ feature(
             }
         },
         then({
+            outsideBooks,
+            asFinanceB,
             both,
             forbidden,
             linked,
@@ -392,6 +400,11 @@ feature(
             asReader.costs
                 .filter(found => found.costSourceEnumId != "CcsManual")
                 .every(found => found.description == "An Accounting line")
+            outsideBooks.refusal.includes("SOURCE_FORBIDDEN")
+            asFinanceB.refusal == "" &&
+                asFinanceB.costs
+                    .filter(found => found.costSourceEnumId != "CcsManual")
+                    .every(found => found.description == "An Accounting line" && found.sourceRef == "Not shown")
         }
     }
 )

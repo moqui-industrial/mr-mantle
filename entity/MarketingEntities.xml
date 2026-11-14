@@ -55,6 +55,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="campaignRevision" type="number-integer"/>
         <!-- who started the plan (P2): the author whose own approval the separation policy refuses (MarketingPolicy) -->
         <field name="createdByUserId" type="id"/>
+        <!-- who made the current revision's material change (P2 review): an author of that revision too, whose own approval of it the
+            separation policy refuses as the creator's; the creator on a new campaign -->
+        <field name="revisedByUserId" type="id"/>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId"/></relationship>
         <relationship type="one" title="Parent" related="mantle.marketing.campaign.MarketingCampaign">

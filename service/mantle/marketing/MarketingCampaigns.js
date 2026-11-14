@@ -134,7 +134,8 @@ function materialChange(row, reason) {
         )
     const campaignRevision = Number(row.campaignRevision || 1) + 1
     approvals.supersede("campaign", row.marketingCampaignId, campaignRevision)
-    const fields = {campaignRevision}
+    // whoever makes the revision is one of its authors (MarketingApprovals: the separation policy)
+    const fields = {campaignRevision, revisedByUserId: ec.user.userId || null}
     if (row.statusId === "MKTG_CAMP_APPROVED") {
         fields.statusId = "MKTG_CAMP_PLANNED"
         fields.statusId_changeReason = "Returned to review: " + reason
@@ -294,7 +295,8 @@ function create(p) {
         estimatedCost,
         statusId: "MKTG_CAMP_PLANNED",
         campaignRevision: 1,
-        createdByUserId: ec.user.userId
+        createdByUserId: ec.user.userId,
+        revisedByUserId: ec.user.userId
     }).marketingCampaignId
     const now = ec.user.nowTimestamp
     call("create#" + PARTY, {marketingCampaignId, partyId: organizationPartyId, roleTypeId: roles.organization, fromDate: now})
@@ -521,10 +523,12 @@ function storeAssociation(p) {
     if (!Object.hasOwn(associationKinds, kindId)) denied("KIND_UNAVAILABLE", "A campaign cannot link this kind of record yet")
     const sourceId = text(p.sourceId)
     const found = sourceId ? associationKinds[kindId].organization(sourceId) : null
-    if (!found) denied("RECORD_UNAVAILABLE", associationKinds[kindId].name + " " + sourceId + " is not available")
-    // another organization's record answers as a mismatch, never naming it
-    if (found.owner !== row.organizationPartyId)
-        denied("ORGANIZATION_MISMATCH", "A campaign links records of its own organization only")
+    // another organization's record answers as a missing one (P2 review: a distinct answer told which ids exist elsewhere)
+    if (!found || found.owner !== row.organizationPartyId)
+        denied(
+            "RECORD_UNAVAILABLE",
+            associationKinds[kindId].name + " " + sourceId + " is not available; a campaign links records of its own organization"
+        )
     const existing = rows(ASSOCIATION, {
         marketingCampaignId: row.marketingCampaignId,
         associationKindEnumId: kindId,
@@ -638,7 +642,20 @@ function duplicate(p) {
                 roleTypeId: roles.manager,
                 fromDate: now
             })
-    for (const link of rows(ASSOCIATION, {marketingCampaignId: source.marketingCampaignId}).filter(link => lib.active(link)))
+    // the current links whose record is still the organization's (P2 review: one re-owned since is left behind)
+    const stillOwned = link => {
+        try {
+            return associationKinds[link.associationKindEnumId]?.organization(link.sourceId)?.owner === source.organizationPartyId
+        } catch (error) {
+            ec.logger.error(
+                "Campaign " + source.marketingCampaignId + " link " + link.campaignAssociationId + ": " + error.message
+            )
+            return false
+        }
+    }
+    for (const link of rows(ASSOCIATION, {marketingCampaignId: source.marketingCampaignId}).filter(
+        link => lib.active(link) && stillOwned(link)
+    ))
         call("create#" + ASSOCIATION, {
             marketingCampaignId: created.marketingCampaignId,
             associationKindEnumId: link.associationKindEnumId,
@@ -715,7 +732,7 @@ function get(p) {
     const pending = approvals.pendingRequest(approvals.targetKinds.campaign, id, revision)
     const problems = approvals.campaignProblems(row, policy)
     const edit = caps.campaignEdit && marketingAccess.covers(userScope, row.organizationPartyId)
-    const authorIds = [row.createdByUserId, pending?.decidedByUserId].filter(Boolean)
+    const authorIds = approvals.targetKinds.campaign.authors(row).concat([pending?.decidedByUserId].filter(Boolean))
     const own = authorIds.includes(ec.user.userId)
     return {
         campaign: Object.assign(

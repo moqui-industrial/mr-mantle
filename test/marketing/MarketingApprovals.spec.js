@@ -140,6 +140,29 @@ feature("a material change ends the approval: the campaign returns to review, it
     }
 })
 
+feature("whoever made a revision's material change does not approve it, the flag off (P2 review)", {
+    when() {
+        const id = campaign(users.author, orgA, {campaignName: "Revised by an approver"})
+        // the one-person team's member raises the budget of a colleague's campaign; the colleague asks
+        const budget = as(users.solo, C + "store#CampaignBudget", {
+            marketingCampaignId: id,
+            expectedRevision: revisionOf(id).expectedRevision,
+            budgetedCost: "1800"
+        })
+        const asked = request(users.author, id)
+        const told = notices(id)
+        const own = decide(users.solo, id, "approve")
+        const other = decide(users.approver, id, "approve")
+        return {budget, asked, told, own, other}
+    },
+    then({budget, asked, told, own, other}) {
+        budget.refusal == "" && asked.refusal == "" && asked.targetRevision == 2
+        told[users.solo] == null && told[users.approver] == "unread"
+        own.refusal.includes("SELF_APPROVAL")
+        other.refusal == ""
+    }
+})
+
 feature(
     "the author never approves their own but under the one-person-team flag, recorded as a self-approval; a send at 500 recipients never",
     {
