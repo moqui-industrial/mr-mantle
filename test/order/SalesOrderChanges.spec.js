@@ -283,6 +283,15 @@ feature("a price change and a quantity increase with a new line are applied by t
         const priceKey = key()
         const applied = salesApply(price, {operationKey: priceKey})
         const again = salesApply(price, {operationKey: priceKey})
+        // the confirmation (P20): the change operator gets as far as the recipient check, another organization's operator and the
+        // approver no further than the permission and the record
+        const confirm = username =>
+            run(username, S + "send#OrderChangeConfirmation", {
+                requestId: price.requestId,
+                toAddress: "someone@elsewhere.test",
+                operationKey: key()
+            })
+        const confirms = {own: confirm(state.salesChange), other: confirm(state.otherChange), approver: confirm(state.sales)}
         const priced = {
             item: itemOf(orderId, "01"),
             request: one("mantle.request.Request", {requestId: price.requestId}),
@@ -310,6 +319,7 @@ feature("a price change and a quantity increase with a new line are applied by t
             price,
             desk,
             other,
+            confirms,
             revisionBefore,
             applied,
             again,
@@ -343,6 +353,9 @@ feature("a price change and a quantity increase with a new line are applied by t
         r.priced.request.statusId === "ReqCompleted"
         r.priced.holds.length === 0
         r.priced.pdf.length === 1
+        code(r.confirms.own) === "RECIPIENT_UNCHECKED"
+        code(r.confirms.other) === "RECORD_UNAVAILABLE"
+        code(r.confirms.approver) === "PERMISSION_DENIED"
         r.priced.revision > r.revisionBefore
         code(r.tooLow) === "QUANTITY_INVALID"
         r.more.saved.error === ""

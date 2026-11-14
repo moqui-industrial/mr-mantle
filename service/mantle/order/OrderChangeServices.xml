@@ -253,7 +253,8 @@ along with this software (see the LICENSE.md file). If not, see
             of the customer or of a current contact, employee or representative of it) as a mail client draft of an account the
             user sends from, through send#EmailDraft filed on the order, recorded as an OrderEmailMessage naming the content it
             sent. A send that fails leaves the change applied, its delivery pending; it is never applied again. Requires
-            ORDER_CHANGE_APPLY or SUPPORT_CASE_EDIT; refuses a proposal not applied (NOT_APPLIED), no stored PDF
+            ORDER_CHANGE_APPLY or SUPPORT_CASE_EDIT, or SALES_ORDER_CHANGE on an order of the sender's sales scope (impl-sales P20);
+            refuses a proposal not applied (NOT_APPLIED), no stored PDF
             (NOT_STORED), RECIPIENT_REQUIRED, RECIPIENT_INVALID, RECIPIENT_UNCHECKED and SEND_ACCOUNT_REQUIRED. The same
             operation key answers the first result.</description>
         <in-parameters>
