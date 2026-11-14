@@ -2621,7 +2621,8 @@ General Order Placement and eCommerce Usage
         </actions>
     </service>
 
-    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all">
+    <!-- impl-sales P19 (design-sales §8 shipped definitions): the recurrence worker is the operation sales.recurrence.run -->
+    <service verb="create" noun="RecurringOrders" authenticate="anonymous-all" operation="sales.recurrence.run">
         <description>Called by scheduled ServiceJob to clone recurring orders, place, and try auto-approve. A Shop-linked base goes
             to Shop's occurrence coordinator. Every other base is due as Sales' recurrence reads it (impl-sales P16,
             service/mantle/order/SalesRecurrence.js occurrenceOf: its latest scheduled time in its own zone after its last order,

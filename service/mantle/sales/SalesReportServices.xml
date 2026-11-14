@@ -393,7 +393,12 @@ along with this software (see the LICENSE.md file). If not, see
             the organization's fiscal month holding today. Every read is the organization's own, so its top products and
             customer classes hold no other organization's sales (F6). A read over 2,000 documents of a kind is named (complete
             false). Refuses a user without report read in the organization, a period of another organization and a unit
-            that is not a currency.</description>
+            that is not a currency. Sales' report scope (impl-sales P19; Sales owns the report, Accounting mounts it): a holder
+            of SALES_REPORT_VIEW without report read is answered for an organization of their sales scope, its periods those of
+            the organization itself; ORGANIZATION_DENIED outside it. Each row also carries the shipped value and, for a report
+            reader who also holds PRODUCT_COST_VIEW or a holder of both PRICE_VIEW and PRODUCT_COST_VIEW (costShown), the cost of what was shipped (its
+            issuances at their asset's acquire cost) and the margin over the shipped value, unknown (null, costIncomplete named)
+            where a cost is missing or in another currency than the sale's; withheld (null) from anyone else.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="timePeriodId"/>
@@ -412,6 +417,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="asOf"/>
             <parameter name="complete" type="Boolean"/>
             <parameter name="incompleteReason"/>
+            <parameter name="costShown" type="Boolean"/>
+            <parameter name="costIncomplete"/>
         </out-parameters>
         <actions>
             <set field="report" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAnalysis.js')
@@ -424,6 +431,8 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="asOf" from="report.asOf"/>
             <set field="complete" from="report.complete"/>
             <set field="incompleteReason" from="report.incompleteReason"/>
+            <set field="costShown" from="report.costShown"/>
+            <set field="costIncomplete" from="report.costIncomplete"/>
         </actions>
     </service>
 
@@ -517,6 +526,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="topLimit" type="Integer" default="100"/><!-- high limit to show all customer classes -->
             <parameter name="fromPartyIds" type="List"><description>The invoicing organizations, so the customer classes are
                 theirs only (F6)</description><parameter name="fromPartyId"/></parameter>
+            <parameter name="currencyUomIds" type="List"><description>Only these currencies (impl-sales P19: a summary of one
+                currency never adds another's); empty, every one as before</description><parameter name="currencyUomId"/></parameter>
             <parameter name="poffset" type="Integer" default="-1"/>
             <parameter name="dateField" default-value="invoiceDate"/>
             <parameter name="orderByField" default-value="-invoiceTotal"/>
@@ -554,6 +565,7 @@ along with this software (see the LICENSE.md file). If not, see
                     {field: {name: 'statusId', op: 'in', values: ['InvoiceFinalized', 'InvoiceSent', 'InvoiceAcked', 'InvoicePmtRecvd']}}
             ]
             if (fromPartyIds?.length) filterList.push({field: {name: 'fromPartyId', op: 'in', values: fromPartyIds}})
+            if (currencyUomIds?.length) filterList.push({field: {name: 'currencyUomId', op: 'in', values: currencyUomIds}})
             const filter = {bool:{all:filterList}}
 
             if (!ec.search.isAvailable()) { ec.message.addMessage("Search is not configured, no invoices by customer class", "danger"); return }

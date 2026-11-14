@@ -444,13 +444,18 @@ function accountCard(p) {
 //   sales app, or the customer's own verified party: actingFor) reaches every order of the customers it acts for and lists them.
 // - What: a placed sales order of the site's organization to that customer, every part the seller's to it, with no store (a store
 //   order's one public page is Shop's, F42) and not a recurring base or a template (F7); an order being changed, a cart, a quote
-//   in progress and a cancelled or rejected order are not shown. Every miss is the same NotFound.
+//   in progress and a rejected order are not shown. Every miss is the same NotFound. A cancelled order stays (impl-sales P19, the
+//   user's call of Nov 14): listed under My orders (all, not open) and opened by its link, marked Cancelled and read only, with no
+//   Support change, cancel or return link and no Billing pay link; the Support ask link stays the customer's way to ask.
 // - The answers: the lines and totals as text, promised dates, the accepted quote, shipments with tracking (a carrier's https link
 //   only), invoices with their open amount (Billing's InvoicePay for a signed-in account where the site mounts Billing; the page
 //   never takes payment), Support's pages for a change, cancel or return where the site mounts Support (each app checks its own
 //   access), and the stored confirmation's PDF (streamed by the facade, its location never answered). Read only.
 const CONTENT = "mantle.order.OrderContent"
 const orderStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderSent", "OrderCompleted", "OrderHold"]
+// P19: a placed order since cancelled is shown too (never counted open)
+const cancelledStatus = "OrderCancelled"
+const shownStatuses = orderStatuses.concat([cancelledStatus])
 const excludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
 const cancellableStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
 const issuedInvoices = ["InvoiceFinalized", "InvoiceSent", "InvoiceAcked", "InvoicePmtRecvd"]
@@ -462,7 +467,8 @@ const orderStateTexts = {
     OrderApproved: "Confirmed",
     OrderSent: "Shipped",
     OrderCompleted: "Completed",
-    OrderHold: "Received, being reviewed"
+    OrderHold: "Received, being reviewed",
+    OrderCancelled: "Cancelled"
 }
 const ORDER_LIST_CAP = 500
 const moneyText = (value, currencyUomId) =>
@@ -473,7 +479,7 @@ const httpsUrl = value => (/^https:\/\/[^\s"'<>]+$/i.test(String(value || "")) ?
 // The order's sales part when it is a customer's order of the organization as above, else null.
 function customerOrderPart(order, organizationPartyId, customerPartyId) {
     if (!order || order.productStoreId || !order.placedDate || order.recurCronExpression) return null
-    if (!orderStatuses.includes(order.statusId) || excludedPurposes.includes(order.orderPurposeEnumId)) return null
+    if (!shownStatuses.includes(order.statusId) || excludedPurposes.includes(order.orderPurposeEnumId)) return null
     const parts = rows(PART, {orderId: order.orderId}).sort((a, b) =>
         String(a.orderPartSeqId).localeCompare(String(b.orderPartSeqId))
     )
@@ -511,9 +517,11 @@ function orderFor(p, organizationPartyId) {
     if (!part) unavailable()
     return {order, part, organizationPartyId, customerPartyId, via: token ? "token" : "account", customers}
 }
+const isCancelled = order => order.statusId === cancelledStatus
 const held = order =>
-    order.statusId === "OrderHold" ||
-    rows("mantle.order.OrderHoldReason", {orderId: order.orderId}).some(row => !row.releasedDate)
+    !isCancelled(order) &&
+    (order.statusId === "OrderHold" ||
+        rows("mantle.order.OrderHoldReason", {orderId: order.orderId}).some(row => !row.releasedDate))
 const orderStateText = order => L(held(order) ? orderStateTexts.OrderHold : orderStateTexts[order.statusId] || "")
 // The order's shipments the customer may follow: packed, shipped or delivered, each with its carrier, tracking and items of this order.
 function orderShipments(orderId) {
@@ -564,7 +572,8 @@ function orderShipments(orderId) {
 function orderInvoices(o, siteId) {
     const ids = [...new Set(rows("mantle.order.OrderItemBilling", {orderId: o.order.orderId}).map(row => row.invoiceId))]
     if (!ids.length) return []
-    const billingMount = o.via === "account" ? apps().mount(siteId, "billing") : null
+    // a cancelled order offers no payment (P19)
+    const billingMount = o.via === "account" && !isCancelled(o.order) ? apps().mount(siteId, "billing") : null
     const billing = billingMount?.targetId === o.organizationPartyId
     return Array.from(
         find("mantle.account.invoice.Invoice")
@@ -603,6 +612,14 @@ function orderActions(o, siteId) {
         orderChangeKindEnumId: "OckCancel"
     }).some(row => openCaseStatuses.includes(row.statusId))
     const q = "?orderId=" + encodeURIComponent(o.order.orderId)
+    // a cancelled order is read only: the customer may still ask about it, nothing more (P19)
+    if (isCancelled(o.order))
+        return {
+            askUrl: supportUrl("/NewCustomerCase" + q),
+            requestCancelUrl: null,
+            requestReturnUrl: null,
+            cancellationRequested: false
+        }
     return {
         askUrl: supportUrl("/NewCustomerCase" + q),
         requestCancelUrl:
@@ -681,6 +698,7 @@ function orderView(o, siteId) {
                 repName: issues.ownerOf(order) ? partyName(issues.ownerOf(order)) : "",
                 placedText: dayText(order.placedDate),
                 stateText: orderStateText(order),
+                cancelled: isCancelled(order),
                 purchaseOrder: part.otherPartyOrderId || "",
                 currencyUomId: order.currencyUomId || "",
                 shipByText: dayText(part.estimatedShipDate || part.shipBeforeDate),
@@ -708,7 +726,7 @@ function findCustomerOrders(p) {
     if (!customers.length) return {orderList: [], count: 0, nextCursor: null, actingFor: 0}
     // the candidates by the order's header and part together, newest first, so the cap never fills with a store's orders, drafts
     // or older orders (Sales P17 review)
-    const statuses = p.state === "open" ? orderStatuses.filter(id => id !== "OrderCompleted") : orderStatuses
+    const statuses = p.state === "open" ? orderStatuses.filter(id => id !== "OrderCompleted") : shownStatuses
     const partFind = find("mantle.order.OrderHeaderAndPart")
         .condition("vendorPartyId", organizationPartyId)
         .condition("customerPartyId", "in", customers)
@@ -768,6 +786,7 @@ function findCustomerOrders(p) {
         purchaseOrder: o.part.otherPartyOrderId || "",
         totalText: moneyText(o.order.grandTotal ?? 0, o.order.currencyUomId),
         stateText: orderStateText(o.order),
+        cancelled: isCancelled(o.order),
         deliveryText: deliveryText(o.order.orderId),
         billingText: billingText(o, p.siteId)
     }))

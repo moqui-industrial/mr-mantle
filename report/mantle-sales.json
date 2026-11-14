@@ -42,12 +42,15 @@
                 "query": {
                   "field": {
                     "name": "orderPurposeEnumId",
-                    "op": "eq",
-                    "value": "OrpRecurringTemplate"
+                    "op": "in",
+                    "values": [
+                      "OrpRecurringTemplate",
+                      "OrpSalesQuoteTemplate"
+                    ]
                   }
                 },
                 "negated": true,
-                "label": "Not a recurring base order"
+                "label": "Not a recurring base or quote template"
               }
             ]
           }
@@ -91,12 +94,15 @@
                 "query": {
                   "field": {
                     "name": "orderPurposeEnumId",
-                    "op": "eq",
-                    "value": "OrpRecurringTemplate"
+                    "op": "in",
+                    "values": [
+                      "OrpRecurringTemplate",
+                      "OrpSalesQuoteTemplate"
+                    ]
                   }
                 },
                 "negated": true,
-                "label": "Not a recurring base order"
+                "label": "Not a recurring base or quote template"
               }
             ]
           }
@@ -148,12 +154,15 @@
                 "query": {
                   "field": {
                     "name": "orderPurposeEnumId",
-                    "op": "eq",
-                    "value": "OrpRecurringTemplate"
+                    "op": "in",
+                    "values": [
+                      "OrpRecurringTemplate",
+                      "OrpSalesQuoteTemplate"
+                    ]
                   }
                 },
                 "negated": true,
-                "label": "Not a recurring base order"
+                "label": "Not a recurring base or quote template"
               }
             ]
           }
