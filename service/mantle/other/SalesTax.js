@@ -381,7 +381,128 @@ function sample(organizationPartyId, p) {
     return answer
 }
 
-const operations = {local, invoice, simulate}
+// ===== X1: a storeless order's tax (impl-sales P7; design-sales §5, CX-PRICING) =====
+// The gateway of a storeless order part: its seller's (the part's internal vendor, PartyAcctgPreference.taxGatewayConfigId,
+// gateway() as an invoice's), or null for a purchase part or a seller without one.
+function orderPartGateway(part) {
+    if (!part?.vendorPartyId) return null
+    if (!one("mantle.party.PartyRole", {partyId: part.vendorPartyId, roleTypeId: "OrgInternal"})) return null
+    return gateway(part.vendorPartyId, null)
+}
+// Whether any part of a storeless order (or the one given) has a seller's gateway: handle#OrderItemChange, handle#OrderPartChange
+// and handle#OrderMajorChange retax a storeless order only then, so a storeless order of a seller without one (Customer Service's
+// replacements, Projects' estimates of a seller that sets none) is untouched, as before X1.
+function orderTaxed(p) {
+    const order = one("mantle.order.OrderHeader", {orderId: p.orderId})
+    if (!order || order.productStoreId) return {taxed: false}
+    const parts = p.orderPartSeqId
+        ? [one("mantle.order.OrderPart", {orderId: p.orderId, orderPartSeqId: p.orderPartSeqId})]
+        : rows("mantle.order.OrderPart", {orderId: p.orderId})
+    return {taxed: parts.some(part => !!orderPartGateway(part))}
+}
+// calculate#OrderSalesTax for an order without a store: for each part (or the one given) whose seller names a gateway, its tax
+// lines replaced by the gateway's results, one ItemSalesTax child under each taxed line (product lines not marked non-taxable,
+// shipping charge lines the rep entered, as the store path builds them), the destination the part's address else the customer's
+// (shipping, billing, primary), else the part's facility's origin. A part with no gateway keeps its lines untouched; a part with no
+// address at all loses its tax lines and gets none until it has one. A sale the gateway cannot tax (no rate in effect, two of one
+// scope) is refused with its reason, as an invoice's is.
+function order(p) {
+    const header = one("mantle.order.OrderHeader", {orderId: p.orderId})
+    if (!header || header.productStoreId) return {taxed: false}
+    const parts = p.orderPartSeqId
+        ? [one("mantle.order.OrderPart", {orderId: p.orderId, orderPartSeqId: p.orderPartSeqId})].filter(Boolean)
+        : rows("mantle.order.OrderPart", {orderId: p.orderId})
+    const date = header.entryDate || ec.user.nowTimestamp
+    let taxed = false
+    for (const part of parts) {
+        const config = orderPartGateway(part)
+        if (!config) continue
+        taxed = true
+        const lines = rows("mantle.order.OrderItem", {orderId: header.orderId, orderPartSeqId: part.orderPartSeqId})
+        for (const line of lines.filter(line => taxTypes.includes(line.itemTypeEnumId)))
+            call("delete#mantle.order.OrderItem", {orderId: line.orderId, orderItemSeqId: line.orderItemSeqId})
+        const kept = lines.filter(line => !taxTypes.includes(line.itemTypeEnumId))
+        const items = []
+        for (const line of kept) {
+            const selected = line.selectedAmount != null && !toDecimal(line.selectedAmount).isZero() ? line.selectedAmount : 1
+            const quantity = toDecimal(line.quantity ?? 1).multiply(toDecimal(selected))
+            if (quantity.isZero()) continue
+            const product = line.productId ? one("mantle.product.Product", {productId: line.productId}) : null
+            if (product?.taxable === "N") continue
+            const itemTotal = quantity.multiply(toDecimal(line.unitAmount ?? 0)).setScale(2, "HALF_UP")
+            const discountTotal = kept
+                .filter(
+                    child =>
+                        child.itemTypeEnumId === "ItemDiscount" &&
+                        child.parentItemSeqId === line.orderItemSeqId &&
+                        child.unitAmount != null
+                )
+                .reduce(
+                    (sum, child) => sum.add(toDecimal(child.quantity ?? 1).multiply(toDecimal(child.unitAmount))),
+                    toDecimal(0)
+                )
+            items.push({
+                itemId: line.orderItemSeqId,
+                itemTypeEnumId: line.itemTypeEnumId,
+                parentItemId: line.parentItemSeqId || null,
+                quantity: line.quantity,
+                unitAmount: line.unitAmount,
+                unitAmountLessDiscounts: itemTotal.add(discountTotal).divide(quantity).setScale(3, "HALF_UP"),
+                itemTotal,
+                discountTotal,
+                productId: line.productId,
+                taxCode: product?.taxCode
+            })
+        }
+        if (!items.length) continue
+        const origin = part.facilityId
+            ? rows("mantle.facility.FacilityContactMech", {
+                  facilityId: part.facilityId,
+                  contactMechPurposeId: "PostalShippingOrigin"
+              }).find(row => active(row, date))
+            : null
+        const destination = part.postalContactMechId || customerAddress(part.customerPartyId, date)
+        // a part with no address to tax at (none of its own, the customer's or its facility's) is not taxed yet: a draft entered
+        // before the customer's address is known (get#Quote says so), as a storeless order was before X1
+        if (!destination && !origin) continue
+        const out = call(config.calculateServiceName, {
+            referenceId: header.orderId + ":" + part.orderPartSeqId,
+            saveResults: false,
+            taxGatewayConfigId: config.taxGatewayConfigId,
+            customerPartyId: part.customerPartyId,
+            organizationPartyId: part.vendorPartyId,
+            originAddressContactMechId: origin?.contactMechId || null,
+            destinationAddressContactMechId: destination,
+            currencyUomId: header.currencyUomId,
+            taxDate: date,
+            items
+        })
+        for (const result of Array.from(out.taxResults || [])) {
+            if (result.taxAmount == null || toDecimal(result.taxAmount).isZero()) continue
+            const line = kept.find(item => item.orderItemSeqId === result.itemId)
+            if (!line) continue
+            const authority = result.taxAuthorityId
+                ? one("mantle.other.tax.TaxAuthority", {taxAuthorityId: result.taxAuthorityId})
+                : null
+            const quantity =
+                result.taxQuantity != null && !toDecimal(result.taxQuantity).isZero() ? result.taxQuantity : line.quantity
+            call("create#mantle.order.OrderItem", {
+                orderId: header.orderId,
+                orderPartSeqId: part.orderPartSeqId,
+                parentItemSeqId: result.itemId,
+                itemTypeEnumId: "ItemSalesTax",
+                quantity,
+                unitAmount: toDecimal(result.taxAmount).setScale(3, "HALF_UP"),
+                sourcePercentage: result.taxRate != null ? toDecimal(result.taxRate).multiply(toDecimal(100)) : null,
+                taxAuthorityId: result.taxAuthorityId || null,
+                itemDescription: [authority?.description, result.taxName].filter(Boolean).join(" ")
+            })
+        }
+    }
+    return {taxed}
+}
+
+const operations = {local, invoice, simulate, order, orderTaxed}
 ;({
     sample,
     execute: (op, parameters) => {

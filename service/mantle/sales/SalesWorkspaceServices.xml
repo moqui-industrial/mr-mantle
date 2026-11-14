@@ -213,20 +213,22 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="OwnedSalesAssignments" allow-remote="false">
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
         <description>Sales' lifecycle participant's lookup (design-admin §14; impl-sales P6, F54): what userId owns of Sales, for an
-            offboarding preview: the open leads and opportunities they own now (resourceId deal:id) and the accounts they manage now
-            (account:partyId; quotes join in P7), each named with its organization, never an amount, all transferable. The caller's
-            own, or another user's with SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise).</description>
+            offboarding preview: the open leads and opportunities they own now (resourceId deal:id), their open quotes (Open,
+            Requested or Proposed and never placed; quote:orderId, P7) and the accounts they manage now (account:partyId), each named
+            with its organization, never an amount, all transferable but a shared account. The caller's own, or another user's
+            with SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise).</description>
         <actions>
             <set field="resourceList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('findOwnedAssignments', context).resourceList"/>
         </actions>
     </service>
     <service verb="transfer" noun="SalesAssignment" allow-remote="false">
         <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
-        <description>One deal or account of fromUserId's handed to toUserId's person (the owned-resource contract): a deal's owner row
-            ends now and the new owner's starts (its team kept), an account's manager relationship ends now and the new manager's
-            starts. With SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise). Refuses a resource fromUserId does not own now
-            (RECORD_UNAVAILABLE), a closed deal (RECORD_CLOSED), a new owner with no enabled account and person (OWNER_INVALID) and
-            one who does not work for the record's organization (NOT_EMPLOYED).</description>
+        <description>One deal, quote or account of fromUserId's handed to toUserId's person (the owned-resource contract): a deal's owner
+            row ends now and the new owner's starts (its team kept), an open quote's owner row (undated) is replaced by the new
+            owner's (its team and contact kept; P7), an account's manager relationship ends now and the new manager's starts. With
+            SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise). Refuses a resource fromUserId does not own now (RECORD_UNAVAILABLE), a
+            closed deal or a quote no longer open (RECORD_CLOSED), a new owner with no enabled account and person (OWNER_INVALID)
+            and one who does not work for the record's organization (NOT_EMPLOYED).</description>
         <in-parameters><parameter name="salesResourceId" required="true"/></in-parameters>
         <actions>
             <set field="transferred" from="!!ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('transferAssignment', context).transferred"/>

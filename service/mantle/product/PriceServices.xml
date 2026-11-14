@@ -629,4 +629,59 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <service verb="get" noun="SellerProductPrice" allow-remote="false">
+        <description>A selling organization's sale price of a product for a customer, read as the seller's authority (impl-sales
+            P7; design-sales §5, §7): get#ProductPrice's resolver and modifiers, where the selling organization's rows, the
+            customer's own and the public ones are eligible, and the organization's published price lists apply, for a caller
+            without PRICE_VIEW too (get#ProductPrice gives such a caller no scoped row or list); never an agreement's row, an
+            average cost or another party's, and no trace. In process only: Sales' quote lines (mantle.order.SalesQuoteServices,
+            SalesQuotes.js) call it after their own checks (the seller in the caller's sales scope, the customer an account of
+            it, the quote the caller's).</description>
+        <in-parameters>
+            <parameter name="productId" required="true"/>
+            <parameter name="organizationPartyId" required="true"/>
+            <parameter name="customerPartyId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="quantity" type="BigDecimal" default="1.0"/>
+            <parameter name="quantityUomId"/>
+            <parameter name="validDate" type="Timestamp" default="ec.user.nowTimestamp"/>
+            <parameter name="priceUomId" required="true"/>
+            <parameter name="pricePurposeEnumId" default-value="PppPurchase"/>
+            <parameter name="shipToCountryGeoId"/>
+            <parameter name="defaultToListPrice" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="price" type="BigDecimal"/>
+            <parameter name="productPriceId"/>
+            <parameter name="listPrice" type="BigDecimal"/>
+            <parameter name="priceUomId"/>
+            <parameter name="priceListId"/>
+            <parameter name="priceRuleId"/>
+            <parameter name="priceAvailable" type="Boolean"/>
+            <parameter name="listPriceAvailable" type="Boolean"/>
+            <parameter name="priceSource"/>
+            <parameter name="taxInPrice"/>
+            <parameter name="virtualPriceFallback" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/PriceResolver.js').execute('resolve',Object.assign({},context,{direction:'sales',vendorPartyId:organizationPartyId,sellerAuthority:true})))
+                for (const modifier of ec.entity.find('mantle.product.ProductPriceModify').disableAuthz().orderBy('sequenceNum,priceModifyId').list()) {
+                    const serviceName=modifier.serviceRegister.serviceName
+                    ec.message.pushErrors()
+                    try {
+                        const input=Object.assign({},context)
+                        for(const parameter of modifier.parameters) input[parameter.parameterName]=parameter.parameterValue
+                        const result=ec.service.sync().name(serviceName).parameters(input).disableAuthz().call()||{}
+                        if(ec.message.hasError())throw new Error(ec.message.getErrorsString())
+                        ec.context.putAll(result)
+                    } catch(error) {
+                        ec.logger.error('Price modifier '+modifier.priceModifyId+' ('+serviceName+') failed: '+error)
+                        if(serviceName==='mantle.product.PriceServices.modify#ProductPriceList')throw error
+                    } finally {ec.message.clearErrors();ec.message.popErrors()}
+                }
+                ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/product/PriceResolver.js').execute('finalize',context))
+            ]]></script>
+        </actions>
+    </service>
 </services>

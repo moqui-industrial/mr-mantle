@@ -288,6 +288,70 @@ function requireOpportunity(userScope, salesOpportunityId, edit = false) {
     return found
 }
 
+// ===== P7: quotes (impl-sales P7; design-sales §1.1, §5) =====
+// A quote is a native order of purpose SalesQuote (OrderHeader.orderPurposeEnumId OrpSalesQuote) whose part sells: its vendor an
+// internal organization of the scope, its customer not internal. Inside the organization a Sales reader sees the quotes assigned to
+// them or a team of theirs (the part's SalesRepresentative and SalesTeam OrderPartParty rows, which create#Quote writes) and a holder
+// of SALES_TEAM_VIEW the organization's every quote; a customer or an opportunity link never widens it. An edit needs
+// SALES_QUOTE_EDIT on a quote the caller sees. A quote outside the scope answers as a missing one (RECORD_UNAVAILABLE).
+const quoteRoles = {owner: "SalesRepresentative", team: "SalesTeam", contact: "Contact"}
+const quotePurpose = "OrpSalesQuote"
+// The ids of the orders assigned now to the caller or a team of theirs (the part's owner and team rows), or null for a reader of
+// the organizations' every quote (teamRead).
+function assignedQuoteOrderIds(userScope) {
+    if (userScope.capabilities.teamRead) return null
+    const partyIds = assignmentParties(userScope)
+    if (!partyIds.length) return []
+    return Array.from(
+        new Set(
+            Array.from(
+                lib
+                    .find("mantle.order.OrderPartParty")
+                    .condition("partyId", "in", partyIds)
+                    .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                    .selectField("orderId")
+                    .list()
+            ).map(row => row.orderId)
+        )
+    )
+}
+// The quote as the caller may see it, or null: {order, part, organizationPartyId, customerPartyId, canEdit}.
+function quoteOf(userScope, orderId) {
+    if (!orderId || !userScope.capabilities.anyRead) return null
+    const order = lib.one("mantle.order.OrderHeader", {orderId})
+    if (!order || order.orderPurposeEnumId !== quotePurpose) return null
+    const part = Array.from(lib.find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
+    if (!part || !covers(userScope, part.vendorPartyId) || !isInternal(part.vendorPartyId)) return null
+    if (!part.customerPartyId || isInternal(part.customerPartyId)) return null
+    if (!userScope.capabilities.teamRead) {
+        const partyIds = assignmentParties(userScope)
+        const assigned =
+            partyIds.length > 0 &&
+            lib
+                .find("mantle.order.OrderPartParty")
+                .condition("orderId", orderId)
+                .condition("partyId", "in", partyIds)
+                .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
+                .count() > 0
+        if (!assigned) return null
+    }
+    return {
+        order,
+        part,
+        organizationPartyId: part.vendorPartyId,
+        customerPartyId: part.customerPartyId,
+        canEdit: !!userScope.capabilities.quoteEdit
+    }
+}
+// The quote or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for an edit without
+// SALES_QUOTE_EDIT.
+function requireQuote(userScope, orderId, edit = false) {
+    const found = quoteOf(userScope, orderId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Quote " + (orderId || "") + " is not available")
+    if (edit) requireCapability(userScope, "quoteEdit")
+    return found
+}
+
 ;({
     permissions,
     reads,
@@ -316,5 +380,11 @@ function requireOpportunity(userScope, salesOpportunityId, edit = false) {
     assignmentParties,
     assignedOpportunityIds,
     opportunityOf,
-    requireOpportunity
+    requireOpportunity,
+    // P7
+    quoteRoles,
+    quotePurpose,
+    assignedQuoteOrderIds,
+    quoteOf,
+    requireQuote
 })

@@ -9,7 +9,7 @@
 //   and then the assignment or team (SalesAccess.js), not the organization alone, which would show a representative the
 //   organization's whole pipeline (impl-sales F66).
 // - The lifecycle participant (find#OwnedSalesAssignments, transfer#SalesAssignment): the open leads and opportunities a departing
-//   user owns and the accounts they manage, read and moved by a holder of SALES_OWNER_CHANGE (Admin's identity operator and
+//   user owns, their open quotes (P7) and the accounts they manage, read and moved by a holder of SALES_OWNER_CHANGE (Admin's identity operator and
 //   administrator), the new owner one who works for the record's organization. Names only; no amount.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
@@ -215,6 +215,40 @@ function ownedDeals(partyId) {
             .list()
     )
 }
+// The open quotes a party owns (P7): a quote (OrderHeader of purpose SalesQuote) Open, Requested or Proposed and never placed whose
+// part names them as its owner (an OrderPartParty SalesRepresentative row, which has no dates: the row is the current owner).
+const PART_PARTY = "mantle.order.OrderPartParty"
+const openQuoteStatuses = ["OrderOpen", "OrderRequested", "OrderProposed"]
+function ownedQuotes(partyId) {
+    const ids = Array.from(
+        new Set(
+            Array.from(
+                find(PART_PARTY)
+                    .condition("partyId", partyId)
+                    .condition("roleTypeId", salesAccess.quoteRoles.owner)
+                    .selectField("orderId")
+                    .list()
+            ).map(row => row.orderId)
+        )
+    )
+    if (!ids.length) return []
+    return Array.from(
+        find("mantle.order.OrderHeader")
+            .condition("orderId", "in", ids)
+            .condition("orderPurposeEnumId", salesAccess.quotePurpose)
+            .condition("statusId", "in", openQuoteStatuses)
+            .condition("placedDate", "is-null", null)
+            .orderBy("orderId")
+            .limit(ownedCap)
+            .list()
+    )
+}
+function quoteSeller(orderId) {
+    return (
+        Array.from(find("mantle.order.OrderPart").condition("orderId", orderId).orderBy("orderPartSeqId").list())[0]
+            ?.vendorPartyId || null
+    )
+}
 // The accounts a party manages now (a current PrtAccountManager relationship from them).
 function managedAccounts(partyId) {
     return Array.from(
@@ -243,6 +277,15 @@ function findOwnedAssignments(p) {
                 " · " +
                 organizationName(deal.organizationPartyId),
             resourceKind: deal.typeEnumId === "SotLead" ? "lead" : "opportunity",
+            transferable: true,
+            note: ""
+        })
+    for (const quote of ownedQuotes(partyId))
+        resourceList.push({
+            resourceId: "quote:" + quote.orderId,
+            resourceName:
+                L("Quote") + " " + (quote.orderName || quote.orderId) + " · " + organizationName(quoteSeller(quote.orderId)),
+            resourceKind: "quote",
             transferable: true,
             note: ""
         })
@@ -305,6 +348,34 @@ function transferAssignment(p) {
         call("create#" + OPPORTUNITY_PARTY, {salesOpportunityId: id, partyId: toPartyId, roleTypeId: roles.owner, fromDate: now})
         ec.logger.info(
             "Sales deal " +
+                id +
+                " moved from " +
+                p.fromUserId +
+                " to " +
+                p.toUserId +
+                " by " +
+                ec.user.userId +
+                (p.reason ? ": " + p.reason : "")
+        )
+        return {transferred: true}
+    }
+    if (kind === "quote") {
+        // P7: an open quote's owner row (undated: the old row removed, the new owner's made); its team and contact are kept
+        const order = one("mantle.order.OrderHeader", {orderId: id})
+        const ownerRows = rows(PART_PARTY, {orderId: id, partyId: fromPartyId, roleTypeId: salesAccess.quoteRoles.owner})
+        if (!order || order.orderPurposeEnumId !== salesAccess.quotePurpose || !ownerRows.length) unavailable()
+        if (!openQuoteStatuses.includes(order.statusId) || order.placedDate)
+            denied("RECORD_CLOSED", (order.orderName || id) + " is no longer an open quote")
+        const toPartyId = newOwner(text(p.toUserId), quoteSeller(id))
+        if (toPartyId === fromPartyId) return {transferred: false}
+        for (const row of ownerRows) {
+            const key = {orderId: id, orderPartSeqId: row.orderPartSeqId, roleTypeId: row.roleTypeId}
+            call("delete#" + PART_PARTY, Object.assign({partyId: fromPartyId}, key))
+            if (!one(PART_PARTY, Object.assign({partyId: toPartyId}, key)))
+                call("create#" + PART_PARTY, Object.assign({partyId: toPartyId}, key))
+        }
+        ec.logger.info(
+            "Sales quote " +
                 id +
                 " moved from " +
                 p.fromUserId +

@@ -2706,7 +2706,14 @@ General Order Placement and eCommerce Usage
                             in-map="{orderId:orderId, orderPartSeqId:originalValue.orderPartSeqId}"/>
                 </if>
 
-                <if condition="orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
+                <!-- X1 (impl-sales P7): a storeless order whose seller names a tax gateway is retaxed on a line change, a shipping
+                    charge line the rep entered too (no carrier estimate without a store); any other storeless order as before -->
+                <set field="storelessTaxed" from="false"/>
+                <if condition="!orderHeader.productStoreId &amp;&amp; !(['ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))">
+                    <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId}" out-map="storelessTax"/>
+                    <set field="storelessTaxed" from="!!storelessTax.taxed"/>
+                </if>
+                <if condition="(orderHeader.productStoreId &amp;&amp; isPromo != 'Y' &amp;&amp; !(['ItemShipping', 'ItemSalesTax', 'ItemVatTax'].includes(itemTypeEnumId))) || storelessTaxed">
                     <service-call name="mantle.order.OrderServices.handle#OrderMajorChange"
                             in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
                     <if condition="hasOriginal &amp;&amp; orderPartSeqId != originalValue.orderPartSeqId">
@@ -2746,7 +2753,14 @@ General Order Placement and eCommerce Usage
             <if condition="hasOriginal &amp;&amp; ((partTotal == null) !== (originalValue.partTotal == null) || (partTotal != null &amp;&amp; !toDecimal(partTotal).eq(originalValue.partTotal)))"><return/></if>
 
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
-            <if condition="orderHeader.productStoreId &amp;&amp; (!hasOriginal || postalContactMechId != originalValue.postalContactMechId ||
+            <!-- X1 (impl-sales P7): a storeless order whose seller names a tax gateway is retaxed on an address or customer change -->
+            <set field="storelessTaxed" from="false"/>
+            <if condition="!orderHeader.productStoreId">
+                <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"
+                        out-map="storelessTax"/>
+                <set field="storelessTaxed" from="!!storelessTax.taxed"/>
+            </if>
+            <if condition="(orderHeader.productStoreId || storelessTaxed) &amp;&amp; (!hasOriginal || postalContactMechId != originalValue.postalContactMechId ||
                     carrierPartyId != originalValue.carrierPartyId || shipmentMethodEnumId != originalValue.shipmentMethodEnumId ||
                     customerPartyId != originalValue.customerPartyId || disablePromotions != originalValue.disablePromotions ||
                     disableShippingCalc != originalValue.disableShippingCalc || disableTaxCalc != originalValue.disableTaxCalc)"><then>
@@ -2776,6 +2790,29 @@ General Order Placement and eCommerce Usage
             <if condition="ec.context.sharedMap[sharedFlagKey]"><return/></if>
 
             <if condition="orderHeader == null"><entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/></if>
+            <!-- X1 (impl-sales P7; design-sales §5): an order without a store runs the tax step alone, through its seller's tax
+                gateway (calculate#OrderSalesTax), when a seller of it names one; promotions and carrier estimates stay store-only,
+                and freight on a storeless order is a charge line. A storeless order of sellers without a gateway is untouched. -->
+            <if condition="!orderHeader.productStoreId">
+                <service-call name="mantle.other.TaxServices.check#OrderTaxGateway" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"
+                        out-map="storelessTax"/>
+                <if condition="!storelessTax.taxed"><return/></if>
+                <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
+                <set field="noRecalcStatuses" from="['OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderRejected', 'OrderCancelled']"/>
+                <if condition="noRecalcStatuses.includes(orderHeader.statusId) || noRecalcStatuses.includes(orderPart?.statusId)">
+                    <return type="warning" message="Not updating tax for order ${orderId} in status ${orderHeader.status?.description}"/></if>
+                <entity-find-count entity-name="mantle.order.OrderItemBillingDetail" count-field="partBillingCount">
+                    <econdition field-name="orderId"/><econdition field-name="orderPartSeqId"/></entity-find-count>
+                <if condition="partBillingCount">
+                    <return type="warning" message="Not updating tax for order part ${orderId}:${orderPartSeqId} with ${partBillingCount} OrderItemBilling records"/></if>
+                <if condition="!('Y' === orderPart?.disableTaxCalc)">
+                    <script>ec.context.sharedMap[sharedFlagKey] = true</script>
+                    <service-call name="mantle.other.TaxServices.calculate#OrderSalesTax" in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}"/>
+                    <script>delete ec.context.sharedMap[sharedFlagKey]</script>
+                </if>
+                <service-call name="mantle.order.OrderServices.increment#OrderRevision" in-map="context"/>
+                <return/>
+            </if>
             <if condition="orderHeader.productStoreId">
                 <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart" for-update="true"/>
                 <set field="noRecalcStatuses" from="['OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderRejected', 'OrderCancelled']"/>
