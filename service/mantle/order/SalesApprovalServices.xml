@@ -43,6 +43,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="approveNetTermsOrders"/>
             <parameter name="intakeRetentionDays"/>
             <parameter name="reminderDays"/>
+            <parameter name="rfqAcknowledge"><description>Y: a request for quote made from mail is acknowledged to its sender (Sales P20
+                review)</description></parameter>
             <parameter name="acceptanceThresholds" type="List"><description>Each a map: currencyUomId, thresholdAmount (empty to
                 remove it)</description></parameter>
             <parameter name="changeReason"/>

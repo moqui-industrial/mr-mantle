@@ -74,7 +74,7 @@ function troubledSends(context) {
     for (const row of Array.from(
         find(SEND)
             .condition("organizationPartyId", "in", context.organizationPartyIds)
-            .condition("statusId", "in", ["CsSending", "CsPaused", "CsCompletedFailures"])
+            .condition("statusId", "in", ["CsSending", "CsPaused", "CsSampleSent", "CsCompletedFailures"])
             .orderBy("-releasedDate")
             .limit(100)
             .list()

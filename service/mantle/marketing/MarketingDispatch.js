@@ -44,6 +44,8 @@ const profiles = ec.resource.script("component://mr-mantle/service/mantle/party/
 const suppressions = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSuppressions.js")
 const ledger = ec.resource.script("component://mr-mantle/service/mantle/party/MessageDeliveries.js")
 const sends = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingSends.js").forDispatch
+// P10: a send's experiment (a sample recipient's variant, the remainder held for the winner)
+const experiments = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingExperiments.js")
 const {find, one, rows, denied, call, ms} = lib
 
 const SEND = "mantle.marketing.campaign.CampaignSend"
@@ -57,7 +59,7 @@ const ATTEMPT = "mantle.party.MessageDeliveryAttempt"
 const SOURCE = "MdsrcCampaignSend"
 const TEMPLATE_KEY = "MANTLE_CAMPAIGN_SEND"
 const limits = {pageSize: 100, maxPageSize: 500, pagesPerRun: 20, sendsPerRun: 20, leaseMinutes: 15, sweepRows: 2000}
-const releasedStatuses = ["CsScheduled", "CsSending", "CsPaused", "CsCompleted", "CsCompletedFailures"]
+const releasedStatuses = ["CsScheduled", "CsSending", "CsPaused", "CsSampleSent", "CsCompleted", "CsCompletedFailures"]
 const stoppableStatuses = ["CsScheduled", "CsSending"]
 const openDeliveryStates = ["MdsQueued", "MdsRetry", "MdsUncertain"]
 const accepted = ["CLPT_ACCEPTED", "CLPT_IN_USE"]
@@ -66,13 +68,17 @@ const recipientTexts = {
     CrsHandedOff: "Handed off",
     CrsSkipped: "Skipped at dispatch",
     CrsCancelled: "Not sent: cancelled",
-    CrsReplaced: "Replaced by a later preparation"
+    CrsReplaced: "Replaced by a later preparation",
+    CrsHeld: "Held for the winner"
 }
 // a dispatch's own skip reasons beside the eligibility's (MarketingEligibility.js reasonTexts)
 const skipTexts = {
     DESTINATION_CHANGED: "The address changed since approval",
     FREQUENCY_CAP: "Over the organization's frequency cap",
-    NOT_CLASSIFIED: "Could not be checked"
+    NOT_CLASSIFIED: "Could not be checked",
+    // P10: left out at the winner's release
+    AUDIENCE_LEFT: "No longer in the send's audience at the winner's release",
+    ALREADY_SENT: "Sent this send already"
 }
 
 const text = value => (value == null ? "" : String(value).trim())
@@ -128,7 +134,7 @@ function releaseParties(row, approval) {
 }
 const preparedCount = row =>
     find(RECIPIENT, {campaignSendId: row.campaignSendId, preparedRevision: Number(row.preparedRevision || 0)})
-        .condition("statusId", "in", ["CrsSelected", "CrsHandedOff", "CrsSkipped"])
+        .condition("statusId", "in", ["CrsSelected", "CrsHandedOff", "CrsSkipped", "CrsHeld"])
         .count()
 // The deliveries of a send in the ledger, counted by state (one query by the send's event key).
 function deliveryCounts(campaignSendId) {
@@ -141,7 +147,7 @@ function deliveryCounts(campaignSendId) {
 }
 function recipientCounts(row) {
     const counts = {}
-    for (const statusId of ["CrsSelected", "CrsHandedOff", "CrsSkipped", "CrsCancelled"])
+    for (const statusId of ["CrsSelected", "CrsHandedOff", "CrsSkipped", "CrsCancelled", "CrsHeld"])
         counts[statusId] = find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId})
             .condition("preparedRevision", Number(row.preparedRevision || 0))
             .count()
@@ -164,6 +170,7 @@ function controlOf(userScope, row) {
               handedOffCount: recipients.CrsHandedOff,
               skippedCount: recipients.CrsSkipped,
               cancelledCount: recipients.CrsCancelled,
+              heldCount: recipients.CrsHeld,
               sentCount: deliveries.MdsSent,
               failedCount: deliveries.MdsFailed,
               uncertainCount: deliveries.MdsUncertain,
@@ -181,7 +188,8 @@ function controlOf(userScope, row) {
         const approval = approvals.currentApproval("send", row.campaignSendId, Number(row.sendRevision || 1))
         if (approval) {
             const own = releaseParties(row, approval).has(ec.user.userId)
-            const count = row.statusId === "CsPaused" ? Number(row.releasedCount || 0) : preparedCount(row)
+            // P10: preparedCount reads the samples and the held remainder alike (a paused experiment's resume counts the whole audience)
+            const count = row.statusId === "CsPaused" ? resumeCount(row) : preparedCount(row)
             releaseSelf = own
             canRelease = !own || approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", count)
         }
@@ -194,7 +202,8 @@ function controlOf(userScope, row) {
             releaseSelf,
             canPause: !!caps.dispatch && stoppableStatuses.includes(row.statusId),
             canCancel:
-                (!!caps.dispatch && ["CsApproved", "CsScheduled", "CsSending", "CsPaused"].includes(row.statusId)) ||
+                (!!caps.dispatch &&
+                    ["CsApproved", "CsScheduled", "CsSending", "CsPaused", "CsSampleSent"].includes(row.statusId)) ||
                 (!!caps.sendEdit && ["CsDraft", "CsAwaitingApproval", "CsApproved"].includes(row.statusId)),
             canRetry: !!caps.dispatch && released && row.statusId !== "CsCancelled" && (deliveries?.MdsFailed || 0) > 0,
             canReconcile: !!caps.dispatch && ec.user.hasPermission("MESSAGE_DELIVERY_REVIEW"),
@@ -220,7 +229,7 @@ function releaseSend(p) {
         selfDispatch: row.selfDispatch === "Y"
     })
     // a second release answers the first, whatever stamp it names
-    if (["CsScheduled", "CsSending", "CsCompleted", "CsCompletedFailures"].includes(row.statusId)) return first()
+    if (["CsScheduled", "CsSending", "CsSampleSent", "CsCompleted", "CsCompletedFailures"].includes(row.statusId)) return first()
     if (row.statusId === "CsPaused") return resumeSend(userScope, row)
     if (row.statusId !== "CsApproved")
         denied("STATUS_INVALID", "Send " + row.campaignSendId + " is " + sends().statusText(row.statusId).toLowerCase())
@@ -236,15 +245,18 @@ function releaseSend(p) {
         preparedRevision: revision
     }).count()
     if (!count) denied("EMPTY_AUDIENCE", "Send " + row.campaignSendId + " has no eligible recipient to release to")
+    // P10: an experiment's release sends its samples; the remainder held for the winner counts toward the limits all the same
+    const held = find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId: "CrsHeld", preparedRevision: revision}).count()
+    const total = count + held
     const policy = approvals.policyOf(row.organizationPartyId)
-    if (policy?.audienceLimit != null && count > Number(policy.audienceLimit))
+    if (policy?.audienceLimit != null && total > Number(policy.audienceLimit))
         denied(
             "AUDIENCE_LIMIT",
-            "The send has " + count + " recipients, over the organization's limit of " + policy.audienceLimit
+            "The send has " + total + " recipients, over the organization's limit of " + policy.audienceLimit
         )
     // apart from approval: an author or the approver releases only under the one-person-team flag, under 500 counted now
     const own = releaseParties(row, approval).has(ec.user.userId)
-    if (own && !approvals.selfApprovalAdmits(policy, "send", count))
+    if (own && !approvals.selfApprovalAdmits(policy, "send", total))
         denied(
             "SELF_DISPATCH",
             "You wrote, submitted or approved send " + row.campaignSendId + "; another dispatcher releases it"
@@ -326,12 +338,15 @@ function releaseSend(p) {
         selfDispatch: own
     }
 }
+// The count a paused send's resume is admitted by: what was released, or (P10 review) the whole prepared audience when larger, so an
+// experiment's samples never stand for its held or released remainder under the one-person team's flag.
+const resumeCount = row => Math.max(Number(row.releasedCount || 0), preparedCount(row))
 // a paused send resumed by a dispatcher, under release's rule
 function resumeSend(userScope, row) {
     const approval = approvals.currentApproval("send", row.campaignSendId, Number(row.sendRevision || 1))
     if (!approval) denied("APPROVAL_REQUIRED", "Send " + row.campaignSendId + " is no longer approved")
     const own = releaseParties(row, approval).has(ec.user.userId)
-    if (own && !approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", Number(row.releasedCount || 0)))
+    if (own && !approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", resumeCount(row)))
         denied("SELF_DISPATCH", "You wrote, submitted or approved send " + row.campaignSendId + "; another dispatcher resumes it")
     call("update#" + SEND, {
         campaignSendId: row.campaignSendId,
@@ -780,6 +795,18 @@ function sweep(p) {
     if (waiting) return {completed: false}
     const counts = deliveryCounts(row.campaignSendId)
     if (openDeliveryStates.some(state => counts[state] > 0)) return {completed: false}
+    // P10: an experiment's sample settled while its remainder waits for the winner: Sample sent, not completed
+    const held = find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId: "CrsHeld"})
+        .condition("preparedRevision", Number(row.preparedRevision || 0))
+        .count()
+    if (held) {
+        call("update#" + SEND, {
+            campaignSendId: row.campaignSendId,
+            statusId: "CsSampleSent",
+            statusId_changeReason: "The sample is sent; " + held + " recipients wait for the winner"
+        })
+        return {completed: false, sampleSent: true}
+    }
     const failed = counts.MdsFailed > 0
     call("update#" + SEND, {
         campaignSendId: row.campaignSendId,
@@ -839,7 +866,8 @@ function cancelSend(p) {
     const row = sends().sendOf(userScope, p.campaignSendId, true)
     if (row.statusId === "CsCancelled")
         return {campaignSendId: row.campaignSendId, statusId: row.statusId, inFlightCount: inFlight(row)}
-    const byDispatcher = !!caps.dispatch && ["CsApproved", "CsScheduled", "CsSending", "CsPaused"].includes(row.statusId)
+    const byDispatcher =
+        !!caps.dispatch && ["CsApproved", "CsScheduled", "CsSending", "CsPaused", "CsSampleSent"].includes(row.statusId)
     const byAuthor = !!caps.sendEdit && ["CsDraft", "CsAwaitingApproval", "CsApproved"].includes(row.statusId)
     if (!byDispatcher && !byAuthor) {
         if (!caps.dispatch && !caps.sendEdit)
@@ -848,10 +876,10 @@ function cancelSend(p) {
     }
     const reason = text(p.reason)
     if (!reason) denied("REASON_REQUIRED", "A cancellation needs its reason")
-    const cancelledCount = find(RECIPIENT, {campaignSendId: row.campaignSendId, statusId: "CrsSelected"}).updateAll({
-        statusId: "CrsCancelled",
-        leaseUntilDate: null
-    })
+    // P10: an experiment's remainder held for the winner is not sent either
+    const cancelledCount = find(RECIPIENT, {campaignSendId: row.campaignSendId})
+        .condition("statusId", "in", ["CrsSelected", "CrsHeld"])
+        .updateAll({statusId: "CrsCancelled", leaseUntilDate: null})
     call("update#" + SEND, {
         campaignSendId: row.campaignSendId,
         statusId: "CsCancelled",
@@ -884,7 +912,13 @@ function findRecipients(p) {
         Number(row.preparedRevision || 0)
     )
     const state = text(p.state)
-    const recipientStates = {waiting: "CrsSelected", handedOff: "CrsHandedOff", skipped: "CrsSkipped", cancelled: "CrsCancelled"}
+    const recipientStates = {
+        waiting: "CrsSelected",
+        handedOff: "CrsHandedOff",
+        skipped: "CrsSkipped",
+        cancelled: "CrsCancelled",
+        held: "CrsHeld"
+    }
     const deliveryStates = {
         sent: ["MdsSent"],
         failed: ["MdsFailed"],
@@ -903,7 +937,7 @@ function findRecipients(p) {
                 .list()
         ).map(delivery => delivery.deliveryId)
         query = query.condition("messageDeliveryId", "in", deliveryIds.length ? deliveryIds : ["_none_"])
-    } else query = query.condition("statusId", "in", ["CrsSelected", "CrsHandedOff", "CrsSkipped", "CrsCancelled"])
+    } else query = query.condition("statusId", "in", ["CrsSelected", "CrsHandedOff", "CrsSkipped", "CrsCancelled", "CrsHeld"])
     if (!blank(p.skipReasonCode)) query = query.condition("skipReasonCode", text(p.skipReasonCode))
     if (!blank(p.text) && unmasked) {
         const like =
@@ -933,6 +967,8 @@ function recipientRows(recipientRows, unmasked) {
             : []
     )
     const names = unmasked ? lib.partyNames(recipientRows.map(recipient => recipient.partyId)) : {}
+    // P10: each recipient's variant, by its label
+    const variantLabels = experiments().labelsOf(recipientRows.map(recipient => recipient.campaignExperimentVariantId))
     return recipientRows.map(recipient => {
         const delivery = deliveries.get(recipient.messageDeliveryId) || null
         const address = recipient.destinationKey || ""
@@ -952,7 +988,13 @@ function recipientRows(recipientRows, unmasked) {
             handedOffDateText: recipient.handedOffDate ? lib.dateText(recipient.handedOffDate) : "",
             sentDateText: delivery?.sentDate ? lib.dateText(delivery.sentDate) : "",
             uncertain: delivery?.stateEnumId === "MdsUncertain",
-            retryable: delivery?.stateEnumId === "MdsFailed" && lastOutcome(delivery) === "retryable"
+            retryable: delivery?.stateEnumId === "MdsFailed" && lastOutcome(delivery) === "retryable",
+            variantText: recipient.campaignExperimentVariantId
+                ? (variantLabels[recipient.campaignExperimentVariantId] || "") +
+                  (recipient.experimentRemainder === "Y" ? " (winner, to the remainder)" : "")
+                : recipient.experimentRemainder === "Y"
+                  ? "Remainder"
+                  : ""
         }
     })
 }
@@ -1038,7 +1080,7 @@ function getRecipient(p) {
 function retryRecipients(p) {
     const userScope = dispatchScope()
     const row = sends().sendOf(userScope, p.campaignSendId, true)
-    if (!["CsSending", "CsPaused", "CsCompleted", "CsCompletedFailures"].includes(row.statusId))
+    if (!["CsSending", "CsPaused", "CsSampleSent", "CsCompleted", "CsCompletedFailures"].includes(row.statusId))
         denied("STATUS_INVALID", "Send " + row.campaignSendId + " is " + sends().statusText(row.statusId).toLowerCase())
     const chosen = Array.from(
         new Set(
@@ -1102,7 +1144,7 @@ function retryRecipients(p) {
     for (const id of chosen)
         if (!candidates.some(recipient => recipient.campaignRecipientId === id))
             results.push({campaignRecipientId: id, retried: false, reasonText: "Not a retryable failure"})
-    if (requeued.length && row.statusId === "CsCompletedFailures")
+    if (requeued.length && ["CsCompletedFailures", "CsSampleSent"].includes(row.statusId))
         call("update#" + SEND, {
             campaignSendId: row.campaignSendId,
             statusId: "CsSending",
@@ -1211,7 +1253,13 @@ function buildDelivery(p) {
     if (!current || suppressions.normalize("MdcEmail", mech.infoString) !== recipient.destinationKey)
         return {suppress: "The address changed since approval"}
     const s = sends()
-    const rendered = s.render(s.preparedContent(row), s.recipientValues(recipient.partyId))
+    // P10: a recipient of an experiment gets its variant's prepared content (a sample's, or the winner's for the remainder)
+    let prepared = s.preparedContent(row)
+    if (recipient.campaignExperimentVariantId) {
+        prepared = experiments().preparedVariantContent(row, recipient.campaignExperimentVariantId)
+        if (!prepared) return {suppress: "The recipient's variant was not prepared with the send"}
+    } else if (recipient.experimentRemainder === "Y") return {suppress: "The recipient waits for the winner"}
+    const rendered = s.render(prepared, s.recipientValues(recipient.partyId))
     const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
     const where = unsubscribeLink(row, profile, row.unsubscribeBaseUrl)
     if (!where.ready) return {suppress: "The unsubscribe link has no address"}
@@ -1288,6 +1336,8 @@ const operations = {
     controlOf,
     limits,
     SOURCE,
+    // P10: what the winner's release (MarketingExperiments.js) shares
+    forExperiments: {dispatchScope, releaseParties, dispatchAfterCommit, checkPage, reasonText, deliveryCounts, eventPrefix},
     // P11: an automation step's hand-off through the same checks
     checkRecipients,
     handOffRecipient,

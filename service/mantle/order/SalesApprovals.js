@@ -62,9 +62,12 @@ const policyFields = [
     "reminderDays",
     // P10: the stored text of the quote's cover and terms and of its reminder (F70)
     "quoteTextLocation",
-    "reminderTextLocation"
+    "reminderTextLocation",
+    // P20 review: whether a request for quote made from mail is acknowledged, and its stored text (design §16)
+    "rfqAcknowledge",
+    "rfqAcknowledgeTextLocation"
 ]
-const flagFields = ["responsePoRequired", "orderApprovalRequired", "approveNetTermsOrders"]
+const flagFields = ["responsePoRequired", "orderApprovalRequired", "approveNetTermsOrders", "rfqAcknowledge"]
 const dayFields = ["quoteValidityDays", "intakeRetentionDays", "reminderDays"]
 const ruleFields = [
     "purposeEnumId",

@@ -135,4 +135,21 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND" description="Campaign send message"
             emailServerId="SYSTEM" subject=""/>
     <!-- ===== end of Marketing P9 ===== -->
+
+    <!-- ===== Marketing P10: experiments (impl-marketing P10; design-marketing §5 ExperimentDetail) ===== -->
+    <!-- A send with an experiment: once its sample is handed off and settled while its remainder waits for the winner it is "Sample
+        sent"; the winner's release (release#ExperimentWinner) sends it on, a retry of the sample's failures too; a dispatcher may
+        cancel it, the remainder then not sent. -->
+    <moqui.basic.StatusItem statusId="CsSampleSent" statusTypeId="CampaignSend" sequenceNum="6" description="Sample sent"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsSampleSent" transitionName="Sample sent"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSampleSent" toStatusId="CsSending" transitionName="Release the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSampleSent" toStatusId="CsCancelled" transitionName="Cancel"/>
+    <!-- A remainder recipient is held until the winner's release (then selected, or skipped when the audience no longer admits it),
+        cancelled with its send or replaced by a later preparation. -->
+    <moqui.basic.StatusItem statusId="CrsHeld" statusTypeId="CampaignRecipient" sequenceNum="5" description="Held for the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsSelected" transitionName="Release the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsSkipped" transitionName="Leave out at the winner's release"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsReplaced" transitionName="Replace"/>
+    <!-- ===== end of Marketing P10 ===== -->
 </entity-facade-xml>
