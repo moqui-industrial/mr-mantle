@@ -3,8 +3,9 @@
 // duplicate admission event enrolls once; a completed send step is not replayed after a restart, and a pause holds a due step that
 // a resume sends; a withdrawal stops an enrollment while a channel's withdrawal skips only that channel's sends; a goal met ends an
 // enrollment and a stopped one does not resume; a day wait across a daylight-saving gap lands on the next valid instant and a
-// business-day wait skips the weekend; a segment reading Sales is refused (an automation runs as the system) and another
-// organization's automation is missing; an order placed files its admission event once.
+// business-day wait skips the weekend; another organization's automation is missing; an order placed files its admission event
+// once; an automation runs as its owner (the user's call, Nov 14): a Sales lead segment admits under an owner with Sales access, a
+// dispatcher without it cannot activate it, and the owner losing the permission pauses the run.
 // Standalone: spec-local organizations, users, parties, a topic, a template and a profile. Run:
 // ./moq test mr-mantle --spec Automations
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
@@ -18,7 +19,7 @@ const ENROLLMENT = "mantle.marketing.automation.AutomationEnrollment"
 const EXECUTION = "mantle.marketing.automation.AutomationStepExecution"
 const EVENT = "mantle.marketing.automation.AutomationSourceEvent"
 const capture = ec.factory.getTool("MailCapture")
-const prefix = "MKA"
+const prefix = "MKO"
 const orgA = prefix + "_ORG_A",
     orgB = prefix + "_ORG_B"
 const topic = prefix + "_TOPIC"
@@ -159,6 +160,13 @@ spec({
                 ["MARKETING_VIEW", "MARKETING_APPROVE", "MARKETING_DISPATCH"]
             )
             users.dispatcherB = user(prefix, "dispatcherB", [orgB], ["MARKETING_VIEW", "MARKETING_DISPATCH"])
+            // a dispatcher who also reads the organization's Sales pipeline: an automation's owner with Sales facts
+            users.salesDispatcher = user(
+                prefix,
+                "salesdisp",
+                [orgA],
+                ["MARKETING_VIEW", "MARKETING_DISPATCH", "SALES_VIEW", "SALES_TEAM_VIEW"]
+            )
             users.audience = user(
                 prefix,
                 "audience",
@@ -185,7 +193,7 @@ spec({
                 contactMechTypeEnumId: "CmtEmailAddress",
                 ownerPartyId: orgA
             })
-            for (const name of ["Ann", "Kim", "Lee", "Mia"]) person(name, true)
+            for (const name of ["Ann", "Kim", "Lee", "Mia", "Nia"]) person(name, true)
             for (const name of ["Hal", "Ivy", "Jon"]) person(name, false)
             // Kim meets the goal: an explicit segment of Kim alone
             make("mantle.marketing.segment.MarketSegment", {
@@ -201,7 +209,7 @@ spec({
                 fromDate: ago(5),
                 memberKindEnumId: "MspInclude"
             })
-            // a rule segment reading Sales' leads: an automation (the system) cannot read it
+            // a rule segment reading Sales' leads: read as the automation's owner, under the owner's Sales access
             make("mantle.marketing.segment.MarketSegment", {
                 marketSegmentId: prefix + "_SALES",
                 segmentName: "Open leads",
@@ -213,19 +221,19 @@ spec({
                 fromDate: ago(5),
                 filterJson: JSON.stringify({
                     match: "all",
-                    conditions: [{source: "salesLead", field: "hasOpenLead", operator: "equals", value: true}]
+                    conditions: [{source: "salesLead", field: "openLead", operator: "is", value: true}]
                 })
             })
             make("moqui.basic.email.EmailServer", {
                 emailServerId: relay,
-                smtpHost: "relay.mka.example.test",
+                smtpHost: "relay.mko.example.test",
                 smtpPort: "9",
-                webBaseUrl: "https://news.mka.example.test"
+                webBaseUrl: "https://news.mko.example.test"
             })
             make("moqui.basic.email.EmailAccount", {
                 emailAccountId: prefix + "_BOUNCES",
                 accountKindEnumId: "EakHosted",
-                emailAddress: "bounces@bounce.mka.example.test",
+                emailAddress: "bounces@bounce.mko.example.test",
                 statusId: "EasActive"
             })
             make("mantle.party.MessageSendingProfile", {
@@ -234,10 +242,10 @@ spec({
                 profileName: "Automation news",
                 channelEnumId: "MdcEmail",
                 emailServerId: relay,
-                fromAddress: "news@mka.example.test",
+                fromAddress: "news@mko.example.test",
                 purposeEnumId: "MtpPromotional",
                 trackingPolicyEnumId: "MtrNone",
-                bounceDomain: "bounce.mka.example.test",
+                bounceDomain: "bounce.mko.example.test",
                 fromDate: ago(30)
             })
         })
@@ -372,7 +380,7 @@ feature("an automation is approved and activated apart; a duplicate admission ev
         r.ran.handedOff == 1
         r.halMail.length == 1
         String(r.halMail[0].subject) == "Welcome, Hal"
-        r.halUnsubscribe.startsWith("<https://news.mka.example.test/")
+        r.halUnsubscribe.startsWith("<https://news.mko.example.test/")
         r.halExecutions
             .map(e => e.outcomeEnumId)
             .sort()
@@ -573,7 +581,7 @@ feature("a day wait across a daylight-saving gap lands on the next valid instant
         r.gapWait.dueText.startsWith("2026-03-08 03:00 -04:00")
         r.weekendDay.dueMillis == Date.UTC(2026, 2, 13, 14, 0)
         r.weekendWait.dueMillis == Date.UTC(2026, 2, 16, 14, 0)
-        r.salesGoal.refusal.includes("SOURCE_UNAVAILABLE")
+        r.salesGoal.refusal == ""
         r.otherOrganization.refusal.includes("RECORD_UNAVAILABLE")
         r.readerFind.refusal.includes("PERMISSION_DENIED")
         r.readerStore.refusal.includes("PERMISSION_DENIED")
@@ -608,3 +616,70 @@ feature("an order placed files its admission event once, and its customer is enr
         r.mail == 1
     }
 })
+
+feature(
+    "an automation runs as its owner: a Sales lead segment admits under an owner with Sales access; losing it pauses the run",
+    {
+        when() {
+            const id = draft({automationName: "Leads", triggerEnumId: "AtrSegment", triggerSegmentId: prefix + "_SALES"}, [
+                {kind: "send", stepName: "Hello", messageTemplateId: ids.template}
+            ])
+            approve(id)
+            // the activator becomes its owner: a dispatcher who cannot read Sales could not run it
+            const withoutSales = activate(users.dispatcher, id)
+            const activated = activate(users.salesDispatcher, id)
+            admit(id) // the baseline: no open lead yet
+            system(() => {
+                make("mantle.sales.opportunity.SalesOpportunity", {
+                    salesOpportunityId: prefix + "_LEAD",
+                    opportunityName: "Nia's lead",
+                    organizationPartyId: orgA,
+                    typeEnumId: "SotLead",
+                    statusId: "SalesOppOpen"
+                })
+                make("mantle.sales.opportunity.SalesOpportunityParty", {
+                    salesOpportunityId: prefix + "_LEAD",
+                    partyId: ids.Nia,
+                    roleTypeId: "Contact",
+                    fromDate: ago(0.01)
+                })
+            })
+            const admitted = admit(id)
+            const nia = enrollmentOf(id, "Nia")
+            // the owner loses the Sales read: the next run pauses the automation with the reason, and nothing is sent
+            system(() => {
+                for (const userPermissionId of ["SALES_VIEW", "SALES_TEAM_VIEW"])
+                    run("update#moqui.security.UserGroupPermission", {
+                        userGroupId: users.salesDispatcher,
+                        userPermissionId,
+                        fromDate: 0,
+                        thruDate: ago(0.001)
+                    })
+            })
+            capture.clear()
+            steps(id)
+            return {
+                withoutSales,
+                activated,
+                admitted,
+                nia,
+                owner: row(AUTOMATION, {marketingAutomationId: id}).activatedByUserId,
+                after: row(AUTOMATION, {marketingAutomationId: id}),
+                niaAfter: nia ? row(ENROLLMENT, {automationEnrollmentId: nia.automationEnrollmentId}) : null,
+                niaSteps: nia ? executionsOf(nia.automationEnrollmentId).length : -1,
+                mail: mailTo("Nia").length,
+                signedInAfter: ec.user.username
+            }
+        },
+        then(r) {
+            r.withoutSales.refusal.includes("NOT_READY") && r.withoutSales.refusal.includes("Sales leads")
+            r.activated.refusal == "" && r.owner == users.salesDispatcher
+            r.admitted.admitted == 1
+            r.nia != null && r.nia.triggerEnumId == "AtrSegment"
+            r.after.statusId == "MaPaused" && r.after.pauseNote.includes("cannot read segment Open leads")
+            r.niaAfter.statusId == "AenActive" && r.niaSteps == 0
+            r.mail == 0
+            r.signedInAfter != users.salesDispatcher
+        }
+    }
+)

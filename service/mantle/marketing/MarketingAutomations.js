@@ -13,11 +13,14 @@
 //   its current revision, with its problems none and an address for each message's unsubscribe link; pause#Automation and
 //   end#Automation are the dispatcher's too. An enrollment admitted earlier keeps the steps in effect at its admission (design §6:
 //   editing never rewrites executions); it runs only while the automation is active.
-// - The owner identity (the lead's question, F157): an automation acts as the system for its organization, within its approved
-//   definition. Its admission and step runs run with no user (runAsSystem): eligibility by P5's rule (classifyPeople) with no
-//   personal contact of any user, disabled or merged party ever available (automationAvailable); its segment trigger, goal and
-//   conditions read only the party, contact and engagement sources (a segment naming a Sales or purchase source, or whose parent does,
-//   is refused when the rule or a step names it: SOURCE_UNAVAILABLE), so a run answers the same whoever stored or activated it.
+// - The owner (the user's call, Nov 14, 2026; F157): an automation runs as its saved owner, the dispatcher who last activated or
+//   resumed it (activatedByUserId; a new activation by another dispatcher makes that person the owner), signed in for each admission
+//   and step run and checked again each time (as run#EtlMapping signs in as a mapping's saved owner): the owner can sign in, still
+//   holds MARKETING_DISPATCH and works for the automation's organization, and can read every segment the automation names. Its
+//   trigger, goal and condition segments may use any of P5's sources, Sales and purchases too, under the owner's own Sales and
+//   Commerce access read at run time; eligibility is P5's rule (classifyPeople) with "not available" decided by the owner (P5
+//   review). An owner who lost access pauses the automation with the reason (pauseNote), never a run wider or narrower; activation
+//   refuses a dispatcher who could not run it (NOT_READY).
 // - Triggers (sourceKey, one AutomationSourceEvent per automation and source): a confirmed subscription to the topic (an accepted
 //   SubscriptionRequest after the activation, read by a cursor), a newly matched segment member (a difference scan: the first scan
 //   after activation records the matches as a baseline, later scans file the new ones), staff enrollment with evidence
@@ -71,6 +74,7 @@ const nameLimit = 120
 const defaultMaxSteps = 10
 const limits = {
     automationsPerRun: 50,
+    activeAutomations: 1000,
     eventsPerRun: 200,
     enrollmentsPerRun: 200,
     perAutomation: 100,
@@ -83,8 +87,6 @@ const triggers = ["AtrSubscription", "AtrSegment", "AtrStaff", "AtrOrderPlaced",
 const stepKinds = {send: "AskSendEmail", wait: "AskWait", condition: "AskCondition"}
 const editableStatuses = ["MaDraft", "MaAwaitingApproval", "MaApproved", "MaActive", "MaPaused"]
 const closedCampaignStatuses = ["MKTG_CAMP_COMPLETED", "MKTG_CAMP_CANCELLED"]
-// The sources an automation reads (it acts as the system: no Sales or purchase scope)
-const systemSources = ["party", "contact", "engagement"]
 // A classification's reasons that end an enrollment (the topic left or withdrawn, a suppression: design §6) and those that skip only
 // the channel's sends (the channel's purpose or the address's solicitation withdrawn, no usable address, no evidence)
 const endingReasons = ["NOT_SUBSCRIBED", "UNSUBSCRIBED", "LIST_WITHDRAWN", "PENDING", "SUPPRESSED", "PARTY_UNAVAILABLE"]
@@ -205,39 +207,13 @@ const stepsAt = (marketingAutomationId, at = ec.user.nowTimestamp) =>
         .filter(row => lib.active(row, at))
         .sort((a, b) => Number(a.sequenceNum) - Number(b.sequenceNum))
 
-// A segment an automation may read: of the organization, not archived, naming only the system's sources, its parents too
-// (SOURCE_UNAVAILABLE: the automation runs as the system). The segment row.
+// A segment an automation may name: of the organization and not archived. Its sources are read as the owner at each run (ownerProblem),
+// and activation refuses a dispatcher who cannot read them. The segment row.
 function automationSegment(userScope, marketSegmentId, organizationPartyId, what) {
     const segment = segments.segmentOfScope(userScope, marketSegmentId)
     if (segment.ownerPartyId !== organizationPartyId)
         denied("RECORD_UNAVAILABLE", "Segment " + text(marketSegmentId) + " is not available")
     if (segments.archived(segment)) denied("SEGMENT_ARCHIVED", "Segment " + segments.segmentLabel(segment) + " is archived")
-    let current = segment
-    for (let depth = 0; current && depth < 12; depth++) {
-        const filter = rows("mantle.marketing.segment.MarketSegmentFilter", {marketSegmentId: current.marketSegmentId})
-            .filter(row => lib.active(row))
-            .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0]
-        const tree = filter ? lib.json(filter.filterJson, null) : null
-        const named = new Set()
-        const walk = node => {
-            if (!node) return
-            if (Array.isArray(node.conditions)) node.conditions.forEach(walk)
-            else if (node.source) named.add(String(node.source))
-        }
-        walk(tree)
-        const outside = Array.from(named).filter(source => !systemSources.includes(source))
-        if (outside.length)
-            denied(
-                "SOURCE_UNAVAILABLE",
-                what +
-                    " " +
-                    segments.segmentLabel(segment) +
-                    " reads " +
-                    outside.join(", ") +
-                    ": an automation runs as the system and reads only party, contact and engagement facts"
-            )
-        current = current.parentMarketSegmentId ? one(SEGMENT, {marketSegmentId: current.parentMarketSegmentId}) : null
-    }
     return segment
 }
 // A store of the organization for an order or cart trigger.
@@ -260,33 +236,105 @@ function zoneOf(value) {
     return zone
 }
 
-// ===== the system's view (the owner identity) =====
-// Whether parties may be enrolled and sent to by an automation: present, not disabled or merged, and no user's personal contact.
-function automationAvailable(partyIds) {
-    const found = new Map()
-    if (!partyIds.length) return found
-    for (const party of Array.from(find("mantle.party.Party").condition("partyId", "in", partyIds).list()))
-        if (party.disabled !== "Y" && !party.mergedToPartyId && !party.privateOwnerUserId) found.set(party.partyId, party)
-    return found
-}
-// The scope a segment is evaluated in for an automation: its organization, Marketing's reads, no user.
-const systemScope = organizationPartyId => ({
-    capabilities: {anyRead: true},
-    partyId: null,
-    allOrganizations: false,
-    activeOrganizationPartyId: organizationPartyId,
-    organizationPartyIds: [organizationPartyId]
-})
-// The parties of a set a segment matches now (or of the organization's audience when partyIds is null), as the system.
+// ===== the owner (the user's call, Nov 14, 2026) =====
+// The parties of a set a segment matches now (or of the organization's audience when partyIds is null), as the user signed in: the
+// automation's owner in a run, the caller in a simulation. A source the user may not read is refused (SOURCE_UNAVAILABLE).
 function segmentMatches(organizationPartyId, marketSegmentId, partyIds) {
     const segment = one(SEGMENT, {marketSegmentId})
     if (!segment || segments.archived(segment)) return new Set()
-    const ctx = segments.context(systemScope(organizationPartyId), organizationPartyId, ec.user.nowTimestamp, partyIds)
-    const matched = segments.matchesOf(ctx, segment)
-    const available = automationAvailable(Array.from(matched))
-    return new Set(Array.from(matched).filter(partyId => available.has(partyId)))
+    const ctx = segments.context(marketingAccess.scope(), organizationPartyId, ec.user.nowTimestamp, partyIds)
+    return segments.matchesOf(ctx, segment)
 }
-// One person classified for the automation's topic now, as the system: {bucket, reasonCode, contactMechId, key, address}.
+// The segments an automation names now: its trigger's, its goal and its current steps' conditions.
+const namedSegments = automation =>
+    Array.from(
+        new Set(
+            [automation.triggerEnumId === "AtrSegment" ? automation.triggerSegmentId : null, automation.goalSegmentId]
+                .concat(stepsAt(automation.marketingAutomationId).map(step => step.conditionSegmentId))
+                .filter(Boolean)
+        )
+    )
+// Why the user signed in could not run an automation as its owner, or null: MARKETING_DISPATCH, the organization, and each segment it
+// names read (its sources, its parents') as that user.
+function ownerProblem(automation) {
+    const userScope = marketingAccess.scope()
+    if (!userScope.capabilities.dispatch) return "no longer holds the Marketing dispatch permission"
+    if (!marketingAccess.covers(userScope, automation.organizationPartyId))
+        return "no longer works for " + organizationName(automation.organizationPartyId)
+    for (const marketSegmentId of namedSegments(automation)) {
+        const segment = one(SEGMENT, {marketSegmentId})
+        if (!segment) continue
+        try {
+            segments.matchesOf(segments.context(userScope, automation.organizationPartyId, ec.user.nowTimestamp, []), segment)
+        } catch (error) {
+            return "cannot read segment " + segments.segmentLabel(segment) + " (" + String(error.message).split("\n")[0] + ")"
+        }
+    }
+    return null
+}
+const ownerText = userId => {
+    const account = userId ? one("moqui.security.UserAccount", {userId}) : null
+    return account ? account.userFullName || account.username || userId : "its owner"
+}
+// body(problem) signed in as the automation's owner (activatedByUserId) with authorization off for the run's own writes, the user
+// before it put back after; problem is why the owner cannot run it now (null when they can). A user who is the owner already is not
+// signed in again.
+function asOwner(automation, body) {
+    const ownerUserId = automation.activatedByUserId || null
+    if (ownerUserId && ec.user.userId === ownerUserId)
+        return withoutAuthz(() => body(withoutAuthz(() => ownerProblem(automation))))
+    const previous = ec.user.username || null
+    const account = ownerUserId ? one("moqui.security.UserAccount", {userId: ownerUserId}) : null
+    // the login gate refuses a disabled or terminated account; its error is kept off the run's messages
+    let signedIn = false
+    ec.message.pushErrors()
+    try {
+        signedIn = !!account && ec.user.internalLoginUser(account.username) === true && ec.user.userId === ownerUserId
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+    try {
+        const problem = !ownerUserId
+            ? "has no owner: activate it again"
+            : !signedIn
+              ? "cannot sign in"
+              : withoutAuthz(() => ownerProblem(automation))
+        return withoutAuthz(() => body(problem && "Its owner " + ownerText(ownerUserId) + " " + problem))
+    } finally {
+        // back to the user before the run, or none: an owner never outlives the run
+        ec.message.pushErrors()
+        try {
+            if (previous) {
+                if (ec.user.username !== previous) ec.user.internalLoginUser(previous)
+            } else if (ec.user.userId) ec.user.logoutUser()
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+}
+function withoutAuthz(body) {
+    const disabled = ec.artifactExecution.disableAuthz()
+    try {
+        return body()
+    } finally {
+        if (!disabled) ec.artifactExecution.enableAuthz()
+    }
+}
+// The automation paused for a change outside its approval (its owner's access, a closed path): its pauseNote says why; a dispatcher
+// resumes it (a new activation, that dispatcher its owner).
+function pauseFor(automation, note) {
+    call("update#" + AUTOMATION, {
+        marketingAutomationId: automation.marketingAutomationId,
+        statusId: "MaPaused",
+        statusId_changeReason: note.slice(0, 250),
+        pausedDate: ec.user.nowTimestamp,
+        pauseNote: note.slice(0, 250)
+    })
+}
+// One person classified for the automation's topic now, as the user signed in (the owner in a run: P5's "not available" is the
+// owner's): {bucket, reasonCode, contactMechId, key, address}.
 function classifyFor(automation, partyId) {
     const topic = one("mantle.marketing.contact.ContactList", {contactListId: automation.contactListId})
     if (!topic) return {bucket: "withdrawn", reasonCode: "NOT_SUBSCRIBED"}
@@ -295,8 +343,7 @@ function classifyFor(automation, partyId) {
         list: topic,
         purposeEnumId: automation.purposeEnumId,
         channelEnumId: automation.channelEnumId || "MdcEmail",
-        partyIds: [partyId],
-        availableOf: automationAvailable
+        partyIds: [partyId]
     })
     return found.people[0] || {bucket: "unavailable", reasonCode: "PARTY_UNAVAILABLE"}
 }
@@ -617,6 +664,16 @@ function activateAutomation(p) {
     const problems = automationProblems(row)
     if (problems.length)
         denied("NOT_READY", "Automation " + row.marketingAutomationId + " cannot be activated: " + problems.join(", "))
+    // the activator becomes its owner (the user's call, Nov 14): one who could not run it (a segment's source they may not read) is refused
+    const ownerIssue = withoutAuthz(() => ownerProblem(row))
+    if (ownerIssue)
+        denied(
+            "NOT_READY",
+            "Automation " +
+                row.marketingAutomationId +
+                " cannot be activated by you: its owner would be you, and you " +
+                ownerIssue
+        )
     // each message's unsubscribe link needs an address of its own (P9 review): a site that mounts Account or a configured root
     let root = ""
     try {
@@ -879,7 +936,17 @@ function admitEvent(p) {
     }
     if (!automation || automation.statusId === "MaEnded") return refuse("AUTOMATION_ENDED")
     if (automation.statusId !== "MaActive") return {admitted: false, reasonCode: "NOT_ACTIVE"}
-    if (!automationAvailable([event.partyId]).has(event.partyId)) return refuse("PARTY_UNAVAILABLE")
+    // as its owner (the user's call, Nov 14): an owner who lost access pauses it and the event waits
+    return asOwner(automation, problem => {
+        if (problem) {
+            pauseFor(automation, problem)
+            return {admitted: false, reasonCode: "NOT_ACTIVE"}
+        }
+        return admitAsOwner(event, automation, refuse)
+    })
+}
+function admitAsOwner(event, automation, refuse) {
+    if (!segments.inScopeParties([event.partyId]).has(event.partyId)) return refuse("PARTY_UNAVAILABLE")
     // re-entry: never two active; once per person, or once per new event after the cooldown
     const earlier = Array.from(
         find(ENROLLMENT, {marketingAutomationId: automation.marketingAutomationId, partyId: event.partyId}).forUpdate(true).list()
@@ -922,41 +989,42 @@ function runAdmission(p) {
     const totals = {automations: 0, filed: 0, admitted: 0, refused: 0, failed: 0}
     let query = find(AUTOMATION, {statusId: "MaActive"}).orderBy("lastAdmissionDate").limit(limits.automationsPerRun)
     if (!blank(p.marketingAutomationId)) query = query.condition("marketingAutomationId", text(p.marketingAutomationId))
-    for (const automation of Array.from(query.list())) {
-        totals.automations++
+    for (const automation of Array.from(query.list())) asOwner(automation, () => admitFor(automation, totals))
+    return totals
+}
+function admitFor(automation, totals) {
+    totals.automations++
+    try {
+        totals.filed += Number(
+            apart(SERVICES + "collect#AdmissionEvents", {marketingAutomationId: automation.marketingAutomationId}).filed || 0
+        )
+    } catch (error) {
+        totals.failed++
+        ec.logger.error(
+            "Automation " +
+                automation.marketingAutomationId +
+                ": its events were not read: " +
+                String(error.message).split("\n")[0]
+        )
+    }
+    const filed = Array.from(
+        find(EVENT, {marketingAutomationId: automation.marketingAutomationId, statusEnumId: "AseFiled"})
+            .orderBy("filedDate")
+            .limit(limits.eventsPerRun)
+            .list()
+    )
+    for (const event of filed) {
         try {
-            totals.filed += Number(
-                apart(SERVICES + "collect#AdmissionEvents", {marketingAutomationId: automation.marketingAutomationId}).filed || 0
-            )
+            const out = apart(SERVICES + "admit#SourceEvent", {automationSourceEventId: event.automationSourceEventId})
+            if (out.admitted) totals.admitted++
+            else if (out.reasonCode !== "NOT_ACTIVE" && out.reasonCode !== "NOT_FILED") totals.refused++
         } catch (error) {
             totals.failed++
             ec.logger.error(
-                "Automation " +
-                    automation.marketingAutomationId +
-                    ": its events were not read: " +
-                    String(error.message).split("\n")[0]
+                "Automation event " + event.automationSourceEventId + " not admitted: " + String(error.message).split("\n")[0]
             )
         }
-        const filed = Array.from(
-            find(EVENT, {marketingAutomationId: automation.marketingAutomationId, statusEnumId: "AseFiled"})
-                .orderBy("filedDate")
-                .limit(limits.eventsPerRun)
-                .list()
-        )
-        for (const event of filed) {
-            try {
-                const out = apart(SERVICES + "admit#SourceEvent", {automationSourceEventId: event.automationSourceEventId})
-                if (out.admitted) totals.admitted++
-                else if (out.reasonCode !== "NOT_ACTIVE" && out.reasonCode !== "NOT_FILED") totals.refused++
-            } catch (error) {
-                totals.failed++
-                ec.logger.error(
-                    "Automation event " + event.automationSourceEventId + " not admitted: " + String(error.message).split("\n")[0]
-                )
-            }
-        }
     }
-    return totals
 }
 // collect#AdmissionEvents (internal, its own transaction): one active automation's new source events filed.
 function collectEvents(p) {
@@ -964,7 +1032,11 @@ function collectEvents(p) {
         .forUpdate(true)
         .one()
     if (!automation || automation.statusId !== "MaActive") return {filed: 0}
-    return {filed: collect(automation)}
+    return asOwner(automation, problem => {
+        if (!problem) return {filed: collect(automation)}
+        pauseFor(automation, problem)
+        return {filed: 0}
+    })
 }
 // A service in a transaction of its own; its errors thrown, the caller's kept apart.
 function apart(name, parameters) {
@@ -1053,8 +1125,8 @@ function enrollParty(p) {
     })
     const event = one(EVENT, {automationSourceEventId: filed.automationSourceEventId})
     if (event.partyId !== partyId) denied("OPERATION_KEY_USED", "That operation key enrolled someone else")
-    if (event.statusEnumId === "AseFiled")
-        ec.artifactExecution.runAsSystem(() => admitEvent({automationSourceEventId: event.automationSourceEventId}))
+    // admitted now by the same rule, as the automation's owner (admitEvent signs them in and puts the caller back)
+    if (event.statusEnumId === "AseFiled") admitEvent({automationSourceEventId: event.automationSourceEventId})
     const after = one(EVENT, {automationSourceEventId: event.automationSourceEventId})
     return {
         automationSourceEventId: after.automationSourceEventId,
@@ -1071,44 +1143,56 @@ function enrollParty(p) {
 // enrollmentsPerRun in all, each enrollment in a transaction of its own, then each new delivery's first attempt. As the system.
 function runSteps(p) {
     const totals = {enrollments: 0, handedOff: 0, failed: 0}
-    let query = find(AUTOMATION, {statusId: "MaActive"}).selectField("marketingAutomationId").limit(limits.automationsPerRun)
+    let query = find(AUTOMATION, {statusId: "MaActive"}).limit(limits.activeAutomations)
     if (!blank(p.marketingAutomationId)) query = query.condition("marketingAutomationId", text(p.marketingAutomationId))
-    const automationIds = Array.from(query.list()).map(row => row.marketingAutomationId)
+    const automations = new Map(Array.from(query.list()).map(row => [row.marketingAutomationId, row]))
+    if (!automations.size) return totals
     const attempt = !(p.attempt === false || p.attempt === "false")
-    for (const marketingAutomationId of automationIds) {
-        if (totals.enrollments >= limits.enrollmentsPerRun) break
-        const due = Array.from(
-            find(ENROLLMENT, {marketingAutomationId, statusId: "AenActive"})
-                .condition("nextDueDate", "less-equals", ec.user.nowTimestamp)
-                .orderBy("nextDueDate")
-                .limit(Math.min(limits.perAutomation, limits.enrollmentsPerRun - totals.enrollments))
-                .selectField("automationEnrollmentId")
-                .selectField("nextDueDate")
-                .list()
-        )
-        for (const row of due) {
-            totals.enrollments++
-            let out
-            try {
-                out = apart(SERVICES + "process#EnrollmentStep", {automationEnrollmentId: row.automationEnrollmentId})
-            } catch (error) {
-                totals.failed++
-                ec.logger.error(
-                    "Enrollment " + row.automationEnrollmentId + " step failed: " + String(error.message).split("\n")[0]
-                )
-                continue
-            }
-            for (const deliveryId of Array.from(out.deliveryIdList || [])) {
-                totals.handedOff++
-                if (!attempt) continue
+    // the most overdue first across every active automation (P11 review: a fixed first page of automations starved the rest), at most
+    // perAutomation an automation and enrollmentsPerRun in all
+    const due = Array.from(
+        find(ENROLLMENT, {statusId: "AenActive"})
+            .condition("marketingAutomationId", "in", Array.from(automations.keys()))
+            .condition("nextDueDate", "less-equals", ec.user.nowTimestamp)
+            .orderBy("nextDueDate")
+            .limit(limits.enrollmentsPerRun * 5)
+            .selectField("automationEnrollmentId")
+            .selectField("marketingAutomationId")
+            .list()
+    )
+    const byAutomation = new Map()
+    for (const row of due) {
+        const list = byAutomation.get(row.marketingAutomationId) || []
+        if (list.length >= limits.perAutomation || totals.enrollments >= limits.enrollmentsPerRun) continue
+        list.push(row.automationEnrollmentId)
+        byAutomation.set(row.marketingAutomationId, list)
+        totals.enrollments++
+    }
+    // signed in once as the automation's owner, so each enrollment's step does not sign in again
+    for (const [marketingAutomationId, enrollmentIds] of byAutomation)
+        asOwner(automations.get(marketingAutomationId), () => {
+            for (const automationEnrollmentId of enrollmentIds) {
+                let out
                 try {
-                    apart("mantle.party.MessageServices.attempt#Delivery", {deliveryId})
+                    out = apart(SERVICES + "process#EnrollmentStep", {automationEnrollmentId})
                 } catch (error) {
-                    ec.logger.error("Delivery " + deliveryId + " attempt failed: " + String(error.message).split("\n")[0])
+                    totals.failed++
+                    ec.logger.error(
+                        "Enrollment " + automationEnrollmentId + " step failed: " + String(error.message).split("\n")[0]
+                    )
+                    continue
+                }
+                for (const deliveryId of Array.from(out.deliveryIdList || [])) {
+                    totals.handedOff++
+                    if (!attempt) continue
+                    try {
+                        apart("mantle.party.MessageServices.attempt#Delivery", {deliveryId})
+                    } catch (error) {
+                        ec.logger.error("Delivery " + deliveryId + " attempt failed: " + String(error.message).split("\n")[0])
+                    }
                 }
             }
-        }
-    }
+        })
     return totals
 }
 // process#EnrollmentStep (internal, its own transaction): one due enrollment's steps run under its lock, until a wait, a
@@ -1122,6 +1206,16 @@ function processEnrollment(p) {
     if (enrollment.nextDueDate != null && ms(enrollment.nextDueDate) > nowMs()) return {deliveryIdList}
     const automation = one(AUTOMATION, {marketingAutomationId: enrollment.marketingAutomationId})
     if (!automation || automation.statusId !== "MaActive") return {deliveryIdList}
+    // as its owner (the user's call, Nov 14): an owner who lost access pauses the automation before any step
+    return asOwner(automation, problem => {
+        if (!problem) return stepAsOwner(enrollment, automation)
+        call("update#" + ENROLLMENT, {automationEnrollmentId: enrollment.automationEnrollmentId, dueNote: problem.slice(0, 250)})
+        pauseFor(automation, problem)
+        return {deliveryIdList, statusId: "AenActive"}
+    })
+}
+function stepAsOwner(enrollment, automation) {
+    const deliveryIdList = []
     const now = nowMs()
     let sequenceNum = Number(enrollment.nextSequenceNum || 0)
     let skipNextSend = enrollment.skipNextSend === "Y"
@@ -1156,14 +1250,28 @@ function processEnrollment(p) {
     }
     const pauseAutomation = note => {
         update({dueNote: note})
-        call("update#" + AUTOMATION, {
-            marketingAutomationId: automation.marketingAutomationId,
-            statusId: "MaPaused",
-            statusId_changeReason: note,
-            pausedDate: ec.user.nowTimestamp,
-            pauseNote: note
-        })
+        pauseFor(automation, note)
         return {deliveryIdList, statusId: "AenActive"}
+    }
+    // a segment the owner can no longer read (a source, a parent, an old step's condition) pauses the automation with the reason
+    const matches = (marketSegmentId, what) => {
+        try {
+            return {
+                met: segmentMatches(automation.organizationPartyId, marketSegmentId, [enrollment.partyId]).has(enrollment.partyId)
+            }
+        } catch (error) {
+            return {
+                paused: pauseAutomation(
+                    "Its owner " +
+                        ownerText(automation.activatedByUserId) +
+                        " cannot read its " +
+                        what +
+                        " (" +
+                        String(error.message).split("\n")[0] +
+                        ")"
+                )
+            }
+        }
     }
     // the campaign: closed ends pending work; no longer approved pauses the automation (a change outside its approval)
     const campaign = one(CAMPAIGN, {marketingCampaignId: automation.marketingCampaignId})
@@ -1210,11 +1318,11 @@ function processEnrollment(p) {
             continue
         }
         // before every step: the goal, then the enrollment (design §6)
-        if (
-            automation.goalSegmentId &&
-            segmentMatches(automation.organizationPartyId, automation.goalSegmentId, [enrollment.partyId]).has(enrollment.partyId)
-        )
-            return end("AenCompleted", "GOAL_MET")
+        if (automation.goalSegmentId) {
+            const goal = matches(automation.goalSegmentId, "goal segment")
+            if (goal.paused) return goal.paused
+            if (goal.met) return end("AenCompleted", "GOAL_MET")
+        }
         const person = classifyFor(automation, enrollment.partyId)
         if (endingReasons.includes(person.reasonCode)) return end("AenStopped", person.reasonCode)
         if (step.stepKindEnumId === stepKinds.wait) {
@@ -1229,9 +1337,9 @@ function processEnrollment(p) {
             continue
         }
         if (step.stepKindEnumId === stepKinds.condition) {
-            const met = segmentMatches(automation.organizationPartyId, step.conditionSegmentId, [enrollment.partyId]).has(
-                enrollment.partyId
-            )
+            const condition = matches(step.conditionSegmentId, "condition segment")
+            if (condition.paused) return condition.paused
+            const met = condition.met
             record(step, {outcomeEnumId: met ? "AsoConditionMet" : "AsoConditionNotMet"})
             if (!met && step.conditionFalseEnumId === "AcfEnd") return end("AenCompleted", "CONDITION_NOT_MET")
             if (!met) skipNextSend = true
@@ -1305,7 +1413,7 @@ function processEnrollment(p) {
     }
     return {deliveryIdList, statusId: "AenActive"}
 }
-// run#AutomationSteps and run#AutomationAdmission run as the system (the owner identity above).
+// handle#OrderPlaced files events as the system (no segment is read); the runs sign in as each automation's owner (asOwner).
 const asSystem = action => p => ec.artifactExecution.runAsSystem(() => action(p))
 
 // ===== stop#Enrollment =====
@@ -1507,6 +1615,9 @@ function getAutomation(p) {
             timeZone: row.timeZone || "",
             definitionDateText: lib.dateText(row.definitionDate),
             activatedDateText: row.activatedDate ? lib.dateText(row.activatedDate) : "",
+            // the owner its runs sign in as (the user's call, Nov 14)
+            ownerName:
+                row.activatedByUserId && ["MaActive", "MaPaused"].includes(row.statusId) ? ownerText(row.activatedByUserId) : "",
             endedDateText: row.endedDate ? lib.dateText(row.endedDate) : "",
             endReason: row.endReason || "",
             admissionNote: row.admissionNote || "",
@@ -1731,11 +1842,11 @@ const operations = {
     findEnrollments,
     getEnrollment,
     stopEnrollment,
-    runAdmission: asSystem(runAdmission),
-    collect: asSystem(collectEvents),
-    admit: asSystem(admitEvent),
-    runSteps: asSystem(runSteps),
-    process: asSystem(processEnrollment),
+    runAdmission,
+    collect: collectEvents,
+    admit: admitEvent,
+    runSteps,
+    process: processEnrollment,
     orderPlaced: asSystem(orderPlaced)
 }
 ;({

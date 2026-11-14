@@ -16,8 +16,8 @@ along with this software (see the LICENSE.md file). If not, see
     enrollment rule and dated steps, the dry run, activation, pause and end, the enrollments and their steps, and the admission and step
     jobs (MarketingAutomations.js). The approval is CampaignServices request#MarketingApproval and decide#MarketingApproval with
     targetKind automation (MarketingApprovals.js). Each service checks its permission and the automation's organization itself
-    (mantle/marketing/MarketingAccess.js); the jobs and the internal services run as the system (the automation's owner identity:
-    MarketingAutomations.js's head). -->
+    (mantle/marketing/MarketingAccess.js); the jobs and the internal services run as each automation's saved owner, the dispatcher who last activated it,
+    signed in and checked again at each run (the user's call, Nov 14, 2026: MarketingAutomations.js's head). -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="Automations" allow-remote="false" read-only="true">
         <description>The automations of the caller's scope (design §6 AutomationList), filtered in the query: text (id or name, ignoring case), an organization of the scope, a campaign, a trigger, status (one, open by default: not ended, or all) and mine; paged (automationList with its page fields). Each row: name, campaign, topic, sender, trigger, status with its text and colour, the active, completed and stopped enrollments, the skipped steps, the next due time and why it is paused. For a Marketing reader who writes, approves or dispatches sends or reads audiences (PERMISSION_DENIED); an organization outside the scope ORGANIZATION_DENIED.</description>
@@ -49,7 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="Automation" allow-remote="false">
-        <description>A new draft automation of an open campaign of the scope (RECORD_UNAVAILABLE, CAMPAIGN_CLOSED): its name (NAME_REQUIRED), topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), sending profile (the organization's, promotional or for both: PROFILE_PURPOSE), trigger (AtrSubscription by default; AtrSegment with a segment of the organization reading only party, contact and engagement facts: SOURCE_UNAVAILABLE; AtrOrderPlaced or AtrCartAbandoned with a store of the organization), description and time zone (the user's when empty). Re-entry once per person. MARKETING_SEND_EDIT.</description>
+        <description>A new draft automation of an open campaign of the scope (RECORD_UNAVAILABLE, CAMPAIGN_CLOSED): its name (NAME_REQUIRED), topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), sending profile (the organization's, promotional or for both: PROFILE_PURPOSE), trigger (AtrSubscription by default; AtrSegment with a segment of the organization, not archived (its sources read as the owner at each run); AtrOrderPlaced or AtrCartAbandoned with a store of the organization), description and time zone (the user's when empty). Re-entry once per person. MARKETING_SEND_EDIT.</description>
         <in-parameters>
             <parameter name="marketingCampaignId" required="true"/>
             <parameter name="automationName"/>
@@ -83,7 +83,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="EnrollmentRule" allow-remote="false">
-        <description>An automation's name, description, topic, sending profile, trigger (and its segment or store), goal segment, re-entry (ArOnce, or ArPerEvent with a cooldown of 1 to 365 days) and time zone, each changed only when given, at the revision read (expectedRevision, its lastUpdatedStamp: REVISION_REQUIRED, STALE_REVISION); an ended one is refused (STATUS_INVALID). A segment it names reads only party, contact and engagement facts, its parents too (SOURCE_UNAVAILABLE: an automation runs as the system). Any change but the name and description raises its revision, ends the approval and returns it to draft (approvalEnded); the current send steps follow a new topic or sender. MARKETING_SEND_EDIT and the organization (RECORD_UNAVAILABLE).</description>
+        <description>An automation's name, description, topic, sending profile, trigger (and its segment or store), goal segment, re-entry (ArOnce, or ArPerEvent with a cooldown of 1 to 365 days) and time zone, each changed only when given, at the revision read (expectedRevision, its lastUpdatedStamp: REVISION_REQUIRED, STALE_REVISION); an ended one is refused (STATUS_INVALID). A segment it names is of the organization and not archived; its sources (Sales and purchases too) are read as the automation's owner at each run. Any change but the name and description raises its revision, ends the approval and returns it to draft (approvalEnded); the current send steps follow a new topic or sender. MARKETING_SEND_EDIT and the organization (RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="marketingAutomationId" required="true"/>
             <parameter name="expectedRevision"/>
@@ -105,7 +105,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="Steps" allow-remote="false">
-        <description>An automation's ordered steps, the whole set, at the revision read (REVISION_REQUIRED, STALE_REVISION): each {kind: send, wait or condition, stepName; messageTemplateId (a promotional template of the organization with published content, read with a template permission: TEMPLATE_UNAVAILABLE; its subject, body and variables checked as a preparation checks them: SUBJECT_REQUIRED, BODY_REQUIRED, PRIVATE_LINK, VARIABLE_UNKNOWN); waitAmount and waitUnitEnumId (minutes, hours, days or business days, bounded: VALUE_INVALID); conditionSegmentId (a segment of the organization reading only party, contact and engagement facts: SOURCE_UNAVAILABLE) and conditionFalseEnumId (skip the next send step or end)}; at least one (STEPS_REQUIRED), at most the policy's automationMaxSteps, ten by default (TOO_MANY_STEPS). No loop or jump. The steps in effect end and the new ones start now (an enrollment admitted earlier keeps its own); each send step's content is copied from its template and prepared now as a send of the automation. Raises the revision, ends the approval and returns it to draft. MARKETING_SEND_EDIT and the organization.</description>
+        <description>An automation's ordered steps, the whole set, at the revision read (REVISION_REQUIRED, STALE_REVISION): each {kind: send, wait or condition, stepName; messageTemplateId (a promotional template of the organization with published content, read with a template permission: TEMPLATE_UNAVAILABLE; its subject, body and variables checked as a preparation checks them: SUBJECT_REQUIRED, BODY_REQUIRED, PRIVATE_LINK, VARIABLE_UNKNOWN); waitAmount and waitUnitEnumId (minutes, hours, days or business days, bounded: VALUE_INVALID); conditionSegmentId (a segment of the organization, not archived, read as the owner at each run) and conditionFalseEnumId (skip the next send step or end)}; at least one (STEPS_REQUIRED), at most the policy's automationMaxSteps, ten by default (TOO_MANY_STEPS). No loop or jump. The steps in effect end and the new ones start now (an enrollment admitted earlier keeps its own); each send step's content is copied from its template and prepared now as a send of the automation. Raises the revision, ends the approval and returns it to draft. MARKETING_SEND_EDIT and the organization.</description>
         <in-parameters>
             <parameter name="marketingAutomationId" required="true"/>
             <parameter name="expectedRevision"/>
@@ -122,7 +122,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="preview" noun="Automation" allow-remote="false" read-only="true">
-        <description>A dry run (design §6 Simulation) that sends and stores nothing: each current step in order from startDate (now when empty) with its due time in the rule's zone and its offset (a day wait keeps the local time, across a daylight-saving gap the next valid instant) and what it would do; for a sample person (partyId: an audience reader's, MARKETING_AUDIENCE_VIEW, a person the caller may see) their eligibility now, the goal, the conditions and each send's verdict as the system would find them. For a reader of the automation (RECORD_UNAVAILABLE, PERMISSION_DENIED).</description>
+        <description>A dry run (design §6 Simulation) that sends and stores nothing: each current step in order from startDate (now when empty) with its due time in the rule's zone and its offset (a day wait keeps the local time, across a daylight-saving gap the next valid instant) and what it would do; for a sample person (partyId: an audience reader's, MARKETING_AUDIENCE_VIEW, a person the caller may see) their eligibility now, the goal, the conditions and each send's verdict as the caller finds them (a segment source the caller may not read: SOURCE_UNAVAILABLE). For a reader of the automation (RECORD_UNAVAILABLE, PERMISSION_DENIED).</description>
         <in-parameters>
             <parameter name="marketingAutomationId" required="true"/>
             <parameter name="partyId"/>
@@ -141,7 +141,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="activate" noun="Automation" allow-remote="false">
-        <description>An approved automation activated, or a paused one resumed (design §6 AutomationControl), at the revision read (REVISION_REQUIRED, STALE_REVISION): it needs MARKETING_DISPATCH, a current approval at its revision (APPROVAL_REQUIRED), an activator who is none of its authors (its creator, the maker of its revision, the requester) nor its approver (SELF_DISPATCH: an automation is never self-approved), what approval needs (NOT_READY: an approved campaign, a ready promotional profile, a send step, the trigger's source) and an address for each message's unsubscribe link (NOT_READY). Each current send step gets its communication event and link root. A confirmed subscription counts from the first activation on. An active one answers alreadyActive; any other state STATUS_INVALID.</description>
+        <description>An approved automation activated, or a paused one resumed (design §6 AutomationControl), at the revision read (REVISION_REQUIRED, STALE_REVISION): it needs MARKETING_DISPATCH, a current approval at its revision (APPROVAL_REQUIRED), an activator who is none of its authors (its creator, the maker of its revision, the requester) nor its approver (SELF_DISPATCH: an automation is never self-approved), what approval needs (NOT_READY: an approved campaign, a ready promotional profile, a send step, the trigger's source) and an address for each message's unsubscribe link (NOT_READY). Each current send step gets its communication event and link root. A confirmed subscription counts from the first activation on. An active one answers alreadyActive; any other state STATUS_INVALID. The activator becomes its owner, whose access its runs use (the user's call, Nov 14, 2026): one who could not run it (a segment source they may not read, its organization) is refused (NOT_READY).</description>
         <in-parameters>
             <parameter name="marketingAutomationId" required="true"/>
             <parameter name="expectedRevision"/>
@@ -263,9 +263,9 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
 
-    <!-- the jobs and their internal steps, as the system (design §15.3 Automation admission/steps) -->
+    <!-- the jobs and their internal steps, as each automation's owner (design §15.3 Automation admission/steps; the user's call, Nov 14, 2026) -->
     <service verb="run" noun="AutomationAdmission" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.admission.run">
-        <description>The admission job (run_MarketingAutomationAdmission; operation marketing.automation.admission.run): for each active automation (or the one named), its trigger's new source events filed (an accepted subscription to its topic since its cursor, a segment's new matches after the baseline of its first scan, its store's abandoned carts when the store's recovery sender is the automation) and its filed events admitted, each in a transaction of its own; one that fails is logged and the next goes on. Runs as the system.</description>
+        <description>The admission job (run_MarketingAutomationAdmission; operation marketing.automation.admission.run): for each active automation (or the one named), its trigger's new source events filed (an accepted subscription to its topic since its cursor, a segment's new matches after the baseline of its first scan, its store's abandoned carts when the store's recovery sender is the automation) and its filed events admitted, each in a transaction of its own; one that fails is logged and the next goes on. Each automation's work runs signed in as its owner (activatedByUserId), who must still sign in, hold MARKETING_DISPATCH, work for its organization and read every segment it names; otherwise the automation is paused with the reason (pauseNote) and nothing of it runs.</description>
         <in-parameters><parameter name="marketingAutomationId"/></in-parameters>
         <out-parameters>
             <parameter name="automations" type="Integer"/>
@@ -303,7 +303,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="run" noun="AutomationSteps" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.steps.run">
-        <description>The step job (run_MarketingAutomationSteps; operation marketing.automation.steps.run): the due steps of the active automations' enrollments (or the named one's), at most 100 an automation and 200 a run, each enrollment in a transaction of its own (process#EnrollmentStep), then each new delivery's first attempt (unless attempt is false); one that fails is logged and the next goes on. Runs as the system.</description>
+        <description>The step job (run_MarketingAutomationSteps; operation marketing.automation.steps.run): the due steps of the active automations' enrollments (or the named one's), at most 100 an automation and 200 a run, each enrollment in a transaction of its own (process#EnrollmentStep), then each new delivery's first attempt (unless attempt is false); one that fails is logged and the next goes on. Each automation's work runs signed in as its owner (activatedByUserId), who must still sign in, hold MARKETING_DISPATCH, work for its organization and read every segment it names; otherwise the automation is paused with the reason (pauseNote) and nothing of it runs.</description>
         <in-parameters>
             <parameter name="marketingAutomationId"/>
             <parameter name="attempt" type="Boolean"/>
