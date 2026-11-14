@@ -48,4 +48,32 @@ function facilityOrganization(facility) {
 function ownsFacility(userScope, facility) {
     return owns(userScope, facilityOrganization(facility))
 }
-;({scope, owns, facilityOrganization, ownsFacility})
+// The organization a new record is for when none is named, from any app's scope ({activeOrganizationPartyId,
+// organizationPartyIds: null for every organization, partyId: the user's when absent}): the active one, else the scope's only
+// one, else the only one of the scope the user works for themselves (a current PrtAgent or PrtEmployee relationship; with every
+// organization, an internal one); null when that leaves a choice. A user's scope holds their organization's rollup children too
+// (get#PartyInternalOrgIds), so "the scope's only one" alone leaves a representative of Retail, whose scope also holds Retail's
+// Returns Center, with an empty field (impl-sales F111). Sales (SalesAccess.js) and the apps' contexts read it here.
+function defaultOrganization(userScope) {
+    if (!userScope) return null
+    if (userScope.activeOrganizationPartyId) return userScope.activeOrganizationPartyId
+    const ids = userScope.organizationPartyIds == null ? null : Array.from(userScope.organizationPartyIds)
+    if (ids?.length === 1) return ids[0]
+    const partyId = userScope.partyId || ec.user.userAccount?.partyId
+    if ((ids != null && !ids.length) || !partyId) return null
+    let query = ec.entity
+        .find("mantle.party.PartyRelationship")
+        .condition("fromPartyId", partyId)
+        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .selectField("toPartyId")
+        .disableAuthz()
+    if (ids != null) query = query.condition("toPartyId", "in", ids)
+    const isInternal = id =>
+        !!ec.entity.find("mantle.party.PartyRole").condition({partyId: id, roleTypeId: "OrgInternal"}).disableAuthz().one()
+    const own = Array.from(new Set(Array.from(query.list()).map(row => row.toPartyId))).filter(
+        id => ids != null || isInternal(id)
+    )
+    return own.length === 1 ? own[0] : null
+}
+;({scope, owns, facilityOrganization, ownsFacility, defaultOrganization})

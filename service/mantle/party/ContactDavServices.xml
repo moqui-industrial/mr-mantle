@@ -20,14 +20,23 @@ along with this software (see the LICENSE.md file). If not, see
         names and its emails, phones, addresses and websites (those no longer on the card end), and a deleted card leaves
         the book (and is deleted when it is in no other book of the user). A shared book is read only over CardDAV: its
         contacts are directory parties, changed on the Contacts screens. The card's own UID and the name the client stored
-        it under are kept on its ContactBookParty row (davUid, davName). -->
+        it under are kept on its ContactBookParty row (davUid, davName). Projected address books (impl-sales P5, F29; CX-SYNC): each
+        ContactProjection row (seeded by its owner's component) is a read-only collection projected-{projectionId}, listed for a user
+        its owner service admits and holding the cards of the parties it answers (define#ProjectionOwner), computed per request:
+        the kind reads no record of the owner and copies no ContactBook row, and a device's write to one is refused (403). Sales'
+        My accounts is the first. -->
 
     <service verb="get" noun="ContactObjectTags">
         <description>The cards of a contact book for CardDAV: each current member the user may see, by its name (davName,
             else partyId.vcf), with an entity tag over the rows its vCard is made of (the party, person or organization,
-            contact mechanisms, relationships, the book membership), and the book's ctag. No access check: the callers check
-            the book.</description>
-        <in-parameters><parameter name="contactBookId" required="true"/></in-parameters>
+            contact mechanisms, relationships, the book membership), and the book's ctag; or, for a projected collection, the
+            cards of partyIdList (not disabled), named partyId.vcf, with collectionId in its ctag. No access check: the callers
+            check the book or the projection's owner.</description>
+        <in-parameters>
+            <parameter name="contactBookId"/>
+            <parameter name="partyIdList" type="List"><description>A projected collection's parties, in place of a book</description></parameter>
+            <parameter name="collectionId"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="objectList" type="List"/>
             <parameter name="ctag"/>
@@ -41,13 +50,19 @@ along with this software (see the LICENSE.md file). If not, see
                 return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0')
             }
             const millis = (value) => value == null || value === '' ? '' : String(value instanceof Date ? value.getTime() : value)
-            const members = Array.from(ec.entity.find('mantle.party.contact.ContactBookPartyDetail').condition('contactBookId', contactBookId)
+            const projected = partyIdList != null
+            const wantedIds = projected ? Array.from(new Set(Array.from(partyIdList).map(String))) : []
+            const members = projected
+                ? (wantedIds.length ? Array.from(ec.entity.find('mantle.party.Party').condition(cf.makeCondition('partyId', 'in', wantedIds))
+                    .condition(cf.makeCondition('disabled', 'not-equals', 'Y', true)).disableAuthz().list())
+                    .map((row) => ({partyId: row.partyId, davName: null, davUid: null, isFavorite: null, fromDate: null, privateOwnerUserId: null})) : [])
+                : Array.from(ec.entity.find('mantle.party.contact.ContactBookPartyDetail').condition('contactBookId', contactBookId)
                     .condition(cf.makeConditionDate('fromDate', 'thruDate', null))
                     .condition(cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null), cf.makeCondition('privateOwnerUserId', 'equals', userId)], 'or'))
                     .condition(cf.makeCondition('disabled', 'not-equals', 'Y', true)).list())
             objectList = []
             const ids = Array.from(new Set(members.map((row) => row.partyId)))
-            if (!ids.length) { ctag = hash(`${contactBookId}|empty`); return }
+            if (!ids.length) { ctag = hash(`${projected ? collectionId : contactBookId}|empty`); return }
             const stamps = new Map()
             const add = (id, value) => { if (!stamps.has(id)) stamps.set(id, []); stamps.get(id).push(millis(value)) }
             // the fields the card is made of, so two changes in one millisecond still change the tag
@@ -78,13 +93,63 @@ along with this software (see the LICENSE.md file). If not, see
                 objectList.push({partyId: row.partyId, name: row.davName || `${row.partyId}.vcf`, uid: row.davUid || null,
                     fromDate: row.fromDate, isPersonal: row.privateOwnerUserId === userId, etag: hash(parts.join('|'))})
             }
-            ctag = hash(objectList.map((object) => `${object.name}:${object.etag}`).sort().join('|'))
+            ctag = hash((projected ? `${collectionId}|` : '') + objectList.map((object) => `${object.name}:${object.etag}`).sort().join('|'))
+        ]]></script></actions>
+    </service>
+
+    <service verb="define" noun="ProjectionOwner" type="interface">
+        <description>What a projected address book's owner service answers (ContactProjection.ownerServiceName), as the user:
+            admitted, whether the user sees the collection at all; and without checkOnly the parties whose cards it holds
+            (partyIdList). The owner decides what each user sees; the projection kind adds nothing to it.</description>
+        <in-parameters><parameter name="checkOnly" type="Boolean"/></in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="partyIdList" type="List"/>
+        </out-parameters>
+    </service>
+    <service verb="get" noun="ProjectionObjects">
+        <description>A projected address book's cards (collectionId projected-{projectionId}, its ContactProjection not disabled)
+            for the user: the cards of the parties its owner service answers (none when it does not admit the user), as
+            get#ContactObjectTags names and tags them, and the collection's ctag; admitted false for a user the owner does not
+            admit or an unknown projection. A failure of the owner is logged and answers nothing.</description>
+        <in-parameters>
+            <parameter name="collectionId" required="true"/>
+            <parameter name="checkOnly" type="Boolean"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="admitted" type="Boolean"/>
+            <parameter name="projection" type="Map"/>
+            <parameter name="objectList" type="List"/>
+            <parameter name="ctag"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            admitted = false; projection = null; objectList = []; ctag = null
+            const projectionId = String(collectionId).startsWith('projected-') ? String(collectionId).substring(10) : ''
+            const row = projectionId ? ec.entity.find('mantle.party.contact.ContactProjection').condition('projectionId', projectionId).disableAuthz().one() : null
+            if (row == null || row.disabled === 'Y' || !row.ownerServiceName) return
+            projection = {projectionId: row.projectionId, title: row.title, description: row.description ?? null, sequenceNum: row.sequenceNum ?? null}
+            let out = null
+            ec.message.pushErrors()
+            try {
+                out = ec.service.sync().name(row.ownerServiceName).parameters({checkOnly: !!checkOnly}).call()
+                if (ec.message.hasError()) { ec.logger.error(`Projected address book ${projectionId}: ${ec.message.getErrorsString()}`); out = null }
+            } catch (error) {
+                ec.logger.error(`Projected address book ${projectionId} was not answered: ${error.message}`); out = null
+            } finally { ec.message.clearErrors(); ec.message.popErrors() }
+            if (!out?.admitted) return
+            admitted = true
+            if (checkOnly) return
+            const tags = ec.service.sync().name('mantle.party.ContactDavServices.get#ContactObjectTags').parameters({collectionId: collectionId,
+                    partyIdList: Array.from(out.partyIdList || [])}).call()
+            objectList = Array.from(tags.objectList || [])
+            ctag = tags.ctag
         ]]></script></actions>
     </service>
 
     <service verb="get" noun="DavCollections">
         <description>The CardDAV address books of the user: each contact book the user may view, read only when it is shared
-            (a personal book is the user's own to change). With collectionId only that one.</description>
+            (a personal book is the user's own to change); and each projected address book whose owner admits the user
+            (projected-{projectionId}, read only; impl-sales P5). With collectionId only that one.</description>
         <in-parameters><parameter name="collectionId"/></in-parameters>
         <out-parameters><parameter name="collectionList" type="List"/></out-parameters>
         <actions><script><![CDATA[
@@ -98,6 +163,17 @@ along with this software (see the LICENSE.md file). If not, see
                 const tags = ec.service.sync().name('mantle.party.ContactDavServices.get#ContactObjectTags').parameters({contactBookId: book.contactBookId}).call()
                 collectionList.push({collectionId: book.contactBookId, name: book.contactBookName, description: book.description ?? null,
                     color: book.color ?? null, ctag: tags.ctag, readOnly: !(book.isOwner && book.visibilityEnumId === 'CbvPersonal')})
+            }
+            // the projected address books (impl-sales P5): each whose owner admits the user, read only
+            if (!collectionId || String(collectionId).startsWith('projected-')) {
+                const projections = Array.from(ec.entity.find('mantle.party.contact.ContactProjection').orderBy(['sequenceNum', 'projectionId']).disableAuthz().list())
+                        .filter((row) => row.disabled !== 'Y' && (!collectionId || collectionId === `projected-${row.projectionId}`))
+                for (const row of projections) {
+                    const found = ec.service.sync().name('mantle.party.ContactDavServices.get#ProjectionObjects').parameters({collectionId: `projected-${row.projectionId}`}).call()
+                    if (!found?.admitted) continue
+                    collectionList.push({collectionId: `projected-${row.projectionId}`, name: ec.l10n.localize(row.title || row.projectionId),
+                        description: row.description ? ec.l10n.localize(row.description) : null, color: null, ctag: found.ctag, readOnly: true})
+                }
             }
         ]]></script></actions>
     </service>
@@ -116,10 +192,17 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="objectList" type="List"/></out-parameters>
         <actions><script><![CDATA[
             objectList = []
-            ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess').parameters({contactBookId: collectionId, permissionEnumId: 'CbpView'}).call()
-            if (ec.message.hasError()) return
+            let tags
+            if (String(collectionId).startsWith('projected-')) {
+                // a projected address book (impl-sales P5): its owner's parties, read only
+                tags = ec.service.sync().name('mantle.party.ContactDavServices.get#ProjectionObjects').parameters({collectionId: collectionId}).call()
+                if (!tags?.admitted) { ec.message.addError(`Address book ${collectionId} not found`); return }
+            } else {
+                ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess').parameters({contactBookId: collectionId, permissionEnumId: 'CbpView'}).call()
+                if (ec.message.hasError()) return
+                tags = ec.service.sync().name('mantle.party.ContactDavServices.get#ContactObjectTags').parameters({contactBookId: collectionId}).call()
+            }
             const names = objectNameList ? new Set(Array.from(objectNameList).map(String)) : null
-            const tags = ec.service.sync().name('mantle.party.ContactDavServices.get#ContactObjectTags').parameters({contactBookId: collectionId}).call()
             const wanted = Array.from(tags.objectList || []).filter((object) => !names || names.has(object.name))
             const cards = new Map()
             if (withData && wanted.length) {
@@ -164,6 +247,8 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions><script><![CDATA[
             created = false; etag = null; status = null
+            // a projected address book is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const cf = ec.entity.conditionFactory
             const userId = ec.user.userId
             const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess').parameters({contactBookId: collectionId}).call()
@@ -260,6 +345,8 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="status" type="Integer"/></out-parameters>
         <actions><script><![CDATA[
             status = null
+            // a projected address book is read only (the DAV server refuses it first)
+            if (String(collectionId).startsWith('projected-')) { status = 403; return }
             const cf = ec.entity.conditionFactory
             const access = ec.service.sync().name('mantle.party.ContactBookServices.check#ContactBookAccess').parameters({contactBookId: collectionId}).call()
             if (ec.message.hasError()) return

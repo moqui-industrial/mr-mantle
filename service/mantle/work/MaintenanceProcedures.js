@@ -888,8 +888,10 @@ function storeProcess(p) {
     }
     const name = text(p.workEffortName)
     if (!name) denied("NAME_REQUIRED", "Name the procedure")
+    // the one named, else the default one (FacilityScope.js defaultOrganization: the active, the only, or the user's own)
     const organizationPartyId =
-        text(p.organizationPartyId) || (userScope.organizationPartyIds?.length === 1 ? userScope.organizationPartyIds[0] : null)
+        text(p.organizationPartyId) ||
+        ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js").defaultOrganization(userScope)
     if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose an organization")
     maintenanceAccess.requireOrganization(userScope, organizationPartyId)
     const source = text(p.sourceWorkEffortId) ? requireProcedure(userScope, p.sourceWorkEffortId, "read") : null
