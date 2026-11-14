@@ -1,0 +1,667 @@
+// PASS Marketing: public subscription and its confirmation (mantle.marketing.MarketingPortalServices, P of IronStone Marketing design
+// §14.2; design §13.1, §13 Subscribe and VerifySubscription, EmailPreferences' Marketing context; impl-marketing P7, F24, F25, F26,
+// F43). CC0 1.0 Universal plus Grant of Patent License.
+//
+// - Every operation first finds the organization the page serves: the marketing mount's target on a published site, an internal
+//   organization. A list is offered there only by an explicit public offer: its policy in effect has publicOffer Y, this site
+//   and an open interval, the list is a Marketing list of that organization (not a mailbox, not archived, of email). The legacy
+//   ContactList.isPublic publishes nothing. Anything else answers the same NotFound.
+// - request#Subscription: the address, an optional display name, the offered topics and the consent box, with PASS's request key.
+//   A public subscriber is a party (F43): the address's directory party when there is one (never a personal contact), else a new
+//   person with that address; which one is never said. Each topic is filed through the audience's one evidenced path
+//   (MarketingAudiences.js fileOne: pending, never clearing a withdrawal or a suppression) as one public request
+//   (SubscriptionRequest rows sharing requestGroupId), and a verification message is queued on Comms' ledger as a transactional
+//   delivery from a ready sending profile of the organization, with the published confirmation template the list's policy
+//   names. The answer is the same neutral receipt whatever happened: a new party or a matched one, a member already, a refusal,
+//   a limit reached. Limits: requests per client, per site and per address (over: the receipt, nothing recorded) and
+//   verification messages per address (over: the request kept, no message).
+// - The confirmation link: each attempt of the verification message makes its own token (SubscriptionRequestToken keeps its
+//   digest only, never the token), ending with the request (seven days). get#SubscriptionRequest is read only, so a mail
+//   scanner's fetch changes nothing; verify#Subscription is a POST that accepts exactly the request's topics for its address
+//   (the person's own act, renewing a withdrawn purpose, F120), once: a replay answers the first result, and a withdrawal
+//   after the request is never undone by it (the request's evidence predates it). Every token lookup counts against the
+//   requester's limit.
+// - The PASS Account Email preferences page's Marketing context (AccountHub.js asks preferencesContext and changeTopics): the
+//   sending organization's offered topics with the recipient's state; a topic turned on files a public request for the
+//   recipient's address (a verified account's own address is accepted at once, as a checkout's is).
+// - Answers are allow-listed projections; addresses are masked; tokens never leave the verification message.
+const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
+const audiences = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAudiences.js").audience
+const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+const templates = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageTemplates.js")
+const profiles = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSendingProfiles.js")
+const {find, one, rows, ms, call} = lib
+
+const LIST = "mantle.marketing.contact.ContactList"
+const CLP = "mantle.marketing.contact.ContactListParty"
+const POLICY = "mantle.marketing.contact.ContactListPolicy"
+const REQUEST = "mantle.marketing.contact.SubscriptionRequest"
+const TOKEN = "mantle.marketing.contact.SubscriptionRequestToken"
+const SOURCE = "MdsrcSubscriptionVerify"
+const limits = {
+    topics: 10,
+    address: 254,
+    name: 100,
+    requestDays: 7,
+    clientRequests: 30,
+    siteRequests: 1000,
+    addressRequests: 5,
+    addressMails: 3,
+    tokenLookups: 100
+}
+const MINUTES_10 = 600000
+const HOUR = 3600000
+const DAY = 86400000
+const RECEIPT =
+    "Thank you. If this address can receive our email, a message is on its way to it: open the link in that message to confirm. " +
+    "Nothing is sent to you before you confirm."
+
+const blank = value => value == null || String(value).trim() === ""
+const text = value => (blank(value) ? null : String(value).trim())
+const nowMs = () => Number(ms(ec.user.nowTimestamp))
+const L = words => ec.l10n.localize(words)
+const fail = (kind, message) => {
+    const error = new Error(message)
+    error.moquiErrorKind = kind
+    throw error
+}
+const unavailable = () => fail("NotFound", "This page is not available")
+const yes = value =>
+    value === true ||
+    ["y", "yes", "true", "on", "1"].includes(
+        String(value ?? "")
+            .trim()
+            .toLowerCase()
+    )
+const emailPattern =
+    /^[^\s@<>()[\],;:"\\]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/
+const masked = email => {
+    const [local, domain] = String(email || "").split("@")
+    return domain ? local.slice(0, 1) + "***@" + domain : ""
+}
+const organizationName = partyId => (partyId ? one("mantle.party.Organization", {partyId})?.organizationName || "" : "")
+const listOf = value =>
+    value == null
+        ? []
+        : (typeof value === "string" ? value.split(",") : Array.from(value)).map(item => text(item)).filter(Boolean)
+const esc = value =>
+    String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c])
+
+// A limit's count (the framework's attempt buckets, as the sign-in limits): whether this one is still allowed.
+function allowed(key, limit, windowMillis) {
+    return !!ec.service
+        .sync()
+        .throwOnError(true)
+        .name("org.moqui.public.AccountServices.record#Attempt")
+        .parameters({input: {key, limit, windowMillis}})
+        .requireNewTransaction(true)
+        .call().result.allowed
+}
+const requester = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+const addressKey = address => ec.user.singleUseCodeHash("mkt-address:" + address)
+// A token lookup counts against the requester's limit first.
+function throttleLookup() {
+    if (!allowed("mkt-token:" + requester(), limits.tokenLookups, MINUTES_10))
+        fail("Tarpit", "RATE_LIMITED: Too many attempts. Wait a few minutes and try again.")
+}
+
+// ===== the organization and its offers =====
+// The organization the Marketing app of a published site serves (the marketing mount's target, an internal organization).
+function served(siteId) {
+    const site = siteId && one("mantle.public.PublicSite", {siteId})
+    if (!site || site.state !== "published") unavailable()
+    const mount = apps().mount(siteId, "marketing")
+    if (!mount?.targetId || !one("mantle.party.PartyRole", {partyId: mount.targetId, roleTypeId: "OrgInternal"})) unavailable()
+    return mount.targetId
+}
+// The list's offer on a site for an organization: {list, policy} while it is offered there, else null.
+function offerOf(contactListId, siteId, organizationPartyId) {
+    const list = contactListId ? one(LIST, {contactListId}) : null
+    const audience = audiences()
+    if (
+        !list ||
+        list.ownerPartyId !== organizationPartyId ||
+        !audience.listTypes.includes(list.contactListTypeEnumId) ||
+        (list.contactMechTypeEnumId || "CmtEmailAddress") !== "CmtEmailAddress" ||
+        audience.archived(list)
+    )
+        return null
+    const policy = audience.currentPolicy(list.contactListId)
+    if (!policy || policy.publicSiteId !== siteId || !audience.offerState(policy).offered) return null
+    return {list, policy}
+}
+// The lists offered on a site for its organization, by name.
+function offersOf(siteId, organizationPartyId) {
+    const ids = [
+        ...new Set(
+            Array.from(find(POLICY, {publicSiteId: siteId, publicOffer: "Y"}).list())
+                .filter(row => lib.active(row))
+                .map(row => row.contactListId)
+        )
+    ]
+    return ids
+        .map(id => offerOf(id, siteId, organizationPartyId))
+        .filter(Boolean)
+        .sort((a, b) => String(a.list.contactListName || "").localeCompare(String(b.list.contactListName || "")))
+}
+const topicView = ({list, policy}) => ({
+    contactListId: list.contactListId,
+    name: list.contactListName || list.contactListId,
+    description: list.description || "",
+    channelText: L("Email"),
+    consentText: policy.evidenceText || L("Yes, send me") + " " + (list.contactListName || "") + "."
+})
+
+// One topic's request decided and recorded in this transaction (file#SubscriptionRequest, internal): its result.
+function fileHere(list, policy, request, partyId) {
+    return call("mantle.marketing.AudienceServices.file#SubscriptionRequest", {
+        contactListId: list.contactListId,
+        partyId,
+        request
+    }).result
+}
+// Work in a transaction of its own, committed before what follows reads it (the ledger's attempt and build run in their own).
+const apart = (label, work) => ec.transaction.runRequireNew(null, label, work)
+
+// ===== the subscriber =====
+// The party a public request names for an address: the first directory party (by id) with it as a current email address,
+// not merged, disabled or anyone's personal contact; else a new person with that address. Never said which.
+function subscriberOf(address, displayName) {
+    const cf = ec.entity.conditionFactory
+    const infos = Array.from(
+        find("mantle.party.contact.PartyContactMechInfo")
+            .condition("contactMechTypeEnumId", "CmtEmailAddress")
+            .condition(cf.makeCondition("infoString", "equals", address, false, true))
+            .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+            .orderBy("partyId")
+            .limit(50)
+            .list()
+    )
+    for (const info of infos) {
+        const party = one("mantle.party.Party", {partyId: info.partyId})
+        if (party && party.disabled !== "Y" && !party.mergedToPartyId && !party.privateOwnerUserId)
+            return {partyId: party.partyId, contactMechId: info.contactMechId}
+    }
+    const partyId = call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson"}).partyId
+    call("create#mantle.party.Person", {partyId, firstName: displayName || null})
+    const contactMechId = call("create#mantle.party.contact.ContactMech", {
+        contactMechTypeEnumId: "CmtEmailAddress",
+        infoString: address
+    }).contactMechId
+    call("create#mantle.party.contact.PartyContactMech", {
+        partyId,
+        contactMechId,
+        contactMechPurposeId: "EmailPrimary",
+        fromDate: ec.user.nowTimestamp
+    })
+    return {partyId, contactMechId}
+}
+
+// ===== the verification message =====
+// The organization's sending profile for a verification: a ready email profile, a transactional (or either purpose) one first.
+function profileFor(organizationPartyId) {
+    const ready = Array.from(find("mantle.party.MessageSendingProfile", {organizationPartyId, channelEnumId: "MdcEmail"}).list())
+        .filter(row => lib.active(row) && profiles().readinessOf(row).ready)
+        .sort((a, b) => String(a.sendingProfileId).localeCompare(String(b.sendingProfileId)))
+    return ready.find(row => !row.purposeEnumId || row.purposeEnumId === "MtpTransactional") || ready[0] || null
+}
+// The published confirmation template a policy names: its EmailTemplate's Comms template of the organization, in use, with a
+// published content. {template, content} or null.
+function confirmationOf(policy, organizationPartyId) {
+    const emailTemplateId = text(policy?.confirmEmailTemplateId)
+    if (!emailTemplateId) return null
+    const template = one("mantle.party.MessageTemplate", {emailTemplateId})
+    if (!template || template.organizationPartyId !== organizationPartyId || template.channelEnumId !== "MdcEmail") return null
+    if (template.thruDate != null && ms(template.thruDate) <= nowMs()) return null
+    const content = templates().currentOf(templates().contentsOf(template.messageTemplateId))
+    return content ? {template, content} : null
+}
+// Queue a public request's verification message (a transactional delivery of the ledger, sent now in its own transaction):
+// the deliveryId, or null when the organization has no ready profile or the topics' policies no published confirmation.
+function queueVerification(group, rowsOfGroup, organizationPartyId, address) {
+    const profile = profileFor(organizationPartyId)
+    const confirmation = rowsOfGroup
+        .map(row => confirmationOf(audiences().currentPolicy(row.contactListId), organizationPartyId))
+        .find(Boolean)
+    if (!profile || !confirmation) {
+        ec.logger.warn(
+            "Subscription request " +
+                group +
+                ": no verification sent, the organization " +
+                organizationPartyId +
+                " has " +
+                (!profile ? "no ready sending profile" : "no published confirmation template on the topics")
+        )
+        return null
+    }
+    const queued = call("mantle.party.MessageServices.queue#Delivery", {
+        eventKey: "mkt-verify:" + group,
+        sourceEnumId: SOURCE,
+        recipientPartyId: rowsOfGroup[0].partyId,
+        toAddress: address,
+        channelEnumId: "MdcEmail",
+        templateKey: confirmation.template.emailTemplateId,
+        siteId: rowsOfGroup[0].siteId || null,
+        organizationPartyId,
+        sendingProfileId: profile.sendingProfileId,
+        transactional: true,
+        sendNow: true
+    })
+    return queued.deliveryId || null
+}
+// build#VerificationDelivery (the ledger's source, before each attempt): the confirmation template's content (its declared
+// variables' fallbacks and the topics' names; nothing the visitor typed), with the confirmation link this attempt makes; a
+// request decided or expired is suppressed.
+function buildVerification(p) {
+    const delivery = one("mantle.party.MessageDelivery", {deliveryId: text(p.deliveryId)})
+    const group = delivery ? String(delivery.eventKey || "").replace(/^mkt-verify:/, "") : null
+    const rowsOfGroup = group ? rows(REQUEST, {requestGroupId: group}) : []
+    if (!rowsOfGroup.length) return {suppress: "The subscription request is gone"}
+    const first = rowsOfGroup[0]
+    if (first.expireDate != null && ms(first.expireDate) <= nowMs()) return {suppress: "The subscription request expired"}
+    if (!rowsOfGroup.some(row => row.statusEnumId === "SrsPending")) return {suppress: "The subscription request is decided"}
+    const template = one("mantle.party.MessageTemplate", {emailTemplateId: delivery.templateKey})
+    const content = template ? templates().currentOf(templates().contentsOf(template.messageTemplateId)) : null
+    if (!template || template.organizationPartyId !== delivery.organizationPartyId || !content)
+        return {suppress: "The confirmation template is not published"}
+    const names = rowsOfGroup
+        .filter(row => row.statusEnumId === "SrsPending")
+        .map(row => one(LIST, {contactListId: row.contactListId})?.contactListName || row.contactListId)
+    const rendered = templates().render(content, {listName: names.join(", ")})
+    const token = ec.user.randomString(40).replace(/[^A-Za-z0-9_-]/g, "")
+    call("create#" + TOKEN, {
+        tokenDigest: ec.user.singleUseCodeHash(token),
+        requestGroupId: group,
+        createdDate: ec.user.nowTimestamp,
+        thruDate: first.expireDate || null
+    })
+    const url = apps().pageUrl(first.siteId, "marketing", "/VerifySubscription?token=" + encodeURIComponent(token))
+    if (!url) return {suppress: "The site has no Marketing page to confirm on"}
+    const body =
+        (rendered.body || "") +
+        '<p><a href="' +
+        esc(url) +
+        '">' +
+        esc(L("Confirm my subscription")) +
+        "</a></p><p><small>" +
+        esc(L("The link opens a page where you confirm; opening it alone changes nothing.")) +
+        "</small></p>"
+    const bodyText =
+        (rendered.bodyText || String(rendered.body || "").replace(/<[^>]*>/g, "")).trim() +
+        "\n\n" +
+        L("Confirm my subscription") +
+        ": " +
+        url +
+        "\n"
+    return {bodyParameters: {}, subject: rendered.subject || L("Please confirm your subscription"), body, bodyText}
+}
+
+// ===== get#Publication =====
+// getPublication: the site's offered topics (or the one named), with the consent wording each shows.
+function getPublication(p) {
+    const organizationPartyId = served(p.siteId)
+    const named = text(p.contactListId)
+    const offers = named
+        ? [offerOf(named, p.siteId, organizationPartyId)].filter(Boolean)
+        : offersOf(p.siteId, organizationPartyId)
+    if (!offers.length) unavailable()
+    return {organizationName: organizationName(organizationPartyId), topics: offers.map(topicView)}
+}
+
+// ===== request#Subscription =====
+// The request a public page or the preferences page files: each topic through fileOne, one group; then the verification message
+// (unless the address's message limit is reached). Internal to this module.
+function fileGroup({siteId, organizationPartyId, offers, subscriber, address, requestKey, evidenceText, sourceEnumId}) {
+    const audience = audiences()
+    const expireDate = new Date(nowMs() + limits.requestDays * DAY)
+    let group = null
+    const outcomes = []
+    for (const {list, policy} of offers) {
+        const result = audience.fileApart(
+            list,
+            policy,
+            {
+                requestKindEnumId: "SrkPublic",
+                sourceEnumId,
+                evidenceDate: ec.user.nowTimestamp,
+                evidenceText: evidenceText(list, policy),
+                contactMechId: subscriber.contactMechId,
+                accept: false,
+                extra: {siteId, requestKey, expireDate, requestGroupId: group}
+            },
+            subscriber.partyId
+        )
+        outcomes.push(result)
+        if (!group && result.subscriptionRequestId) {
+            group = result.subscriptionRequestId
+            const first = group
+            apart("Error marking the subscription request", () =>
+                call("update#" + REQUEST, {subscriptionRequestId: first, requestGroupId: first})
+            )
+        }
+    }
+    const waiting = group ? rows(REQUEST, {requestGroupId: group}).filter(row => row.statusEnumId === "SrsPending") : []
+    if (waiting.length && allowed("mkt-mail:" + addressKey(address), limits.addressMails, DAY)) {
+        const deliveryId = queueVerification(group, waiting, organizationPartyId, address)
+        if (deliveryId)
+            for (const row of waiting)
+                call("update#" + REQUEST, {subscriptionRequestId: row.subscriptionRequestId, verificationDeliveryId: deliveryId})
+    }
+    return {group, outcomes}
+}
+// requestSubscription: the neutral receipt, whatever happened.
+function requestSubscription(p) {
+    const receipt = {receipt: {message: L(RECEIPT)}}
+    const organizationPartyId = served(p.siteId)
+    const address = String(p.emailAddress || "")
+        .trim()
+        .toLowerCase()
+    if (!address || address.length > limits.address || !emailPattern.test(address))
+        fail("Unprocessable", "VALUE_INVALID[emailAddress]: Enter your email address")
+    const displayName = text(p.displayName)
+    if (displayName && (displayName.length > limits.name || /[\r\n<>]/.test(displayName)))
+        fail("Unprocessable", "VALUE_INVALID[displayName]: Enter a shorter name, without line breaks or angle brackets")
+    const asked = [...new Set(listOf(p.contactListIds))]
+    if (!asked.length) fail("Unprocessable", "VALUE_INVALID[contactListIds]: Choose what you want to receive")
+    if (asked.length > limits.topics) unavailable()
+    if (!yes(p.consent)) fail("Unprocessable", "VALUE_INVALID[consent]: Tick the box to say you want to receive it")
+    const operationId = String(p.operationId || "")
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(operationId)) fail("Unprocessable", "Reload the page and try again")
+    // every topic offered on this site, else the same NotFound
+    const offers = asked.map(id => offerOf(id, p.siteId, organizationPartyId))
+    if (offers.some(offer => !offer)) unavailable()
+    // the limits: over any, the receipt and nothing recorded
+    if (
+        !allowed("mkt-client:" + requester(), limits.clientRequests, MINUTES_10) ||
+        !allowed("mkt-site:" + p.siteId, limits.siteRequests, HOUR) ||
+        !allowed("mkt-request:" + addressKey(address), limits.addressRequests, HOUR)
+    )
+        return receipt
+    // a repeat of the request key answers the first request
+    const requestKey = ec.user.singleUseCodeHash("mkt-request:" + p.siteId + ":" + address + ":" + operationId)
+    if (find(REQUEST, {requestKey}).count() > 0) return receipt
+    // the party committed first: each topic is filed in a transaction of its own, and the verification's build in another
+    const subscriber = apart("Error making the subscriber", () => subscriberOf(address, displayName))
+    const site = one("mantle.public.PublicSite", {siteId: p.siteId})
+    fileGroup({
+        siteId: p.siteId,
+        organizationPartyId,
+        offers,
+        subscriber,
+        address,
+        requestKey,
+        sourceEnumId: "PcsForm",
+        evidenceText: (list, policy) =>
+            (policy.evidenceText || "Subscribe to " + (list.contactListName || list.contactListId)) +
+            " (the subscribe page of site " +
+            (site?.name || p.siteId) +
+            ", the consent box ticked)"
+    })
+    return receipt
+}
+
+// ===== get#SubscriptionRequest and verify#Subscription =====
+// The public request a confirmation token names on this site, while it stands: {group, rows}; else the same NotFound.
+function requestOfToken(siteId, token) {
+    throttleLookup()
+    const value = text(token)
+    if (!value || !/^[A-Za-z0-9_-]{20,80}$/.test(value)) unavailable()
+    const found = one(TOKEN, {tokenDigest: ec.user.singleUseCodeHash(value)})
+    if (!found || (found.thruDate != null && ms(found.thruDate) <= nowMs())) unavailable()
+    const rowsOfGroup = rows(REQUEST, {requestGroupId: found.requestGroupId}).sort((a, b) =>
+        String(a.subscriptionRequestId).localeCompare(String(b.subscriptionRequestId))
+    )
+    const first = rowsOfGroup[0]
+    if (!first || first.siteId !== siteId || (first.expireDate != null && ms(first.expireDate) <= nowMs())) unavailable()
+    return {group: found.requestGroupId, rows: rowsOfGroup}
+}
+const addressOf = contactMechId =>
+    contactMechId ? one("mantle.party.contact.ContactMech", {contactMechId})?.infoString || "" : ""
+const confirmedOf = row => row.verifiedDate != null
+// The request's view: the masked address, the topics and their consent wording, and its state.
+function requestView(organizationPartyId, rowsOfGroup) {
+    const decided = rowsOfGroup.every(row => row.statusEnumId !== "SrsPending")
+    const confirmed = rowsOfGroup.some(confirmedOf)
+    return {
+        organizationName: organizationName(organizationPartyId),
+        maskedAddress: masked(addressOf(rowsOfGroup[0].contactMechId)),
+        topics: rowsOfGroup.map(row => {
+            const list = one(LIST, {contactListId: row.contactListId})
+            return {
+                name: list?.contactListName || row.contactListId,
+                description: list?.description || "",
+                consentText: audiences().currentPolicy(row.contactListId)?.evidenceText || ""
+            }
+        }),
+        state: decided ? (confirmed ? "confirmed" : "closed") : "pending",
+        expiresText: lib.dateText(rowsOfGroup[0].expireDate),
+        canConfirm: !decided
+    }
+}
+// getSubscriptionRequest: read only (a scanner's fetch changes nothing).
+function getSubscriptionRequest(p) {
+    const organizationPartyId = served(p.siteId)
+    const found = requestOfToken(p.siteId, p.token)
+    if (found.rows.some(row => row.organizationPartyId !== organizationPartyId)) unavailable()
+    return requestView(organizationPartyId, found.rows)
+}
+// verifySubscription: the request's topics accepted for its address, once.
+function verifySubscription(p) {
+    const organizationPartyId = served(p.siteId)
+    const found = requestOfToken(p.siteId, p.token)
+    if (found.rows.some(row => row.organizationPartyId !== organizationPartyId)) unavailable()
+    // one confirmation at a time: the group's first row locked, its rows read again under the lock
+    find(REQUEST, {subscriptionRequestId: found.group}).forUpdate(true).one()
+    const current = rows(REQUEST, {requestGroupId: found.group})
+    const audience = audiences()
+    for (const row of current.filter(item => item.statusEnumId === "SrsPending")) {
+        const list = one(LIST, {contactListId: row.contactListId})
+        const offer = offerOf(row.contactListId, p.siteId, organizationPartyId)
+        // a topic no longer offered is refused, the others go on
+        if (!offer) {
+            call("update#" + REQUEST, {
+                subscriptionRequestId: row.subscriptionRequestId,
+                statusEnumId: "SrsRefused",
+                reasonCode: "OFFER_CLOSED",
+                decidedDate: ec.user.nowTimestamp
+            })
+            continue
+        }
+        // in this transaction, under the group's lock
+        fileHere(
+            list,
+            offer.policy,
+            {
+                subscriptionRequestId: row.subscriptionRequestId,
+                requestKindEnumId: row.requestKindEnumId,
+                sourceEnumId: "PcsEmailLink",
+                // the request's own evidence date: a withdrawal after the request is never undone by its confirmation
+                evidenceDate: row.evidenceDate,
+                evidenceText: "Confirmed by the subscription link: " + (row.evidenceText || ""),
+                contactMechId: row.contactMechId,
+                accept: true,
+                byPerson: true
+            },
+            row.partyId
+        )
+    }
+    const after = rows(REQUEST, {requestGroupId: found.group}).sort((a, b) =>
+        String(a.subscriptionRequestId).localeCompare(String(b.subscriptionRequestId))
+    )
+    const view = requestView(organizationPartyId, after)
+    const accepted = after.filter(row => row.statusEnumId === "SrsAccepted").length
+    return Object.assign(view, {
+        receipt: {
+            message: accepted
+                ? L("Thank you. Your subscription is confirmed.")
+                : L("Nothing was changed. To subscribe, ask again from the subscribe page.")
+        }
+    })
+}
+
+// ===== check#MarketingAppReadiness =====
+// The Marketing app's checks of a site (PublicApps.js): its target an internal organization, a list offered there (a mount with
+// no published record is named), a ready sending profile, a published confirmation template on each offered list, and the
+// site's canonical host, from which every link is made.
+function appReadiness(p) {
+    const organization = !!p.targetId && !!one("mantle.party.PartyRole", {partyId: p.targetId, roleTypeId: "OrgInternal"})
+    const offers = organization ? offersOf(p.siteId, p.targetId) : []
+    return {
+        checks: [
+            {name: "organization", ready: organization},
+            {name: "published list", ready: offers.length > 0},
+            {name: "sending profile", ready: organization && !!profileFor(p.targetId)},
+            {
+                name: "confirmation template",
+                ready: offers.length > 0 && offers.every(offer => !!confirmationOf(offer.policy, p.targetId))
+            },
+            {name: "canonical host", ready: !!apps().pageUrl(p.siteId, p.app || "marketing", "/")}
+        ]
+    }
+}
+
+// ===== the email preferences page's Marketing context (AccountHub.js) =====
+// The organization's offered topics on a site with the party's state on each: {organizationName, topics: [{contactListId, name,
+// description, channelText, state (subscribed, pending, unsubscribed, none)}]}, or null when the site offers none of its lists.
+function preferencesContext(siteId, organizationPartyId, partyId) {
+    if (!siteId || !organizationPartyId) return null
+    const mount = apps().mount(siteId, "marketing")
+    if (!mount || mount.targetId !== organizationPartyId) return null
+    const offers = offersOf(siteId, organizationPartyId)
+    if (!offers.length) return null
+    const audience = audiences()
+    return {
+        organizationPartyId,
+        organizationName: organizationName(organizationPartyId),
+        topics: offers.map(offer => {
+            const latest = partyId
+                ? Array.from(
+                      find(CLP, {contactListId: offer.list.contactListId, partyId})
+                          .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                          .orderBy("-fromDate")
+                          .list()
+                  )[0]
+                : null
+            const state = !latest
+                ? "none"
+                : audience.subscribed.includes(latest.statusId)
+                  ? "subscribed"
+                  : latest.statusId === "CLPT_PENDING"
+                    ? "pending"
+                    : "unsubscribed"
+            return Object.assign(topicView(offer), {state})
+        })
+    }
+}
+// Topics turned on from the preferences page: for the party's address (the link's, or the account's), each still offered; a
+// verified account's own address accepted at once (its sign-in proves the address, as a checkout's does), else a public request
+// with its verification message. {requested, accepted}.
+function changeTopics({siteId, organizationPartyId, partyId, contactMechId, contactListIds, verifiedAccount}) {
+    const offers = listOf(contactListIds)
+        .slice(0, limits.topics)
+        .map(id => offerOf(id, siteId, organizationPartyId))
+        .filter(Boolean)
+    if (!offers.length || !partyId || !contactMechId) return {requested: 0, accepted: 0}
+    const address = String(addressOf(contactMechId)).toLowerCase()
+    if (!address) return {requested: 0, accepted: 0}
+    const site = one("mantle.public.PublicSite", {siteId})
+    const evidence = list =>
+        "Turned on " +
+        (list.contactListName || list.contactListId) +
+        " on the email preferences of site " +
+        (site?.name || siteId)
+    if (verifiedAccount) {
+        let accepted = 0
+        for (const {list, policy} of offers) {
+            const result = audiences().fileApart(
+                list,
+                policy,
+                {
+                    requestKindEnumId: "SrkPublic",
+                    sourceEnumId: "PcsForm",
+                    evidenceDate: ec.user.nowTimestamp,
+                    evidenceText: evidence(list) + " (signed in, the account's verified address)",
+                    contactMechId,
+                    accept: true,
+                    byPerson: true,
+                    extra: {siteId}
+                },
+                partyId
+            )
+            if (result.outcome === "accepted" || result.outcome === "existing") accepted++
+        }
+        return {requested: 0, accepted}
+    }
+    if (!allowed("mkt-request:" + addressKey(address), limits.addressRequests, HOUR)) return {requested: 0, accepted: 0}
+    fileGroup({
+        siteId,
+        organizationPartyId,
+        offers,
+        subscriber: {partyId, contactMechId},
+        address,
+        requestKey: null,
+        sourceEnumId: "PcsEmailLink",
+        evidenceText: list => evidence(list) + " (by the link of a message to this address)"
+    })
+    return {requested: offers.length, accepted: 0}
+}
+
+// ===== the checkout's store-news choice (StoreTopics.js, impl-shop §7, F26) =====
+// fileCheckout: the buyer's choice of the store's news list filed through the audience's evidenced path, source PcsCheckout:
+// pending until the receipt's link (or a verified sign-in) confirms it, or accepted at once for a verified account. {outcome}.
+function fileCheckout(p) {
+    const list = one(LIST, {contactListId: text(p.contactListId)})
+    if (!list) throw new Error("No news list " + p.contactListId)
+    const accept = yes(p.accept)
+    // in the opt-in's own transaction (apply#CheckoutOptIn), which sees the checkout's party
+    const result = fileHere(
+        list,
+        audiences().currentPolicy(list.contactListId),
+        {
+            requestKindEnumId: "SrkCheckout",
+            sourceEnumId: "PcsCheckout",
+            evidenceDate: ec.user.nowTimestamp,
+            evidenceText: text(p.evidenceText) || "Checkout",
+            sourceRecordId: text(p.sourceRecordId),
+            contactMechId: text(p.contactMechId),
+            accept,
+            byPerson: true
+        },
+        text(p.partyId)
+    )
+    return {outcome: result.outcome, reasonCode: result.reasonCode || null}
+}
+
+const operations = {
+    getPublication,
+    requestSubscription,
+    getSubscriptionRequest,
+    verifySubscription,
+    appReadiness,
+    buildVerification,
+    fileCheckout
+}
+const internalOperations = new Set(["appReadiness", "buildVerification", "fileCheckout"])
+;({
+    served,
+    offersOf,
+    preferencesContext,
+    changeTopics,
+    limits,
+    // the PASS operations check the site and the asker first; Mantle's reads and writes below them run without artifact
+    // authorization (as SalesPortal.js), and a refusal below them is never shown as itself
+    execute(op, input) {
+        if (!operations[op]) fail("NotFound", "Unknown marketing portal operation")
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            return operations[op](input || {})
+        } catch (error) {
+            if (internalOperations.has(op) || error?.moquiErrorKind) throw error
+            ec.logger.error("Marketing portal " + op + " failed: " + String(error?.message || error).split("\n")[0])
+            ec.message.clearErrors()
+            fail("Unavailable", "This is not available right now. Try again later.")
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    }
+})

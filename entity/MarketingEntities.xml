@@ -470,6 +470,55 @@ along with this software (see the LICENSE.md file). If not, see
     </entity>
     <!-- ===== end of Marketing P5 ===== -->
 
+    <!-- ===== Marketing P7: PASS Marketing, subscription and preferences (impl-marketing P7, F24, F25, F26, F43; design-marketing §13,
+        §14.1) ===== -->
+    <!-- A list's public offer is its policy's publicOffer with a site and an opening interval (P7): offered on that site's Marketing
+        mount only while the interval is open; ContactList.isPublic alone publishes nothing (mantle.marketing.MarketingPortalServices). -->
+    <extend-entity entity-name="ContactListPolicy" package="mantle.marketing.contact">
+        <field name="publicSiteId" type="id"><description>The PASS site whose Marketing mount offers the list (a public offer needs
+            one whose mount targets the list's organization)</description></field>
+        <field name="offerFromDate" type="date-time"><description>The public offer opens (empty: from the policy's start)</description></field>
+        <field name="offerThruDate" type="date-time"><description>The public offer closes (empty: open while the policy is)</description></field>
+        <relationship type="one" title="PublicSite" related="mantle.public.PublicSite">
+            <key-map field-name="publicSiteId" related="siteId"/></relationship>
+    </extend-entity>
+    <!-- P7: a public request (the PASS Subscribe page, PASS's request key) or a checkout's store-news choice: its site, the request
+        it belongs to (one public request asks one or more topics: each topic's row names the first row's id), the request key, when
+        its confirmation link expires, when it was confirmed and its verification delivery. The link's token is never kept: each
+        verification message makes its own (SubscriptionRequestToken, its digest only). -->
+    <extend-entity entity-name="SubscriptionRequest" package="mantle.marketing.contact">
+        <field name="siteId" type="id"><description>The PASS site of a public request</description></field>
+        <field name="requestGroupId" type="id"><description>The public request this row is a topic of (its first row's id)</description></field>
+        <field name="requestKey" type="text-medium"><description>A digest of the site, the address and PASS's request key: a repeat
+            answers the first request</description></field>
+        <field name="expireDate" type="date-time"><description>A public request is confirmed only before this</description></field>
+        <field name="verifiedDate" type="date-time"><description>When the recipient confirmed it</description></field>
+        <field name="verificationDeliveryId" type="id"><description>The ledger delivery of its verification message</description></field>
+        <relationship type="one" title="PublicSite" related="mantle.public.PublicSite">
+            <key-map field-name="siteId"/></relationship>
+        <relationship type="one" title="Verification" related="mantle.party.MessageDelivery">
+            <key-map field-name="verificationDeliveryId" related="deliveryId"/></relationship>
+        <index name="SUBSCR_REQ_GROUP"><index-field name="requestGroupId"/></index>
+        <index name="SUBSCR_REQ_KEY"><index-field name="requestKey"/></index>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="SrkCheckout" description="Checkout" sequenceNum="6" enumTypeId="SubscriptionRequestKind"/>
+        </seed-data>
+    </extend-entity>
+    <!-- One confirmation link of a public request (P7): made by each attempt of its verification message, its token in that
+        message only and its digest here; any of a request's links confirms it until the request expires. -->
+    <entity entity-name="SubscriptionRequestToken" package="mantle.marketing.contact" cache="never">
+        <field name="tokenId" type="id" is-pk="true"/>
+        <field name="tokenDigest" type="text-medium"/>
+        <field name="requestGroupId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="thruDate" type="date-time"/>
+        <relationship type="one" title="RequestGroup" related="mantle.marketing.contact.SubscriptionRequest">
+            <key-map field-name="requestGroupId" related="subscriptionRequestId"/></relationship>
+        <index name="SUBSCR_TOKEN_DIGEST" unique="true"><index-field name="tokenDigest"/></index>
+        <index name="SUBSCR_TOKEN_GROUP"><index-field name="requestGroupId"/></index>
+    </entity>
+    <!-- ===== end of Marketing P7 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

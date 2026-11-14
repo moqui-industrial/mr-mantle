@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingPortalServices (P, IronStone Marketing design §14.2; design §13.1, §13 Subscribe and
+    VerifySubscription; impl-marketing P7, F24, F43): PASS Marketing's public subscription, over
+    service/mantle/marketing/MarketingPortal.js. Each PASS operation takes PASS's input map (the operations getMarketingPublication,
+    requestSubscription, getSubscriptionRequest and verifySubscription in mr-pass Schema.js and Routes.js and Mantle's copies,
+    served remotely by PassApi), finds the organization from the site's marketing mount and each list from its explicit public offer
+    on that site, and answers an allow-listed projection or the neutral receipt; refusals are PASS error kinds that say nothing of
+    a person, an address or a list the site does not offer. None is remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="Publication" authenticate="anonymous-all" allow-remote="false">
+        <description>getMarketingPublication: the lists the site's Marketing mount offers (or the one named by contactListId), each
+            with its name, description, channel and the consent wording its offer shows; the organization's name. A site without the
+            mount, a list it does not offer (no public offer on this site, the interval not open, archived, a mailbox, another
+            organization's) and a site offering none answer the same NotFound.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getPublication', input)"/>
+        </actions>
+    </service>
+    <service verb="request" noun="Subscription" authenticate="anonymous-all" allow-remote="false">
+        <description>requestSubscription: emailAddress, displayName (optional), contactListIds (each offered on this site, at most
+            ten), consent (the box ticked) and operationId (PASS's request key). The address's directory party or a new person is
+            filed pending on each list through the audience's evidenced path (one public request, an expiring confirmation) and a
+            rate-limited verification message is queued on the ledger from a ready sending profile of the organization with the
+            confirmation template the list's policy names. Answers the same receipt whatever happened (a new or a matched party, a
+            member already, a refusal, a repeat of the key, a limit reached). Refuses VALUE_INVALID (the address, the name, no topic,
+            the box) and NotFound (a list not offered).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('requestSubscription', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SubscriptionRequest" authenticate="anonymous-all" allow-remote="false">
+        <description>getSubscriptionRequest: the public request a confirmation link's token names (read only: a mail scanner's fetch
+            changes nothing): the organization, the address masked, the topics with their consent wording, its state (pending,
+            confirmed, closed) and expiry. A wrong, expired or another site's token answers NotFound; each lookup counts against
+            the requester's limit.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getSubscriptionRequest', input)"/>
+        </actions>
+    </service>
+    <service verb="verify" noun="Subscription" authenticate="anonymous-all" allow-remote="false">
+        <description>verifySubscription (a POST, a bearer write): the request's topics accepted for its address (the person's own
+            confirmation, source the email link), each still offered, under the request's lock; once: a replay answers the first
+            result, and a withdrawal after the request is never undone by it. Answers the request's view and a receipt.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('verifySubscription', input)"/>
+        </actions>
+    </service>
+    <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
+        <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
+            offered there, a ready sending profile of the organization, a published confirmation template on each offered list, and
+            the site's canonical host.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('appReadiness', input)"/>
+        </actions>
+    </service>
+    <service verb="build" noun="VerificationDelivery" allow-remote="false">
+        <description>The ledger's source MdsrcSubscriptionVerify, before each attempt: the confirmation template's published content
+            with the topics' names and a confirmation link this attempt makes (its token only in the message, its digest kept);
+            suppressed once the request is decided or expired. Internal.</description>
+        <in-parameters>
+            <parameter name="deliveryId" required="true"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="subject"/>
+            <parameter name="body"/>
+            <parameter name="bodyText"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('buildVerification', context))</script></actions>
+    </service>
+    <service verb="file" noun="CheckoutSubscription" allow-remote="false">
+        <description>Internal, for Shop's checkout opt-in (StoreTopics.js, impl-shop §7, F26): the buyer's store-news choice filed
+            on the store's news list through the audience's evidenced path, source PcsCheckout, pending (the receipt's link
+            confirms it) or, with accept, accepted (a verified account, or the receipt's link); the caller decides who may.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="contactMechId"/>
+            <parameter name="accept" type="Boolean" default="false"/>
+            <parameter name="evidenceText"/>
+            <parameter name="sourceRecordId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcome"/>
+            <parameter name="reasonCode"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('fileCheckout', context)"/>
+            <set field="outcome" from="found.outcome"/>
+            <set field="reasonCode" from="found.reasonCode"/>
+        </actions>
+    </service>
+</services>
