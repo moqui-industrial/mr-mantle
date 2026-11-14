@@ -239,3 +239,114 @@ feature("revise ends the issue and keeps its PDF; the revised quote is issued an
         view.canSend == true
     }
 })
+
+// Sales P10 review: the organization's mail goes from its own address alone, never the issuing rep's; a reminder waits for the
+// organization's reminder days; the customer's reference alone keeps the revision, and with another field changed it counts
+feature(
+    "the organization's mail never goes from the rep's address; reminders wait for the days set; a reference alone is not a change",
+    {
+        when() {
+            const {orderId} = proposedQuote(f, f.users.rep, f.orgA, f.accounts.a, f.contacts.mailed)
+            const orgMech = system(() =>
+                Array.from(ec.entity.find("mantle.party.contact.PartyContactMech").condition("partyId", f.orgA).list()).filter(
+                    row => !row.thruDate
+                )
+            )
+            system(() => {
+                fx.email(f.users.rep, "sqi_rep@issue.example.test")
+                for (const row of orgMech)
+                    fx.call("update#mantle.party.contact.PartyContactMech", {
+                        partyId: row.partyId,
+                        contactMechId: row.contactMechId,
+                        contactMechPurposeId: row.contactMechPurposeId,
+                        fromDate: row.fromDate,
+                        thruDate: ec.user.nowTimestamp
+                    })
+            })
+            capture.clear()
+            const sent = as(f.users.rep, "send#Quote", {
+                orderId,
+                orderRevision: revision(orderId),
+                sendMode: "organization",
+                operationKey: key("nofrom")
+            })
+            attempt(sent.issueId)
+            const noSender = deliveries(sent.issueId)[0]
+            const noSenderMails = capture.getMessages().length
+            // the organization gets an address: the next send reaches the contact from it
+            system(() => fx.email(f.orgA, "quotes@issue-a.example.test"))
+            const again = as(f.users.rep, "send#Quote", {
+                orderId,
+                orderRevision: revision(orderId),
+                sendMode: "organization",
+                operationKey: key("withfrom")
+            })
+            attempt(again.issueId)
+            const sentMails = capture.getMessages()
+            // reminders: none while the organization has no reminder days, one once it has
+            system(() =>
+                fx.call("update#mantle.sales.quote.SalesQuoteIssue", {
+                    issueId: sent.issueId,
+                    issuedDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+                })
+            )
+            capture.clear()
+            const noDays = system(() => fx.call(fx.issueService + "send#QuoteReminders", {}))
+            const policy = system(
+                () =>
+                    Array.from(
+                        ec.entity.find("mantle.sales.policy.SalesPolicy").condition("organizationPartyId", f.orgA).list()
+                    )[0]
+            )
+            system(() =>
+                fx.call("update#mantle.sales.policy.SalesPolicy", {
+                    salesPolicyId: policy.salesPolicyId,
+                    reminderDays: 2,
+                    reminderEmailTemplateId: f.template
+                })
+            )
+            const withDays = system(() => fx.call(fx.issueService + "send#QuoteReminders", {}))
+            const reminders = capture.getMessages().filter(mail => String(mail.subject).startsWith("Reminder"))
+            system(() =>
+                fx.call("update#mantle.sales.policy.SalesPolicy", {salesPolicyId: policy.salesPolicyId, reminderDays: null})
+            )
+            // the customer's reference alone keeps the revision; with the ship-by date it is counted
+            const before = revision(orderId)
+            system(() => fx.call("update#mantle.order.OrderPart", {orderId, orderPartSeqId: "01", otherPartyOrderId: "PO-SQI-1"}))
+            const afterReference = revision(orderId)
+            system(() =>
+                fx.call("update#mantle.order.OrderPart", {
+                    orderId,
+                    orderPartSeqId: "01",
+                    otherPartyOrderId: "PO-SQI-2",
+                    shipBeforeDate: ec.user.nowTimestamp
+                })
+            )
+            return {
+                sent,
+                noSender,
+                noSenderMails,
+                again,
+                sentMails,
+                noDays,
+                withDays,
+                reminders,
+                before,
+                afterReference,
+                after: revision(orderId)
+            }
+        },
+        then({sent, noSender, noSenderMails, again, sentMails, noDays, withDays, reminders, before, afterReference, after}) {
+            sent.refused == ""
+            noSender.stateEnumId == "MdsFailed" && String(noSender.lastError).includes("no email address to send the quote from")
+            noSenderMails == 0
+            again.issueId == sent.issueId && again.recipients[0].retried == true
+            sentMails.length == 1 && sentMails[0].fromAddress == "quotes@issue-a.example.test"
+            noDays.queuedCount == 0
+            withDays.queuedCount == 1
+            reminders.length == 1 && reminders[0].toList.includes("sqi_mailed@issue.example.test")
+            afterReference == before
+            after == before + 1
+        }
+    }
+)

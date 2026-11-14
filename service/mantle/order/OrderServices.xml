@@ -2745,11 +2745,9 @@ General Order Placement and eCommerce Usage
             <parameter name="disableTaxCalc"/>
             <parameter name="partTotal" type="BigDecimal"/>
             <parameter name="statusId"/>
-            <!-- impl-sales P10: the customer's reference and the validity, so a change of the reference alone is told apart -->
+            <!-- impl-sales P10: the customer's reference and the new-customer mark, so a change of those alone is told apart -->
             <parameter name="otherPartyOrderId"/>
             <parameter name="isNewCustomer"/>
-            <parameter name="validFromDate" type="Timestamp"/>
-            <parameter name="validThruDate" type="Timestamp"/>
             <parameter name="originalValue" type="Map"/>
         </in-parameters>
         <actions>
@@ -2779,15 +2777,19 @@ General Order Placement and eCommerce Usage
                 <!-- the send's own Approved to Sent is the issue of the revision, not a change of it (send#PurchaseOrder) -->
                 <set field="issuedOnly" from="statusOnly &amp;&amp; statusId == 'OrderSent' &amp;&amp; originalValue.statusId == 'OrderApproved'"/>
                 <!-- the customer's reference (its purchase order recorded with an acceptance, impl-sales P10) and place#Order's
-                    new-customer mark are not commercial changes either: the status, addresses, carrier, customer and validity unchanged -->
+                    new-customer mark are not commercial changes either: every other field of the part unchanged (Sales P10 review:
+                    the part as stored now against its original value, so a reference written with any other field counts) -->
                 <script><![CDATA[
-                    const sameTime = (a, b) => (a == null || a === "" ? "" : String(a)) === (b == null || b === "" ? "" : String(b))
-                    const changed = (a, b) => (a ?? null) != (b ?? null)
-                    referenceOnly = hasOriginal && !statusOnly && statusId == originalValue.statusId
-                        && (changed(otherPartyOrderId, originalValue.otherPartyOrderId) || changed(isNewCustomer, originalValue.isNewCustomer))
-                        && postalContactMechId == originalValue.postalContactMechId && carrierPartyId == originalValue.carrierPartyId
-                        && shipmentMethodEnumId == originalValue.shipmentMethodEnumId && customerPartyId == originalValue.customerPartyId
-                        && sameTime(validFromDate, originalValue.validFromDate) && sameTime(validThruDate, originalValue.validThruDate)
+                    const same = (a, b) => (a == null || a === "" ? "" : String(a)) === (b == null || b === "" ? "" : String(b))
+                    const referenceFields = ["otherPartyOrderId", "otherPartyOrderDate", "isNewCustomer", "lastUpdatedStamp"]
+                    referenceOnly = false
+                    if (hasOriginal && !statusOnly && (!same(otherPartyOrderId, originalValue.otherPartyOrderId)
+                            || !same(isNewCustomer, originalValue.isNewCustomer))) {
+                        const stored = ec.entity.find("mantle.order.OrderPart").condition({orderId, orderPartSeqId}).disableAuthz().one()
+                        referenceOnly = stored != null && Object.keys(originalValue)
+                            .filter(name => !referenceFields.includes(name))
+                            .every(name => same(stored[name], originalValue[name]))
+                    }
                 ]]></script>
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision"
                         in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : (referenceOnly ? 'reference' : null)))}"/>

@@ -556,10 +556,12 @@ function sendLedger(quote, issue, recipient, emailTemplateId, subject, note) {
 // send#Quote: the issue (reused or made) and each recipient's send; previewOnly answers what would go and writes nothing.
 function sendQuote(p) {
     const userScope = salesAccess.scope()
-    const quote = editableQuote(userScope, p.orderId)
+    const preview = flag(p.previewOnly)
+    // a send reads and writes under the order's lock (Sales P10 review): two at once give one issue, and the same key the first's
+    // result, as the operation key is read after the lock
+    const quote = editableQuote(userScope, p.orderId, !preview)
     salesAccess.requireCapability(userScope, "quoteSend")
     const order = quote.order
-    const preview = flag(p.previewOnly)
     const {options, chosen} = chosenRecipients(quote, p.recipientPartyIds)
     const caller = userScope.partyId
     const account = ownAccount(p.emailAccountId)
@@ -689,23 +691,12 @@ function attemptDeliveries(p) {
 }
 
 // ===== the ledger's builds =====
-// The sender of an organization's quote mail: its primary email, else the issuer's.
+// The sender of an organization's quote mail: its own email, the primary one first (emailOf). Never a person's (Sales P10 review:
+// the issuer's address let a later send or reminder by someone else go out as the rep who issued it); with none the build fails,
+// and the delivery is sent again once the organization has one.
 function senderOf(issue) {
-    let fromAddress = null
-    try {
-        fromAddress = text(
-            call("mantle.party.ContactServices.get#PartyContactInfo", {
-                partyId: issue.organizationPartyId,
-                emailContactMechPurposeId: "EmailPrimary"
-            }).emailAddress
-        )
-    } catch (error) {
-        ec.message.clearErrors()
-    }
-    if (!fromAddress) {
-        const issuer = issue.issuedByUserId ? one("moqui.security.UserAccount", {userId: issue.issuedByUserId}) : null
-        fromAddress = issuer?.partyId ? emailOf(issuer.partyId) : null
-    }
+    const fromAddress = emailOf(issue.organizationPartyId)
+    if (!fromAddress) throw new Error(partyName(issue.organizationPartyId) + " has no email address to send the quote from")
     return {fromAddress, fromName: partyName(issue.organizationPartyId)}
 }
 // build#QuoteMessage and build#QuoteReminderMessage (each attempt): suppressed once the issue no longer stands (revised, withdrawn,
@@ -767,32 +758,45 @@ function sendReminders(p) {
     let queued = 0
     const days = {}
     const issueIds = []
+    // each issue in a transaction of its own (Sales P10 review): a failing one rolls back only its own queueing
+    const queueReminders = issue => {
+        let count = 0
+        ec.transaction.runRequireNew(null, "Reminder of quote issue " + issue.issueId + " failed", () => {
+            count = remindIssue(issue)
+        })
+        return count
+    }
+    const remindIssue = issue => {
+        let count = 0
+        const order = one(ORDER, {orderId: issue.orderId})
+        if (!order || !stands(issue, order, now)) return -1
+        const recipients = new Set(
+            rows(DELIVERY, {eventKey: eventOf("quote", issue.issueId), stateEnumId: "MdsSent"}).map(row => row.recipientPartyId)
+        )
+        for (const row of ownSendsOf(issue)) if (row.state === "sent" && row.partyId) recipients.add(row.partyId)
+        const emailTemplateId = text(policyOf(issue.organizationPartyId).reminderEmailTemplateId) || templates.reminder
+        for (const recipientPartyId of recipients) {
+            const out = call("mantle.party.MessageServices.queue#Delivery", {
+                eventKey: eventOf("reminder", issue.issueId),
+                sourceEnumId: sources.reminder,
+                recipientPartyId,
+                templateKey: emailTemplateId,
+                transactional: true
+            })
+            if (out.created) count++
+        }
+        return recipients.size ? count : -1
+    }
     for (const issue of candidates) {
         try {
             if (!(issue.organizationPartyId in days))
                 days[issue.organizationPartyId] = Number(policyOf(issue.organizationPartyId).reminderDays || 0)
             const wait = days[issue.organizationPartyId]
             if (!wait || (ms(issue.issuedDate) ?? now) + wait * dayMs > now) continue
-            const order = one(ORDER, {orderId: issue.orderId})
-            if (!order || !stands(issue, order, now)) continue
-            const recipients = new Set(
-                rows(DELIVERY, {eventKey: eventOf("quote", issue.issueId), stateEnumId: "MdsSent"}).map(
-                    row => row.recipientPartyId
-                )
-            )
-            for (const row of ownSendsOf(issue)) if (row.state === "sent" && row.partyId) recipients.add(row.partyId)
-            const emailTemplateId = text(policyOf(issue.organizationPartyId).reminderEmailTemplateId) || templates.reminder
-            for (const recipientPartyId of recipients) {
-                const out = call("mantle.party.MessageServices.queue#Delivery", {
-                    eventKey: eventOf("reminder", issue.issueId),
-                    sourceEnumId: sources.reminder,
-                    recipientPartyId,
-                    templateKey: emailTemplateId,
-                    transactional: true
-                })
-                if (out.created) queued++
-            }
-            if (recipients.size) issueIds.push(issue.issueId)
+            const count = queueReminders(issue)
+            if (count < 0) continue
+            queued += count
+            issueIds.push(issue.issueId)
         } catch (error) {
             ec.message.clearErrors()
             ec.logger.error("Reminder of quote issue " + issue.issueId + " failed: " + String(error.message).split("\n")[0])
@@ -810,7 +814,8 @@ function sendReminders(p) {
 // placed, approved or held by the native rules; a decline needs its reason and cancels the quote through Cancel Quote.
 function respondQuote(p) {
     const userScope = salesAccess.scope()
-    const quote = editableQuote(userScope, p.orderId)
+    // under the order's lock before the operation key is read (Sales P10 review), so a double submit answers the first
+    const quote = editableQuote(userScope, p.orderId, true)
     const action = text(p.responseType) || "accept"
     if (!Object.hasOwn(responseTypes, action)) denied("RESPONSE_INVALID", "Record an acceptance or a decline")
     const request = {
@@ -823,7 +828,7 @@ function respondQuote(p) {
     }
     const operation = lib.operation(p, "SalesQuoteRespond", quote.organizationPartyId, request)
     if (operation.old) return lib.previous(operation)
-    const order = find(ORDER, {orderId: quote.order.orderId}).forUpdate(true).one()
+    const order = quote.order
     const issue = request.issueId ? one(ISSUE, {issueId: request.issueId}) : issuesOf(order.orderId)[0] || null
     if (!issue || issue.orderId !== order.orderId) denied("ISSUE_UNAVAILABLE", "Quote " + order.orderId + " has no such issue")
     const earlier = responseOf(issue.issueId)
