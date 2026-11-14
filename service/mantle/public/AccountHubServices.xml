@@ -84,7 +84,8 @@
     <service verb="apply" noun="CheckoutOptIn" authenticate="anonymous-all" allow-remote="false">
         <description>Internal (StoreTopics.js, one opt-in in a transaction of its own): a checkout party's opt-in (reviewRequests,
             cartReminders or news) of a store, pending (a CLPT_PENDING membership of its list, never sent to) or granted
-            (the topic's PartyConsent on its list, or the news list's subscription). outcome: pending, granted or already.</description>
+            (the topic's PartyConsent on its list; the news list's choice a request of the audience, source PcsCheckout, IronStone
+            Marketing P7). outcome: pending, granted, already or failed (a news choice the audience refused).</description>
         <in-parameters>
             <parameter name="optInId" required="true"/>
             <parameter name="mode" required="true"><description>pend or grant</description></parameter>

@@ -1028,6 +1028,11 @@ along with this software (see the LICENSE.md file). If not, see
             impl-marketing P3, PERMISSION_DENIED). reasonText (why, as the visitor or staff gave it) goes on
             the consent rows as their comments; an unsubscribe that waits for confirmation sends the verification email,
             its link under baseUrl (verifyEmailSent).
+
+            impl-marketing P7 (the PASS Email preferences page's Marketing context): with organizationPartyId and allMarketing,
+            only that organization's lists are left and the marketing email withdrawal is that organization's (a scoped
+            PartyConsent row, which a staff acceptance of the purpose for it then meets), not every organization's; with a token
+            the organization must be the token list's. Without it everything is as before, so a legacy token keeps working.
         </description>
         <in-parameters>
             <parameter name="token"/>
@@ -1035,6 +1040,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId"/>
             <parameter name="contactMechId"/>
             <parameter name="allMarketing" type="Boolean" default="false"/>
+            <parameter name="organizationPartyId"><description>impl-marketing P7: with allMarketing, one organization's lists and a
+                withdrawal scoped to it</description></parameter>
             <parameter name="listUnsubscribe"><description>One-Click for the RFC 8058 POST, whose form field
                 List-Unsubscribe=One-Click the route passes here; Mailto for the email to the List-Unsubscribe mailto
                 (process#UnsubscribeEmail, which gives the sender as evidenceText)</description></parameter>
@@ -1083,6 +1090,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (tokenRow == null || (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(now))) { ec.message.addError(invalid); return }
                 if (partyId && partyId !== tokenRow.partyId) { ec.message.addError(invalid); return }
             }
+            const scopeOrganization = organizationPartyId ? String(organizationPartyId) : null
             const oneClick = String(listUnsubscribe || '').trim().toLowerCase() === 'one-click'
             // the List-Unsubscribe mailto: an email whose subject carries the token (process#UnsubscribeEmail)
             const byMail = String(listUnsubscribe || '').trim().toLowerCase() === 'mailto'
@@ -1105,6 +1113,8 @@ along with this software (see the LICENSE.md file). If not, see
                         : byMail ? `Unsubscribe by email (List-Unsubscribe mailto)${mailFrom}${ofMessage}` : `Unsubscribe link${ofMessage}`
                 tokenList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
                 if (tokenList == null) { ec.message.addError(invalid); return }
+                // P7: a token's organization scope is its list's organization only
+                if (scopeOrganization && scopeOrganization !== (tokenList.ownerPartyId ?? null)) { ec.message.addError(invalid); return }
             } else {
                 const userId = ec.user.userId || null
                 if (!userId) { ec.message.addError('Unsubscribing without a link token needs a signed-in user'); return }
@@ -1130,7 +1140,8 @@ along with this software (see the LICENSE.md file). If not, see
                         .map((row) => row.contactListId)))
                 const lists = memberIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', memberIds)
                         .orderBy('contactListName').list()) : []
-                listIds = lists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' && list.contactMechTypeEnumId !== 'CmtTelecomNumber' && sameOwner(list))
+                listIds = lists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' && list.contactMechTypeEnumId !== 'CmtTelecomNumber' && sameOwner(list)
+                        && (!scopeOrganization || (list.ownerPartyId ?? null) === scopeOrganization))
                         .map((list) => list.contactListId)
             } else {
                 const targetId = contactListId || tokenRow?.contactListId
@@ -1180,15 +1191,19 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('partyId', partyId).condition('contactMechTypeEnumId', 'CmtEmailAddress')
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()).map((info) => info.contactMechId)))
                 if (mechIds.length === 0) mechIds = [null]
+                // P7: an organization's scope withdraws its own (scoped) purpose; else every organization's, as before
                 const consents = Array.from(ec.entity.find('mantle.party.PartyConsent').condition('partyId', partyId)
                         .condition('purposeEnumId', 'PcpMarketingEmail').condition('contactListId', null).list())
+                        .filter((row) => (row.organizationPartyId ?? null) === scopeOrganization)
                 consents.sort(newestFirst)
                 for (const mechId of mechIds) {
                     const state = consents.find((row) => (row.contactMechId || null) === mechId)
                     if (state?.statusId === 'PconWithdrawn') continue
                     ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
                         purposeEnumId: 'PcpMarketingEmail', statusId: 'PconWithdrawn', sourceEnumId: sourceEnumId,
-                        evidenceText: [evidenceText, 'all marketing email'].filter((part) => part).join('; '), comments: reason}).call()
+                        ...(scopeOrganization ? {organizationPartyId: scopeOrganization} : {}),
+                        evidenceText: [evidenceText, scopeOrganization ? 'all marketing email of the organization' : 'all marketing email']
+                            .filter((part) => part).join('; '), comments: reason}).call()
                     if (ec.message.hasError()) return
                     marketingWithdrawn = true
                 }

@@ -74,6 +74,10 @@ const TOKEN_WRITES = [
     'recoverCart',
     // IronStone Sales P13: a quote link's acceptance or decline (input.token)
     'respondSalesQuote',
+    // IronStone Marketing P7: a subscription request (anonymous: PASS's request key, its limits and the neutral receipt bound it)
+    // and its confirmation link's POST (input.token)
+    'requestSubscription',
+    'verifySubscription',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
@@ -101,6 +105,8 @@ const DOWNLOADS = [
     'downloadArchive',
     // IronStone Sales P13: an issued quote's PDF
     'getSalesQuoteDocument',
+    // IronStone Sales P17: an order's confirmation as placed
+    'getSalesOrderDocument',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's

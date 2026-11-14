@@ -13,11 +13,18 @@
  *   request needs (check#ReviewRequestConsent); the topics and their lists are StoreTopics.js'. A checkout opt-in waiting for
  *   confirmation is confirmed here: by the receipt's link (?confirm=, read only; its button confirms) or, for a signed-in
  *   account with its email verified, on opening the page.
+ * - Marketing's context (impl-marketing P7, F25; design-marketing §13 EmailPreferences): the sending organization's lists offered on
+ *   the site's Marketing mount, with the recipient's state on each (MarketingPortal.js preferencesContext): by a list link's
+ *   token its list's organization, signed in the mount's organization. Turning one off unsubscribes it (with the reason given,
+ *   kept on the withdrawal's PartyConsent.comments); turning one on files a public request for the recipient's address (a
+ *   verified account's own address accepted at once); "no more email from" the organization leaves all its lists and withdraws
+ *   its marketing email for it alone (unsubscribe#ContactListParty's organization scope). A legacy token keeps working.
  * Reads and writes are the authority's own (authorization disabled), after these checks.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
 const storeTopics = () => ec.resource.script("component://mr-mantle/service/mantle/public/StoreTopics.js")
+const marketingPortal = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingPortal.js")
 const {find, one, rows, call, ms} = lib
 const text = value => (value == null ? "" : String(value).trim())
 function refuse(kind, code, message) {
@@ -89,6 +96,88 @@ function siteStores(siteId) {
     return store ? [store] : []
 }
 
+// ===== Marketing's context (impl-marketing P7) =====
+// The opt-out reasons the page offers (design-marketing §13 EmailPreferences), kept as the withdrawal's comments.
+const optOutReasons = [
+    {reasonId: "tooFrequent", label: "Too frequent"},
+    {reasonId: "notRelevant", label: "Not relevant to me"},
+    {reasonId: "neverSignedUp", label: "I never signed up"},
+    {reasonId: "other", label: "Other"}
+]
+function reasonTextOf(choices) {
+    const reason = optOutReasons.find(row => row.reasonId === text(choices.reason))
+    const other = text(choices.reasonText).replace(/[\r\n]+/g, " ").slice(0, 200)
+    if (!reason) return other || null
+    return (reason.reasonId === "other" && other ? "Other: " + other : reason.label).slice(0, 255)
+}
+// A list link's token row (resolve#UnsubscribeToken has checked it), its list's organization.
+function tokenRowOf(token) {
+    const row = one("mantle.marketing.contact.ContactListToken", {tokenHash: ec.user.singleUseCodeHash(text(token))})
+    const list = row ? one("mantle.marketing.contact.ContactList", {contactListId: row.contactListId}) : null
+    return row && list ? {row, organizationPartyId: list.ownerPartyId || null} : null
+}
+// The site's Marketing context for a party and organization (null when the site offers none of its lists), with the reasons.
+function marketingOf(siteId, organizationPartyId, partyId) {
+    const context = marketingPortal().preferencesContext(siteId, organizationPartyId, partyId)
+    return context ? Object.assign(context, {reasons: optOutReasons}) : null
+}
+// The account's own email address on its party (the contact mech of its current address), or null.
+function accountMechOf(partyId) {
+    const address = text(ec.user.userAccount?.emailAddress).toLowerCase()
+    if (!address) return null
+    return (
+        rows("mantle.party.contact.PartyContactMechInfo", {partyId, contactMechTypeEnumId: "CmtEmailAddress"}).find(
+            info => lib.active(info) && text(info.infoString).toLowerCase() === address
+        )?.contactMechId || null
+    )
+}
+// Marketing's choices of a store: {topics: {contactListId: on}, reason, reasonText, leaveOrganization}, against the context
+// shown. Off unsubscribes (with the reason); on files a request (changeTopics); leaving the organization ends all its lists and
+// withdraws its marketing email for it. A topic not offered is left alone.
+function storeMarketing(site, marketing, choices, who) {
+    if (!marketing || !choices) return
+    const on = value => value === true || value === "true" || value === "Y" || value === "on"
+    const reasonText = reasonTextOf(choices)
+    if (on(choices.leaveOrganization)) {
+        call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {
+            ...(who.token ? {token: who.token} : {partyId: who.partyId}),
+            allMarketing: true,
+            organizationPartyId: marketing.organizationPartyId,
+            reasonText
+        })
+        return
+    }
+    const wanted = choices.topics || {}
+    const turnOn = []
+    for (const topic of marketing.topics) {
+        if (!Object.hasOwn(wanted, topic.contactListId)) continue
+        const want = on(wanted[topic.contactListId])
+        const isOn = topic.state === "subscribed" || topic.state === "pending"
+        if (want === isOn) continue
+        if (want) {
+            turnOn.push(topic.contactListId)
+            continue
+        }
+        call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {
+            ...(who.token ? {token: who.token} : {partyId: who.partyId}),
+            contactListId: topic.contactListId,
+            reasonText
+        })
+    }
+    if (turnOn.length)
+        marketingPortal().changeTopics({
+            siteId: site.siteId,
+            organizationPartyId: marketing.organizationPartyId,
+            partyId: who.partyId,
+            contactMechId: who.contactMechId,
+            contactListIds: turnOn,
+            verifiedAccount: !!who.verifiedAccount
+        })
+}
+// The lists the page shows apart from Marketing's topics (each list once).
+const apartFrom = (lists, marketing) =>
+    marketing ? lists.filter(list => !marketing.topics.some(topic => topic.contactListId === list.contactListId)) : lists
+
 // ===== email preferences =====
 // get#EmailPreferences: by a list link's token (its list and the party's other lists of that organization; anonymous),
 // or for the signed-in account (its current lists, the site's store topics, and the Forum's opt-out link).
@@ -103,12 +192,15 @@ function getEmailPreferences(p) {
     }
     if (text(p.token)) {
         const resolved = call("mantle.party.ConsentServices.resolve#UnsubscribeToken", {token: text(p.token)})
+        const tokenOf = tokenRowOf(p.token)
+        const marketing = tokenOf ? marketingOf(site.siteId, tokenOf.organizationPartyId, tokenOf.row.partyId) : null
         return {
             mode: "token",
             organizationName: resolved.organizationName || "",
             maskedAddress: resolved.maskedAddress || "",
             marketingWithdrawn: !!resolved.marketingWithdrawn,
-            lists: Array.from(resolved.listList || []).map(list => ({
+            marketing,
+            lists: apartFrom(Array.from(resolved.listList || []), marketing).map(list => ({
                 contactListId: list.contactListId,
                 name: list.contactListName || "",
                 description: list.description || "",
@@ -147,10 +239,12 @@ function getEmailPreferences(p) {
             fromLink: false
         }))
     const topics = storeTopics().topics
+    const marketing = marketingOf(site.siteId, publicApps().mount(site.siteId, "marketing")?.targetId || null, partyId)
     return {
         mode: "account",
         emailAddress: ec.user.userAccount.emailAddress || "",
-        lists,
+        marketing,
+        lists: apartFrom(lists, marketing),
         topics: stores.flatMap(store =>
             topicOrder
                 .map(topic => ({
@@ -187,12 +281,23 @@ function storeEmailPreferences(p) {
             contactListId,
             subscribed: on(subscribed)
         }))
+        // P7: the reason chosen from Marketing's list (or the text given)
+        const reasonText = reasonTextOf(choices.marketing || {}) || text(choices.reason).slice(0, 255) || null
         call("mantle.party.ConsentServices.apply#UnsubscribePreferences", {
             token: text(p.token),
             listChoices: lists,
             unsubscribeAll: on(choices.unsubscribeAll),
-            reasonText: text(choices.reason).slice(0, 255) || null
+            reasonText
         })
+        if (!on(choices.unsubscribeAll) && choices.marketing) {
+            const tokenOf = tokenRowOf(p.token)
+            const marketing = tokenOf ? marketingOf(site.siteId, tokenOf.organizationPartyId, tokenOf.row.partyId) : null
+            storeMarketing(site, marketing, choices.marketing, {
+                token: text(p.token),
+                partyId: tokenOf?.row.partyId,
+                contactMechId: tokenOf?.row.contactMechId || null
+            })
+        }
         return getEmailPreferences({siteId: site.siteId, token: p.token})
     }
     const partyId = signedIn()
@@ -214,6 +319,15 @@ function storeEmailPreferences(p) {
         // a checkout opt-in waiting for its confirmation is not a subscription to end
         if (!row || on(subscribed) || row.statusId === "CLPT_PENDING") continue
         call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {contactListId: row.contactListId, partyId})
+    }
+    // P7: Marketing's topics of the site's organization
+    if (choices.marketing) {
+        const marketing = marketingOf(site.siteId, publicApps().mount(site.siteId, "marketing")?.targetId || null, partyId)
+        storeMarketing(site, marketing, choices.marketing, {
+            partyId,
+            contactMechId: accountMechOf(partyId),
+            verifiedAccount: emailVerified() && !!accountMechOf(partyId)
+        })
     }
     const stores = siteStores(site.siteId)
     for (const [topicId, wanted] of Object.entries(choices.topics || {})) {

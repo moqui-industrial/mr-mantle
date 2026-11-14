@@ -4,12 +4,19 @@
 // nothing; another customer's quote, a changed order ID, a forged token and a revised issue give the same nothing; a double submit
 // gives one response and one placed order, a retry answering the first and another link's use of the key a conflict; a contact
 // invited for the customer lists only its account's issued quotes; above the seller's acceptance threshold a bearer is refused and
-// the signed-in contact accepts. Standalone: SalesQuoteIssueFixtures, a spec-local site.
+// the signed-in contact accepts. P17 (design-sales §10 CustomerOrders, CustomerOrder; F42, F48, F236): the storeless confirmation
+// carries its recipient's link to the order's Sales page, which reads its one order (lines, the accepted quote, shipments with
+// tracking, invoices with their open amount, the PDF) and lists nothing, while a store order's link stays Shop's; a contact lists
+// only its account's placed storeless orders (no draft, base, store order or other customer's); an accepted quote's page shows the
+// issued offer, not a later change of the order. Standalone: SalesQuoteIssueFixtures, a spec-local site.
 // Run: ./moq test mr-mantle --spec SalesPortal
 const fx = ec.resource.script("component://mr-mantle/test/order/SalesQuoteIssueFixtures.js")
 const {system, as, make, one, revision, status, proposedQuote, key, call} = fx
 const capture = ec.factory.getTool("MailCapture")
 const P = "mantle.order.SalesPortalServices."
+const orders = "mantle.order.SalesOrderServices."
+// the placement's tx-commit rules run on a service worker (send#OrderConfirmation among them): wait for them
+const drain = () => ec.factory.waitWorkerPoolEmpty(50)
 const siteId = "SPT_SITE"
 let f
 const shared = {}
@@ -122,6 +129,18 @@ spec({
                 app: "sales",
                 fromDate: ec.user.nowTimestamp
             })
+            // P17: a seller of A's direct orders, and A's confirmations through the spec's mail server
+            shared.seller = fx.addUser(
+                f,
+                "seller",
+                [f.orgA],
+                ["SALES_VIEW", "SALES_TEAM_VIEW", "SALES_ORDER_EDIT", "ORDER_APPROVE"]
+            )
+            const policy = ec.entity.find("mantle.sales.policy.SalesPolicy").condition("organizationPartyId", f.orgA).one()
+            call("update#mantle.sales.policy.SalesPolicy", {
+                salesPolicyId: policy.salesPolicyId,
+                confirmationEmailTemplateId: f.template
+            })
         })
     },
     cleanupSpec() {
@@ -226,6 +245,7 @@ feature(
                 Array.from(ec.entity.find("mantle.sales.quote.SalesQuoteResponse").condition("orderId", quote.orderId).list())
             )
             shared.accepted = quote.orderId
+            shared.acceptedToken = quote.token
             return {
                 quote,
                 nameless,
@@ -340,3 +360,215 @@ feature("above the seller's acceptance threshold a bearer link is refused and th
         statusId == "OrderPlaced"
     }
 })
+
+// ===== P17: a customer's orders =====
+// a direct order of A for a customer, one line of the product, placed by the seller (productStoreId: a store's order)
+function placedOrder(customerPartyId, more = {}) {
+    const orderId = as(
+        shared.seller,
+        orders + "create#SalesOrder",
+        Object.assign({organizationPartyId: f.orgA, customerPartyId}, more)
+    ).orderId
+    as(shared.seller, orders + "store#SalesOrderLine", {
+        orderId,
+        orderRevision: revision(orderId),
+        productId: f.product,
+        quantity: 2
+    })
+    const placed = as(shared.seller, orders + "place#SalesOrder", {orderId, orderRevision: revision(orderId)})
+    if (placed.refused) throw new Error(placed.refused)
+    return orderId
+}
+// a shipped shipment of the order's line with two tracked packages (one with a carrier's https link, one with a script URL), and a
+// finalized invoice of the line, unpaid
+function shipAndInvoice(orderId) {
+    system(() => {
+        const item = Array.from(ec.entity.find("mantle.order.OrderItem").condition("orderId", orderId).list())[0]
+        const shipmentId = make("mantle.shipment.Shipment", {
+            shipmentTypeEnumId: "ShpTpSales",
+            statusId: "ShipShipped",
+            fromPartyId: f.orgA,
+            toPartyId: f.accounts.a,
+            shipDate: ec.user.nowTimestamp
+        }).shipmentId
+        make("mantle.shipment.ShipmentItem", {shipmentId, productId: f.product, quantity: 2})
+        make("mantle.shipment.ShipmentItemSource", {
+            shipmentId,
+            productId: f.product,
+            orderId,
+            orderItemSeqId: item.orderItemSeqId,
+            quantity: 2
+        })
+        make("mantle.shipment.ShipmentRouteSegment", {shipmentId, shipmentRouteSegmentSeqId: "01"})
+        for (const [seq, url] of [
+            ["01", "https://carrier.example.test/track/SPT1"],
+            ["02", "javascript:alert(1)"]
+        ]) {
+            make("mantle.shipment.ShipmentPackage", {shipmentId, shipmentPackageSeqId: seq})
+            make("mantle.shipment.ShipmentPackageRouteSeg", {
+                shipmentId,
+                shipmentPackageSeqId: seq,
+                shipmentRouteSegmentSeqId: "01",
+                trackingCode: "SPT" + seq,
+                trackingUrl: url
+            })
+        }
+        const invoiceId = make("mantle.account.invoice.Invoice", {
+            invoiceTypeEnumId: "InvoiceSales",
+            fromPartyId: f.orgA,
+            toPartyId: f.accounts.a,
+            statusId: "InvoiceFinalized",
+            invoiceDate: ec.user.nowTimestamp,
+            currencyUomId: "USD"
+        }).invoiceId
+        make("mantle.account.invoice.InvoiceItem", {
+            invoiceId,
+            invoiceItemSeqId: "01",
+            itemTypeEnumId: "ItemProduct",
+            productId: f.product,
+            quantity: 2,
+            amount: 100
+        })
+        make("mantle.order.OrderItemBilling", {
+            orderId,
+            orderItemSeqId: item.orderItemSeqId,
+            invoiceId,
+            invoiceItemSeqId: "01",
+            quantity: 2,
+            amount: 100
+        })
+    })
+}
+const orderTokenOf = body => {
+    const found = /\/sales\/CustomerOrder\?token=([^"'\s<&]+)/.exec(String(body || ""))
+    return found ? decodeURIComponent(found[1]) : null
+}
+
+feature(
+    "the confirmation's link reads its one order and lists nothing; a quote's link, another order and a store order's give nothing",
+    {
+        when() {
+            capture.clear()
+            const orderId = placedOrder(f.accounts.a, {contactPartyId: f.contacts.mailed, otherPartyOrderId: "PO-P17"})
+            drain()
+            const mail = capture.getMessages().find(message => String(message.subject).includes(orderId))
+            const token = orderTokenOf(mail?.body)
+            shipAndInvoice(orderId)
+            const other = placedOrder("SPT_ACC_X")
+            const view = page(null, "get#CustomerOrder", {token})
+            const document = page(null, "get#OrderDocument", {token})
+            const list = page(null, "find#CustomerOrders", {})
+            const changed = page(null, "get#CustomerOrder", {token, orderId: other})
+            const asQuote = page(null, "get#CustomerQuote", {token})
+            const byQuoteLink = page(null, "get#CustomerOrder", {token: shared.acceptedToken})
+            const byId = page(null, "get#CustomerOrder", {orderId})
+            // a store order's OrderView link opens Shop's page on the store's site, and the Sales page refuses it
+            const store = system(() => {
+                make("mantle.product.store.ProductStore", {
+                    productStoreId: "SPT_STORE",
+                    storeName: "Portal spec store",
+                    organizationPartyId: f.orgA,
+                    defaultCurrencyUomId: "USD",
+                    requireInventory: "N"
+                })
+                make("mantle.public.PublicSiteApp", {
+                    siteId,
+                    appMountId: "shop",
+                    app: "shop",
+                    pathPrefix: "/shop",
+                    enabled: "Y",
+                    targetId: "SPT_STORE"
+                })
+                return null
+            })
+            const storeOrder = placedOrder(f.accounts.a, {productStoreId: "SPT_STORE"})
+            const storeLink = system(() =>
+                ec.resource
+                    .script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+                    .create({recordType: "SalesOrder", recordId: storeOrder, scopes: "OrderView"})
+            )
+            const storeView = page(null, "get#CustomerOrder", {token: storeLink.token})
+            shared.direct = orderId
+            shared.other = other
+            shared.storeOrder = storeOrder
+            return {orderId, mail, token, view, document, list, changed, asQuote, byQuoteLink, byId, store, storeLink, storeView}
+        },
+        then({orderId, mail, token, view, document, list, changed, asQuote, byQuoteLink, byId, storeLink, storeView}) {
+            token != null && mail.body.includes("https://spt.example.test/sales/CustomerOrder?token=")
+            view.order.orderId == orderId && view.order.purchaseOrder == "PO-P17" && view.order.customerName == "Account a"
+            view.order.lines.length == 1 && view.order.totalText.includes("200")
+            view.acceptedQuote == null && view.capabilities.quoteLink == false
+            view.shipments.length == 1 && view.shipments[0].shipped == true
+            view.shipments[0].tracking.length == 2 &&
+                view.shipments[0].tracking[0].url == "https://carrier.example.test/track/SPT1"
+            view.shipments[0].tracking[1].url == null
+            view.invoices.length == 1 && view.invoices[0].openText.includes("200") && view.invoices[0].billingUrl == null
+            view.document.fileName.endsWith(".pdf") && !JSON.stringify(view).includes("dbresource")
+            view.actions.askUrl == null && view.actions.requestCancelUrl == null
+            document.file.mimeType == "application/pdf" && document.location.startsWith("dbresource://")
+            list.kind == "AuthenticationRequired"
+            changed.kind == "NotFound"
+            asQuote.kind == "NotFound"
+            byQuoteLink.kind == "NotFound"
+            byId.kind == "AuthenticationRequired"
+            storeLink.url == "https://spt.example.test/shop/Orders/Status?token=" + encodeURIComponent(storeLink.token)
+            storeView.kind == "NotFound"
+        }
+    }
+)
+
+feature(
+    "a contact lists its account's placed orders only; an accepted quote's page keeps the issued offer once the order changes",
+    {
+        when() {
+            const draft = as(shared.seller, orders + "create#SalesOrder", {
+                organizationPartyId: f.orgA,
+                customerPartyId: f.accounts.a
+            }).orderId
+            const base = placedOrder(f.accounts.a)
+            system(() => call("update#mantle.order.OrderHeader", {orderId: base, orderPurposeEnumId: "OrpRecurringTemplate"}))
+            system(() =>
+                make("mantle.public.PublicSiteApp", {
+                    siteId,
+                    appMountId: "billing",
+                    app: "billing",
+                    pathPrefix: "/billing",
+                    enabled: "Y",
+                    targetId: f.orgA
+                })
+            )
+            const list = page("SPT_BUYER", "find#CustomerOrders", {})
+            const byPo = page("SPT_BUYER", "find#CustomerOrders", {reference: "po-p17"})
+            const own = page("SPT_BUYER", "get#CustomerOrder", {orderId: shared.direct})
+            const accepted = page("SPT_BUYER", "get#CustomerOrder", {orderId: shared.accepted})
+            const otherOrder = page("SPT_BUYER", "get#CustomerOrder", {orderId: shared.other})
+            const outsider = page("SPT_OUTSIDER", "find#CustomerOrders", {})
+            const outsiderOwn = page("SPT_OUTSIDER", "get#CustomerOrder", {orderId: shared.direct})
+            const card = page("SPT_BUYER", "get#AccountCard", {})
+            // F236: the accepted quote's page shows the issued offer; after a commercial change of the order it shows none of the change
+            const before = page("SPT_BUYER", "get#CustomerQuote", {orderId: shared.accepted})
+            system(() =>
+                call("mantle.order.OrderServices.increment#OrderRevision", {orderId: shared.accepted, revisionKind: "commercial"})
+            )
+            const after = page("SPT_BUYER", "get#CustomerQuote", {orderId: shared.accepted})
+            const receipt = page(null, "get#QuoteResponse", {token: shared.acceptedToken})
+            return {draft, base, list, byPo, own, accepted, otherOrder, outsider, outsiderOwn, card, before, after, receipt}
+        },
+        then({draft, base, list, byPo, own, accepted, otherOrder, outsider, outsiderOwn, card, before, after, receipt}) {
+            list.orderList.some(row => row.orderId == shared.direct) && list.orderList.some(row => row.orderId == shared.accepted)
+            !list.orderList.some(row => [draft, base, shared.other, shared.storeOrder].includes(row.orderId))
+            list.orderList.find(row => row.orderId == shared.direct).deliveryText == "Shipped"
+            list.orderList.find(row => row.orderId == shared.direct).billingText.includes("200")
+            byPo.orderList.length == 1 && byPo.orderList[0].orderId == shared.direct
+            own.invoices[0].billingUrl == "https://spt.example.test/billing/InvoicePay?invoiceId=" + own.invoices[0].invoiceId
+            accepted.acceptedQuote.purchaseOrder == "PO-SPT" && accepted.capabilities.quoteLink == true
+            otherOrder.kind == "NotFound"
+            outsider.count == 0 && outsiderOwn.kind == "NotFound"
+            card.lines.some(line => line.includes("open order")) &&
+                card.links.some(link => link.url.endsWith("/sales/CustomerOrders"))
+            before.quote.lines.length == 1 && before.quote.changedSinceAccepted == false
+            after.quote.lines.length == 0 && after.quote.totalText == "" && after.quote.changedSinceAccepted == true
+            receipt.quote.totalText == "" && receipt.response.accepted == true
+        }
+    }
+)

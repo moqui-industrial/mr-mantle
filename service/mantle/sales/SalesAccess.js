@@ -665,6 +665,131 @@ function requireRecurrence(userScope, orderId, edit = false) {
 }
 // ===== end of P16 =====
 
+// ===== P18: forecasts and targets (impl-sales P18; design-sales §8 Forecast, TargetAttainment, §9 Targets) =====
+// A forecast (SalesForecast) is keyed by its organization, its internal party (a person, a sales team of the organization or the
+// organization itself), its time period and its currency. Inside an organization of the scope a Sales reader sees the forecasts of
+// their own key, and a team's manager (a current PrtSalesTeamMember row as Manager) those of the teams they manage and of those
+// teams' current members; a holder of SALES_TEAM_VIEW sees the organization's every one. Entering a judgement (forecastAmount,
+// bestCaseAmount, details) needs SALES_FORECAST_EDIT for one's own key, a team one manages or, with SALES_TEAM_VIEW, a team or the
+// organization, never another person's (their judgement is theirs). Setting a target (quota, basis, parent) needs
+// SALES_TEAM_MANAGE on a key the caller sees. Another organization's forecast answers as missing (RECORD_UNAVAILABLE).
+const forecastBases = {won: "SfbWonOpportunity", order: "SfbPlacedOrder", invoice: "SfbFinalInvoice"}
+// The parties of the current members of a team at a time (now when not given), by their dated membership rows.
+function teamMemberIds(teamPartyId, at = ec.user.nowTimestamp) {
+    if (!teamPartyId) return []
+    return Array.from(
+        new Set(
+            lib
+                .rows("mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: teamRelationships.member,
+                    toPartyId: teamPartyId
+                })
+                .filter(row => lib.active(row, at))
+                .map(row => row.fromPartyId)
+        )
+    )
+}
+// The teams a person manages now (a current membership as Manager).
+function managedTeams(partyId, at = ec.user.nowTimestamp) {
+    if (!partyId) return []
+    return Array.from(
+        new Set(
+            lib
+                .rows("mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: teamRelationships.member,
+                    fromPartyId: partyId,
+                    fromRoleTypeId: "Manager"
+                })
+                .filter(row => lib.active(row, at))
+                .map(row => row.toPartyId)
+        )
+    )
+}
+// The kind of a forecast's internal party in an organization: organization, team or person (a person who works for it as an agent
+// or employee, or a current member of one of its teams), or null when it is none of these.
+function forecastSubjectKind(organizationPartyId, internalPartyId) {
+    if (!organizationPartyId || !internalPartyId) return null
+    if (internalPartyId === organizationPartyId) return "organization"
+    if (
+        teamOrganization(internalPartyId) === organizationPartyId &&
+        lib.one("mantle.party.PartyRole", {partyId: internalPartyId, roleTypeId: "SalesTeam"})
+    )
+        return "team"
+    if (!lib.one("mantle.party.Person", {partyId: internalPartyId})) return null
+    const works = lib
+        .find("mantle.party.PartyRelationship")
+        .condition("fromPartyId", internalPartyId)
+        .condition("toPartyId", organizationPartyId)
+        .condition("relationshipTypeEnumId", "in", ["PrtAgent", "PrtEmployee"])
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .count()
+    if (works > 0) return "person"
+    return memberTeams(internalPartyId).some(teamPartyId => teamOrganization(teamPartyId) === organizationPartyId)
+        ? "person"
+        : null
+}
+// Whether the caller sees the forecasts of a key's internal party in an organization (above).
+function forecastSees(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    if (!kind || !userScope.capabilities.anyRead || !covers(userScope, organizationPartyId)) return false
+    if (userScope.capabilities.teamRead) return true
+    if (internalPartyId === userScope.partyId) return true
+    const managed = managedTeams(userScope.partyId)
+    if (kind === "team") return managed.includes(internalPartyId)
+    if (kind === "person") return managed.some(teamPartyId => teamMemberIds(teamPartyId).includes(internalPartyId))
+    return false
+}
+// Whether the caller may enter the judgement of a key (above): SALES_FORECAST_EDIT on their own key, a team they manage, or, with
+// SALES_TEAM_VIEW, a team or the organization.
+function forecastSubmits(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    if (!userScope.capabilities.forecastEdit || !forecastSees(userScope, organizationPartyId, internalPartyId, kind)) return false
+    if (kind === "person") return internalPartyId === userScope.partyId
+    if (kind === "team") return userScope.capabilities.teamRead || managedTeams(userScope.partyId).includes(internalPartyId)
+    return !!userScope.capabilities.teamRead
+}
+// Whether the caller may set the target of a key: SALES_TEAM_MANAGE on a key they see.
+function targetManages(
+    userScope,
+    organizationPartyId,
+    internalPartyId,
+    kind = forecastSubjectKind(organizationPartyId, internalPartyId)
+) {
+    return !!userScope.capabilities.teamManage && forecastSees(userScope, organizationPartyId, internalPartyId, kind)
+}
+// The forecast as the caller may see it, or null: {forecast, organizationPartyId, kind, canSubmit, canManage}.
+function forecastOf(userScope, salesForecastId) {
+    if (!salesForecastId || !userScope.capabilities.anyRead) return null
+    const forecast = lib.one("mantle.sales.forecast.SalesForecast", {salesForecastId: String(salesForecastId)})
+    if (!forecast) return null
+    // a stored forecast of a person who no longer works for the organization stays a person's (its history is kept)
+    const kind =
+        forecastSubjectKind(forecast.organizationPartyId, forecast.internalPartyId) ||
+        (lib.one("mantle.party.Person", {partyId: forecast.internalPartyId || "_NA_"}) ? "person" : null)
+    if (!forecastSees(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind)) return null
+    return {
+        forecast,
+        organizationPartyId: forecast.organizationPartyId,
+        kind,
+        canSubmit: forecastSubmits(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind),
+        canManage: targetManages(userScope, forecast.organizationPartyId, forecast.internalPartyId, kind)
+    }
+}
+function requireForecast(userScope, salesForecastId) {
+    const found = forecastOf(userScope, salesForecastId)
+    if (!found) denied("RECORD_UNAVAILABLE", "Forecast " + (salesForecastId || "") + " is not available")
+    return found
+}
+// ===== end of P18 =====
+
 ;({
     permissions,
     reads,
@@ -732,5 +857,15 @@ function requireRecurrence(userScope, orderId, edit = false) {
     recurringPurpose,
     recurrenceReader,
     recurrenceOf,
-    requireRecurrence
+    requireRecurrence,
+    // P18: forecasts and targets
+    forecastBases,
+    teamMemberIds,
+    managedTeams,
+    forecastSubjectKind,
+    forecastSees,
+    forecastSubmits,
+    targetManages,
+    forecastOf,
+    requireForecast
 })
