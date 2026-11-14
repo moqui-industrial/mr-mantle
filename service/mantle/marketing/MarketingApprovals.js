@@ -115,9 +115,31 @@ const targetKinds = {
             }),
         refused: () => {},
         linkFields: row => ({marketingCampaignId: row.marketingCampaignId})
+    },
+    // P8: a send (CampaignSend), its rules in MarketingSends.js sendKind: requested while a draft, approved to Approved, refused back
+    // to draft; what approval needs is its preparation at the current revision with an eligible recipient, an approved campaign and
+    // a ready promotional profile; its recipients are those counted at that preparation
+    send: {
+        name: "Send",
+        enumId: "MdtSend",
+        topic: "MarketingSendApproval",
+        entity: "mantle.marketing.campaign.CampaignSend",
+        read: (targetId, lock) => sendKind().read(targetId, lock),
+        revision: row => sendKind().revision(row),
+        organization: row => row.organizationPartyId,
+        authors: row => sendKind().authors(row),
+        label: row => row.sendName || row.campaignSendId,
+        recipientCount: row => sendKind().recipientCount(row),
+        requestable: row => sendKind().requestable(row),
+        problems: row => sendKind().problems(row),
+        requested: row => sendKind().requested(row),
+        approved: row => sendKind().approved(row),
+        refused: row => sendKind().refused(row),
+        linkFields: row => ({campaignSendId: row.campaignSendId})
     }
-    // send (P8) and automation (P11) join here
+    // automation (P11) joins here
 }
+const sendKind = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingSends.js").sendKind
 const kindOf = kindKey => {
     if (!Object.hasOwn(targetKinds, kindKey)) denied("KIND_UNAVAILABLE", "Approval of " + kindKey + " is not available")
     return targetKinds[kindKey]
@@ -269,6 +291,8 @@ function request(p) {
         decidedByPartyId: ec.user.userAccount?.partyId || null,
         reason: text(p.reason) || null
     }).marketingDecisionId
+    // P8: a kind whose state shows a request (a send awaits approval)
+    if (kind.requested) kind.requested(row)
     const authorIds = Array.from(new Set(kind.authors(row).concat([ec.user.userId])))
     const notifiedCount = notify(kindKey, kind, row, revision, policy, authorIds)
     return {marketingDecisionId, targetRevision: revision, notifiedCount}
