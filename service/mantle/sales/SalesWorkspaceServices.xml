@@ -14,8 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- mantle.sales.SalesWorkspaceServices (S, design-sales §12.1): Sales' authorized projections. P2 (design §9 Settings): the
     setup readiness (get#SalesReadiness, SalesSettings.js). P3 (design §4): the accounts and contacts of the caller's sales scope
-    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; Home's
-    of P6). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
+    and Customer360's Sales summary (service/mantle/sales/SalesAccounts.js over SalesAccess.js); later phases add theirs (P5: the My accounts address book; P6: Home, the
+    pipeline dataset's row filter and the lifecycle participant, SalesWorkspace.js). Each reads the caller's scope, refuses a caller who reads nothing of Sales (PERMISSION_DENIED) and an organization
     outside the scope (ORGANIZATION_DENIED), and leaves out what the caller may not read. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <!-- ===== P2: the setup readiness (design §9 Settings SalesReadiness) ===== -->
@@ -167,6 +167,69 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesIntake.js').execute('accountContactProjection', context)"/>
             <set field="admitted" from="!!found.admitted"/>
             <set field="partyIdList" from="found.partyIdList"/>
+        </actions>
+    </service>
+
+    <!-- ========== P6: Home, the pipeline dataset's row filter and the lifecycle participant (SalesWorkspace.js) ========== -->
+    <service verb="get" noun="SalesHome" allow-remote="false" read-only="true">
+        <description>Sales Home's work (design §3 Home SalesWork and AssignedWork): counters, each the count of the scoped list it
+            opens with that list's own filters (find#Opportunities: the leads to work, the user's own open opportunities and those
+            of them past their expected close), with its listPath and parameters; a counter that fails is unavailable, never zero,
+            and the others go on; the counters of records not built yet (requests for quote, quotes, blocked orders) are
+            notConfigured. assignedWork: the user's own open leads and opportunities, the soonest to close first, each with its
+            next activity (at most ten; assignedCount all of them). In the organization named (in the scope, ORGANIZATION_DENIED
+            otherwise) or every one of the scope. Refuses a caller who reads nothing of Sales (PERMISSION_DENIED).</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="counters" type="List"/>
+            <parameter name="assignedWork" type="List"/>
+            <parameter name="assignedCount" type="Integer"/>
+            <parameter name="assignedState"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('salesHome', context)"/>
+            <set field="counters" from="found.counters"/>
+            <set field="assignedWork" from="found.assignedWork"/>
+            <set field="assignedCount" from="found.assignedCount"/>
+            <set field="assignedState" from="found.assignedState"/>
+        </actions>
+    </service>
+    <service verb="get" noun="PipelineRowFilter" allow-remote="false" read-only="true">
+        <description>The report engine's row filter of the pipeline dataset (report/mantle-sales-pipeline.json; the ReportScopePolicy
+            MantleSalesScope, data/SalesWorkspaceData.xml): Sales' scope, not the organization alone (impl-sales F66): the deals of
+            the organizations of the signed-in viewer's sales scope and, without SALES_TEAM_VIEW, of those only the deals assigned
+            now to the viewer or a team of theirs. Nothing for a viewer who reads nothing of Sales; a userId of another user is
+            refused.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters><parameter name="filter" type="Map"/></out-parameters>
+        <actions>
+            <set field="filter" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('pipelineRowFilter', context).filter"/>
+        </actions>
+    </service>
+    <service verb="find" noun="OwnedSalesAssignments" allow-remote="false">
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceLookup"/>
+        <description>Sales' lifecycle participant's lookup (design-admin §14; impl-sales P6, F54): what userId owns of Sales, for an
+            offboarding preview: the open leads and opportunities they own now (resourceId deal:id) and the accounts they manage now
+            (account:partyId; quotes join in P7), each named with its organization, never an amount, all transferable. The caller's
+            own, or another user's with SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise).</description>
+        <actions>
+            <set field="resourceList" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('findOwnedAssignments', context).resourceList"/>
+        </actions>
+    </service>
+    <service verb="transfer" noun="SalesAssignment" allow-remote="false">
+        <implements service="org.moqui.admin.IdentityServices.define#OwnedResourceTransfer"/>
+        <description>One deal or account of fromUserId's handed to toUserId's person (the owned-resource contract): a deal's owner row
+            ends now and the new owner's starts (its team kept), an account's manager relationship ends now and the new manager's
+            starts. With SALES_OWNER_CHANGE (PERMISSION_DENIED otherwise). Refuses a resource fromUserId does not own now
+            (RECORD_UNAVAILABLE), a closed deal (RECORD_CLOSED), a new owner with no enabled account and person (OWNER_INVALID) and
+            one who does not work for the record's organization (NOT_EMPLOYED).</description>
+        <in-parameters><parameter name="salesResourceId" required="true"/></in-parameters>
+        <actions>
+            <set field="transferred" from="!!ec.resource.script('component://mr-mantle/service/mantle/sales/SalesWorkspace.js').execute('transferAssignment', context).transferred"/>
         </actions>
     </service>
 </services>

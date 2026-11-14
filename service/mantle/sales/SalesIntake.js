@@ -342,6 +342,54 @@ function intakeTeam(message, value, ruleOwnerUserId) {
     }
     return null
 }
+// Whether a user holds a permission now (an ADMIN member, or a current grant to a group they are a current member of), read for a
+// rule's owner, who is not the caller when the rule runs (People's Recruiting.js userHolds).
+function userHolds(userId, permission) {
+    if (!userId) return false
+    const account = one("moqui.security.UserAccount", {userId})
+    if (!account || account.disabled === "Y") return false
+    const current = (from, thru) => ec.entity.conditionFactory.makeConditionDate(from, thru, null)
+    const inAdmin =
+        find("moqui.security.UserGroupMember")
+            .condition("userId", userId)
+            .condition("userGroupId", "ADMIN")
+            .condition(current("fromDate", "thruDate"))
+            .count() > 0
+    if (inAdmin) return true
+    return (
+        find("moqui.security.UserPermissionCheck")
+            .condition("userId", userId)
+            .condition("userPermissionId", permission)
+            .condition(current("groupFromDate", "groupThruDate"))
+            .condition(current("permissionFromDate", "permissionThruDate"))
+            .count() > 0
+    )
+}
+// check#LeadRuleOwner: a mail rule saved with the createLead action needs its owner to hold SALES_OPPORTUNITY_EDIT (the user's call
+// of Nov 13, impl-sales P6): on create the owner is the caller; on update the stored rule's owner (a mailbox manager may change
+// another's rule, and the rule runs as its owner). Only a save that gives the actions is looked at: an update leaving them as they
+// are (a rename, a disable) changes nothing the check is about, and create#LeadFromEmail checks the owner again each time the rule
+// runs. Refuses nothing but a createLead action of an owner without the permission.
+const leadAction = "createLead"
+function checkLeadRuleOwner(p) {
+    let actions = p.actionList != null ? Array.from(p.actionList) : null
+    if (actions == null && !blank(p.actionsJson)) {
+        try {
+            actions = JSON.parse(String(p.actionsJson))
+        } catch (error) {
+            // not a list: the framework's normalize#EmailRule refuses it
+            return {}
+        }
+    }
+    if (!Array.isArray(actions) || !actions.some(action => text(action?.action) === leadAction)) return {}
+    const ruleId = text(p.emailRuleId)
+    const ownerUserId = ruleId ? one("moqui.basic.email.EmailRule", {emailRuleId: ruleId})?.ownerUserId : ec.user.userId
+    // an unknown rule: the framework's update#EmailRule answers it
+    if (ruleId && !ownerUserId) return {}
+    if (!userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
+        denied("RULE_NOT_ALLOWED", "Making sales leads from mail needs the rule's owner to hold SALES_OPPORTUNITY_EDIT")
+    return {}
+}
 // The source identity of a mail message: its Message-ID, so the same mail delivered to two addresses or accounts is one intake;
 // the row's id when it has none.
 function emailIdentity(message) {
@@ -359,6 +407,10 @@ function leadFromEmail(p) {
         const emailMessageId = text(p.emailMessageId)
         const message = emailMessageId ? one("moqui.basic.email.EmailMessage", {emailMessageId}) : null
         if (!message) denied("RECORD_UNAVAILABLE", "Email message " + (emailMessageId || "") + " is not available")
+        // the rule's owner holds SALES_OPPORTUNITY_EDIT now (the user's call of Nov 13, impl-sales P6), as People's recruiting rule
+        // asks its edit permission: an employee of the organization without it files nothing of their mailbox into a sales queue
+        if (!userHolds(text(p.ruleOwnerUserId), "SALES_OPPORTUNITY_EDIT"))
+            denied("RULE_NOT_ALLOWED", "The rule's owner may not make sales leads (SALES_OPPORTUNITY_EDIT is required)")
         const team = intakeTeam(message, p.value, p.ruleOwnerUserId)
         if (!team) denied("TEAM_UNAVAILABLE", "No sales team takes mail at the addresses of message " + emailMessageId)
         const defaultSource = rows("mantle.party.PartySetting", {partyId: team.teamPartyId, partySettingTypeId: sourceSetting})[0]
@@ -554,10 +606,67 @@ function findTeamIntakes(p) {
 }
 
 // ===== purge#LeadIntakes =====
-// The submitted name, organization, email and phone of each unverified intake received before the retention days whose lead never
-// qualified (no conversion), blanked with its purgedDate; the intake row, its source identity and key stay so a retry still answers
-// one lead. A user needs SALES_CONFIGURE and purges the organizations of their scope; the job (no user) every organization. Each
-// intake on its own: one that fails is logged and the rest go on.
+// The submitted details of each unverified intake past the retention whose lead never qualified, blanked; and (the user's call of Nov
+// 13, impl-sales P6) the lead it made, when that lead is untouched since its intake: its name and description blanked, the mail
+// filed on it unlinked and the lead closed Lost with the purge's reason. Each intake with its lead in a transaction and error frame
+// of its own (P5 review R2), so one row's failure is that row's alone.
+const purgeReason = "SlrIntakePurged"
+// the time after a lead is made within which its intake's own writes (its party rows, the mail filed on it) fall
+const touchMarginMs = 2 * 60 * 1000
+const stampOf = rowList => rowList.reduce((max, row) => Math.max(max, ms(row.lastUpdatedStamp) ?? 0), 0)
+// Whether a lead is still as its intake made it: open, unqualified, every intake of it unverified and past the retention (none
+// joined it since), its people as the intake set them, nothing of it changed after it was made, and no activity, file,
+// competitor or order, and no note, call or mail on it but what its intake filed then.
+function untouchedLead(lead, before) {
+    if (!lead || lead.typeEnumId !== "SotLead" || lead.convertedDate) return false
+    if (lead.statusId && lead.statusId !== "SalesOppOpen") return false
+    const salesOpportunityId = lead.salesOpportunityId
+    const intakes = rows(INTAKE, {salesOpportunityId})
+    if (intakes.some(row => row.verifiedDate || (ms(row.receivedDate) ?? Infinity) >= before.getTime())) return false
+    const made = ms(lead.createdDate) ?? Math.min(...intakes.map(row => ms(row.receivedDate) ?? Infinity))
+    if (!Number.isFinite(made)) return false
+    // its people as the intake set them (a reassignment ends a row and starts another), its own fields and the records filed on it
+    // not changed since
+    const late = at => (ms(at) ?? -Infinity) > made + touchMarginMs
+    if (rows(OPPORTUNITY_PARTY, {salesOpportunityId}).some(row => row.thruDate || late(row.fromDate))) return false
+    const records = rows("mantle.party.communication.CommunicationEventRecord", {
+        recordEntityName: OPPORTUNITY,
+        recordId: salesOpportunityId
+    })
+    if (stampOf([lead].concat(records)) > made + touchMarginMs) return false
+    for (const entityName of [
+        "mantle.sales.opportunity.SalesOpportunityWorkEffort",
+        "mantle.sales.opportunity.SalesOpportunityContent",
+        "mantle.sales.opportunity.SalesOpportunityCompetitor",
+        "mantle.sales.opportunity.SalesOpportunityOrder"
+    ])
+        if (find(entityName, {salesOpportunityId}).count() > 0) return false
+    return true
+}
+// The lead's name and description blanked, the mail filed on it unlinked, and the lead closed Lost with the purge's reason.
+function clearLead(lead) {
+    const salesOpportunityId = lead.salesOpportunityId
+    for (const record of rows("mantle.party.communication.CommunicationEventRecord", {
+        recordEntityName: OPPORTUNITY,
+        recordId: salesOpportunityId
+    }))
+        call("delete#mantle.party.communication.CommunicationEventRecord", {
+            communicationEventId: record.communicationEventId,
+            recordEntityName: record.recordEntityName,
+            recordId: record.recordId
+        })
+    call("update#" + OPPORTUNITY, {
+        salesOpportunityId,
+        opportunityName: null,
+        description: null,
+        nextStep: null,
+        statusId: "SalesOppLost",
+        statusId_changeReason: L("Unverified inquiry purged"),
+        lostReasonEnumId: purgeReason,
+        closedDate: ec.user.nowTimestamp,
+        closedByUserId: ec.user.userId || null
+    })
+}
 function purgeLeadIntakes(p) {
     let organizationPartyIds = null
     if (!isSystem()) {
@@ -575,33 +684,48 @@ function purgeLeadIntakes(p) {
         .orderBy("receivedDate")
         .limit(5000)
     if (organizationPartyIds != null) {
-        if (!organizationPartyIds.length) return {purgedCount: 0, keptCount: 0}
+        if (!organizationPartyIds.length) return {purgedCount: 0, keptCount: 0, leadsClosedCount: 0}
         query = query.condition("organizationPartyId", "in", organizationPartyIds)
     }
     let purgedCount = 0
     let keptCount = 0
+    let leadsClosedCount = 0
     for (const intake of Array.from(query.list())) {
+        const lead = intake.salesOpportunityId ? one(OPPORTUNITY, {salesOpportunityId: intake.salesOpportunityId}) : null
+        if (lead && (lead.convertedDate || lead.typeEnumId !== "SotLead")) {
+            keptCount++
+            continue
+        }
+        ec.message.pushErrors()
         try {
-            const lead = intake.salesOpportunityId ? one(OPPORTUNITY, {salesOpportunityId: intake.salesOpportunityId}) : null
-            if (lead && (lead.convertedDate || lead.typeEnumId !== "SotLead")) {
-                keptCount++
-                continue
-            }
-            // in a transaction and error frame of its own (P5 review R2), so one row's failure is that row's alone
-            lib.probe("update#" + INTAKE, {
-                salesLeadIntakeId: intake.salesLeadIntakeId,
-                submittedName: null,
-                submittedOrganization: null,
-                submittedEmail: null,
-                submittedPhone: null,
-                purgedDate: ec.user.nowTimestamp
-            })
+            const closed = ec.transaction.runRequireNew(
+                null,
+                "Lead intake " + intake.salesLeadIntakeId + " was not purged",
+                () => {
+                    call("update#" + INTAKE, {
+                        salesLeadIntakeId: intake.salesLeadIntakeId,
+                        submittedName: null,
+                        submittedOrganization: null,
+                        submittedEmail: null,
+                        submittedPhone: null,
+                        purgedDate: ec.user.nowTimestamp
+                    })
+                    const untouched = untouchedLead(lead, before)
+                    if (untouched) clearLead(lead)
+                    if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    return untouched
+                }
+            )
             purgedCount++
+            if (closed) leadsClosedCount++
         } catch (error) {
             ec.logger.error("Lead intake " + intake.salesLeadIntakeId + " was not purged: " + error.message)
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
         }
     }
-    return {purgedCount, keptCount}
+    return {purgedCount, keptCount, leadsClosedCount}
 }
 
 // ===== reads for the opportunity services =====
@@ -739,6 +863,8 @@ function accountContactProjection(p) {
             .list()
     ).map(row => row.salesOpportunityId)
     if (assigned.length)
+        // only a deal of an organization of the scope (P5 review R3): a deal left assigned in an organization the user no
+        // longer sells for brings no account, a shared one included
         for (const row of Array.from(
             find(OPPORTUNITY)
                 .condition("salesOpportunityId", "in", Array.from(new Set(assigned)))
@@ -747,8 +873,6 @@ function accountContactProjection(p) {
                 .selectField("organizationPartyId")
                 .list()
         ))
-            // only a deal of an organization of the scope (P5 review R3): a deal left assigned in an organization the user no
-            // longer sells for brings no account, a shared one included
             if (salesAccess.covers(userScope, row.organizationPartyId)) accountIds.add(row.accountPartyId)
     const visibleAccounts = Array.from(accountIds).filter(partyId => salesAccess.accountOf(userScope, partyId))
     if (!visibleAccounts.length) return {admitted: true, partyIdList: []}
@@ -779,6 +903,7 @@ const operations = {
     storeTeamIntake,
     findTeamIntakes,
     purgeLeadIntakes,
+    checkLeadRuleOwner,
     logOpportunityCall,
     accountContactProjection
 }

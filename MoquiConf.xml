@@ -6,7 +6,12 @@
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->
-    <llm-facade><constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/></llm-facade>
+    <!-- and the user's organizations and active one for a new agent conversation's prompt (service/mantle/party/UserFactServices.xml;
+        mr-boss impl-sales P6, F65), the prerequisite of the apps' skills -->
+    <llm-facade>
+        <constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/>
+        <user-facts service="mantle.party.UserFactServices.get#OrganizationFacts"/>
+    </llm-facade>
     <!-- Smithy's quota for Git LFS (mr-pass plan/design-smithy.md §11 Quotas): asked before an upload is accepted; it
         returns at once for a repository with no SmithyRepository row -->
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"/>
