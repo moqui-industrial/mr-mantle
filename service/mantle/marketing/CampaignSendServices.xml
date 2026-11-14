@@ -228,7 +228,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ===== the send as a Chatter and RecordFiles host (design §14.3; get#RecordLinkInfo) ===== -->
     <service verb="check" noun="SendAccess" allow-remote="false" read-only="true">
-        <description>Whether the caller sees a send (a Marketing reader of its organization) and may change it (MARKETING_SEND_EDIT while its content may change): the record visibility of get#RecordLinkInfo and RecordFiles for the send and its files (CampaignSendContent). A call with no user sees none.</description>
+        <description>Whether the caller sees a send (a Marketing reader of its organization) and may change its files (MARKETING_SEND_EDIT while it is a draft: an attached file of a send awaiting approval or approved is never removed or replaced): the record visibility of get#RecordLinkInfo and RecordFiles for the send and its files (CampaignSendContent). A call with no user sees none.</description>
         <in-parameters><parameter name="campaignSendId" required="true"/></in-parameters>
         <out-parameters>
             <parameter name="recordVisible" type="Boolean"/>

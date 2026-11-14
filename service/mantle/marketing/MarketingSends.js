@@ -822,6 +822,9 @@ function buildTest(p) {
     const parameters = lib.json(delivery.parametersJson, {}) || {}
     const row = parameters.campaignSendId ? one(SEND, {campaignSendId: parameters.campaignSendId}) : null
     if (!row || row.organizationPartyId !== delivery.organizationPartyId) return {suppress: "The send is not available"}
+    // the address still on the organization's test list at each attempt (P8 review): a test source never reaches anyone else
+    if (!testAddressesOf(row.organizationPartyId).includes(suppressions.normalize("MdcEmail", delivery.toAddress)))
+        return {suppress: "The address is no longer on the organization's test list"}
     const rendered = render(draftContent(row), syntheticValues)
     const note = text(parameters.note)
     const banner =
@@ -1076,7 +1079,10 @@ function access(p) {
     const visible = !!userScope.capabilities.anyRead && marketingAccess.covers(userScope, row.organizationPartyId)
     return {
         recordVisible: visible,
-        canEdit: visible && !!userScope.capabilities.sendEdit && editableStatuses.includes(row.statusId),
+        // a draft's files only (P8 review): a file attached to a send awaiting approval or approved is never removed or replaced
+        // through its files (RecordFiles), which would change the message without ending its approval; the composer's attachments
+        // (store#SendAssets) end it
+        canEdit: visible && !!userScope.capabilities.sendEdit && row.statusId === "CsDraft",
         organizationPartyId: visible ? row.organizationPartyId : null
     }
 }

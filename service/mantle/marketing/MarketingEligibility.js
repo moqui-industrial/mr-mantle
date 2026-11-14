@@ -498,9 +498,11 @@ function previewAudience(p) {
 // The 5,000-person cap stays for an interactive evaluation and preview; a send's audience is evaluated in pages over the universe
 // narrowed to its topic's members (only an accepted member of the topic is ever eligible): each page of members, in party id order,
 // is matched against the send's lists and segments (a segment over that page only: a party's match does not depend on who else is
-// evaluated) less its exclusions, and classified; the rules across people are settled once over every page. The eligible people are
-// those a preview of the same audience finds eligible, with the same resultDigest; the counts are of the topic's members (the
-// people of a source who are not members, whom a preview counts as not subscribed, are not read). o: userScope, topic (the list
+// evaluated) less its exclusions, and classified; the rules across people are settled once over every page. A person of the
+// selection who is not on the topic is never eligible, so is read only when they hold an address a page may send to (their
+// withdrawal blocks it, as in the preview: P8 review). The eligible people are those a preview of the same audience finds eligible,
+// with the same resultDigest; the counts are of the topic's members and those sharers (the other people of a source who are not
+// members, whom a preview counts as not subscribed, are not read). o: userScope, topic (the list
 // row), purposeEnumId, lists, segments, excludeLists, excludeSegments (rows the caller checked), asOf, pageSize (500; at most
 // 1,000). {rows: the eligible, in party id order, counts, untrackedEligible, matchedCount, resultDigest, pages}.
 function evaluateSend(o) {
@@ -524,6 +526,50 @@ function evaluateSend(o) {
                   ).map(row => row.partyId)
               )
             : new Set()
+    const classifyOf = partyIds =>
+        classifyPeople({organizationPartyId: org, list: topic, purposeEnumId, channelEnumId: channel, partyIds, asOf}).people
+    // The people not on the topic who hold one of the addresses (key -> a contact mech of it) and are in the selection (a source
+    // list's member or a segment's match, less the exclusions), each once, classified: they are never eligible (not subscribed or
+    // withdrawn), and settle blocks an address one of them withdrew at. An email address is matched by its text in any case.
+    const sharersSeen = new Set()
+    const sharersOf = keys => {
+        if (onTopicOnly) return []
+        const factory = ec.entity.conditionFactory
+        const candidates = new Set()
+        const entries = Array.from(keys.entries())
+        for (let start = 0; start < entries.length; start += 200) {
+            const batch = entries.slice(start, start + 200)
+            const byAddress =
+                channel === "MdcEmail"
+                    ? batch.map(([key]) => factory.makeCondition("infoString", "equals", key).ignoreCase())
+                    : []
+            const byMech = batch.map(([, contactMechId]) => contactMechId).filter(Boolean)
+            if (byMech.length) byAddress.push(factory.makeCondition("contactMechId", "in", byMech))
+            if (!byAddress.length) continue
+            for (const info of Array.from(
+                find("mantle.party.contact.PartyContactMechInfo")
+                    .condition("contactMechTypeEnumId", channel === "MdcSms" ? "CmtTelecomNumber" : "CmtEmailAddress")
+                    .condition(factory.makeCondition(byAddress, "or"))
+                    .conditionDate("fromDate", "thruDate", asOf)
+                    .selectField("partyId")
+                    .list()
+            ))
+                if (!sharersSeen.has(info.partyId)) candidates.add(info.partyId)
+        }
+        if (!candidates.size) return []
+        // a member of the topic (in any state) is classified in its own page
+        for (const partyId of memberOf([topic.contactListId], Array.from(candidates))) candidates.delete(partyId)
+        for (const partyId of candidates) sharersSeen.add(partyId)
+        if (!candidates.size) return []
+        const ids = Array.from(candidates)
+        const ctx = segments.context(o.userScope, org, asOf, ids)
+        const included = memberOf(listIds, ids)
+        for (const segment of o.segments || []) for (const partyId of segments.matchesOf(ctx, segment)) included.add(partyId)
+        for (const partyId of memberOf(excludeListIds, ids)) included.delete(partyId)
+        for (const segment of o.excludeSegments || [])
+            for (const partyId of segments.matchesOf(ctx, segment)) included.delete(partyId)
+        return included.size ? classifyOf(Array.from(included)) : []
+    }
     const people = []
     let lastPartyId = null,
         pages = 0
@@ -549,17 +595,17 @@ function evaluateSend(o) {
         for (const partyId of memberOf(excludeListIds, page)) included.delete(partyId)
         for (const segment of o.excludeSegments || [])
             for (const partyId of segments.matchesOf(ctx, segment)) included.delete(partyId)
-        if (included.size)
-            people.push(
-                ...classifyPeople({
-                    organizationPartyId: org,
-                    list: topic,
-                    purposeEnumId,
-                    channelEnumId: channel,
-                    partyIds: Array.from(included),
-                    asOf
-                }).people
-            )
+        if (included.size) {
+            const found = classifyOf(Array.from(included))
+            people.push(...found)
+            // the people of the selection who are not on the topic at the addresses this page may send to (P8 review): a
+            // withdrawal of theirs blocks the address as the preview's does (F147, F155: anyone matched at the address)
+            const keys = new Map()
+            for (const person of found)
+                if ((person.bucket === "eligible" || person.bucket === "evidence") && person.key)
+                    keys.set(person.key, person.contactMechId)
+            if (keys.size) people.push(...sharersOf(keys))
+        }
         if (page.length < pageSize) break
     }
     const result = summarize(settle(people), {purposeEnumId, channelEnumId: channel})

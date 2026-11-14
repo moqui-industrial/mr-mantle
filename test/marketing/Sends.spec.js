@@ -336,6 +336,116 @@ feature("the audience is evaluated in pages with the preview's eligible people; 
     }
 })
 
+feature("a withdrawal at a shared address by a source's person who is not on the topic blocks it, as in the preview", {
+    when() {
+        // a second topic of Hal and Jo; a source list of Hal and Ivy, who is not on the topic, shares Hal's address (in another
+        // case) and withdrew the purpose
+        const topic2 = prefix + "_TOPIC2",
+            source = prefix + "_SOURCE"
+        system(() => {
+            for (const contactListId of [topic2, source])
+                make("mantle.marketing.contact.ContactList", {
+                    contactListId,
+                    contactListName: contactListId,
+                    contactListTypeEnumId: "NEWSLETTER",
+                    contactMechTypeEnumId: "CmtEmailAddress",
+                    ownerPartyId: orgA
+                })
+            for (const [name, address, onTopic] of [
+                ["Hal", "hal@sends.example.test", true],
+                ["Jo", "jo@sends.example.test", true],
+                ["Ivy", "HAL@sends.example.test", false]
+            ]) {
+                const partyId = (ids[name] = prefix + "_" + name.toUpperCase())
+                make("mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson", ownerPartyId: orgA})
+                make("mantle.party.Person", {partyId, firstName: name, lastName: "Sendspec"})
+                make("mantle.party.contact.ContactMech", {
+                    contactMechId: partyId + "_EM",
+                    contactMechTypeEnumId: "CmtEmailAddress",
+                    infoString: address
+                })
+                make("mantle.party.contact.PartyContactMech", {
+                    partyId,
+                    contactMechId: partyId + "_EM",
+                    contactMechPurposeId: "EmailPrimary",
+                    fromDate: ago(30)
+                })
+                if (onTopic) {
+                    make("mantle.marketing.contact.ContactListParty", {
+                        contactListId: topic2,
+                        partyId,
+                        fromDate: ago(20),
+                        statusId: "CLPT_ACCEPTED",
+                        preferredContactMechId: partyId + "_EM"
+                    })
+                    make("mantle.party.PartyConsent", {
+                        partyId,
+                        contactMechId: partyId + "_EM",
+                        contactListId: topic2,
+                        purposeEnumId: "PcpMarketingEmail",
+                        statusId: "PconGranted",
+                        consentDate: ago(19),
+                        sourceEnumId: "PcsForm",
+                        evidenceText: "Spec sign-up"
+                    })
+                } else
+                    make("mantle.party.PartyConsent", {
+                        partyId,
+                        contactMechId: partyId + "_EM",
+                        purposeEnumId: "PcpMarketingEmail",
+                        statusId: "PconWithdrawn",
+                        consentDate: ago(2),
+                        sourceEnumId: "PcsForm",
+                        evidenceText: "Spec withdrawal"
+                    })
+                if (name !== "Jo")
+                    make("mantle.marketing.contact.ContactListParty", {
+                        contactListId: source,
+                        partyId,
+                        fromDate: ago(20),
+                        statusId: "CLPT_ACCEPTED"
+                    })
+            }
+            make("mantle.marketing.contact.ContactListParty", {
+                contactListId: source,
+                partyId: ids.Jo,
+                fromDate: ago(20),
+                statusId: "CLPT_ACCEPTED"
+            })
+        })
+        const made = newSend({sendName: "Shared address", contactListId: topic2, listIds: [source]})
+        as(users.author, D + "store#SendContent", {
+            campaignSendId: made.campaignSendId,
+            expectedRevision: revisionOf(made.campaignSendId),
+            variables: [
+                {name: "firstName", label: "First name", fallback: "friend"},
+                {name: "offer", label: "Offer", fallback: "news"}
+            ]
+        })
+        const preview = as(users.author, "mantle.marketing.SegmentServices.preview#Audience", {
+            topicListId: topic2,
+            listIds: [source],
+            pageSize: 50
+        })
+        const prepared = as(users.author, D + "prepare#Send", {
+            campaignSendId: made.campaignSendId,
+            expectedRevision: revisionOf(made.campaignSendId),
+            resultDigest: preview.resultDigest,
+            pageSize: 1
+        })
+        const recipients = rows(RECIPIENT, {campaignSendId: made.campaignSendId, statusId: "CrsSelected"}).map(r => r.partyId)
+        return {preview, prepared, recipients}
+    },
+    then({preview, prepared, recipients}) {
+        preview.eligibleCount == 1
+        prepared.refusal == ""
+        prepared.eligibleCount == 1
+        prepared.resultDigest == preview.resultDigest
+        recipients.length == 1
+        recipients[0] == ids.Jo
+    }
+})
+
 feature("a change of the content, sender, audience or schedule ends the approval and returns the send to draft", {
     when() {
         const outcomes = {}
@@ -348,6 +458,8 @@ feature("a change of the content, sender, audience or schedule ends the approval
         for (const [name, change] of Object.entries(changes)) {
             const decisionId = approve(ids.send)
             const approvedState = sendRow(ids.send).statusId
+            // an approved send's files are not changed through its files panel (P8 review)
+            const approvedFiles = as(users.author, D + "check#SendAccess", {campaignSendId: ids.send})
             const {service, fields} = change()
             const out = as(
                 users.author,
@@ -356,6 +468,8 @@ feature("a change of the content, sender, audience or schedule ends the approval
             )
             outcomes[name] = {
                 approvedState,
+                approvedCanEdit: approvedFiles.canEdit,
+                draftCanEdit: as(users.author, D + "check#SendAccess", {campaignSendId: ids.send}).canEdit,
                 refusal: out.refusal,
                 approvalEnded: out.approvalEnded,
                 state: sendRow(ids.send).statusId,
@@ -392,6 +506,7 @@ feature("a change of the content, sender, audience or schedule ends the approval
     then({outcomes, soloChange, prepared, own, self, other, state}) {
         soloChange.refusal == ""
         Object.values(outcomes).every(o => o.approvedState == "CsApproved")
+        Object.values(outcomes).every(o => o.approvedCanEdit === false && o.draftCanEdit === true)
         Object.values(outcomes)
             .map(o => o.refusal)
             .join("") == ""
@@ -452,6 +567,22 @@ feature("a test goes to the allowlist only, marked TEST, refused at a suppressed
         const outside = as(users.author, D + "test#Send", {campaignSendId: ids.send, toAddress: "ann@sends.example.test"})
         const suppressed = as(users.author, D + "test#Send", {campaignSendId: ids.send, toAddress: "blocked@mkn.example.test"})
         const reader = as(users.reader, D + "test#Send", {campaignSendId: ids.send, toAddress: "tester@mkn.example.test"})
+        // a delivery of the test source to an address off the test list (none but test#Send queues one) is refused at its attempt
+        const offList = system(() =>
+            run(M + "queue#Delivery", {
+                sourceEnumId: "MdsrcCampaignSendTest",
+                eventKey: "CampaignSendTest:" + ids.send + ":offlist",
+                recipientPartyId: ids.Ann,
+                channelEnumId: "MdcEmail",
+                templateKey: "MANTLE_CAMPAIGN_SEND_TEST",
+                toAddress: "ann@sends.example.test",
+                organizationPartyId: orgA,
+                sendingProfileId: profile,
+                transactional: false,
+                bodyParameters: {campaignSendId: ids.send},
+                sendNow: true
+            })
+        )
         const message = testsTo("tester@mkn.example.test")[0] || {}
         const delivery = row("mantle.party.MessageDelivery", {deliveryId: sent.deliveryId}) || {}
         return {
@@ -460,13 +591,17 @@ feature("a test goes to the allowlist only, marked TEST, refused at a suppressed
             outside,
             suppressed,
             reader,
+            offList,
+            offListMails: testsTo("ann@sends.example.test").length,
             message,
             delivery,
             after: {selected: selected(ids.send), eligible: sendRow(ids.send).eligibleCount, state: sendRow(ids.send).statusId},
             blockedMails: testsTo("blocked@mkn.example.test").length
         }
     },
-    then({before, sent, outside, suppressed, reader, message, delivery, after, blockedMails}) {
+    then({before, sent, outside, suppressed, reader, offList, offListMails, message, delivery, after, blockedMails}) {
+        offList.stateEnumId == "MdsSuppressed"
+        offListMails == 0
         sent.refusal == ""
         sent.stateEnumId == "MdsSent"
         String(message.subject).startsWith("[TEST] Spring is here, Alex")
