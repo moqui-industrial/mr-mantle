@@ -535,5 +535,19 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="canEdit" from="!!found.canEdit"/>
         </actions>
     </service>
+    <service verb="notify" noun="RepairToQuote" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (service/SalesQuoteRequest.secas.xml, on decide#WarrantyClaim's commit; the user's call of Nov 13,
+            2026): a warranty decision that is a chargeable repair (a charge estimate above zero), current on an open claim, tells the
+            organization's default Sales team (Sales P9's SalesPolicy in effect) on the topic SalesRepairToQuote: its current members
+            who work for the organization and hold SALES_QUOTE_EDIT or SALES_TEAM_VIEW. The notice names the claim, its customer and
+            a product, never its fault text, diagnosis, decision or the charge. No default team, no notice. Never fails: an error
+            is logged.</description>
+        <in-parameters><parameter name="warrantyDecisionId"/></in-parameters>
+        <out-parameters><parameter name="sentCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('notifyRepairToQuote', context)"/>
+            <set field="sentCount" from="found.sentCount"/>
+        </actions>
+    </service>
     <!-- ===== end of P8 ===== -->
 </services>

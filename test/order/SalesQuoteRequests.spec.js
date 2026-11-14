@@ -138,6 +138,17 @@ function mail(emailMessageId, messageId) {
     })
 }
 const listIds = found => Array.from(found.quoteRequestList || []).map(row => row.requestId)
+// the notices of a topic about a request: each one's title, record and users
+const noticesOf = (topic, requestId) =>
+    rowsOf("moqui.security.user.NotificationMessage", {topic})
+        .filter(row => String(row.messageJson || "").includes(requestId))
+        .map(row => ({
+            titleText: String(row.titleText || ""),
+            recordId: row.recordId,
+            userIds: rowsOf("moqui.security.user.NotificationMessageUser", {notificationMessageId: row.notificationMessageId}).map(
+                user => user.userId
+            )
+        }))
 const detail = (username, requestId) => as(username, "get#QuoteRequest", {requestId})
 const linkVisible = (username, recordEntityName, recordId) =>
     as(username, "mantle.party.CommunicationServices.get#RecordLinkInfo", {recordEntityName, recordId, checkOnly: true})
@@ -175,6 +186,8 @@ spec({
             users.manager = user("manager", orgA, rep.concat(["SALES_TEAM_VIEW", "SALES_TEAM_MANAGE"]))
             users.reader = user("reader", orgA, ["SALES_VIEW"])
             users.repB = user("repb", orgB, rep.concat(["SALES_TEAM_VIEW"]))
+            // Customer Service's agent, the chargeable claim's assignee
+            users.agent = user("agent", orgA, ["SUPPORT_CASE_EDIT"])
             teams.east = team("east", orgA)
             teams.west = team("west", orgA)
             member(users.rep, teams.east)
@@ -241,6 +254,17 @@ spec({
                 accountName: "Quotes A sales",
                 statusId: "EasActive",
                 recordFilingEnumId: "ErfLinkedOnly"
+            })
+            // the mailbox's RFQ rule, off until the decline feature turns it on (Sales answers from an intake mailbox, not from
+            // any mailbox a rep reads)
+            make("moqui.basic.email.EmailRule", {
+                emailRuleId: prefix + "_RULE",
+                ownerUserId: users.manager,
+                emailAccountId: prefix + "_MAIL",
+                ruleName: "Requests for quote",
+                sequenceNum: 5,
+                enabled: "N",
+                actionsJson: JSON.stringify([{action: "createQuoteRequest", value: teams.east}])
             })
             mail(prefix + "_M1", "<rfq-12bays@acme.example>")
             mail(prefix + "_M2", "<RFQ-12BAYS@acme.example>")
@@ -382,7 +406,21 @@ feature("a rep's request becomes a quote from two of its three lines, linked lin
             requestItemSeqIdList: ["03"]
         })
         const shown = detail(users.rep, made.requestId)
+        // the manager's quote of the third line is no quote of the rep's (no team): the rep sees that a quote exists, not its title
+        const managerQuote = as(users.manager, "create#QuoteFromRequest", {
+            requestId: made.requestId,
+            requestRevision: revision(),
+            operationKey: prefix + "-quote-manager",
+            requestItemSeqIdList: ["03"]
+        })
+        const shownAfter = detail(users.rep, made.requestId)
+        const listed = Array.from(as(users.rep, "find#QuoteRequests", {state: "all"}).quoteRequestList || []).find(
+            row => row.requestId === made.requestId
+        )
         return {
+            managerQuote,
+            shownAfter,
+            listed,
             made,
             quote,
             again,
@@ -427,6 +465,13 @@ feature("a rep's request becomes a quote from two of its three lines, linked lin
         r.statusId == "ReqInProgress"
         r.shown.quotes.length == 2
         r.shown.items.find(item => item.requestItemSeqId === "01").statusText == "Quoted"
+        // a quote the rep cannot open gives no title, total or count
+        r.managerQuote.refused == ""
+        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).canOpen == false
+        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).orderName != "Store refit"
+        r.shownAfter.quotes.find(quote => quote.orderId === r.managerQuote.orderId).totalText == ""
+        !r.shownAfter.items.find(item => item.requestItemSeqId === "03").quotedText.includes(r.managerQuote.orderId)
+        r.listed.quoteCount == 2
     }
 })
 
@@ -434,6 +479,16 @@ feature("a declined request tells its requester only at the address the preview 
     when() {
         const requestId = state.mailRequest
         const revision = () => detail(users.rep, requestId).quoteRequest?.requestRevision
+        // a mailbox the rep reads nothing of and no RFQ rule runs on: Sales does not answer from it
+        const unanswered = as(users.rep, "preview#QuoteRequestDecline", {requestId})
+        const unsent = as(users.rep, "decline#QuoteRequest", {
+            requestId,
+            requestRevision: revision(),
+            reason: "Outside our region",
+            notify: "Y",
+            toAddress: "buyer@acme.example"
+        })
+        system(() => call("update#moqui.basic.email.EmailRule", {emailRuleId: prefix + "_RULE", enabled: "Y"}))
         const preview = as(users.rep, "preview#QuoteRequestDecline", {requestId})
         const changed = as(users.rep, "decline#QuoteRequest", {
             requestId,
@@ -455,6 +510,8 @@ feature("a declined request tells its requester only at the address the preview 
             ? one("moqui.basic.email.EmailMessage", {emailMessageId: declined.emailMessageId})
             : null
         return {
+            unanswered,
+            unsent,
             preview,
             changed,
             reasonless,
@@ -467,6 +524,8 @@ feature("a declined request tells its requester only at the address the preview 
         }
     },
     then(r) {
+        r.unanswered.canNotify == false
+        code(r.unsent) == "NOTIFY_UNAVAILABLE"
         r.preview.canNotify == true
         r.preview.toAddress == "buyer@acme.example"
         r.preview.fromAddress == "sales@quotes-a.example"
@@ -500,6 +559,7 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
                 })
                 make("mantle.request.RequestParty", {requestId, partyId: orgA, roleTypeId: "OrgInternal", fromDate: 0})
                 make("mantle.request.RequestParty", {requestId, partyId: ids.account, roleTypeId: "Customer", fromDate: 0})
+                make("mantle.request.RequestParty", {requestId, partyId: users.agent, roleTypeId: "Assignee", fromDate: 0})
                 make("mantle.request.RequestItem", {
                     requestId,
                     requestItemSeqId: "01",
@@ -517,8 +577,24 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
                 )
                 return requestId
             })
+        // the organization's default Sales team (Sales P9's SalesPolicy, when this build has it) is East
+        const policies = ec.entity.isEntityDefined("mantle.sales.policy.SalesPolicy")
+        if (policies)
+            system(() =>
+                make("mantle.sales.policy.SalesPolicy", {
+                    salesPolicyId: prefix + "_POLICY",
+                    organizationPartyId: orgA,
+                    fromDate: 0,
+                    defaultTeamPartyId: teams.east
+                })
+            )
         const chargeable = claim("CHARGE", {decisionEnumId: "WdRejected", chargeEstimate: 180, chargeCurrencyUomId: "USD"})
         const covered = claim("COVERED", {decisionEnumId: "WdCovered"})
+        // Customer Service's decisions as decide#WarrantyClaim's commit hands them on: the chargeable one tells East's quote makers
+        const toSales = asSystem("notify#RepairToQuote", {warrantyDecisionId: chargeable + "_D"})
+        const coveredToSales = asSystem("notify#RepairToQuote", {warrantyDecisionId: covered + "_D"})
+        const byName = listIds(as(users.rep, "find#QuoteRequests", {kind: "repair", text: "water"}))
+        const byId = listIds(as(users.rep, "find#QuoteRequests", {kind: "repair", text: chargeable}))
         const shown = detail(users.rep, chargeable)
         const repairs = listIds(as(users.rep, "find#QuoteRequests", {kind: "repair"}))
         const quote = as(users.rep, "create#QuoteFromRequest", {
@@ -540,6 +616,13 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
             .script("component://mr-mantle/service/mantle/order/SalesQuoteRequests.js")
             .quotesOfRequest(chargeable)
         return {
+            policies,
+            toSales,
+            coveredToSales,
+            salesNotices: noticesOf("SalesRepairToQuote", chargeable),
+            serviceNotices: noticesOf("SalesRepairQuoted", chargeable),
+            byName,
+            byId,
             shown,
             repairs,
             chargeable,
@@ -578,5 +661,19 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
         !r.decisions[0].supersededDate
         r.forService.length == 1
         r.forService[0].orderId == r.quote.orderId
+        // a repair is found by its id, never by the claim's name
+        r.byName.length == 0
+        r.byId.includes(r.chargeable)
+        // the notices both ways (the user's call of Nov 13, 2026), none naming the fault or an amount
+        r.coveredToSales.sentCount == 0
+        r.policies ? r.toSales.sentCount == 1 : r.toSales.sentCount == 0
+        !r.policies || r.salesNotices.some(notice => notice.userIds.includes(users.rep) && !notice.userIds.includes(users.reader))
+        r.serviceNotices.length == 1
+        r.serviceNotices[0].userIds.join() == users.agent
+        r.serviceNotices[0].recordId == r.chargeable
+        r.serviceNotices[0].titleText.includes(r.quote.orderId)
+        r.salesNotices
+            .concat(r.serviceNotices)
+            .every(notice => !/water|Diagnosis|damage|180/i.test(notice.titleText))
     }
 })

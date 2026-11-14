@@ -193,9 +193,9 @@ function asUser(name, parameters) {
         ec.message.popErrors()
     }
 }
-// The RFQ a mail message already made: one of the same Message-ID (the same mail delivered twice or to two mailboxes) on an RqtQuote
-// request.
-function requestOfEmail(message) {
+// The RFQs a mail message already made: those of the same Message-ID (the same mail delivered twice or to two mailboxes) on an
+// RqtQuote request.
+function requestsOfEmail(message) {
     const ids = [message.emailMessageId]
     if (message.messageId)
         for (const row of find("moqui.basic.email.EmailMessage")
@@ -204,20 +204,23 @@ function requestOfEmail(message) {
             .limit(50)
             .list())
             ids.push(row.emailMessageId)
+    const found = []
     for (const link of find(EMAIL_LINK)
         .condition("emailMessageId", "in", Array.from(new Set(ids)))
         .list()) {
         const request = one(REQUEST, {requestId: link.requestId})
-        if (request?.requestTypeEnumId === rfqType) return request
+        if (request?.requestTypeEnumId === rfqType && !found.some(row => row.requestId === request.requestId)) found.push(request)
     }
-    return null
+    return found
 }
-function requestOfEvent(communicationEventId) {
+const requestOfEmail = message => requestsOfEmail(message)[0] || null
+function requestsOfEvent(communicationEventId) {
+    const found = []
     for (const link of rows(EVENT_LINK, {communicationEventId})) {
         const request = one(REQUEST, {requestId: link.requestId})
-        if (request?.requestTypeEnumId === rfqType) return request
+        if (request?.requestTypeEnumId === rfqType && !found.some(row => row.requestId === request.requestId)) found.push(request)
     }
-    return null
+    return found
 }
 function sourceOf(p) {
     if (!blank(p.emailMessageId)) {
@@ -228,7 +231,7 @@ function sourceOf(p) {
         return {
             kind: "email",
             message,
-            existing: requestOfEmail(message),
+            existing: requestsOfEmail(message),
             channel: "ScEmail",
             name: intake().subjectName(message.subject),
             description: String(message.bodyText || intake().plainText(message.body) || "").substring(0, 20000) || null,
@@ -244,7 +247,7 @@ function sourceOf(p) {
         return {
             kind: "event",
             communicationEventId,
-            existing: requestOfEvent(communicationEventId),
+            existing: requestsOfEvent(communicationEventId),
             channel: null,
             name: String(message.subject || thread.subject || "").trim() || null,
             description:
@@ -267,7 +270,7 @@ function sourceOf(p) {
         return {
             kind: "event",
             communicationEventId: found.communicationEventId,
-            existing: requestOfEvent(found.communicationEventId),
+            existing: requestsOfEvent(found.communicationEventId),
             channel: "ScChat",
             name:
                 body
@@ -385,11 +388,12 @@ function createQuoteRequest(p) {
         denied("ORGANIZATION_DENIED", "Organization " + organizationPartyId + " is not available")
     salesAccess.requireOrganization(userScope, organizationPartyId)
     // the message first, as the caller may read it, before anything is written
+    // the request the message already made: one the caller sees (whichever was made first), else REQUEST_TAKEN naming none
     const source = sourceOf(p)
-    if (source?.existing) {
-        if (!salesAccess.quoteRequestOf(userScope, source.existing.requestId))
-            denied("REQUEST_TAKEN", "This message is already a request for quote you cannot open")
-        return {requestId: source.existing.requestId, alreadyApplied: true}
+    if (source?.existing?.length) {
+        const seen = source.existing.find(request => salesAccess.quoteRequestOf(userScope, request.requestId))
+        if (!seen) denied("REQUEST_TAKEN", "This message is already a request for quote you cannot open")
+        return {requestId: seen.requestId, alreadyApplied: true}
     }
     const parties = customerOf(userScope, organizationPartyId, p, source?.address)
     const assignment = assignmentOf(userScope, organizationPartyId, text(p.teamPartyId))
@@ -669,12 +673,37 @@ function createQuoteFromRequest(p) {
         call("update#" + REQUEST, {requestId, statusId: "ReqInProgress"})
     const result = {orderId: created.orderId, orderRevision, requestId}
     lib.complete(operation, ORDER, created.orderId, result)
+    // a repair's quote tells Customer Service (the user's call of Nov 13, 2026)
+    if (source.repair) notifyRepairQuoted(source, created.orderId)
     return Object.assign({alreadyApplied: false}, result)
 }
 
 // ===== preview#QuoteRequestDecline, decline#QuoteRequest =====
-// The mailbox an RFQ came in by (its first received message's account, still active) and the address to tell: that message's
-// sender, else the contact's or the customer's email.
+// Whether Sales may answer from a mailbox as the system: it is an RFQ intake mailbox (an enabled createQuoteRequest rule runs on it,
+// its owner holding SALES_QUOTE_EDIT), whose mail Sales answers as send#IntakeConfirmation does a project's, or the caller may send
+// from it themselves. Reading a mailbox (which Create RFQ needs) is not sending from it.
+function mailboxAnswers(account) {
+    if (!account || account.statusId === "EasRemoved") return false
+    const intakeRule = rows("moqui.basic.email.EmailRule", {emailAccountId: account.emailAccountId}).some(rule => {
+        if (rule.enabled === "N") return false
+        let actions
+        try {
+            actions = JSON.parse(rule.actionsJson || "[]")
+        } catch (_) {
+            return false
+        }
+        return (
+            Array.isArray(actions) &&
+            actions.some(action => text(action?.action) === "createQuoteRequest") &&
+            intake().userHolds(rule.ownerUserId, "SALES_QUOTE_EDIT")
+        )
+    })
+    if (intakeRule) return true
+    const access = asUser("org.moqui.mail.EmailClientServices.get#EmailAccountAccess", {emailAccountId: account.emailAccountId})
+    return !!access?.account?.canSend
+}
+// The mailbox an RFQ came in by (its first received message's account, still active, one Sales may answer from: mailboxAnswers)
+// and the address to tell: that message's sender (its Reply-To, else From), else the contact's or the customer's email.
 function declineTarget(rfq) {
     const links = rows(EMAIL_LINK, {requestId: rfq.request.requestId})
     const messages = links
@@ -702,7 +731,7 @@ function declineTarget(rfq) {
                 break
             }
         }
-    const usable = account && account.statusId !== "EasRemoved" ? account : null
+    const usable = mailboxAnswers(account) ? account : null
     return {parent: first, account: usable, toAddress: toAddress ? String(toAddress).split(",")[0].trim().toLowerCase() : null}
 }
 function defaultDeclineText(rfq) {
@@ -731,7 +760,9 @@ function previewDecline(p) {
                   to: target.toAddress,
                   from: target.account.emailAddress
               })
-            : L("The requester cannot be told from here: the request came in by no mailbox or has no address; tell them yourself")
+            : L(
+                  "The requester cannot be told from here: the request came in by no mailbox Sales answers from, or has no address; tell them yourself"
+              )
     }
 }
 // The decline mail, a draft of the RFQ's mailbox answering its first message, sent and filed on the RFQ's conversation; a send
@@ -853,7 +884,8 @@ function rowOf(found, names) {
     const request = found.request
     const now = ms(ec.user.nowTimestamp)
     const due = ms(request.responseRequiredDate)
-    const quoteIds = quoteIdsOf(request.requestId)
+    // the quotes the caller may open: an unreadable one gives no id, title, amount or count
+    const quoteIds = quoteIdsOf(request.requestId).filter(orderId => salesAccess.quoteOf(found.scope, orderId))
     return {
         requestId: request.requestId,
         requestName: found.repair
@@ -918,18 +950,21 @@ function findQuoteRequests(p) {
             query = query.condition("statusId", "in", openStatuses)
         }
     } else query = query.condition("statusId", "not-in", closedStatuses)
+    // a claim's name is Customer Service's (often its fault): a repair is found by its id alone, and never sorted by its name
     const term = text(p.text)
     if (term)
         query = query.condition(
             factory.makeCondition(
-                ["requestId", "requestName"].map(field => factory.makeCondition(field, "like", likeText(term)).ignoreCase()),
+                (kind === "repair" ? ["requestId"] : ["requestId", "requestName"]).map(field =>
+                    factory.makeCondition(field, "like", likeText(term)).ignoreCase()
+                ),
                 "or"
             )
         )
     query = query.selectField("requestId").selectField("requestDate").selectField("responseRequiredDate").distinct(true)
     const orderBy = text(p.orderByField)
     const sort =
-        orderBy && /^[-+^]?(requestName|requestDate|responseRequiredDate)$/.test(orderBy)
+        orderBy && (kind === "repair" ? /^[-+^]?requestDate$/ : /^[-+^]?(requestName|requestDate|responseRequiredDate)$/).test(orderBy)
             ? [orderBy, "requestId"]
             : ["-requestDate", "requestId"]
     let pageRows
@@ -984,15 +1019,17 @@ function getQuoteRequest(p) {
     const quoteRows = quoteIds.map(orderId => {
         const order = one(ORDER, {orderId})
         const seen = !!salesAccess.quoteOf(userScope, orderId)
+        // a quote of another assignment: that a line was quoted, never its title or total
         return {
             orderId,
-            orderName: order.orderName || orderId,
+            orderName: seen ? order.orderName || orderId : L("A quote you cannot open"),
             statusText: statusText(order.statusId),
             totalText: seen ? moneyText(order.grandTotal ?? 0, order.currencyUomId) : "",
             entryText: dayText(order.entryDate),
             canOpen: seen
         }
     })
+    const seenIds = quoteRows.filter(row => row.canOpen).map(row => row.orderId)
     const names = lib.partyNames([
         found.customerPartyId,
         found.contactPartyId,
@@ -1017,7 +1054,7 @@ function getQuoteRequest(p) {
             requiredByText: repair ? "" : dayText(item.requiredByDate),
             cancelled: item.statusId === "ReqCancelled",
             statusText: item.statusId === "ReqCancelled" ? L("Removed") : quotedIn.length ? L("Quoted") : L("Open"),
-            quotedText: quotedIn.join(", ")
+            quotedText: quotedIn.filter(orderId => seenIds.includes(orderId)).join(", ")
         }
     })
     const repairName = L("Chargeable repair") + (firstProduct(requestId) ? " · " + productName(firstProduct(requestId)) : "")
@@ -1070,6 +1107,120 @@ function quoteRequestAccess(p) {
     return {recordVisible: !!found, canEdit: !!found?.canEdit && openStatuses.includes(found.request.statusId)}
 }
 
+// ===== the chargeable repair's notices (the user's call of Nov 13, 2026) =====
+// Both ways, each title naming the claim, its customer and product or the quote, never the fault text, diagnosis, decision or an
+// amount: Customer Service's chargeable decision tells the organization's default Sales team (SalesRepairToQuote), and a repair's
+// quote tells the claim's assignee, else its queue's team or fallback assignee (SalesRepairQuoted). Never a failure of the decision
+// or the quote: an error is logged.
+const toSalesTopic = "SalesRepairToQuote"
+const toServiceTopic = "SalesRepairQuoted"
+const activeUserIds = partyId =>
+    partyId
+        ? rows("moqui.security.UserAccount", {partyId})
+              .filter(row => row.disabled !== "Y")
+              .map(row => row.userId)
+        : []
+// The organization's default Sales team: Sales P9's SalesPolicy in effect (an organization's dated Sales defaults), when this build
+// has it; none otherwise.
+function defaultTeamOf(organizationPartyId) {
+    const entity = "mantle.sales.policy.SalesPolicy"
+    if (!organizationPartyId || !ec.entity.isEntityDefined(entity)) return null
+    const now = ms(ec.user.nowTimestamp)
+    const policy = rows(entity, {organizationPartyId})
+        .filter(row => (row.fromDate == null || ms(row.fromDate) <= now) && (row.thruDate == null || ms(row.thruDate) > now))
+        .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))[0]
+    return policy?.defaultTeamPartyId || null
+}
+// notify#RepairToQuote: after a warranty decision (decide#WarrantyClaim's commit), a chargeable one current on an open claim tells
+// the current members of the organization's default team who would see it under "Repairs to quote" (SALES_QUOTE_EDIT or
+// SALES_TEAM_VIEW, working for the organization).
+function notifyRepairToQuote(p) {
+    let sentCount = 0
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    ec.message.pushErrors()
+    try {
+        const decision = text(p.warrantyDecisionId) ? one(DECISION, {warrantyDecisionId: text(p.warrantyDecisionId)}) : null
+        if (!decision || decision.supersededDate) return {sentCount}
+        if (decision.chargeEstimate == null || toDecimal(String(decision.chargeEstimate)).compare(toDecimal(0)) <= 0)
+            return {sentCount}
+        const request = one(REQUEST, {requestId: decision.requestId})
+        if (!request || request.requestTypeEnumId !== repairType || closedStatuses.includes(request.statusId)) return {sentCount}
+        const parties = salesAccess.requestParties(request.requestId)
+        const organizationPartyId = parties.find(row => row.roleTypeId === "OrgInternal")?.partyId || null
+        const teamPartyId = defaultTeamOf(organizationPartyId)
+        const team = teamPartyId ? settings.teamRow(teamPartyId) : null
+        if (!team || team.organizationPartyId !== organizationPartyId || !settings.inEffect(team.relationship)) {
+            ec.logger.info("Repair claim " + request.requestId + " to quote: the organization has no default Sales team to tell")
+            return {sentCount}
+        }
+        const memberIds = Array.from(
+            new Set(
+                rows("mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtSalesTeamMember", toPartyId: teamPartyId})
+                    .filter(row => lib.active(row))
+                    .map(row => row.fromPartyId)
+            )
+        ).filter(partyId => settings.worksFor(partyId, organizationPartyId))
+        const userIds = memberIds
+            .flatMap(activeUserIds)
+            .filter(
+                userId => intake().userHolds(userId, "SALES_QUOTE_EDIT") || intake().userHolds(userId, "SALES_TEAM_VIEW")
+            )
+        if (!userIds.length) return {sentCount}
+        ec.makeNotificationMessage()
+            .topic(toSalesTopic)
+            .message({
+                requestId: request.requestId,
+                customerName: partyName(parties.find(row => row.roleTypeId === "Customer")?.partyId),
+                productName: productName(firstProduct(request.requestId)) || L("a product")
+            })
+            .userIds(Array.from(new Set(userIds)))
+            .send()
+        sentCount = userIds.length
+    } catch (error) {
+        ec.logger.error("Warranty decision " + (p.warrantyDecisionId || "") + ": Sales was not told: " + error.message)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+    return {sentCount}
+}
+// A repair's quote made: the claim's assignee is told, else the members of its service queue's team, else the queue's fallback
+// assignee; not the user who made it.
+function notifyRepairQuoted(source, orderId) {
+    ec.message.pushErrors()
+    try {
+        const requestId = source.request.requestId
+        const assigneePartyId = source.parties.find(row => row.roleTypeId === "Assignee")?.partyId || null
+        let partyIds = assigneePartyId ? [assigneePartyId] : []
+        if (!partyIds.length) {
+            const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
+            const queue = cases.queueOf(source.request.requestCategoryId)?.queue || null
+            if (queue?.responsibleTeamPartyId)
+                partyIds = cases.teamMembers(queue.responsibleTeamPartyId).map(row => row.fromPartyId)
+            if (!partyIds.length && queue?.fallbackAssigneePartyId) partyIds = [queue.fallbackAssigneePartyId]
+        }
+        const userIds = Array.from(new Set(partyIds.flatMap(activeUserIds))).filter(userId => userId !== ec.user.userId)
+        if (!userIds.length) return
+        ec.makeNotificationMessage()
+            .topic(toServiceTopic)
+            .message({
+                requestId,
+                orderId,
+                customerName: partyName(source.customerPartyId),
+                madeByName: partyName(ec.user.userAccount?.partyId) || ec.user.username || ""
+            })
+            .record(REQUEST, requestId)
+            .userIds(userIds)
+            .send()
+    } catch (error) {
+        ec.logger.error("Repair quote " + orderId + ": Customer Service was not told: " + error.message)
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
+
 // ===== the chargeable repair's quotes, for Customer Service =====
 // The quotes made from a warranty claim's lines (Warranty.js get, after Customer Service's own check of the claim): each one's state,
 // total and validity, never its lines' prices or the Sales assignment.
@@ -1097,7 +1248,8 @@ const operations = {
     createQuoteFromRequest,
     previewDecline,
     declineQuoteRequest,
-    quoteRequestAccess
+    quoteRequestAccess,
+    notifyRepairToQuote
 }
 ;({
     execute: (op, parameters) => {
