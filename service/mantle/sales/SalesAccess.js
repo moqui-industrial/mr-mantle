@@ -333,7 +333,9 @@ function quoteOf(userScope, orderId) {
                 .condition("partyId", "in", partyIds)
                 .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
                 .count() > 0
-        if (!assigned) return null
+        // P9: a holder of SALES_APPROVE sees a quote of their organizations that asked for an approval (design §1.1 "an assigned
+        // approval grants its authorized approver the source projection needed to decide that")
+        if (!assigned && !approvalAsked(userScope, orderId)) return null
     }
     return {
         order,
@@ -342,6 +344,19 @@ function quoteOf(userScope, orderId) {
         customerPartyId: part.customerPartyId,
         canEdit: !!userScope.capabilities.quoteEdit
     }
+}
+// ===== P9: approvals (impl-sales P9; design-sales §1.1, §5 Approvals) =====
+// Whether the caller approves Sales exceptions (SALES_APPROVE) and the quote asked for one (an OrderDecision of purpose SapQuote,
+// mantle.order.SalesApprovalServices request#QuoteApproval); the organization is checked by quoteOf.
+function approvalAsked(userScope, orderId) {
+    return (
+        !!userScope.capabilities.approve &&
+        lib
+            .find("mantle.order.OrderDecision")
+            .condition("orderId", orderId)
+            .condition("decisionPurposeEnumId", "SapQuote")
+            .count() > 0
+    )
 }
 // The quote or a refusal: RECORD_UNAVAILABLE when the caller does not see it, PERMISSION_DENIED for an edit without
 // SALES_QUOTE_EDIT.

@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.order.SalesApprovalServices (the approval verbs of Q, IronStone Sales design §12.1; design §9 SalesDefaults and
+    ApprovalPolicies, §5 Approvals and the approval binding; impl-sales P9, SAL-APPROVAL): an organization's Sales defaults and
+    approval rules, a quote's approval preview, request and decision, the SalesQuoteApproval topic's handlers, and the two rules on
+    the native order (Sales' pre-approval warnings on check#OrderPreApprove and the supersession of a quote's decisions on a new
+    revision, service/SalesApproval.secas.xml). Each checks its own permission and the organization (SalesAccess.js) over
+    service/mantle/order/SalesApprovals.js. The quote verbs themselves are SalesQuoteServices'; propose#Quote's approval guard is
+    here and SalesQuoteServices.propose#Quote calls it. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="store" noun="SalesPolicy" allow-remote="false">
+        <description>Publish an organization's Sales defaults from now or later (design §9 SalesDefaults): the row in effect then is
+            ended where the new one starts, which keeps its values for each field not given; the acceptance thresholds, when given,
+            replace the earlier ones (one per currency). previewOnly Y answers the changes and writes nothing. Needs SALES_CONFIGURE for
+            an organization of the caller's sales scope (PERMISSION_DENIED, ORGANIZATION_DENIED); refuses no reason
+            (REASON_REQUIRED), nothing changed (NO_CHANGE), a start before now or before the row it replaces (DATE_INVALID), a stale
+            revision (REVISION_CHANGED), a team of another organization (TEAM_INVALID), an unknown template (TEMPLATE_INVALID), a
+            day count that is not a positive whole number (VALUE_INVALID) and a threshold without its currency or twice in one
+            (CURRENCY_INVALID, THRESHOLD_DUPLICATE).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="revision"><description>The revision of the defaults read (get#SalesPolicy's policy.revision)</description></parameter>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="defaultTeamPartyId"/>
+            <parameter name="quoteValidityDays"/>
+            <parameter name="quoteEmailTemplateId"/>
+            <parameter name="confirmationEmailTemplateId"/>
+            <parameter name="reminderEmailTemplateId"/>
+            <parameter name="responsePoRequired"/>
+            <parameter name="orderApprovalRequired"/>
+            <parameter name="approveNetTermsOrders"/>
+            <parameter name="intakeRetentionDays"/>
+            <parameter name="reminderDays"/>
+            <parameter name="acceptanceThresholds" type="List"><description>Each a map: currencyUomId, thresholdAmount (empty to
+                remove it)</description></parameter>
+            <parameter name="changeReason"/>
+            <parameter name="previewOnly"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesPolicyId"/>
+            <parameter name="changes" type="List"/>
+            <parameter name="published" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('storePolicy', context)"/>
+            <set field="salesPolicyId" from="stored.salesPolicyId"/>
+            <set field="changes" from="stored.changes"/>
+            <set field="published" from="!!stored.published"/>
+        </actions>
+    </service>
+    <service verb="get" noun="SalesPolicy" allow-remote="false" read-only="true">
+        <description>An organization's Sales defaults in effect (each field, the thresholds, who published them and why), the
+            scheduled and the earlier versions, and the effective commercial revision flag (X2, F9) with the organization whose
+            preference sets it. Needs SALES_CONFIGURE for an organization of the caller's sales scope.</description>
+        <in-parameters><parameter name="organizationPartyId"/></in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="policy" type="Map"/>
+            <parameter name="scheduled" type="List"/>
+            <parameter name="earlier" type="List"/>
+            <parameter name="commercialRevisionOnly" type="Boolean"/>
+            <parameter name="commercialRevisionOwnerName"/>
+            <parameter name="commercialRevisionOwn" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('getPolicy', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesCommercialRevision" allow-remote="false">
+        <description>The seller's own PartyAcctgPreference.salesCommercialRevisionOnly (X2; impl-sales §4, F9: a quote is issued only
+            where it is on), audit-logged with its reason. Needs SALES_CONFIGURE for an organization of the caller's sales scope;
+            refuses no reason (REASON_REQUIRED) and an organization that takes its preference from a parent
+            (PREFERENCE_INHERITED).</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="commercialRevisionOnly"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters><parameter name="commercialRevisionOnly" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="commercialRevisionOnly" from="!!ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('storeCommercialRevision', context).commercialRevisionOnly"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SalesApprovalPolicy" allow-remote="false">
+        <description>An approval rule of an organization (design §9 ApprovalRules): a new rule from now or later, the next version of
+            a rule (salesApprovalPolicyId; the rule ends where the next starts) or, with endPolicy Y, the rule ended. A rule has a
+            purpose (SapQuote: a quote's exception, decided before it is proposed; SapOrder: a sales order's approval) and a bounded
+            type: SarAmount (thresholdAmount and currencyUomId), SarDiscount (discountPercent, above 0 and at most 100), SarPriceFloor
+            (floorMarginPercent over the product's cost) or SarFreeLine; the approvers' group (approverUserGroupId, holding
+            SALES_APPROVE) and self-approval (selfApprovalAllowed Y). Needs SALES_CONFIGURE for an organization of the caller's sales
+            scope; refuses no reason (REASON_REQUIRED), an unknown purpose or type (PURPOSE_INVALID, RULE_INVALID), a type's missing
+            or invalid input (THRESHOLD_REQUIRED, CURRENCY_INVALID, PERCENT_REQUIRED, PERCENT_INVALID, VALUE_INVALID), a group that
+            holds no SALES_APPROVE (APPROVER_INVALID), dates out of order (DATE_INVALID), a stale revision (REVISION_CHANGED) and an
+            ended rule (RULE_ENDED); another organization's rule answers as missing (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="salesApprovalPolicyId"/>
+            <parameter name="revision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="ruleTypeEnumId"/>
+            <parameter name="thresholdAmount"/>
+            <parameter name="currencyUomId"/>
+            <parameter name="discountPercent"/>
+            <parameter name="floorMarginPercent"/>
+            <parameter name="approverUserGroupId"/>
+            <parameter name="selfApprovalAllowed"/>
+            <parameter name="description"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="endPolicy"/>
+            <parameter name="changeReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="salesApprovalPolicyId"/>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('storeRule', context)"/>
+            <set field="salesApprovalPolicyId" from="stored.salesApprovalPolicyId"/>
+            <set field="ended" from="!!stored.ended"/>
+        </actions>
+    </service>
+    <service verb="find" noun="SalesApprovalPolicies" allow-remote="false" read-only="true">
+        <description>An organization's approval rules (in effect and scheduled; the ended ones too with includeEnded Y), each with its
+            purpose, type, inputs as text, approvers and dates, and whether the organization has a quote rule (configured: without
+            one a manual price needs an approver other than its author). For a Sales reader of the organization.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="includeEnded"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="organizationName"/>
+            <parameter name="ruleList" type="List"/>
+            <parameter name="configured" type="Boolean"/>
+            <parameter name="canConfigure" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('findRules', context))</script>
+        </actions>
+    </service>
+    <service verb="preview" noun="Quote" allow-remote="false" read-only="true">
+        <description>The approvals a quote needs at its current revision (design §9 ApprovalPreview): each rule it meets with its
+            inputs (the lines and amounts it names; a price floor's cost is checked here and never answered), the approver it needs,
+            its state (needs approval, waiting, approved, refused, with who decided and why) and whether the caller may decide it or
+            ask for it. For a quote the caller sees (SalesAccess.js quoteOf: the rep's, the team's, the organization's for
+            SALES_TEAM_VIEW, and one that asked for approval for a holder of SALES_APPROVE in its organization); another answers as
+            missing (RECORD_UNAVAILABLE).</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="approval" type="Map"/></out-parameters>
+        <actions>
+            <set field="approval" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('preview', context).approval"/>
+        </actions>
+    </service>
+    <service verb="request" noun="QuoteApproval" allow-remote="false">
+        <description>Ask the approvers of a draft quote's open rules at its revision (an OrderDecision of result SdrRequested; one
+            SalesQuoteApproval notice to the holders of SALES_APPROVE of the organization who may decide it, titled with the quote and
+            the customer and no amount). Needs SALES_QUOTE_EDIT on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED);
+            refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), one
+            that needs no approval or is approved (APPROVAL_NOT_NEEDED) and one whose approval is asked already
+            (APPROVAL_REQUESTED).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+            <parameter name="note"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="notifiedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('requestApproval', context))</script>
+        </actions>
+    </service>
+    <service verb="decide" noun="Quote" allow-remote="false">
+        <description>Approve or refuse a quote's rules at the revision read (design §5 the approval binding): one rule
+            (salesApprovalPolicyId, "default" for the manual-price rule of an organization with no quote rule) or each open rule the
+            caller may decide, each an OrderDecision bound to the revision, the rule and the time, with the reason (required to
+            refuse). Needs SALES_APPROVE (PERMISSION_DENIED) in the quote's organization; refuses a quote that is no longer a draft
+            (QUOTE_NOT_DRAFT) or has expired (QUOTE_EXPIRED), a missing or stale revision naming the current one (REVISION_REQUIRED,
+            REVISION_CHANGED), a rule the quote no longer meets (APPROVAL_NOT_NEEDED), its author (its owner, who asked for the
+            approval or entered the lines the rule names) unless the rule allows it (SELF_APPROVAL), one outside the rule's group
+            (APPROVER_INVALID) and an unknown decision (DECISION_INVALID). The same operation key answers the first result.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+            <parameter name="salesApprovalPolicyId"/>
+            <parameter name="decision" default-value="approve"/>
+            <parameter name="reason"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="orderRevision" type="Integer"/>
+            <parameter name="decidedCount" type="Integer"/>
+            <parameter name="decisionResultEnumId"/>
+            <parameter name="approved" type="Boolean"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('decide', context))</script>
+        </actions>
+    </service>
+    <service verb="approve" noun="QuoteMessage" allow-remote="false">
+        <description>The approve service of the SalesQuoteApproval topic, which the framework's decide#NotificationMessage calls as
+            the user: decide#Quote at the revision in the message (sourceRevision), so a quote changed since is refused naming its
+            current revision and a message with none is refused (REVISION_REQUIRED); another record is SOURCE_INVALID.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('approveMessage', context)</script>
+            <set field="decision" value="approved"/>
+        </actions>
+    </service>
+    <service verb="refuse" noun="QuoteMessage" allow-remote="false">
+        <description>The refuse service of the SalesQuoteApproval topic, with the reason: decide#Quote's refusal at the message's
+            revision; refuses as approve#QuoteMessage does.</description>
+        <in-parameters>
+            <parameter name="recordEntityName"/>
+            <parameter name="recordId" required="true"/>
+            <parameter name="message" type="Map"/>
+            <parameter name="notificationMessageId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters><parameter name="decision"/></out-parameters>
+        <actions>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('refuseMessage', context)</script>
+            <set field="decision" value="refused"/>
+        </actions>
+    </service>
+    <service verb="handle" noun="SalesApprovalRevision" allow-remote="false">
+        <description>The SECA on increment#OrderRevision (service/SalesApproval.secas.xml): a commercial change of a quote supersedes
+            the decisions of its earlier revisions (invalidatedDate) and reads their approval notices. Any other order returns at
+            once.</description>
+        <in-parameters>
+            <parameter name="orderId"/>
+            <parameter name="revisionKind"/>
+        </in-parameters>
+        <out-parameters><parameter name="supersededCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="supersededCount" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('revisionChanged', context).supersededCount"/>
+        </actions>
+    </service>
+    <service verb="check" noun="SalesPreApprove" allow-remote="false" read-only="true">
+        <description>Sales' pre-approval warnings for the SECA on check#OrderPreApprove (impl-sales §4 Nov 11, F60): for each sales
+            part of a seller with a Sales rule in effect, the quote rules an accepted quote meets without a current approval and the
+            order rules the order meets. None for an organization with no rule or an order that meets none.</description>
+        <in-parameters><parameter name="orderId"/></in-parameters>
+        <out-parameters><parameter name="approveWarnings" type="List"/></out-parameters>
+        <actions>
+            <set field="approveWarnings" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('preApproveWarnings', context).approveWarnings"/>
+        </actions>
+    </service>
+</services>

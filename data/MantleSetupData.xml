@@ -965,6 +965,17 @@ along with this software (see the LICENSE.md file). If not, see
             approveServiceName="mantle.order.OrderChangeServices.approve#OrderChangeMessage"
             refuseServiceName="mantle.order.OrderChangeServices.refuse#OrderChangeMessage" refuseReasonRequired="Y"
             titleTemplate="Approve ${kindText} of order ${orderId} for ${customerName} (${requestedByName})"/>
+    <!-- Sales P9 (impl-sales P9, F26; mantle.order.SalesApprovalServices): a quote's exception to decide, sent by
+        request#QuoteApproval to the holders of SALES_APPROVE of the seller who may decide it, with orderId, sourceRevision (the
+        quote's revision), quoteName, customerName, organizationName, ruleText (the kinds of its rules) and requestedByName, the
+        quote as the record; its title names the quote and never an amount. Approve and refuse decide it at the message's revision (decide#Quote). The app
+        that decides it sets the link (IronStone Sales: BossSetupSalesData.xml). -->
+    <moqui.security.user.NotificationTopic topic="SalesQuoteApproval" inboxEnumId="NinNotifications"
+            description="Quote to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.order.SalesApprovalServices.approve#QuoteMessage"
+            refuseServiceName="mantle.order.SalesApprovalServices.refuse#QuoteMessage" refuseReasonRequired="Y"
+            titleTemplate="Approve quote ${orderId} for ${customerName}: ${ruleText} (${requestedByName})"/>
 
     <!-- Customer returns (impl-customer-service P9, CX-APPROVAL; mantle.order.ReturnPolicyServices): an exception a customer
         return needs before authorization (outside the window, a reason or remedy the policy does not allow, goods with no order
