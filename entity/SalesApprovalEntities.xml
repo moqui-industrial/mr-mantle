@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales defaults, approval policies and approval decisions (IronStone Sales design §9 SalesDefaults and ApprovalPolicies, §5
+    the approval binding, §17 SAL-APPROVAL; impl-sales P9, §4 Nov 11 and Nov 13, F14). SalesPolicy holds an organization's dated
+    defaults, SalesApprovalPolicy its dated approval rules (bounded rule types, no scripts), and a Sales approval decision is the
+    native OrderDecision extended with the order revision it binds, its purpose, the rule and time it was evaluated against, its
+    result and operation key (the user's call of Nov 11: no decision record on Purchasing's pattern). Each published row is changed
+    by a dated successor, never edited in place; their key fields are audit-logged. mantle.order.SalesApprovalServices over
+    service/mantle/order/SalesApprovals.js reads and writes them. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <entity entity-name="SalesPolicy" package="mantle.sales.policy" cache="never">
+        <description>An organization's Sales defaults from a date (design §9 SalesDefaults): the default team of a new quote, the
+            quote validity in days, the templates of the quote, the storeless confirmation and the reminder, the customer's response
+            requirements, the approval setting (orderApprovalRequired: the seller's sales orders wait for a Sales approver, off by
+            default, impl-sales §4), whether an accepted net-terms order is approved as the system while that setting is off, the
+            unverified lead intake retention and the reminder interval; the high-value acceptance thresholds per currency are
+            SalesPolicyThreshold rows. One row is in effect at a time; a change publishes a successor from now or later and ends the
+            row it replaces there (store#SalesPolicy). With no row in effect every default is the built behaviour.</description>
+        <field name="salesPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="defaultTeamPartyId" type="id" enable-audit-log="true"><description>The team a new quote is assigned to when
+            its opportunity has none and its author is in no single team of the organization</description></field>
+        <field name="quoteValidityDays" type="number-integer" enable-audit-log="true"><description>Days a new quote is valid from
+            its start; empty leaves its end open</description></field>
+        <field name="quoteEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="confirmationEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="reminderEmailTemplateId" type="id" enable-audit-log="true"/>
+        <field name="responsePoRequired" type="text-indicator" enable-audit-log="true"><description>Y: an acceptance names the
+            customer's purchase order</description></field>
+        <field name="orderApprovalRequired" type="text-indicator" enable-audit-log="true"><description>The approval setting: Y, no
+            sales order of the seller is approved automatically and each waits for a holder of SALES_ORDER_APPROVE, whichever app
+            placed it (impl-sales P11 enforces it); N or empty, every caller approves as built</description></field>
+        <field name="approveNetTermsOrders" type="text-indicator" enable-audit-log="true"><description>Y: an accepted net-terms
+            order is approved as the system when credit and every Sales rule pass, while the approval setting is off</description>
+        </field>
+        <field name="intakeRetentionDays" type="number-integer" enable-audit-log="true"><description>Days an unverified lead intake
+            whose lead never qualified is kept before purge#LeadIntakes blanks it (30 when empty)</description></field>
+        <field name="reminderDays" type="number-integer" enable-audit-log="true"><description>Days after an issue a reminder is sent;
+            empty sends none</description></field>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DefaultTeam" related="mantle.party.Party" short-alias="defaultTeam">
+            <key-map field-name="defaultTeamPartyId" related="partyId"/></relationship>
+        <relationship type="many" related="mantle.sales.policy.SalesPolicyThreshold" short-alias="thresholds">
+            <key-map field-name="salesPolicyId"/></relationship>
+        <index name="SAL_POL_ORG"><index-field name="organizationPartyId"/><index-field name="fromDate"/></index>
+    </entity>
+    <entity entity-name="SalesPolicyThreshold" package="mantle.sales.policy" cache="never">
+        <description>A high-value acceptance threshold of a SalesPolicy in one currency (design §9, §10; the user's call of Nov 11):
+            above it a bearer link cannot accept on its own and acceptance needs PASS sign-in as an invited contact (impl-sales P13
+            reads it). Unset by default; a policy's successor copies its thresholds.</description>
+        <field name="salesPolicyId" type="id" is-pk="true"/>
+        <field name="currencyUomId" type="id" is-pk="true"/>
+        <field name="thresholdAmount" type="currency-amount" enable-audit-log="true"/>
+        <relationship type="one" related="mantle.sales.policy.SalesPolicy" short-alias="policy"/>
+        <relationship type="one" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+    </entity>
+    <entity entity-name="SalesApprovalPolicy" package="mantle.sales.policy" cache="never">
+        <description>One approval rule of an organization's quotes or sales orders from a date (design §9 ApprovalPolicies): its
+            purpose (a quote's discount or price exception, decided before the quote is proposed, or the final approval of a sales
+            order, decided when it is approved), its type (an amount at or above a threshold in a currency, a line discounted at or
+            beyond a percent of its calculated price, a line under its price floor of the product's cost and a margin, or a free or
+            zero-price line), the approvers (holders of SALES_APPROVE in the organization, narrowed to a user group when one is
+            named) and whether the author may approve. A change ends the row in effect and starts the next (store#SalesApprovalPolicy);
+            a decision keeps the row it was evaluated against. With no quote rule in effect, a manual price on a quote needs an
+            approver other than its author (design §9 "until configured").</description>
+        <field name="salesApprovalPolicyId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="purposeEnumId" type="id" enable-audit-log="true"><description>SalesApprovalPurpose: SapQuote,
+            SapOrder</description></field>
+        <field name="ruleTypeEnumId" type="id" enable-audit-log="true"><description>SalesApprovalRule: SarAmount, SarDiscount,
+            SarPriceFloor, SarFreeLine</description></field>
+        <field name="thresholdAmount" type="currency-amount" enable-audit-log="true"><description>SarAmount: the total at or above
+            which approval is needed</description></field>
+        <field name="currencyUomId" type="id" enable-audit-log="true"><description>SarAmount: the threshold's currency; a quote in
+            another currency does not meet the rule</description></field>
+        <field name="discountPercent" type="number-decimal" enable-audit-log="true"><description>SarDiscount: the discount from
+            the line's calculated price at or beyond which approval is needed</description></field>
+        <field name="floorMarginPercent" type="number-decimal" enable-audit-log="true"><description>SarPriceFloor: the margin over
+            the product's cost the price may not go under (0 when empty); a line whose cost is not known needs approval</description>
+        </field>
+        <field name="approverUserGroupId" type="id" enable-audit-log="true"><description>The approver role: only members of the
+            group, each holding SALES_APPROVE; empty for any holder of SALES_APPROVE in the organization</description></field>
+        <field name="selfApprovalAllowed" type="text-indicator" enable-audit-log="true"><description>Y: the quote's author may
+            approve it; N or empty: never</description></field>
+        <field name="description" type="text-medium" enable-audit-log="true"/>
+        <field name="fromDate" type="date-time" enable-audit-log="true"/>
+        <field name="thruDate" type="date-time" enable-audit-log="true"/>
+        <field name="changeReason" type="text-long" enable-audit-log="true"/>
+        <field name="changedByUserId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="SalesApprovalPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="purposeEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SalesApprovalRule" related="moqui.basic.Enumeration" short-alias="ruleType">
+            <key-map field-name="ruleTypeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="Currency" related="moqui.basic.Uom" short-alias="currencyUom">
+            <key-map field-name="currencyUomId" related="uomId"/></relationship>
+        <relationship type="one-nofk" title="Approver" related="moqui.security.UserGroup" short-alias="approverUserGroup">
+            <key-map field-name="approverUserGroupId" related="userGroupId"/></relationship>
+        <index name="SAL_APR_POL_ORG"><index-field name="organizationPartyId"/><index-field name="purposeEnumId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales approval purpose" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.Enumeration enumId="SapQuote" description="Quote exception" sequenceNum="1" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.Enumeration enumId="SapOrder" description="Order approval" sequenceNum="2" enumTypeId="SalesApprovalPurpose"/>
+            <moqui.basic.EnumerationType description="Sales approval rule" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarAmount" description="Amount at or above" sequenceNum="1" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarDiscount" description="Discount at or beyond" sequenceNum="2" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarPriceFloor" description="Price under its floor" sequenceNum="3" enumTypeId="SalesApprovalRule"/>
+            <moqui.basic.Enumeration enumId="SarFreeLine" description="Free or zero-price line" sequenceNum="4" enumTypeId="SalesApprovalRule"/>
+            <!-- the rule in effect while an organization has no quote rule: a manual price needs an approver other than its author -->
+            <moqui.basic.Enumeration enumId="SarOverride" description="Manual price" sequenceNum="5" enumTypeId="SalesApprovalRule"/>
+        </seed-data>
+    </entity>
+
+    <!-- a Sales approval decision (design §5 the approval binding, §4 Nov 11): the native OrderDecision with the order revision it
+        binds (a decision at an earlier revision no longer counts; invalidatedDate records when a later revision superseded it), its
+        purpose, the rule (none for the unconfigured manual-price rule) and the time it was evaluated, its result (an approval asked,
+        approved or refused), who decided and why, and the operation key a retry answers by -->
+    <extend-entity entity-name="OrderDecision" package="mantle.order">
+        <field name="orderRevision" type="number-integer"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="decisionPurposeEnumId" type="id"/>
+        <field name="salesApprovalPolicyId" type="id"/>
+        <field name="ruleTypeEnumId" type="id"/>
+        <field name="evaluatedDate" type="date-time"/>
+        <field name="decisionResultEnumId" type="id"/>
+        <field name="decisionByUserId" type="id"/>
+        <field name="reasonText" type="text-medium"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one-nofk" related="mantle.sales.policy.SalesApprovalPolicy"/>
+        <relationship type="one-nofk" title="SalesApprovalPurpose" related="moqui.basic.Enumeration" short-alias="purpose">
+            <key-map field-name="decisionPurposeEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" title="SalesDecisionResult" related="moqui.basic.Enumeration" short-alias="result">
+            <key-map field-name="decisionResultEnumId" related="enumId"/></relationship>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Sales decision result" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrRequested" description="Approval asked" sequenceNum="1" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrApproved" description="Approved" sequenceNum="2" enumTypeId="SalesDecisionResult"/>
+            <moqui.basic.Enumeration enumId="SdrRefused" description="Refused" sequenceNum="3" enumTypeId="SalesDecisionResult"/>
+        </seed-data>
+    </extend-entity>
+</entities>

@@ -11,8 +11,10 @@
 // - Prices: a product line takes the one resolver's price for the seller and the customer (get#SellerProductPrice, as the seller's
 //   authority after these checks), keeping its provenance (productPriceId, priceListId, priceRuleId, unitListPrice, priceSource) and
 //   the calculated basis (calculatedUnitAmount). A missing price blocks the line (PRICE_UNAVAILABLE) unless the rep enters one; an
-//   entered price keeps the basis with the value, reason and actor; a free line is an explicit choice with its reason and needs
-//   SALES_APPROVE (FREE_LINE_DENIED). Cost is never read or answered here.
+//   entered price keeps the basis with the value, reason and actor; a free line is an explicit choice with its reason. P9 (the user's
+//   call of Nov 13): a free or zero-price line is drafted by the rep when an approval rule will need it approved (the unconfigured
+//   manual-price rule, a free-line, discount or floor rule; SalesApprovals.js freeLineCovered) and needs SALES_APPROVE only where
+//   none does (FREE_LINE_DENIED). Cost is never read or answered here.
 // - Freight on a storeless quote is a shipping charge line the rep enters (design §19 item 1, impl-sales §4 Nov 13); tax is X1's
 //   (calculate#OrderSalesTax through the store's or the seller's gateway), recalculated by the native rules on each change.
 // - Every change names the order revision it read (orderRevision, REVISION_CHANGED naming the current one) and is refused once the
@@ -20,6 +22,8 @@
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
 const {find, one, rows, denied, call, ms} = lib
+// P9: the organization's defaults and approval rules (SalesApprovals.js), read when a quote is made, a free line entered and a quote shown
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
 
 const ORDER = "mantle.order.OrderHeader"
 const PART = "mantle.order.OrderPart"
@@ -136,7 +140,9 @@ function teamFor(userScope, organizationPartyId, salesOpportunityId) {
     const teams = salesAccess
         .memberTeams(userScope.partyId)
         .filter(teamPartyId => salesAccess.teamOrganization(teamPartyId) === organizationPartyId)
-    return teams.length === 1 ? teams[0] : null
+    if (teams.length === 1) return teams[0]
+    // P9: else the organization's default team (SalesPolicy)
+    return approvals().policyOf(organizationPartyId)?.defaultTeamPartyId || null
 }
 
 // ===== find#Quotes =====
@@ -315,7 +321,10 @@ function createQuote(p) {
     if (one("moqui.basic.Uom", {uomId: currencyUomId})?.uomTypeEnumId !== "UT_CURRENCY_MEASURE")
         denied("CURRENCY_INVALID", "Choose a currency")
     const validFromDate = dateOf(p.validFromDate, "Valid from") || ec.user.nowTimestamp
-    const validThruDate = dateOf(p.validThruDate, "Valid through")
+    // P9: with no end given, the organization's quote validity in days from the start (SalesPolicy; none, an open end)
+    const validityDays = Number(approvals().policyOf(organizationPartyId)?.quoteValidityDays || 0)
+    const validThruDate =
+        dateOf(p.validThruDate, "Valid through") || (validityDays > 0 ? new Date(ms(validFromDate) + validityDays * dayMs) : null)
     if (validThruDate && ms(validThruDate) <= ms(validFromDate))
         denied("VALIDITY_INVALID", "Valid through must be after valid from")
     const created = call("mantle.order.OrderServices.create#Order", {
@@ -384,7 +393,7 @@ function resolvedPrice(quote, productId, quantity, quantityUomId) {
 }
 // The price fields of a line from its resolved price and the rep's choice: the calculated basis and provenance always; the entered
 // price or the free line with its reason and actor, or the calculated price (PRICE_UNAVAILABLE when there is none).
-function priceFields(userScope, price, p, current) {
+function priceFields(userScope, quote, productId, price, p, current) {
     const fields = {
         calculatedUnitAmount: price.priceAvailable ? price.price : null,
         unitListPrice: price.listPriceAvailable ? price.listPrice : null,
@@ -400,8 +409,13 @@ function priceFields(userScope, price, p, current) {
         const reason = text(p.overrideReason)
         if (!reason) denied("OVERRIDE_REASON_REQUIRED", "Give the reason for the entered price")
         const unitAmount = free ? toDecimal(0) : decimal(p.unitAmount, "price", true)
-        if (unitAmount.isZero() && !userScope.capabilities.approve)
-            denied("FREE_LINE_DENIED", "A free line needs a sales approver (SALES_APPROVE)")
+        // P9: a free or zero line an approval rule will need approved is the rep's to draft; elsewhere a sales approver's
+        if (
+            unitAmount.isZero() &&
+            !userScope.capabilities.approve &&
+            !approvals().freeLineCovered(quote, {productId, calculatedUnitAmount: fields.calculatedUnitAmount})
+        )
+            denied("FREE_LINE_DENIED", "No approval rule covers a free line here; it needs a sales approver (SALES_APPROVE)")
         return Object.assign(fields, {
             unitAmount,
             isModifiedPrice: "Y",
@@ -451,7 +465,7 @@ function storeLine(p) {
             if (quantityUomId) changes.quantityUomId = quantityUomId
             if (item.productId) {
                 const price = resolvedPrice(quote, item.productId, quantity, quantityUomId)
-                Object.assign(changes, priceFields(userScope, price, p, item))
+                Object.assign(changes, priceFields(userScope, quote, item.productId, price, p, item))
             } else if (!blank(p.unitAmount)) changes.unitAmount = decimal(p.unitAmount, "price", true)
         }
         call("update#" + ITEM, changes)
@@ -500,7 +514,7 @@ function storeLine(p) {
             salesOpportunityId: link?.salesOpportunityId || null,
             requireInventory: false
         },
-        priceFields(userScope, price, p, null)
+        priceFields(userScope, quote, productId, price, p, null)
     )
     const created = call("mantle.order.OrderServices.create#OrderItem", line)
     return {orderId, orderItemSeqId: created.orderItemSeqId, orderRevision: revisionOf(one(ORDER, {orderId}))}
@@ -704,8 +718,14 @@ function getQuote(p) {
             totalText: moneyText(order.grandTotal ?? 0, currencyUomId),
             taxNote: taxNote(quote),
             canEdit: draft && quote.canEdit,
-            canFreeLine: draft && quote.canEdit && !!userScope.capabilities.approve
+            canFreeLine:
+                draft &&
+                quote.canEdit &&
+                (!!userScope.capabilities.approve ||
+                    approvals().freeLineCovered(quote, {productId: null, calculatedUnitAmount: toDecimal(1)}))
         },
+        // P9: the approvals the quote needs at its revision (SalesApprovals.js; preview#Quote's answer)
+        approval: approvals().summary(userScope, quote),
         lines,
         history: history(order.orderId),
         addresses: customerAddresses(quote.customerPartyId).map(contactMechId => ({

@@ -16,8 +16,10 @@ along with this software (see the LICENSE.md file). If not, see
     P7, SAL-QUOTE): quote drafts over the native order (service/mantle/order/SalesQuotes.js; the scope in
     service/mantle/sales/SalesAccess.js quoteOf). Each checks its own permission, the selling organization and the assignment, and
     every party, opportunity, store, address and product given; each change names the order revision it read. Issue, send, the
-    response, revise and clone are P10's; approval P9's. P8: the requests for quote (RFQs, design §5 QuoteRequests and
-    QuoteRequestDetail; SalesQuoteRequests.js, the scope in SalesAccess.js quoteRequestOf), in a block of their own at the end. -->
+    response, revise and clone are P10's. P8: the requests for quote (RFQs, design §5 QuoteRequests and QuoteRequestDetail;
+    SalesQuoteRequests.js, the scope in SalesAccess.js quoteRequestOf), in a block of their own at the end. P9: the approvals a quote
+    needs are SalesApprovalServices' (preview#Quote, decide#Quote), get#Quote answers them, a free line follows the approval rules
+    and propose#Quote is guarded by them. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="find" noun="Quotes" allow-remote="false" read-only="true">
         <description>The one scoped list of quotes (design §5 QuoteList, Home and the palette): orders of purpose SalesQuote whose
@@ -104,8 +106,9 @@ along with this software (see the LICENSE.md file). If not, see
             facts with names (an account the caller may not see unnamed), validity, owner, team and opportunity (when the caller sees
             it), its lines with their price provenance (the calculated basis, the source, an entered price's reason and actor) and
             tax, the totals of products, shipping and tax, the tax gateway that taxes it, the history of its audited fields, the
-            customer's addresses and whether the caller may edit it (a draft and SALES_QUOTE_EDIT) or enter a free line
-            (SALES_APPROVE). No cost or margin.</description>
+            customer's addresses and whether the caller may edit it (a draft and SALES_QUOTE_EDIT) or enter a free line (an
+            approval rule covers it, or SALES_APPROVE), and (P9) the approvals it needs at its revision (preview#Quote's approval).
+            No cost or margin.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
         </in-parameters>
@@ -115,9 +118,11 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="lines" type="List"/>
             <parameter name="history" type="List"/>
             <parameter name="addresses" type="List"/>
+            <parameter name="approval" type="Map"/>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuotes.js').execute('getQuote', context)"/>
+            <set field="approval" from="found.approval || null"/>
             <set field="quoteFound" from="!!found.quoteFound"/>
             <set field="quote" from="found.quote || null"/>
             <set field="lines" from="found.lines || []"/>
@@ -156,7 +161,8 @@ along with this software (see the LICENSE.md file). If not, see
             (get#SellerProductPrice), with its provenance and calculated basis; a changed quantity is repriced. An entered price
             (unitAmount) or a free line (freeLine Y) keeps the calculated basis with the value, the reason (overrideReason,
             OVERRIDE_REASON_REQUIRED) and the actor; useCalculatedPrice Y returns to the calculated price. A free line or an entered
-            zero needs SALES_APPROVE (FREE_LINE_DENIED); a product with no price the caller has not entered one for is refused
+            zero is the rep's where an approval rule will need it approved (P9, the user's call of Nov 13: with no quote rule the
+            manual-price rule, else a free-line, discount or floor rule it meets), elsewhere SALES_APPROVE's (FREE_LINE_DENIED); a product with no price the caller has not entered one for is refused
             (PRICE_UNAVAILABLE). A shipping charge line (ItemShipping): the amount the rep enters, a storeless quote's freight.
             Tax follows from the native order rules (X1). Needs SALES_QUOTE_EDIT on a quote the caller sees; refuses a quote that
             is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_CHANGED), a line not on the quote or a tax line
@@ -538,7 +544,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="notify" noun="RepairToQuote" authenticate="anonymous-all" allow-remote="false">
         <description>Internal (service/SalesQuoteRequest.secas.xml, on decide#WarrantyClaim's commit; the user's call of Nov 13,
             2026): a warranty decision that is a chargeable repair (a charge estimate above zero), current on an open claim, tells the
-            organization's default Sales team (Sales P9's SalesPolicy in effect) on the topic SalesRepairToQuote: its current members
+            organization's default Sales team (its SalesPolicy in effect, Sales P9) on the topic SalesRepairToQuote: its current members
             who work for the organization and hold SALES_QUOTE_EDIT or SALES_TEAM_VIEW. The notice names the claim, its customer and
             a product, never its fault text, diagnosis, decision or the charge. No default team, no notice. Never fails: an error
             is logged.</description>
@@ -550,4 +556,26 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- ===== end of P8 ===== -->
+    <!-- ===== Sales P9: the approval guard of a quote's proposal ===== -->
+    <service verb="propose" noun="Quote" allow-remote="false">
+        <description>Propose a draft quote (design §5; impl-sales P9 builds its approval guard, P10 the issue's checks): a draft the
+            caller may edit, at its current revision, with lines and every approval it needs current at that revision
+            (SalesApprovalServices.preview#Quote), moved to Proposed through OrderServices.propose#Order, so a direct call cannot
+            propose an unapproved quote. Needs SALES_QUOTE_EDIT on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED);
+            refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), no
+            lines (LINES_REQUIRED) and an approval not given (APPROVAL_REQUIRED, naming the rules).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="statusId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('proposeQuote', context))</script>
+        </actions>
+    </service>
+    <!-- ===== end of Sales P9 ===== -->
 </services>
