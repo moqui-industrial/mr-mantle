@@ -2143,7 +2143,9 @@ along with this software (see the LICENSE.md file). If not, see
             A sales quote not yet placed (an OrderHeader of purpose OrpSalesQuote with no placedDate, IronStone Sales P7) and its files
             (OrderContent) are seen only by a Sales reader of its seller to whom it is assigned, or to a team of theirs, and by a
             reader of the organization's quotes (mantle.order.SalesQuoteServices.check#QuoteAccess), for every caller, authorization
-            disabled or not; a call with no user sees none. Once placed it is an order, under the order rule.
+            disabled or not; a call with no user sees none. Once placed it is an order, under the order rule. A Sales quote
+            template (purpose OrpSalesQuoteTemplate, impl-sales P12) and its files are seen only by a Sales reader of its
+            organization while it is current and by a template manager of the organization (the same check), never as an order.
 
             A customer's request for quote (a Request of type RqtQuote, IronStone Sales P8) and its files (RequestContent) are seen
             only by a Sales reader of its organization to whom it is assigned, or to a team of theirs, and by a reader of the
@@ -2705,7 +2707,10 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === ORDER || entityName === 'mantle.order.OrderContent') {
                     const header = entityName === ORDER ? value
                             : ec.entity.find(ORDER).condition('orderId', value.orderId).disableAuthz().one()
-                    if (header && header.orderPurposeEnumId === 'OrpSalesQuote' && !header.placedDate)
+                    // a Sales quote template (impl-sales P12 review) the same way, placed never: a Sales reader of its
+                    // organization while it is current, a template manager always (SalesAccess.js templateOf)
+                    if (header && ((header.orderPurposeEnumId === 'OrpSalesQuote' && !header.placedDate)
+                            || header.orderPurposeEnumId === 'OrpSalesQuoteTemplate'))
                         return !!ec.service.sync().name('mantle.order.SalesQuoteServices.check#QuoteAccess')
                                 .parameter('orderId', header.orderId).disableAuthz().call()?.recordVisible
                 }

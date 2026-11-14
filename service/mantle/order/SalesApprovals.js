@@ -1169,7 +1169,10 @@ function orderApproveRefusal(order, part) {
 }
 // The decisions approve#SalesOrder records before the native approval: an SdrApproved OrderDecision of purpose SapOrder for each
 // order rule the order meets and has not approved at its revision, each the user's to decide (refused naming the first that is
-// not). Answers the number recorded.
+// not). Answers the number of rule decisions recorded. P12 review (the user's call of Nov 14: a decision on every approval, rule or
+// not): with no rule left to decide, one approval decision of purpose SapOrder with no rule records who approved it, so
+// the approver keeps read-only sight of every order they approved (SalesAccess.js orderOf); no requirement reads a decision with no
+// policy for an order (only a quote's unconfigured manual-price rule has no policy).
 function decideOrderRules(userScope, order, part) {
     const open = orderRequirements(order, part).filter(row => row.state !== "approved")
     for (const row of open) {
@@ -1177,7 +1180,7 @@ function decideOrderRules(userScope, order, part) {
         if (refusal) denied(refusal.code, refusal.message)
     }
     let at = nowMs()
-    for (const row of open) {
+    const record = row => {
         const decisionDate = freeDate(order.orderId, at)
         at = decisionDate.getTime() + 1
         call("create#" + DECISION, {
@@ -1189,12 +1192,14 @@ function decideOrderRules(userScope, order, part) {
             orderRevision: revisionOf(order),
             organizationPartyId: part.vendorPartyId,
             decisionPurposeEnumId: purposes.order,
-            salesApprovalPolicyId: row.salesApprovalPolicyId,
-            ruleTypeEnumId: row.ruleTypeEnumId,
+            salesApprovalPolicyId: row?.salesApprovalPolicyId || null,
+            ruleTypeEnumId: row?.ruleTypeEnumId || null,
             evaluatedDate: ec.user.nowTimestamp,
             decisionResultEnumId: results.approved
         })
     }
+    for (const row of open) record(row)
+    if (!open.length) record(null)
     return open.length
 }
 

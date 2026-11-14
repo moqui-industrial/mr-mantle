@@ -1097,6 +1097,10 @@ General Order Placement and eCommerce Usage
         <out-parameters><parameter name="oldStatusId"/><parameter name="statusChanged" type="Boolean"/></out-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader" for-update="true"/>
+            <!-- a Sales quote template (purpose SalesQuoteTemplate, impl-sales P12) is never placed and never leaves Open: a quote
+                is a copy of it -->
+            <if condition="orderHeader?.orderPurposeEnumId == 'OrpSalesQuoteTemplate' &amp;&amp; statusId != 'OrderOpen'">
+                <return error="true" message="QUOTE_TEMPLATE: Order ${orderId} is a quote template; start a quote from it instead"/></if>
             <entity-find entity-name="mantle.order.OrderPart" list="orderPartList" for-update="true">
                 <econdition field-name="orderId"/>
                 <econdition field-name="orderPartSeqId" ignore-if-empty="true"/>

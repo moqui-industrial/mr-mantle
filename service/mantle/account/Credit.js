@@ -56,7 +56,11 @@ function exposure(organizationPartyId, customerPartyId, currencyUomId, overdue =
             ec.entity.conditionFactory.makeCondition(
                 [
                     ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "is-null", null),
-                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+                    // nor a Sales quote template (impl-sales P12)
+                    ec.entity.conditionFactory.makeCondition("orderPurposeEnumId", "not-in", [
+                        "OrpRecurringTemplate",
+                        "OrpSalesQuoteTemplate"
+                    ])
                 ],
                 "or"
             )

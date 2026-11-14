@@ -24,6 +24,8 @@ const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sal
 const {find, one, rows, denied, call, ms} = lib
 // P9: the organization's defaults and approval rules (SalesApprovals.js), read when a quote is made, a free line entered and a quote shown
 const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
+// P12: quote templates (SalesQuoteTemplates.js): a quote copied from one, and a template draft's lines through the line verbs here
+const templates = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesQuoteTemplates.js")
 
 const ORDER = "mantle.order.OrderHeader"
 const PART = "mantle.order.OrderPart"
@@ -297,7 +299,13 @@ function createQuote(p, kind = "quote") {
     const userScope = salesAccess.scope()
     salesAccess.requireCapability(userScope, "anyRead")
     salesAccess.requireCapability(userScope, direct ? "orderEdit" : "quoteEdit")
-    const organizationPartyId = text(p.organizationPartyId) || salesAccess.defaultOrganization(userScope)
+    // P12: a quote from a current template of the organization (its organization when none is named, its currency)
+    const template =
+        !direct && text(p.templateOrderId)
+            ? templates().usableTemplate(userScope, text(p.templateOrderId), text(p.organizationPartyId))
+            : null
+    const organizationPartyId =
+        text(p.organizationPartyId) || template?.organizationPartyId || salesAccess.defaultOrganization(userScope)
     if (!organizationPartyId) denied("ORGANIZATION_DENIED", "Choose the selling organization")
     if (!salesAccess.isInternal(organizationPartyId))
         denied("ORGANIZATION_DENIED", "Organization " + organizationPartyId + " is not available")
@@ -327,25 +335,38 @@ function createQuote(p, kind = "quote") {
         denied("STORE_INVALID", "Choose a store of the selling organization")
     const preference =
         call("mantle.ledger.LedgerServices.find#PartyAcctgPreference", {organizationPartyId}).partyAcctgPreference || {}
-    const currencyUomId = text(p.currencyUomId) || opportunity?.currencyUomId || preference.baseCurrencyUomId || null
+    if (template && text(p.currencyUomId) && text(p.currencyUomId) !== template.order.currencyUomId)
+        denied("TEMPLATE_CURRENCY", "Quote template " + template.order.orderId + " is in " + template.order.currencyUomId)
+    const currencyUomId =
+        template?.order.currencyUomId ||
+        text(p.currencyUomId) ||
+        opportunity?.currencyUomId ||
+        preference.baseCurrencyUomId ||
+        null
     if (!currencyUomId) denied("CURRENCY_REQUIRED", "Choose the quote's currency")
     if (one("moqui.basic.Uom", {uomId: currencyUomId})?.uomTypeEnumId !== "UT_CURRENCY_MEASURE")
         denied("CURRENCY_INVALID", "Choose a currency")
     const validFromDate = direct ? null : dateOf(p.validFromDate, "Valid from") || ec.user.nowTimestamp
-    // P9: with no end given, the organization's quote validity in days from the start (SalesPolicy; none, an open end)
-    const validityDays = direct ? 0 : Number(approvals().policyOf(organizationPartyId)?.quoteValidityDays || 0)
+    // P9: with no end given, the organization's quote validity in days from the start (SalesPolicy; none, an open end); P12: the
+    // template's own validity first
+    const validityDays = direct
+        ? 0
+        : Number(template?.order.templateValidityDays ?? (approvals().policyOf(organizationPartyId)?.quoteValidityDays || 0))
     const validThruDate = direct
         ? null
         : dateOf(p.validThruDate, "Valid through") ||
           (validityDays > 0 ? new Date(ms(validFromDate) + validityDays * dayMs) : null)
     if (validThruDate && ms(validThruDate) <= ms(validFromDate))
         denied("VALIDITY_INVALID", "Valid through must be after valid from")
-    const created = call("mantle.order.OrderServices.create#Order", {
+    const values = {
         vendorPartyId: organizationPartyId,
         customerPartyId,
         currencyUomId,
         productStoreId,
-        orderName: text(p.orderName) || (opportunity ? opportunity.opportunityName : null),
+        orderName:
+            text(p.orderName) ||
+            (opportunity ? opportunity.opportunityName : null) ||
+            (template ? template.order.orderName : null),
         orderPurposeEnumId: direct ? salesAccess.orderPurposes.direct : purpose,
         statusId: "OrderOpen",
         validFromDate,
@@ -353,7 +374,11 @@ function createQuote(p, kind = "quote") {
         postalContactMechId: customerAddress(customerPartyId),
         otherPartyOrderId: text(p.otherPartyOrderId),
         shipBeforeDate: direct ? dateOf(p.shipBeforeDate, "Required by") : null
-    })
+    }
+    // P12: a template's copy (clone#Order; its parentOrderId names the template), else a new order
+    const created = template
+        ? templates().cloneForQuote(template, Object.assign({enteredByPartyId: userScope.partyId}, values))
+        : call("mantle.order.OrderServices.create#Order", values)
     const assign = (partyId, roleTypeId) => {
         if (partyId && !one(PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId}))
             call("create#" + PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId})
@@ -369,8 +394,24 @@ function createQuote(p, kind = "quote") {
     )
     assign(contactPartyId, roles.contact)
     if (salesOpportunityId) call("create#" + ORDER_LINK, {salesOpportunityId, orderId: created.orderId})
+    // P12: the copy priced as of the quote's own date, then retaxed (X1) as one change
+    let warnings = []
+    if (template) {
+        warnings = templates().priceCopy({
+            orderId: created.orderId,
+            organizationPartyId,
+            customerPartyId,
+            productStoreId,
+            currencyUomId,
+            salesOpportunityId
+        })
+        call("mantle.order.OrderServices.handle#OrderMajorChange", {
+            orderId: created.orderId,
+            orderPartSeqId: created.orderPartSeqId
+        })
+    }
     const order = one(ORDER, {orderId: created.orderId})
-    return {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, orderRevision: revisionOf(order)}
+    return {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, orderRevision: revisionOf(order), warnings}
 }
 
 // ===== update#Quote =====
@@ -448,6 +489,16 @@ function priceFields(userScope, quote, productId, price, p, current) {
         })
     }
     if (keepOverride) return fields
+    // P12: a template's line has no customer; one with no seller's price yet is priced for each customer on the quote's date
+    if (!price.priceAvailable && quote.template)
+        return Object.assign(fields, {
+            unitAmount: null,
+            isModifiedPrice: "N",
+            priceSource: null,
+            priceOverrideReason: null,
+            priceOverrideUserId: null,
+            priceOverrideDate: null
+        })
     if (!price.priceAvailable)
         denied("PRICE_UNAVAILABLE", "No price is set for this product and customer; enter a price with its reason")
     return Object.assign(fields, {
@@ -464,7 +515,16 @@ function priceFields(userScope, quote, productId, price, p, current) {
 // (itemTypeEnumId ItemShipping: an amount the rep enters, the storeless quote's freight).
 function storeLine(p) {
     const userScope = salesAccess.scope()
-    return storeLineOf(userScope, salesAccess.requireQuote(userScope, text(p.orderId), true), p)
+    return storeLineOf(userScope, lineTarget(userScope, text(p.orderId)), p)
+}
+// P12: the draft whose lines a line verb changes: a quote the caller may change, or a template draft they maintain (the quote draft's
+// line editor; a template has no customer, so its prices are the seller's and a quote reprices them)
+function lineTarget(userScope, orderId) {
+    if (orderId && one(ORDER, {orderId})?.orderPurposeEnumId === salesAccess.templatePurpose) {
+        const template = salesAccess.requireTemplate(userScope, orderId, true)
+        return Object.assign({customerPartyId: null, template: true}, template)
+    }
+    return salesAccess.requireQuote(userScope, orderId, true)
 }
 // P11: the line of a draft the caller may change, a quote's or a direct order's (store#SalesOrderLine, SalesOrders.js).
 function storeLineOf(userScope, quote, p) {
@@ -546,7 +606,7 @@ function storeLineOf(userScope, quote, p) {
 // delete#QuoteLine: a draft's line removed, with its tax (the native delete, which retaxes the part).
 function deleteLine(p) {
     const userScope = salesAccess.scope()
-    return deleteLineOf(salesAccess.requireQuote(userScope, text(p.orderId), true), p)
+    return deleteLineOf(lineTarget(userScope, text(p.orderId)), p)
 }
 function deleteLineOf(quote, p) {
     requireDraft(quote)
@@ -808,10 +868,16 @@ function explainLine(p) {
 
 // ===== check#QuoteAccess =====
 // Whether the caller sees the quote and may change it (get#RecordLinkInfo and RecordFiles for a quote not placed); a call with no
-// user sees none.
+// user sees none. P12 review: a quote template too (SalesAccess.js templateOf: a Sales reader of its organization while it is current, a
+// template manager always), so no other app's record view, Chatter, files or product connections show it as an order.
 function quoteAccess(p) {
     if (!ec.user.userId) return {recordVisible: false, canEdit: false}
-    const found = salesAccess.quoteOf(salesAccess.scope(), text(p.orderId))
+    const orderId = text(p.orderId)
+    const userScope = salesAccess.scope()
+    const found =
+        orderId && one(ORDER, {orderId})?.orderPurposeEnumId === salesAccess.templatePurpose
+            ? salesAccess.templateOf(userScope, orderId)
+            : salesAccess.quoteOf(userScope, orderId)
     return {recordVisible: !!found, canEdit: !!found?.canEdit}
 }
 
