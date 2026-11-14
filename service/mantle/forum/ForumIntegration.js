@@ -434,6 +434,19 @@
                     title: page.pagePath || '',
                     published,
                 })
+            } else if (
+                ['issue', 'mergeRequest', 'release'].includes(link.sourceType)
+            ) {
+                // a record of another app that the topic discusses, or became (an issue made from the topic): its
+                // card when the caller may read it, by that app's rule
+                const card = core.scopeAnswer('linkCard', link)
+                if (card)
+                    cards.push({
+                        linkId: link.linkId,
+                        sourceType: link.sourceType,
+                        title: card.title,
+                        path: card.path,
+                    })
             } else if (link.sourceType === 'case' && staffView) {
                 const request = one('mantle.request.Request', {
                     requestId: link.sourceId,

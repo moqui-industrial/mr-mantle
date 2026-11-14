@@ -463,5 +463,30 @@
     confirmBotOperator: {
         service: "mantle.smithy.SmithyAgreementServices.confirm#BotOperator",
         fields: ["siteId", "repositoryId", "mergeRequestNum", "expectedRevision"]
+    },
+    // DG6 (§15.7): the forum inside Smithy, Report and Hide, a topic made an issue, the report address
+    setScopeForum: {
+        service: "mantle.smithy.SmithyServices.set#ScopeForum",
+        fields: ["siteId", "repositoryId", "groupId", "enabled", "contactListId", "expectedRevision"]
+    },
+    reportSmithyTarget: {
+        service: "mantle.smithy.SmithyServices.report#Target",
+        fields: ["siteId", "targetType", "targetId", "reason", "note", "operationId"]
+    },
+    hideSmithyTarget: {
+        service: "mantle.smithy.SmithyServices.hide#Target",
+        fields: ["siteId", "targetType", "targetId", "hidden", "reason", "expectedRevision"]
+    },
+    convertTopicToIssue: {
+        service: "mantle.smithy.SmithyIssueServices.convert#TopicToIssue",
+        fields: ["siteId", "repositoryId", "rootCommEventId", "postIds", "title", "confidential", "operationId"]
+    },
+    storeIssueMailRoute: {
+        service: "mantle.smithy.SmithyIssueServices.store#MailRoute",
+        fields: ["siteId", "groupId", "repositoryId", "address", "enabled", "expectedRevision"]
+    },
+    claimHeldReport: {
+        service: "mantle.smithy.SmithyIssueServices.claim#HeldReport",
+        fields: ["siteId", "token", "operationId"]
     }
 })

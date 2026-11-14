@@ -173,4 +173,35 @@
         <out-parameters><parameter name="contactListId"/></out-parameters>
         <actions><script>contactListId = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").ensureAccountCategory(siteId)</script></actions>
     </service>
+
+    <!-- DG6 (design-smithy §15.7): a topic made an issue, and the report address -->
+    <service verb="convert" noun="TopicToIssue" authenticate="anonymous-all" allow-remote="false">
+        <description>A topic of the forum of a repository or of its group becomes an issue of the repository, by a Reporter who may read the topic: the issue's text quotes the selected posts (postIds), its title is the given one or the topic's, and both pass the post gate as the caller's. The topic stays and is linked to the issue (PublicDiscussionLink, source type issue). Out: issueNumber. Refused: Not Found for a topic the caller may not read; Unprocessable for a record's conversation, a topic of another forum and a post that is not visible; the gate's refusals.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("convertTopicToIssue", input)</script></actions>
+    </service>
+    <service verb="store" noun="MailRoute" authenticate="anonymous-all" allow-remote="false">
+        <description>A group's report address (a security address), by its Owner: mail to it files a confidential issue in a repository of the group with issues on (repositoryId, else the group's issue repository) as the account whose confirmed address sent it; from any other address the message waits as a held item its Owners read, and the sender gets one reply with a link (claimHeldReport). The site's staff turn the address on (enabled), and on again when the address or the repository changes. Out: routeId, revision. Refused: an address outside the site's route domains (Unprocessable), nameTaken, accessDenied to enable, staleRevision.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeIssueMailRoute", input)</script></actions>
+    </service>
+    <service verb="claim" noun="HeldReport" authenticate="anonymous-all" allow-remote="false">
+        <description>File a held report as the signed-in account, by the token of the link its sender was mailed: a confidential issue of the report address's repository with the held message as its text. Out: repositoryPath, issueNumber. Refused: Not Found for an unknown, claimed or expired token; accessDenied when the account's confirmed address is not the sender's.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("claimHeldReport", input)</script></actions>
+    </service>
+    <service verb="file" noun="MailReport" authenticate="false" allow-remote="false">
+        <description>Not an operation: called by the forum's mail in (process#Inbound) for a message to a report address from a confirmed account address, in a transaction of its own. Files a confidential issue as that account; the gateway's spam verdict holds it for review (the gate's mail-verdict).</description>
+        <in-parameters>
+            <parameter name="routeId" required="true"/><parameter name="username" required="true"/>
+            <parameter name="title"/><parameter name="body" allow-html="any"/>
+            <parameter name="spam" type="Boolean"/><parameter name="spamReason"/>
+            <parameter name="operationId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="issueNumber" type="Integer"/><parameter name="rootCommEventId"/><parameter name="state"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").fileMailReport({routeId, username, title, body, spam, spamReason, operationId}))</script></actions>
+    </service>
 </services>

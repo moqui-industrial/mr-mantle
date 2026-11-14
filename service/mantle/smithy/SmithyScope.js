@@ -350,4 +350,137 @@ function fileUpload(siteId, repositoryId, actorPartyId = me()) {
         return {maxBytes: core.settings(siteId).maxEditBytes}
     })
 }
-;({fileUpload, ownedScopes, recordAccess, postAccess, categoryOwner, confidential, recordOwners, recordPage, linkText, postChanged})
+// ===== DG6: the forum inside Smithy, Report and Hide, the report address (§12.3 to §12.5) =====
+/* The group or the repository a category is bound to, or null. */
+function boundTo(contactListId) {
+    const group = find(M + "SmithyGroup", {contactListId}).list()[0]
+    if (group) return {kind: "group", row: group}
+    const repo = find(M + "SmithyRepository", {contactListId}).list()[0]
+    return repo ? {kind: "repository", row: repo} : null
+}
+/* categoryView: how a party (null: no user) views the group or repository a category is bound to, which is the
+   category's ceiling: {canView, restricted (a private scope: its readers and posters are those with a role in it),
+   member (a Guest role or higher)}; null for a category bound to none. */
+function categoryView(contactListId, actorPartyId) {
+    return privileged(() => {
+        const bound = boundTo(contactListId)
+        if (!bound) return null
+        const a = core.actorOfParty(actorPartyId)
+        const r = bound.kind === "group" ? core.groupRights(bound.row, a) : core.repositoryRights(bound.row, a)
+        return {canView: r.canView, restricted: r.visibility === 3, member: r.canView && r.rank >= RANK.SmrGuest}
+    })
+}
+/* forumBase: the path of the forum's pages of the group or repository a category is bound to, under the site's Smithy
+   mount; null for a category bound to none, and for a site with no Smithy. */
+function forumBase(contactListId) {
+    return privileged(() => {
+        const bound = boundTo(contactListId)
+        const mount = bound ? base(bound.row.siteId) : null
+        if (mount == null) return null
+        return mount + "/" + (bound.kind === "group" ? bound.row.groupPath : bound.row.repositoryPath) + "/-/forum"
+    })
+}
+/* targetModerator: whether a party decides a report on a repository or a group: the site's staff who may view it, and an
+   Owner of a group above it; null for a target type that is not Smithy's. */
+function targetModerator(targetType, targetId, actorPartyId) {
+    if (!["repository", "group"].includes(targetType)) return null
+    return privileged(() => {
+        const a = core.actorOfParty(actorPartyId)
+        const held = core.targetRights(null, targetType, targetId, a)
+        return !!held && core.mounted(held.row.siteId) && core.mayHide(targetType, held.r, a)
+    })
+}
+/* targetInfo: what a review item's page shows of a reported repository or group. */
+function targetInfo(targetType, targetId) {
+    if (!["repository", "group"].includes(targetType)) return null
+    return privileged(() => {
+        const held = core.targetRights(null, targetType, targetId, core.actorOfParty(me()))
+        if (!held || !held.r.canView) return null
+        const row = held.row
+        return {
+            targetType,
+            path: targetType === "group" ? row.groupPath : row.repositoryPath,
+            name: row.name || "",
+            visibility: core.VISIBILITY_CODES[core.VISIBILITY_IDS[held.r.visibility]] || "private",
+            hidden: !!row.hiddenAt,
+            hideReason: row.hideReason || null,
+            revision: Number(row.revision || 1)
+        }
+    })
+}
+/* decideTarget: a review of a report decided by one who may (the forum has asked targetModerator): rejected hides the
+   target, as the decider; dismissed and approved leave it. True for a target that is Smithy's. */
+function decideTarget(targetType, targetId, decision, reason) {
+    if (!["repository", "group"].includes(targetType)) return null
+    return privileged(() => {
+        const a = core.actorOfParty(me())
+        const entity = targetType === "group" ? "SmithyGroup" : "SmithyRepository"
+        const row = one(M + entity, {[targetType + "Id"]: targetId}, true)
+        if (!row) return true
+        const r = targetType === "group" ? core.groupRights(row, a) : core.repositoryRights(row, a)
+        if (!core.mayHide(targetType, r, a)) forum.fail("Unauthorized", "accessDenied: Hiding this is not yours to do")
+        if (decision === "rejected" && !row.hiddenAt) core.setHidden(targetType, row, true, a, r.access.staff, reason)
+        return true
+    })
+}
+/* A held report (mail to a report address from an address that is no account's) is read and decided by the Owners of
+   its repository alone, and by an operator on a page: never the site's moderators. Null for a held message that is no
+   report of Smithy's. */
+function heldReadable(held, actorPartyId) {
+    if (held.targetType !== "issue") return null
+    return privileged(() => {
+        const repo = one(M + "SmithyRepository", {repositoryId: held.targetId})
+        if (!repo || !core.mounted(repo.siteId)) return false
+        const r = core.repositoryRights(repo, core.actorOfParty(actorPartyId))
+        return r.canView && r.rank >= RANK.SmrOwner
+    })
+}
+/* The scope category of a report address's repository: where its held reports wait. */
+function heldScope(route) {
+    if (route.targetType !== "issue") return null
+    return privileged(() => {
+        const repo = one(M + "SmithyRepository", {repositoryId: route.targetId})
+        return repo ? core.scopeCategory(repo) : null
+    })
+}
+/* The page a held report's reply links to (§4.4): it leads to Register or Sign in and back, and files the report. */
+const heldLink = (siteId, token) => publicApps().pageUrl(siteId, "smithy", "/-/held-report/" + encodeURIComponent(token))
+/* The service that files a message to a report address as its confirmed sender. */
+const mailReportService = route => (route.targetType === "issue" ? "mantle.smithy.SmithyIssueServices.file#MailReport" : null)
+/* linkCard: an issue or a merge request a forum topic is linked to (PublicDiscussionLink of the source types issue and
+   mergeRequest), when the caller may read it: its number, title and page. A release's (DG7) has none yet. */
+function linkCard(link) {
+    if (!["issue", "mergeRequest"].includes(link.sourceType)) return null
+    return privileged(() => {
+        const record =
+            link.sourceType === "issue"
+                ? one(M + "SmithyIssue", {workEffortId: link.sourceId})
+                : one(M + "SmithyMergeRequest", {mergeRequestId: link.sourceId})
+        const h = record ? held(record.rootCommEventId, me()) : null
+        const page = h && h.access.canRead && rootReadable(h, me()) ? recordPage(record.rootCommEventId) : null
+        if (!page) return false
+        return {sourceType: link.sourceType, title: page.title, path: page.path}
+    })
+}
+;({
+    fileUpload,
+    ownedScopes,
+    recordAccess,
+    postAccess,
+    categoryOwner,
+    confidential,
+    recordOwners,
+    recordPage,
+    linkText,
+    postChanged,
+    categoryView,
+    forumBase,
+    targetModerator,
+    targetInfo,
+    decideTarget,
+    heldReadable,
+    heldScope,
+    heldLink,
+    mailReportService,
+    linkCard
+})

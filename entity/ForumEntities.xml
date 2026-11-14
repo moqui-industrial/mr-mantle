@@ -9,7 +9,8 @@
     <field name="slug" type="text-medium"/>
     <field name="publicationState" type="id"/>
     <field name="visibility" type="id"/>
-    <field name="mode" type="id"/>
+    <field name="mode" type="id"><description>discussion, qa, or list: a mailing list, whose mail carries the category's
+      own List-Id, List-Post and List-Archive, by its address (a ForumMailRoute of the category)</description></field>
     <field name="rules" type="text-long"/>
     <field name="joinApprovalRequired" type="text-indicator"/>
     <field name="qualifyingSources" type="text-medium"><description>Comma-separated grant sources that give category access: manual, subscription. Empty means manual.</description></field>
@@ -439,9 +440,55 @@
     <field name="enabled" type="text-indicator"/>
     <field name="revision" type="number-integer"/>
     <field name="createdAt" type="date-time"/>
+    <field name="targetType" type="id"><description>Empty or category: mail to the address is a topic of contactListId (a
+      mailing list's address when that category's mode is list). issue: a report address, whose mail files a confidential
+      issue in the repository targetId; contactListId is then the category of the group the address belongs to.</description></field>
+    <field name="targetId" type="id"/>
     <relationship type="one" related="mantle.public.PublicSite"/>
     <index name="FORUM_ROUTE_ADDRESS" unique="true">
       <index-field name="address"/>
+    </index>
+    <index name="FORUM_ROUTE_TARGET">
+      <index-field name="siteId"/>
+      <index-field name="targetType"/>
+      <index-field name="contactListId"/>
+    </index>
+  </entity>
+  <entity entity-name="ForumHeldMail" package="mantle.forum">
+    <description>A message that came by mail from an address that is no account's (Dogfood D17): never posted as it is.
+      It waits, with a ForumReviewItem of the family mail-held (target type mail) in the queue of the scope's moderators,
+      until the sender confirms the address with an account and claims it (the token of the one reply the sender got),
+      or until expiresAt, when its text is removed. The sender's address is never shown to anyone but those who read
+      the review item.</description>
+    <field name="heldId" type="id" is-pk="true"/>
+    <field name="siteId" type="id"/>
+    <field name="routeId" type="id"/>
+    <field name="contactListId" type="id"><description>The scope whose moderators see it</description></field>
+    <field name="targetType" type="id"><description>category (a list's message) or issue (a report)</description></field>
+    <field name="targetId" type="id"><description>The category, or the repository of the report</description></field>
+    <field name="senderAddress" type="text-medium"><description>Lower case</description></field>
+    <field name="senderName" type="text-medium"/>
+    <field name="subject" type="text-medium"/>
+    <field name="body" type="text-very-long"><description>The message's new text as cleaned HTML; removed when dropped</description></field>
+    <field name="messageId" type="text-medium"/>
+    <field name="tokenHash" type="text-medium"/>
+    <field name="reviewId" type="id"/>
+    <field name="state" type="id"><description>held, claimed (posted or filed as resultId) or dropped</description></field>
+    <field name="noticeSentAt" type="date-time"><description>When the sender was answered: one reply an address a day</description></field>
+    <field name="resultId" type="id"><description>The post, or the issue's topic</description></field>
+    <field name="createdAt" type="date-time"/>
+    <field name="expiresAt" type="date-time"/>
+    <relationship type="one" related="mantle.public.PublicSite"/>
+    <index name="FORUM_HELD_TOKEN" unique="true">
+      <index-field name="tokenHash"/>
+    </index>
+    <index name="FORUM_HELD_SENDER">
+      <index-field name="senderAddress"/>
+      <index-field name="state"/>
+    </index>
+    <index name="FORUM_HELD_EXPIRY">
+      <index-field name="state"/>
+      <index-field name="expiresAt"/>
     </index>
   </entity>
   <entity entity-name="ForumReplyToken" package="mantle.forum">

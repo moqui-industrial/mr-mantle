@@ -567,4 +567,38 @@
             ]]></script>
         </actions>
     </service>
+
+    <!-- DG6 (design-smithy §15.7): the forum inside Smithy, Report and Hide -->
+    <service verb="set" noun="ScopeForum" authenticate="anonymous-all" allow-remote="false">
+        <description>Turn the forum of a group (groupId) or of a repository (repositoryId) on or off, by its Owner: its category is published with its name and a visibility no wider than it, under the category of the group above (whose forum must be on); a repository gets its subcategory when its forum is first turned on, and its issues' and merge requests' conversations move to it. contactListId links an existing category of the site in place of its own, when the caller owns it and nothing else is bound to it. Out: contactListId, enabled, revision. Refused: a category of another site, one the caller does not own, or one bound elsewhere (Unprocessable); one wider than the group or repository, and a forum above that is off (policyRefused); staleRevision.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setScopeForum", input)</script>
+        </actions>
+    </service>
+    <service verb="report" noun="Target" authenticate="anonymous-all" allow-remote="false">
+        <description>Report a repository or a group (targetType, targetId) the caller views, with a reason and a note, by an account with a confirmed address: one review item (target type repository or group, family flag) waits for a target in the queue of the scope above it (the group above; the site's staff for a top-level group and a personal repository), and each account's report is kept. Out: reported. Refused: the gate's limits (the day's, the time between two).</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("reportSmithyTarget", input)</script>
+        </actions>
+    </service>
+    <service verb="hide" noun="Target" authenticate="anonymous-all" allow-remote="false">
+        <description>Hide a repository or a group (hidden true, with a reason), or show it again: hidden, it is Not Found to all but its Owners and the site's staff, on the pages and in git. By the site's staff (owners, moderators, operators) and by an Owner of a group above it, never by a role on the target itself. Logged in the forum's moderation log. Out: hidden, revision. Refused: accessDenied for another caller, and to show again what the site's staff hid; staleRevision.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("hideSmithyTarget", input)</script>
+        </actions>
+    </service>
+    <service verb="count" noun="PipelineRun" authenticate="anonymous-all" allow-remote="false">
+        <description>The day's limit of pipeline runs an account asks for (by hand, or an outside run), by its trust level in the site (the post gate's kind pipelineRun, design-smithy §12.2): whether one more is allowed, and it is counted when it is. A Maintainer of the repository and the site's staff have no limit. For the CI's pre-queue hook (DG5); not an operation.</description>
+        <in-parameters><parameter name="repositoryId" required="true"/><parameter name="userId" required="true"/></in-parameters>
+        <out-parameters><parameter name="allowed" type="Boolean"/><parameter name="reason"/><parameter name="message"/></out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").countPipelineRun({repositoryId, userId}))</script>
+        </actions>
+    </service>
 </services>

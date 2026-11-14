@@ -531,6 +531,15 @@ function deliver(p) {
             st.communicationEventId,
         ),
         listId: allowed.record?.listId || null,
+        // a mailing list's own headers, by the category's address (a topic of a category in list mode)
+        listHeaders:
+            allowed.record || allowed.private || urls.forumBase == null
+                ? null
+                : policy().listHeaders(
+                      v.siteId,
+                      event.contactListId,
+                      urls.origin + urls.forumBase,
+                  ),
         inReplyTo: parentRef || rootRef,
         references: [rootRef, parentRef].filter(Boolean).join(' '),
         bodyParameters: {
@@ -638,8 +647,10 @@ function mail(v, scope, build, needsForum = true) {
             extraHeaders: {
                 'List-Unsubscribe': '<' + oneClickUrl + '>',
                 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-                // a record's mail names its repository, so a filter can tell a repository's mail
+                // a record's mail names its repository, so a filter can tell a repository's mail; a mailing list's
+                // names the list, with where to post to it and where its archive is
                 'List-Id': (built.listId || v.siteId) + '.' + host.hostname,
+                ...(built.listHeaders || {}),
             },
             ...(built.inReplyTo ? { inReplyTo: built.inReplyTo } : {}),
             ...(built.references ? { references: built.references } : {}),

@@ -541,7 +541,9 @@ kit => {
                 title: text(o.title).trim(),
                 ...(hasText ? {body: forum.renderSource(format, source), source} : {}),
                 sourceFormat: format,
-                canModerate: !!o.canModerate
+                canModerate: !!o.canModerate,
+                // a report that came by mail (DG6): what the gateway marked as spam is held
+                mailVerdict: o.mailVerdict
             })
         )
         const pending = gated.decision === "hold"
@@ -1531,6 +1533,7 @@ kit => {
         }
     }
     return {
+        fileIssue,
         syncSite,
         taskHidden,
         taskReference,

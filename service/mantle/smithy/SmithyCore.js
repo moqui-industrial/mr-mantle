@@ -557,6 +557,63 @@ function ensureAccountCategory(siteId) {
 /* The scope category of a repository's conversations: its own, else its group's, else the site's account category. */
 const scopeCategory = repo =>
     repo.contactListId || (repo.groupId ? ensureGroupCategory(repo.groupId) : ensureAccountCategory(repo.siteId))
+// ===== Report and Hide (§12.3) =====
+/* The scope whose moderators decide a report on a repository or a group, and where its hiding is logged: the category of
+   the group above it. None (the site's staff alone) for a top-level group and for a personal repository: a target's own
+   Owners do not decide a report on it. */
+const scopeAbove = (kind, row) => {
+    const groupId = kind === "group" ? row.parentGroupId : row.groupId
+    return groupId ? ensureGroupCategory(groupId) : null
+}
+/* Who may hide a repository or a group they view, and decides a report on it: the site's staff (owners, moderators, and
+   an operator on a page), and an Owner of a group above it. Never by a role on the target itself. r: its rights for a. */
+function mayHide(kind, r, a) {
+    if (!r.canView) return false
+    if (r.access.staff) return true
+    if (!a.partyId || r.access.suspended) return false
+    const above = kind === "group" ? r.chain.slice(1) : r.chain
+    return above.length > 0 && groupRank(above, a.partyId)[0] >= RANK.SmrOwner
+}
+/* The rights an actor holds on a repository or a group by its id and kind, with its row; null for none of the site. */
+function targetRights(siteId, kind, targetId, a) {
+    const entity = kind === "group" ? "SmithyGroup" : kind === "repository" ? "SmithyRepository" : null
+    const row = entity && typeof targetId === "string" && targetId ? one(M + entity, {[kind + "Id"]: targetId}) : null
+    if (!row || (siteId && row.siteId !== siteId)) return null
+    return {row, r: kind === "group" ? groupRights(row, a) : repositoryRights(row, a)}
+}
+/* Hides a repository or a group, or shows it again (the row is locked by the caller): Not Found from now to all but its
+   Owners and the site's staff, on the pages and in git (viewable). The audit row says whether staff hid it (hide-staff),
+   which an Owner cannot undo; it is logged in the scope above the target. Gives the new revision. */
+function setHidden(kind, row, hidden, a, byStaff, reason) {
+    const before = Number(row.revision || 1)
+    update(row, {
+        hiddenAt: hidden ? now() : null,
+        hiddenByPartyId: hidden ? a.partyId : null,
+        hideReason: hidden ? String(reason || "").slice(0, 2000) : null,
+        revision: before + 1
+    })
+    forum.audit(
+        row.siteId,
+        scopeAbove(kind, row),
+        kind,
+        row[kind + "Id"],
+        hidden ? (byStaff ? "hide-staff" : "hide") : "unhide",
+        reason,
+        before,
+        before + 1
+    )
+    return before + 1
+}
+/* Whether what is hidden was hidden by the site's staff: by the last hiding in the log. */
+const hiddenByStaff = (kind, row) =>
+    Array.from(
+        find(forum.F + "ForumModerationAction", {siteId: row.siteId, targetType: kind, targetId: row[kind + "Id"]})
+            .condition("action", "in", ["hide", "hide-staff"])
+            .orderBy("-createdAt")
+            .limit(1)
+            .list()
+    )[0]?.action === "hide-staff"
+
 /* What an actor holds on an issue (§5.3, §8.1, §8.3), from the rights it holds on the repository (r):
    - read: a viewer of a repository with issues on, when the task is public (WevGeneral) or the actor is a Reporter; a
      confidential one only its Owners (operators on a page among them) and its reporter;
@@ -895,7 +952,13 @@ function resolvePath(siteId, path) {
     actorOfParty,
     ensureGroupCategory,
     ensureAccountCategory,
+    makeScopeCategory,
     scopeCategory,
+    scopeAbove,
+    mayHide,
+    targetRights,
+    setHidden,
+    hiddenByStaff,
     issueAccess,
     mergeRequestAccess,
     forkCeiling,

@@ -97,9 +97,22 @@ function bump(siteId) {
     const s = one(S + 'PublicSite', { siteId }, true)
     update(s, { generation: Number(s.generation || 0) + 1 })
 }
+/* A category and the categories above it, nearest first. */
+function categoryChain(contactListId) {
+    const chain = []
+    let at = contactListId || null
+    while (at && chain.length < 8 && !chain.includes(at)) {
+        chain.push(at)
+        at = one(F + 'ForumCategory', { contactListId: at })?.parentContactListId
+    }
+    return chain
+}
+/* A sanction of the whole site, or of the category or one above it: what is said of a group's category holds in the
+   categories of its subgroups and repositories. */
 function sanctioned(siteId, partyId, contactListId, kind) {
     if (!partyId) return false
     const cf = ec.entity.conditionFactory
+    const chain = categoryChain(contactListId)
     return (
         find(F + 'ForumSanction', { siteId, partyId, kind })
             .conditionDate('fromDate', 'thruDate', now())
@@ -107,17 +120,52 @@ function sanctioned(siteId, partyId, contactListId, kind) {
                 cf.makeCondition(
                     [
                         cf.makeCondition('contactListId', 'equals', null),
-                        cf.makeCondition(
-                            'contactListId',
-                            'equals',
-                            contactListId || null,
-                        ),
+                        chain.length > 1
+                            ? cf.makeCondition('contactListId', 'in', chain)
+                            : cf.makeCondition(
+                                  'contactListId',
+                                  'equals',
+                                  contactListId || null,
+                              ),
                     ],
                     'or',
                 ),
             )
             .count() > 0
     )
+}
+/* A category and every category below it in its site (a scope), as a set of ids; at most 2000. */
+function categorySubtree(siteId, contactListId) {
+    const all = rows(F + 'ForumCategory', { siteId }, 2000)
+    const inside = new Set([contactListId])
+    for (let added = true; added; ) {
+        added = false
+        for (const c of all)
+            if (
+                c.parentContactListId &&
+                inside.has(c.parentContactListId) &&
+                !inside.has(c.contactListId)
+            ) {
+                inside.add(c.contactListId)
+                added = true
+            }
+    }
+    return inside
+}
+/* A route address is lower case with no plus tag; its domain must be one the operator registered. */
+function routeAddress(address) {
+    const value = String(address || '')
+        .trim()
+        .toLowerCase()
+    const m = /^([a-z0-9._-]{1,64})@([a-z0-9.-]{1,190})$/.exec(value)
+    if (!m) invalid('A route address is local@domain without a plus tag')
+    const domains = String(System.getProperty('pass_route_domains') || '')
+        .split(',')
+        .map((d) => d.trim().toLowerCase())
+        .filter(Boolean)
+    if (!domains.includes(m[2]))
+        invalid('The route domain is not registered for this deployment')
+    return value
 }
 
 function listMember(contactListId, partyId) {
@@ -226,6 +274,16 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
                 (joined && (c.visibility === 'members' || !!lm || granted))))
     if (c.visibility === 'help' && !moderate && !lm) read = false
     let own = !read && published && joined && c.visibility === 'help'
+    // A category bound to a group or a repository is no wider than it (the access ceiling): who may not view that
+    // scope reads and moderates nothing here, and a private scope's readers and posters are the accounts with a role
+    // in it, not the list's members.
+    const bound = scopeView(contactListId, actor)
+    const scopeMember = !!bound && bound.canView && bound.restricted && bound.member
+    if (bound && !bound.canView) read = own = moderate = false
+    else if (bound?.restricted) {
+        read = moderate || (published && bound.member)
+        own = false
+    }
     if (c.parentContactListId) {
         const parent = categoryAccess(c.parentContactListId, actor, seen)
         if (!parent || parent.category.siteId !== c.siteId) return null
@@ -244,7 +302,7 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         (list?.postingEnumId === 'ClpAnyUser' ||
             (list?.postingEnumId === 'ClpModerators'
                 ? moderate
-                : !!lm || granted))
+                : !!lm || granted || scopeMember))
     return {
         category: c,
         site: s,
@@ -961,7 +1019,7 @@ function scopeOwner(contactListId, actor) {
                 ),
             ),
         )
-    if (!scopeBound.get(contactListId)) return false
+    if (!scopeBound.get(contactListId) || !actor) return false
     const key = contactListId + '|' + actor
     if (!scopeBound.has(key))
         scopeBound.set(
@@ -969,6 +1027,51 @@ function scopeOwner(contactListId, actor) {
             scopes().some((scope) => scope.categoryOwner(contactListId, actor)),
         )
     return scopeBound.get(key)
+}
+/* A category was bound to a group or a repository, or its binding ended: what was kept of it is asked again. */
+function scopeChanged(contactListId) {
+    for (const key of Array.from(scopeBound.keys()))
+        if (key === contactListId || String(key).startsWith(contactListId + '|'))
+            scopeBound.delete(key)
+    if (accessMemo) accessMemo.clear()
+}
+/* How the group or repository a category is bound to is viewed by a party (null: no user): {canView, restricted (a
+   private scope), member (a role in it)}, or null for a category that is bound to none. */
+function scopeView(contactListId, actor) {
+    scopeOwner(contactListId, null)
+    if (!scopeBound.get(contactListId)) return null
+    for (const scope of scopes()) {
+        const view = scope.categoryView
+            ? scope.categoryView(contactListId, actor || null)
+            : null
+        if (view) return view
+    }
+    return null
+}
+/* What the apps that keep records answer for a review item that is theirs: a target of their own type (a repository, a
+   group) or a held message. Each asks every scope module and takes the first answer that is not null. */
+const TARGET_TYPES = ['repository', 'group']
+function scopeAnswer(name, ...args) {
+    for (const scope of scopes()) {
+        const out = scope[name] ? scope[name](...args) : null
+        if (out != null) return out
+    }
+    return null
+}
+const heldMail = (r) =>
+    r.targetType === 'mail'
+        ? one(F + 'ForumHeldMail', { heldId: r.targetId })
+        : null
+/* Whether the caller reads and decides a review item of an app's target or of a held message: true or false; null for an
+   item that is the forum's own, whose staff decide it. A report on a repository or a group is its scope's Owners' above
+   it and the site's staff's; a held report is the Owners' of its repository alone. */
+function reviewScoped(r) {
+    if (TARGET_TYPES.includes(r.targetType))
+        return !!scopeAnswer('targetModerator', r.targetType, r.targetId, me())
+    const held = heldMail(r)
+    if (held && held.targetType !== 'category')
+        return !!scopeAnswer('heldReadable', held, me())
+    return null
 }
 /* The scope categories of the records a party owns without being staff of them as categories (a personal repository's,
    a repository whose Owner is not its group's): where its own review queue is. */
@@ -1045,6 +1148,11 @@ function reviewRecord(r) {
     return t?.kind === 'record' ? t : null
 }
 function reviewStaff(siteId, r) {
+    const scoped = reviewScoped(r)
+    if (scoped != null) {
+        if (!scoped) fail('Unauthorized', 'Scoped moderator access required')
+        return null
+    }
     const t = reviewRecord(r)
     if (!t) return staff(siteId, r.contactListId)
     if (!reviewReadable(r, t))
@@ -1067,6 +1175,9 @@ const TRUST_EFFECTS = {
         mentions: 2,
         issue: 3,
         mergeRequest: 2,
+        fork: 2,
+        repository: 1,
+        pipelineRun: 5,
     },
     basic: {
         topics: 10,
@@ -1076,6 +1187,9 @@ const TRUST_EFFECTS = {
         mentions: 5,
         issue: 10,
         mergeRequest: 10,
+        fork: 5,
+        repository: 3,
+        pipelineRun: 20,
     },
     member: {
         topics: 20,
@@ -1085,6 +1199,9 @@ const TRUST_EFFECTS = {
         mentions: 10,
         issue: 20,
         mergeRequest: 20,
+        fork: 20,
+        repository: 10,
+        pipelineRun: 50,
     },
     regular: {
         topics: 20,
@@ -1094,9 +1211,13 @@ const TRUST_EFFECTS = {
         mentions: 10,
         issue: 20,
         mergeRequest: 20,
+        fork: 20,
+        repository: 10,
+        pipelineRun: 50,
     },
 }
-/* The day's counter of a kind; a kind with none (a name, and until DG6 a fork and a pipeline run) has no day's limit. */
+/* The day's counter of a kind. A name kind (a fork, a repository, a group, a pipeline run) is counted only when the
+   gate is asked for a new one (create), never for an edit of a name or a description. */
 const GATE_COUNTERS = {
     topic: 'topics',
     reply: 'replies',
@@ -1105,6 +1226,10 @@ const GATE_COUNTERS = {
     reviewComment: 'replies',
     issue: 'issue',
     mergeRequest: 'mergeRequest',
+    fork: 'fork',
+    repository: 'repository',
+    group: 'repository',
+    pipelineRun: 'pipelineRun',
 }
 /* A name's text (a group's or repository's name and description, a label, a milestone) is not kept pending: it passes
    the address, the sanctions, the length and the rules, and a rule that would hold it refuses it. */
@@ -1201,6 +1326,15 @@ function gate(g) {
             'accessDenied: Your account is suspended on this site',
             'accessDenied',
         )
+    if (
+        g.contactListId &&
+        sanctioned(g.siteId, actor, g.contactListId, 'suspend')
+    )
+        return refuse(
+            'Unauthorized',
+            'accessDenied: Your account is suspended here',
+            'accessDenied',
+        )
     if (sanctioned(g.siteId, actor, g.contactListId || null, 'silence'))
         return refuse(
             'Unauthorized',
@@ -1227,7 +1361,10 @@ function gate(g) {
         )
     const counter = GATE_COUNTERS[g.kind] || null
     const limited = !nameKind && !g.edit
-    const memberState = limited ? memberStateFor(g.siteId, actor) : null
+    // a new fork, repository, group or pipeline run: the day's limit of its kind, and nothing else of a post's
+    const created = nameKind && g.create === true && !g.canModerate
+    const memberState =
+        limited || created ? memberStateFor(g.siteId, actor) : null
     const effects =
         TRUST_EFFECTS[memberState?.trustLevel || trustLevel(g.siteId, actor)] ||
         TRUST_EFFECTS.new
@@ -1283,6 +1420,18 @@ function gate(g) {
                 )
         }
     }
+    if (created) {
+        const daily =
+            memberState.dayKey === dayKey()
+                ? Number(json(memberState.dailyCounts, {})[counter] || 0)
+                : 0
+        if (daily >= effects[counter])
+            return refuse(
+                'Tarpit',
+                'limitReached: Daily limit reached; try again tomorrow',
+                'limitReached',
+            )
+    }
     // 5. The links, images and mentions the trust level allows.
     // An edit is counted as a new post is, so a post is not approved first and filled with links after.
     let body = g.body
@@ -1333,7 +1482,13 @@ function gate(g) {
                 'Unprocessable',
                 "The site's rules do not allow that text",
             )
-        return { decision: 'allow', body, title, flag: false }
+        return {
+            decision: 'allow',
+            body,
+            title,
+            flag: false,
+            ...(created ? { memberState, counter, countOnly: true } : {}),
+        }
     }
     // A new revision keeps the post's visibility. In the forum a rule that would hold or flag it files a review item,
     // as updatePost always did; anywhere else a rule that would hold the text refuses the edit, so nothing a rule holds
@@ -1361,11 +1516,12 @@ function gate(g) {
     if (firstPost || ruleHold || spam)
         return {
             decision: 'hold',
-            reasonFamily: firstPost
-                ? 'first-post'
-                : ruleHold
-                  ? 'rule'
-                  : 'mail-verdict',
+            // what mail the gateway marked as spam is held as that, whatever else would hold it
+            reasonFamily: spam
+                ? 'mail-verdict'
+                : firstPost
+                  ? 'first-post'
+                  : 'rule',
             body,
             title,
             flag: false,
@@ -1392,6 +1548,17 @@ function gateCommit(result, { pending } = {}) {
         counts = same ? json(m.dailyCounts, {}) : {}
     if (counter && !['topics', 'replies'].includes(counter))
         counts[counter] = Number(counts[counter] || 0) + 1
+    // a new fork, repository or run is no post: its day's counter alone
+    if (result.countOnly) {
+        update(m, {
+            dayKey: day,
+            dailyTopics: same ? Number(m.dailyTopics || 0) : 0,
+            dailyReplies: same ? Number(m.dailyReplies || 0) : 0,
+            dailyCounts: JSON.stringify(counts),
+            revision: Number(m.revision) + 1,
+        })
+        return
+    }
     update(m, {
         lastPostedAt: now(),
         approvedContributions:
@@ -1450,6 +1617,15 @@ function privateTopic(t) {
     revision,
     bump,
     sanctioned,
+    categoryChain,
+    categorySubtree,
+    routeAddress,
+    scopeView,
+    scopeChanged,
+    scopeAnswer,
+    heldMail,
+    reviewScoped,
+    TARGET_TYPES,
     listMember,
     accessMemo,
     withAccessMemo,

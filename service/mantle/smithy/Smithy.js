@@ -214,7 +214,10 @@ function repositoryCapabilities(r) {
         canMerge: holds("SmrMaintainer"),
         canAdminister: confirmed && r.rank >= RANK.SmrMaintainer,
         canOwn: confirmed && r.rank >= RANK.SmrOwner,
-        canModerate: confirmed && (r.rank >= RANK.SmrOwner || r.access.staff)
+        canModerate: confirmed && (r.rank >= RANK.SmrOwner || r.access.staff),
+        // DG6: Report is any confirmed viewer's; Hide is the site's staff's and an Owner's of a group above
+        canReport: confirmed,
+        canHide: confirmed && core.mayHide("repository", r, core.actor())
     }
 }
 /* A role row as a member: the account by its profile and never its party id. */
@@ -417,11 +420,15 @@ methods.getGroup = p => {
             .reverse()
             .map(g => ({...groupNamed(g), name: core.groupRights(g, a).canView ? g.name : null})),
         myRole: core.roleCode(r.rank),
+        // DG6: the group's forum (its category is the scope of the forum's reads) and, for its Owners, its report address
+        forum: {...kit.forumScope.forumView(r, true), issueMailRoute: kit.forumScope.mailRouteView(r)},
         capabilities: {
             canCreateRepository: confirmed && r.rank >= RANK.SmrMaintainer,
             canCreateSubgroup: confirmed && r.rank >= RANK.SmrOwner && r.chain.length < core.MAX_GROUP_DEPTH,
             canOwn: confirmed && r.rank >= RANK.SmrOwner,
             canModerate: confirmed && (r.rank >= RANK.SmrOwner || r.access.staff),
+            canReport: confirmed,
+            canHide: confirmed && core.mayHide("group", r, a),
             confirmed,
             signedIn
         }
@@ -531,6 +538,8 @@ methods.getRepository = p => {
         group: groupRow ? chainView(groupRow, a) : null,
         cloneUrls: {page: pageUrl, https: urls.httpsUrl || null, ssh: urls.sshUrl || null},
         myRole: core.roleCode(r.rank),
+        // DG6: the repository's forum, when it has one
+        forum: kit.forumScope.forumView(r, false),
         capabilities: repositoryCapabilities(r),
         counts: {
             // issues are DG3's
@@ -1148,6 +1157,9 @@ const reviews = ec.resource.script("component://mr-mantle/service/mantle/smithy/
 kit.reviews = reviews
 const agreements = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyAgreements.js")(kit)
 kit.agreement = agreements
+// the forum inside Smithy, Report and Hide, the report address (§15.7); its views are read by getGroup and getRepository
+const forumScope = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyForum.js")(kit)
+kit.forumScope = forumScope
 
 // ===== dispatch =====
 const NUMBERS = [
@@ -1175,7 +1187,7 @@ const NUMBERS = [
     "newLine"
 ]
 /* Lists of ids or handles, and the one field that holds a post's text. */
-const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles"]
+const LISTS = ["labelIds", "assigneeHandles", "attachmentIds", "reviewerHandles", "postIds"]
 const TEXTS = ["body"]
 /* A file's text as a page's editor sends it: bounded here well above the site's maxEditBytes, which commitFile holds. */
 const FILE_TEXTS = ["content"]
@@ -1207,7 +1219,9 @@ const FLAGS = [
     "draft",
     "deleteSourceBranch",
     "resolved",
-    "agent"
+    "agent",
+    "enabled",
+    "hidden"
 ]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
@@ -1311,6 +1325,9 @@ function privileged(work) {
     // error refuses
     agreementWrite: context => guardedCheck(() => agreements.checkWrite(context || {})),
     agreementBrought: context => privileged(() => core.withMemo(() => agreements.brought(context || {}))),
+    // DG6: a report by mail filed as its confirmed sender, and the day's limit of pipeline runs
+    fileMailReport: p => privileged(() => core.withMemo(() => forumScope.fileMailReport(p || {}))),
+    countPipelineRun: p => privileged(() => core.withMemo(() => forumScope.countPipelineRun(p || {}))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

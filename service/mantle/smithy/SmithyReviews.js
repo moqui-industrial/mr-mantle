@@ -1170,14 +1170,17 @@ kit => {
                 invalid("quotaExceeded: You have as many personal repositories as this site allows")
             const slug = text(p.slug || r.repo.slug).toLowerCase()
             const name = text(p.name).trim() || r.repo.name
-            // the fork's name passes the gate as a name does (the day's limit for forks is DG6's)
-            forum.gateRefuse(
+            // the fork's name passes the gate as a name does, with the day's limit of forks at the account's trust level
+            // (limitReached), which the site's staff do not have
+            const gated = forum.gateRefuse(
                 forum.gate({
                     siteId: p.siteId,
                     actorPartyId: partyId,
                     contactListId: parent?.group.contactListId || null,
                     kind: "fork",
                     confirmed: true,
+                    create: true,
+                    canModerate: access.staff,
                     body: name + "\n" + slug
                 })
             )
@@ -1195,6 +1198,7 @@ kit => {
                 visibility: core.VISIBILITY_CODES[VISIBILITY_IDS[visibility]],
                 forkOfRepositoryId: r.repo.repositoryId
             })
+            forum.gateCommit(gated)
             forum.audit(p.siteId, null, "repository", made.repositoryId, "forkRepository", r.repo.repositoryPath, null, 1)
             return made
         })

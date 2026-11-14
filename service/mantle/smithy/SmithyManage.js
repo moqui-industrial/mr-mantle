@@ -48,20 +48,23 @@ kit => {
     }
     /* A name or a description an account writes passes the post gate (§12.2) as a name does: the confirmed address, the
        sanctions, and the forum's rules, where a rule that would hold a post refuses a name, which is not kept pending. */
-    function checkText(siteId, partyId, values, scopeContactListId = null) {
+    function checkText(siteId, partyId, values, scopeContactListId = null, made = null) {
         const written = values
             .filter(value => value != null && value !== "")
             .map(text)
             .join("\n")
         // the caller is a writer (kit.writer): its address is confirmed, or it is an operator's
-        forum.gateRefuse(
+        return forum.gateRefuse(
             forum.gate({
                 siteId,
                 actorPartyId: partyId,
                 // the scope's category when it has one: a silence there and the scope's own rules apply
                 contactListId: scopeContactListId,
-                kind: "repository",
+                kind: made?.kind || "repository",
                 confirmed: true,
+                // a new repository or group (made): the day's limit of the account's trust level (limitReached), which
+                // the site's staff and the scope's Owner (made.exempt) do not have; the caller counts it once it is made
+                ...(made ? {create: true, canModerate: !!made.exempt} : {}),
                 ...(written ? {body: written} : {})
             })
         )
@@ -316,9 +319,13 @@ kit => {
                 find(M + "SmithyGroup", {siteId: p.siteId, requestedByPartyId: partyId, statusId: "SmgRequested"}).count() > 0
             )
                 fail("Conflict", "You have a group request waiting")
-            checkText(p.siteId, partyId, [p.name, p.description, p.reason])
+            const gated = checkText(p.siteId, partyId, [p.name, p.description, p.reason], null, {
+                kind: "group",
+                exempt: access.staff
+            })
             const statusId = access.owner || policy === "ScpVerified" ? "SmgActive" : "SmgRequested"
             const made = makeGroup({...p, partyId, access, parent: null, statusId})
+            forum.gateCommit(gated)
             if (statusId === "SmgActive") audit(p.siteId, null, "group", made.groupId, "createGroup", made.groupPath, null, 1)
             return {groupId: made.groupId, groupPath: made.groupPath, status: STATUS_CODES[statusId]}
         })
@@ -437,8 +444,11 @@ kit => {
                 .concat(repositoriesBelow(p.siteId, group.groupPath))
                 .filter(wider)) {
                 update(row, {visibilityEnumId, revision: revisionOf(row) + 1})
+                kit.forumScope.narrow(row.contactListId, rank)
                 narrowedCount++
             }
+            // the group's forum category is no wider than the group, in this transaction (§12.5)
+            kit.forumScope.narrow(group.contactListId, rank)
         }
         if (given(p.issueRepositoryPath)) {
             const path = text(p.issueRepositoryPath).toLowerCase()
@@ -693,7 +703,10 @@ kit => {
                 )
                     invalid("quotaExceeded: You have as many personal repositories as this site allows")
             }
-            checkText(p.siteId, partyId, [p.name, p.description], parent?.group.contactListId || null)
+            const gated = checkText(p.siteId, partyId, [p.name, p.description], parent?.group.contactListId || null, {
+                kind: "repository",
+                exempt: access.staff || (!!parent && parent.rank >= RANK.SmrOwner)
+            })
             // a new repository of the site's kind, never one that is there
             const made = makeRepository({
                 ...p,
@@ -715,6 +728,7 @@ kit => {
                 })
                 if (!committed?.commitId) fail("Unprocessable", "The README could not be committed")
             }
+            forum.gateCommit(gated)
             audit(p.siteId, null, "repository", made.repositoryId, "createRepository", made.repositoryPath, null, 1)
             return made
         })
@@ -743,6 +757,14 @@ kit => {
             hostedFields.defaultMergeMethodEnumId = core.idOfCode(MERGE_METHODS, p.defaultMergeMethod)
         }
         for (const name of FEATURES) if (given(p[name]) && p[name] !== "") fields[name] = flag(p[name]) ? "Y" : "N"
+        // the forum turned on or off is an Owner's (setScopeForum, DG6): its category is made and published with it
+        if (fields.forumEnabled && fields.forumEnabled !== (repo.forumEnabled === "Y" ? "Y" : "N")) {
+            core.requireRole(r, "SmrOwner")
+            fields.forumEnabled = kit.forumScope.applyForum(p.siteId, r, repo, false, {enabled: fields.forumEnabled === "Y"})
+                .enabled
+                ? "Y"
+                : "N"
+        } else delete fields.forumEnabled
         // issues turned on: the repository gets its project, its group's when the group has one (§8.1)
         if (fields.issuesEnabled === "Y" && repo.issuesEnabled !== "Y") kit.issues.issueProject(repo)
         if (given(p.docsPath)) {
@@ -787,6 +809,7 @@ kit => {
         const forkCeiling = core.forkCeiling(repo.repositoryId)
         if (rank < forkCeiling) invalid("policyRefused[visibility]: A fork is no wider than the repository it was forked from")
         update(repo, {visibilityEnumId, revision: before + 1})
+        kit.forumScope.narrow(repo.contactListId, Math.max(rank, ceiling, forkCeiling))
         audit(
             p.siteId,
             null,

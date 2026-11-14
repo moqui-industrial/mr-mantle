@@ -385,4 +385,15 @@
     ['POST', 'smithy/repositories/{repositoryId}/merge-requests/{mergeRequestNum}/agreement', 'recheckAgreement'],
     ['POST', 'smithy/repositories/{repositoryId}/merge-requests/{mergeRequestNum}/bot-operator', 'declareBotOperator'],
     ['POST', 'smithy/repositories/{repositoryId}/merge-requests/{mergeRequestNum}/bot-operator/confirm', 'confirmBotOperator'],
+    // Dogfood DG6: mailing lists (design-forum's catalog), then Smithy's forum, Report and Hide (design-smithy §15.7)
+    ['POST', 'categories/{contactListId}/mbox-imports', 'importMbox'],
+    ['GET', 'mbox-imports/{importId}', 'getMboxImport'],
+    ['POST', 'categories/{contactListId}/list-invitations', 'inviteListMembers'],
+    ['POST', 'held-mail/claim', 'claimHeldMail'],
+    ['PATCH', 'smithy/scope-forum', 'setScopeForum'],
+    ['POST', 'smithy/reports', 'reportSmithyTarget'],
+    ['POST', 'smithy/hidden', 'hideSmithyTarget'],
+    ['POST', 'smithy/repositories/{repositoryId}/issues/from-topic', 'convertTopicToIssue'],
+    ['POST', 'smithy/groups/{groupId}/issue-mail-route', 'storeIssueMailRoute'],
+    ['POST', 'smithy/held-reports/claim', 'claimHeldReport'],
 ]
