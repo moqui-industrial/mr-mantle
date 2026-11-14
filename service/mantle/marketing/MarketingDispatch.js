@@ -188,8 +188,8 @@ function controlOf(userScope, row) {
         const approval = approvals.currentApproval("send", row.campaignSendId, Number(row.sendRevision || 1))
         if (approval) {
             const own = releaseParties(row, approval).has(ec.user.userId)
-            const count = row.statusId === "CsPaused" ? Number(row.releasedCount || 0) : preparedCount(row)
-            // P10: preparedCount reads the samples and the held remainder alike
+            // P10: preparedCount reads the samples and the held remainder alike (a paused experiment's resume counts the whole audience)
+            const count = row.statusId === "CsPaused" ? resumeCount(row) : preparedCount(row)
             releaseSelf = own
             canRelease = !own || approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", count)
         }
@@ -229,7 +229,7 @@ function releaseSend(p) {
         selfDispatch: row.selfDispatch === "Y"
     })
     // a second release answers the first, whatever stamp it names
-    if (["CsScheduled", "CsSending", "CsCompleted", "CsCompletedFailures"].includes(row.statusId)) return first()
+    if (["CsScheduled", "CsSending", "CsSampleSent", "CsCompleted", "CsCompletedFailures"].includes(row.statusId)) return first()
     if (row.statusId === "CsPaused") return resumeSend(userScope, row)
     if (row.statusId !== "CsApproved")
         denied("STATUS_INVALID", "Send " + row.campaignSendId + " is " + sends().statusText(row.statusId).toLowerCase())
@@ -338,12 +338,15 @@ function releaseSend(p) {
         selfDispatch: own
     }
 }
+// The count a paused send's resume is admitted by: what was released, or (P10 review) the whole prepared audience when larger, so an
+// experiment's samples never stand for its held or released remainder under the one-person team's flag.
+const resumeCount = row => Math.max(Number(row.releasedCount || 0), preparedCount(row))
 // a paused send resumed by a dispatcher, under release's rule
 function resumeSend(userScope, row) {
     const approval = approvals.currentApproval("send", row.campaignSendId, Number(row.sendRevision || 1))
     if (!approval) denied("APPROVAL_REQUIRED", "Send " + row.campaignSendId + " is no longer approved")
     const own = releaseParties(row, approval).has(ec.user.userId)
-    if (own && !approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", Number(row.releasedCount || 0)))
+    if (own && !approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "send", resumeCount(row)))
         denied("SELF_DISPATCH", "You wrote, submitted or approved send " + row.campaignSendId + "; another dispatcher resumes it")
     call("update#" + SEND, {
         campaignSendId: row.campaignSendId,

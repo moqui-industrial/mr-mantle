@@ -309,9 +309,13 @@ function storeExperiment(p) {
         measureEnumId,
         observationHours
     })
-    // the sample decides who receives what: a change of it is the send's; the measure and the period are the reading's
-    const material = samplePercent !== Number(existing.samplePercent)
-    if (material) s.revise(row, {}, "Experiment sample changed")
+    // the setup is the send's as approved (who receives what, and when a winner may be chosen and released): any change of it ends
+    // the approval (P10 review); storing the same values changes nothing
+    const material =
+        samplePercent !== Number(existing.samplePercent) ||
+        measureEnumId !== existing.measureEnumId ||
+        observationHours !== Number(existing.observationHours || defaults.observationHours)
+    if (material) s.revise(row, {}, "Experiment setup changed")
     return {campaignExperimentId: existing.campaignExperimentId, approvalEnded: material && row.statusId !== "CsDraft"}
 }
 
@@ -488,7 +492,7 @@ function summaryOf(userScope, row) {
         variants: variants.map(variant => ({
             campaignExperimentVariantId: variant.campaignExperimentVariantId,
             labelText: variantLabel(variant),
-            subject: textsOf(row, variant).subject,
+            subject: variantContent(row, variant, false).subject || "",
             changedText: changedParts(variant)
         }))
     }
@@ -683,6 +687,16 @@ function releaseWinner(p) {
     const row = s.sendOf(userScope, p.campaignSendId, true)
     const experiment = liveOf(row.campaignSendId, true)
     if (!experiment) denied("RECORD_UNAVAILABLE", "Send " + row.campaignSendId + " has no experiment")
+    // the winner the caller read (P10 review): a release never sends a variant other than the one named, nor answers as released a
+    // call that names another (a choice made again since it was read)
+    const named = text(p.campaignExperimentVariantId)
+    if (named && experiment.winnerVariantId && named !== experiment.winnerVariantId)
+        denied(
+            "WINNER_CHANGED",
+            "The winner is " +
+                variantLabel(one(VARIANT, {campaignExperimentVariantId: experiment.winnerVariantId})) +
+                (experiment.winnerReleasedDate ? ", released already" : " now: read it again before releasing")
+        )
     // one release: a second answers the first, whatever key it names
     if (experiment.winnerReleasedDate)
         return {

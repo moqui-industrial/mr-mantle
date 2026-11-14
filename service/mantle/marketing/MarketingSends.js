@@ -1018,6 +1018,10 @@ function evaluateAudience(userScope, row, o = {}) {
     const org = row.organizationPartyId
     const audience = audienceOf(row)
     const listRow = o.lenient ? id => one(LIST, {contactListId: id}) : id => listFor(id, org)
+    // an exclusion list no longer found refuses rather than admitting whom it excluded (P10 review)
+    const excludeRow = o.lenient
+        ? id => one(LIST, {contactListId: id}) || denied("RECORD_UNAVAILABLE", "The excluded list " + id + " is not available")
+        : listRow
     const segmentRow = o.lenient ? id => segments.segmentOfScope(userScope, id) : id => segmentFor(userScope, id, org)
     return eligibility.evaluateSend({
         userScope,
@@ -1025,7 +1029,7 @@ function evaluateAudience(userScope, row, o = {}) {
         purposeEnumId: row.purposeEnumId,
         lists: audience.listIds.map(listRow).filter(Boolean),
         segments: audience.segmentIds.map(segmentRow),
-        excludeLists: audience.excludeListIds.map(listRow).filter(Boolean),
+        excludeLists: audience.excludeListIds.map(excludeRow),
         excludeSegments: audience.excludeSegmentIds.map(segmentRow),
         asOf: o.asOf || ec.user.nowTimestamp,
         pageSize: o.pageSize

@@ -228,8 +228,32 @@ feature("variants are content of the send; samples equal, disjoint and stable; i
             subject: "Last call, ${firstName}"
         })
         const afterChange = sendRow(campaignSendId)
+        // the setup is the send's as approved: storing it unchanged keeps the approval, a new observation period ends it (P10 review)
+        prepare(users.author, campaignSendId)
+        approve(campaignSendId)
+        const unchanged = as(users.author, D + "store#Experiment", {
+            campaignSendId,
+            expectedRevision: revisionOf(campaignSendId),
+            observationHours: 1
+        })
+        const unchangedStatus = sendRow(campaignSendId).statusId
+        const observed = as(users.author, D + "store#Experiment", {
+            campaignSendId,
+            expectedRevision: revisionOf(campaignSendId),
+            observationHours: 3
+        })
+        const observedStatus = sendRow(campaignSendId).statusId
+        as(users.author, D + "store#Experiment", {
+            campaignSendId,
+            expectedRevision: revisionOf(campaignSendId),
+            observationHours: 1
+        })
         const shown = as(users.author, D + "get#Send", {campaignSendId})
         return {
+            unchanged,
+            unchangedStatus,
+            observed,
+            observedStatus,
             reader,
             setUp,
             same,
@@ -248,6 +272,10 @@ feature("variants are content of the send; samples equal, disjoint and stable; i
         }
     },
     then({
+        unchanged,
+        unchangedStatus,
+        observed,
+        observedStatus,
         reader,
         setUp,
         same,
@@ -284,6 +312,8 @@ feature("variants are content of the send; samples equal, disjoint and stable; i
         approvedStatus == "CsApproved"
         changed.refusal == "" && changed.approvalEnded == true
         afterChange.statusId == "CsDraft"
+        unchanged.refusal == "" && unchanged.approvalEnded == false && unchangedStatus == "CsApproved"
+        observed.refusal == "" && observed.approvalEnded == true && observedStatus == "CsDraft"
         shown.experiment.exists == true && shown.experiment.samplePercent == 40
         shown.experiment.variants.length == 2
         shown.approvalProblems.some(problem => problem.includes("prepared"))
@@ -313,6 +343,11 @@ feature(
             settle()
             system(() => run(D + "dispatch#Send", {campaignSendId}))
             const status = sendRow(campaignSendId).statusId
+            // a second release of the send answers the first while its sample is sent (P10 review)
+            const releasedAgain = as(users.dispatcher, D + "release#Send", {
+                campaignSendId,
+                expectedRevision: revisionOf(campaignSendId)
+            })
             const mails = Object.fromEntries(
                 members.map(name => [addressOf(name), mailTo(addressOf(name)).map(m => String(m.subject || ""))])
             )
@@ -331,15 +366,16 @@ feature(
                 {variantId: "A", observed: 3, denominator: 10},
                 {variantId: "B", observed: 5, denominator: 10}
             ])
-            return {tested, testSubject, beforeRelease, released, status, mails, shown, early, tie, lead}
+            return {tested, testSubject, beforeRelease, released, releasedAgain, status, mails, shown, early, tie, lead}
         },
-        then({tested, testSubject, beforeRelease, released, status, mails, shown, early, tie, lead}) {
+        then({tested, testSubject, beforeRelease, released, releasedAgain, status, mails, shown, early, tie, lead}) {
             tested.refusal == ""
             testSubject == "[TEST] Last call, Alex"
             // a test is no recipient and no result
             beforeRelease.variantList.every(v => v.assignedCount == 2 && v.acceptedCount == 0)
             released.refusal == "" && released.recipientCount == 4
             status == "CsSampleSent"
+            releasedAgain.refusal == "" && releasedAgain.alreadyReleased == true && releasedAgain.recipientCount == 4
             // each sample recipient got one message of its variant; the remainder got none
             Object.entries(ids.assignment).every(([address, variant]) =>
                 variant == "held"
@@ -399,10 +435,28 @@ feature("a dispatcher chooses the winner with a reason; its release reaches the 
             })
         )
         capture.clear()
-        const released = as(users.dispatcher, D + "release#ExperimentWinner", {campaignSendId, operationKey: "first"})
+        // a release naming another winner than the one chosen is refused (P10 review)
+        const wrongWinner = as(users.dispatcher, D + "release#ExperimentWinner", {
+            campaignSendId,
+            campaignExperimentVariantId: ids.variantA
+        })
+        const released = as(users.dispatcher, D + "release#ExperimentWinner", {
+            campaignSendId,
+            campaignExperimentVariantId: ids.variantB,
+            operationKey: "first"
+        })
         settle()
         system(() => run(D + "dispatch#Send", {campaignSendId}))
-        const again = as(users.dispatcher, D + "release#ExperimentWinner", {campaignSendId, operationKey: "second"})
+        const again = as(users.dispatcher, D + "release#ExperimentWinner", {
+            campaignSendId,
+            campaignExperimentVariantId: ids.variantB,
+            operationKey: "second"
+        })
+        const againOther = as(users.dispatcher, D + "release#ExperimentWinner", {
+            campaignSendId,
+            campaignExperimentVariantId: ids.variantA,
+            operationKey: "third"
+        })
         settle()
         const mails = Object.fromEntries(remainder.map(address => [address, mailTo(address).map(m => String(m.subject || ""))]))
         const sampleMails = Object.entries(ids.assignment)
@@ -421,8 +475,10 @@ feature("a dispatcher chooses the winner with a reason; its release reaches the 
             noReason,
             unreleased,
             chosen,
+            wrongWinner,
             released,
             again,
+            againOther,
             mails,
             sampleMails,
             leaver: remainder[0],
@@ -438,8 +494,10 @@ feature("a dispatcher chooses the winner with a reason; its release reaches the 
         noReason,
         unreleased,
         chosen,
+        wrongWinner,
         released,
         again,
+        againOther,
         mails,
         sampleMails,
         leaver,
@@ -457,6 +515,8 @@ feature("a dispatcher chooses the winner with a reason; its release reaches the 
         released.refusal == "" && released.releasedCount == 5 && released.droppedCount == 1
         // a second release, with another key, answers the first and sends nothing more
         again.refusal == "" && again.alreadyReleased == true && again.releasedCount == 5
+        // a call naming the other variant is refused before the release and after it, never answered as released
+        wrongWinner.refusal.includes("WINNER_CHANGED") && againOther.refusal.includes("WINNER_CHANGED")
         leaverRow.statusId == "CrsSkipped" && leaverRow.skipReasonCode == "AUDIENCE_LEFT"
         mails[leaver].length == 0
         Object.entries(mails).every(
