@@ -73,11 +73,12 @@ const TOKEN_WRITES = [
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
 ]
-/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4, §21.5, §21.8: the Dev
-   AIDE connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review
-   threads (getMergeRequestChanges answers them) and pipeline reads. A request whose user came by any other login key (an
-   access token, a session's key) calls no PASS operation (mr-pass plan/design-smithy.md §5.5); the key's account has
-   its normal rights, and a write is idempotent by its operationId as a page's is. */
+/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
+   connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads
+   (getMergeRequestChanges answers them) and reviews, pipeline runs and their re-runs, and issues. A request whose user
+   came by any other login key (an access token, a session's key, a scoped key) calls no PASS operation (mr-pass
+   plan/design-smithy.md §5.5); the key's account has its normal rights, and a write is idempotent by its operationId as
+   a page's is. */
 const APP_KEY_OPERATIONS = [
     'findMergeRequests',
     'getMergeRequest',
@@ -87,9 +88,19 @@ const APP_KEY_OPERATIONS = [
     'getMergeRequestChanges',
     'createReviewComment',
     'resolveReviewThread',
+    // §21.4 a review (approve, comment, request changes); merging stays on the server's page
+    'submitReview',
+    // §21.5 the checks: runs and their jobs read, a run re-run and a job retried by who may
+    'findPipelineRuns',
     'getPipelineRun',
     'getJobRun',
     'getJobLog',
+    'rerunPipelineRun',
+    'retryJobRun',
+    // §21.6 the repository's issues: listed, read, and filed by Quick create
+    'findIssues',
+    'getIssue',
+    'createIssue',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
@@ -264,8 +275,10 @@ function asSystem(work) {
 }
 /* The kind of the current user's unexpired login key `key`: device (an installed app's: a UserLoginKey with a deviceName,
    as /sso/appToken and a REST login with deviceName make it), token (an access token: a description), session (any other,
-   getLoginKey's), or null when it is no such key of the current user. A key is found by its stored form, the SHA-256 of
-   the conf's default login-key hash; under another hash type no key is found, so the request is refused. */
+   getLoginKey's), scoped (create#UserScopedKey's), or null when it is no such key of the current user. A key is found by
+   its stored form, the SHA-256 the conf's default login-key encrypt-hash-type gives: scripts are not told the conf's
+   type, so under another one no key is found and the request is refused (the framework is to tell the kind of the key
+   a request's header login used). */
 function keyKind(key) {
     const userId = ec.user.userId
     if (!key || !userId) return null
@@ -277,6 +290,8 @@ function keyKind(key) {
     )
     if (!row || row.userId !== userId) return null
     if (row.thruDate && ec.user.timestampMillis(row.thruDate) <= Date.now()) return null
+    // a scoped key opens its one service alone (the LLM gateway's): a device name does not make it an app's
+    if (row.scope) return 'scoped'
     if (row.deviceName) return 'device'
     if (row.description) return 'token'
     return 'session'

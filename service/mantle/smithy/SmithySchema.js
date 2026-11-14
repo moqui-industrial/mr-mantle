@@ -675,6 +675,7 @@
             "refs",
             "deleteRefs",
             "enabled",
+            "removeCredential",
             "operationId"
         ]
     },

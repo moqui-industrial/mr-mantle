@@ -42,13 +42,41 @@ function restWrite(p) {
     const repo = p?.repositoryId ? one(REPOSITORY, {repositoryId: p.repositoryId}) : null
     if (!repo) return {allowed: true, message: null, application: null, restUrl: null}
     const url = restUrl(repo.siteId)
-    if (p.operation === "read") return {allowed: true, message: null, application: "smithy", restUrl: url}
+    // a read, and an outside CI's commit status: the framework needs the push right for a status and refuses the
+    // contexts Smithy reserves (agreement/, ci/: git-server reserved-status-contexts), as design-smithy §5.5 has it
+    if (p.operation === "read" || p.operation === "commitStatus.create")
+        return {allowed: true, message: null, application: "smithy", restUrl: url}
+    const smithyOperation = SMITHY_OPERATIONS[p.operation]
     return {
         allowed: false,
-        message: "Smithy keeps " + text(repo.repositoryPath || repo.repositoryId) + ": make this change through Smithy's REST",
+        message:
+            "Smithy keeps " +
+            text(repo.repositoryPath || repo.repositoryId) +
+            ": make this change through Smithy's REST" +
+            (smithyOperation ? " (" + smithyOperation + ")" : ""),
         application: "smithy",
         restUrl: url
     }
+}
+/* Smithy's operation for each write of the framework's REST that it keeps (its roles, gate and conversation hold there):
+   a refusal names it. */
+const SMITHY_OPERATIONS = {
+    "ref.create": "createRef",
+    "ref.delete": "deleteRef",
+    "mergeRequest.create": "createMergeRequest",
+    "mergeRequest.update": "updateMergeRequest",
+    "mergeRequest.close": "setMergeRequestState",
+    "mergeRequest.reopen": "setMergeRequestState",
+    "mergeRequest.reviewers": "setMergeRequestReviewers",
+    "mergeRequest.review": "submitReview",
+    "mergeRequest.comment": "createReviewComment",
+    "mergeRequest.resolveThread": "resolveReviewThread",
+    "mergeRequest.merge": "mergeMergeRequest",
+    "pipeline.run": "runPipeline",
+    "pipeline.rerun": "rerunPipelineRun",
+    "pipeline.cancel": "cancelPipelineRun",
+    "pipeline.approve": "approvePipelineRun",
+    "job.retry": "retryJobRun"
 }
 
 /* The site whose Smithy a client of this server reaches: the site of the host the request came to, else of this server's
@@ -117,14 +145,23 @@ function authorSignedCheck(p) {
     const encoded = value => value.split("/").map(encodeURIComponent).join("/")
     const page = "/" + repo.repositoryPath + "/-/edit/" + encoded(branch) + "/" + encoded(path)
     const missing = Array.from(answer.missing || [], String)
+    // what is missing tells whether an address is a member's confirmed one: it is the author's own to read, or a
+    // Maintainer's of the repository; anyone else learns signed or not
+    const core = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyCore.js")
+    const own = !!ec.user.userId && p.authorUserId === ec.user.userId && !p.authorEmail
+    const detail =
+        own || (!!ec.user.userId && core.repositoryRights(repo, core.actor()).rank >= core.RANK.SmrMaintainer)
     return {
         known: true,
         required: answer.required === true,
         signed: answer.signed === true,
         message: answer.signed
             ? null
-            : "Not signed in " + path + ": missing " + missing.map(word => MISSING[word] || word).join(", "),
-        signUrl: publicApps().pageUrl(repo.siteId, "smithy", page) || (publicApps().mount(repo.siteId, "smithy")?.base ?? "") + page
+            : detail
+              ? "Not signed in " + path + ": missing " + missing.map(word => MISSING[word] || word).join(", ")
+              : "Not signed in " + path,
+        // an absolute https page on the site's own canonical host, or none (a client takes no other address)
+        signUrl: publicApps().pageUrl(repo.siteId, "smithy", page) || null
     }
 }
 ;({restWrite, hostingOffer, authorSignedCheck, restUrl, restPath})

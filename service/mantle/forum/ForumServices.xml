@@ -621,4 +621,21 @@
       <script>result=ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').execute('draftArticleFromTopic',input || {})</script>
     </actions>
   </service>
+  <!-- Not an operation: the restore of ForumCore.asUser's sign-out (restoreSignedIn) -->
+  <service verb="restore" noun="SignedIn" authenticate="false" allow-remote="false">
+    <description>After work done as an account (ForumCore.asUser) signed it out: hasLoggedOut back to N while the row is
+      still as that sign-out left it (Y, and lastUpdatedStamp the stamp given; any Y when the stamp is empty). A sign-out
+      or sign-in elsewhere since changed the row and is kept.</description>
+    <in-parameters>
+      <parameter name="userId" required="true"/>
+      <parameter name="stamp" type="Timestamp"/>
+    </in-parameters>
+    <actions>
+      <script><![CDATA[
+        let find = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).condition('hasLoggedOut', 'Y').disableAuthz()
+        if (stamp != null) find = find.condition('lastUpdatedStamp', stamp)
+        find.updateAll({ hasLoggedOut: 'N' })
+      ]]></script>
+    </actions>
+  </service>
 </services>

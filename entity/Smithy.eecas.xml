@@ -20,4 +20,12 @@
         <actions><service-call name="mantle.smithy.SmithyImportServices.handle#ExternalLink" in-map="{userId:userId}"
                 disable-authz="true"/></actions>
     </eeca>
+    <!-- DG8 review: an account that signed in with GitHub before it joined a site claims that site's placeholders of its
+        proven id when its membership becomes active (handle#MembershipActive; claim#GithubAccount checks the proof) -->
+    <eeca id="SmithyClaimOnMembership" entity="mantle.public.PublicSiteParty" on-create="true" on-update="true"
+            get-original-value="true" run-on-error="false">
+        <condition><expression>state == 'active' &amp;&amp; (originalValue == null || originalValue.state != 'active')</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#MembershipActive" in-map="{partyId:partyId}"
+                disable-authz="true"/></actions>
+    </eeca>
 </eecas>

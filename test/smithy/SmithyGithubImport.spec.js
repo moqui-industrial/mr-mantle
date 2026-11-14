@@ -105,6 +105,9 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
         setProperty("smithy_github_api", RECORDED + "private")
         record("private", "0000000000000000000000000000000000000000", {"repos_acme_widgets.json": "repos_acme_widgets_private.json"})
         const privateRefused = start("SGI_OWNER", "p").reason
+        // nor while GitHub's rate limit holds the token: what the repository is (private or not) is not known yet
+        record("private", "0000000000000000000000000000000000000000", {"repos_acme_widgets.json": "rate-limited.json"})
+        const limitedStart = start("SGI_OWNER", "l").reason
         setProperty("smithy_github_api", RECORDED + "limited")
         // a recycled login: an account of another GitHub id had bob's login before
         lib.make("mantle.party.Party", {partyId: "SGI_OLDBOB", partyTypeEnumId: "PtyPerson"})
@@ -150,12 +153,13 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
             member: !!lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: bob.partyId}),
             discoverability: lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: bob.partyId}).discoverability
         }
-        return {byMaintainer, dots, privateRefused, started, retried, waited, before, again, ended, repo, issue, closed, run, people}
+        return {byMaintainer, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}
     },
-    then({byMaintainer, dots, privateRefused, started, retried, waited, before, again, ended, repo, issue, closed, run, people}) {
+    then({byMaintainer, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}) {
         byMaintainer == "accessDenied"
         dots == "nameInvalid"
         privateRefused == "policyRefused"
+        limitedStart == "rateLimited"
         retried.importId == started.importId
         // bob is GitHub's 1002 now: a new placeholder, and the old id's row lost the login; it is no member and not
         // discoverable, and is shown as the author of what it wrote
@@ -281,6 +285,9 @@ feature("a pull request is a merged merge request with its review and anchored l
         oldIssue == "/code/acmeco/widgets/-/issues/1"
         oldPull == "/code/acmeco/widgets/-/merge-requests/2"
         merged.statusId == "GmrMerged"
+        // written hidden, and shown once Smithy's row and conversation were there
+        merged.hiddenDate == null
+        lib.row("moqui.resource.GitRepository", {repositoryId: merged.repositoryId}).reviewHiddenDate != null
         merged.mergeCommitId == merged.headCommitId
         view.state == "merged"
         view.author.handle == "carol"
@@ -320,7 +327,8 @@ feature("an account that signs in through GitHub with a placeholder's id takes i
             externalUserId: "1003",
             externalAuthFlowId: "SGI_GITHUB"
         })
-        lib.run("mantle.smithy.SmithyImportServices.claim#GithubAccount", {userId: "SGI_CAROL"})
+        // the claim the sign-in makes once it linked the id (handle#ExternalLink, in an /sso/ request): proven
+        lib.run("mantle.smithy.SmithyImportServices.claim#GithubAccount", {userId: "SGI_CAROL", proven: true})
         const merged = requestRow(2)
         return {
             placeholder,
@@ -355,13 +363,30 @@ feature("push mirrors are a Maintainer's, and refused until the framework has th
             secret: "s",
             operationId: "sgi-mirror-1"
         }
+        // what the receipt of a new mirror is of: the input without its secret (its hash would be a guessing oracle)
+        const receiptInput = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").mirrorReceipt(input)
+        const maintainer = op("SGI_MAINT", "storeMirror", input)
+        // once the framework has push mirrors (F6) the stored receipt is checked too: its hash is of the input without
+        // the secret
+        const receipt = lib.row("mantle.forum.ForumOperationReceipt", {siteId: SITE, operationId: "sgi-mirror-1", action: "storeMirror"})
+        const forum = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        const withoutSecret = {...input, siteId: SITE}
+        delete withoutSecret.secret
+        delete withoutSecret.operationId
+        const expected = forum.hash(
+            JSON.stringify(Object.fromEntries(Object.entries(withoutSecret).sort(([a], [b]) => a.localeCompare(b))))
+        )
         return {
-            maintainer: op("SGI_MAINT", "storeMirror", input),
+            receiptInput,
+            maintainer,
+            receiptHashed: receipt ? receipt.payloadHash === expected : null,
             stranger: op("SGI_CAROL", "findMirrors", {repositoryId: repositoryId()})
         }
     },
-    then({maintainer, stranger}) {
-        maintainer.reason == "notBuilt"
+    then({receiptInput, maintainer, receiptHashed, stranger}) {
+        !("secret" in JSON.parse(JSON.stringify(receiptInput)))
+        receiptInput.url == "https://github.com/acme/widgets.git"
+        maintainer.reason == "notBuilt" || receiptHashed == true
         stranger.reason == "accessDenied"
     }
 })
@@ -388,7 +413,9 @@ feature("a claim needs a GitHub sign-in of the placeholder's host, in a site the
         lib.account(SITE, "SGI_ALICE")
         const link = authFlowId =>
             lib.run("update#moqui.security.UserAccount", {userId: "SGI_ALICE", externalUserId: "1001", externalAuthFlowId: authFlowId})
-        const claim = () => lib.run("mantle.smithy.SmithyImportServices.claim#GithubAccount", {userId: "SGI_ALICE"}).claimed
+        // as the sign-in that linked the id claims (proven); whether it records the proof is the flow's to say
+        const claim = () =>
+            lib.run("mantle.smithy.SmithyImportServices.claim#GithubAccount", {userId: "SGI_ALICE", proven: true}).claimed
         link("SGI_GITHUB")
         const notMember = claim()
         lib.make("mantle.public.PublicSiteParty", {
@@ -404,16 +431,27 @@ feature("a claim needs a GitHub sign-in of the placeholder's host, in a site the
         const otherHost = claim()
         link("SGI_PROXY")
         const proxied = claim()
+        // an administrator's flow whose user info is another user's public profile would link that user's id
+        lib.make("moqui.security.sso.AuthFlow", {authFlowId: "SGI_FORGED", authFlowTypeEnumId: "AftOauth", description: "Forged", disabled: "Y"})
+        lib.make("moqui.security.sso.OauthFlow", {
+            authFlowId: "SGI_FORGED",
+            clientTypeEnumId: "OctGitHub",
+            clientId: "sgi-forged",
+            userInfoUrl: "https://api.github.com/users/alice"
+        })
+        link("SGI_FORGED")
+        const forged = claim()
         // an edit of the account outside a sign-in (this one) claims nothing by the rule
         link("SGI_GITHUB")
         const afterRule = partyOfLogin("alice")
-        return {alice, notMember, otherHost, proxied, afterRule, claimed: claim(), now: partyOfLogin("alice")}
+        return {alice, notMember, otherHost, proxied, forged, afterRule, claimed: claim(), now: partyOfLogin("alice")}
     },
-    then({alice, notMember, otherHost, proxied, afterRule, claimed, now}) {
+    then({alice, notMember, otherHost, proxied, forged, afterRule, claimed, now}) {
         alice != null
         notMember == 0
         otherHost == 0
         proxied == 0
+        forged == 0
         afterRule == alice
         claimed == 1
         now == "SGI_ALICE"
@@ -423,17 +461,29 @@ feature("a claim needs a GitHub sign-in of the placeholder's host, in a site the
 feature("work as an account signs it out after without ending its sessions elsewhere", {
     when() {
         lib.set("moqui.security.UserAccount", {userId: "SGI_OWNER"}, {hasLoggedOut: "N"})
-        // as a job calls it: no user, authorization off
+        // as a job calls it: no user, authorization off, in a transaction (the restore runs once it commits)
         const ran = lib.as(null, () =>
             lib.privileged(() =>
-                ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js").asUser("SGI_OWNER", () => ec.user.userId)
+                ec.transaction.runRequireNew(null, "spec", () =>
+                    ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js").asUser("SGI_OWNER", () => ec.user.userId)
+                )
             )
         )
-        return {ran, flag: lib.row("moqui.security.UserAccount", {userId: "SGI_OWNER"}).hasLoggedOut}
+        // the restore runs after the commit, on a worker: wait for it a little
+        const flagNow = () => lib.row("moqui.security.UserAccount", {userId: "SGI_OWNER"}).hasLoggedOut
+        for (const started = Date.now(); flagNow() !== "N" && Date.now() - started < 5000; );
+        const flag = flagNow()
+        // a real sign-out after the step's (the row changed since): the restore keeps it
+        lib.set("moqui.security.UserAccount", {userId: "SGI_OWNER"}, {hasLoggedOut: "Y"})
+        lib.run("mantle.forum.ForumServices.restore#SignedIn", {userId: "SGI_OWNER", stamp: ec.user.timestampMillis(ec.user.nowTimestamp) - 86400000})
+        const kept = lib.row("moqui.security.UserAccount", {userId: "SGI_OWNER"}).hasLoggedOut
+        lib.set("moqui.security.UserAccount", {userId: "SGI_OWNER"}, {hasLoggedOut: "N"})
+        return {ran, flag, kept}
     },
-    then({ran, flag}) {
+    then({ran, flag, kept}) {
         ran == "SGI_OWNER"
         flag == "N"
+        kept == "Y"
     }
 })
 
@@ -453,17 +503,76 @@ feature("a run into an archived repository fails at once; a private repository's
         const run = op("SGI_OWNER", "getGitHubImport", {importId: started.importId}).importRun
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: repositoryId()}, {visibilityEnumId: "SmvPrivate"})
         const hidden = op(null, "resolveRedirect", {path: "/acme/widgets/issues/1"}).targetPath
+        // the redirect row of its GitHub address (the exact path) leads nowhere for who may not view it
+        const hiddenPage = op(null, "resolveRedirect", {path: "/acme/widgets"}).targetPath
+        const shownPage = op("SGI_OWNER", "resolveRedirect", {path: "/acme/widgets"}).targetPath
+        // a group's old name (renamed, then made private) leads nowhere for who may not view the group
+        lib.make("mantle.smithy.SmithyRedirect", {
+            redirectId: "SGI_OLD_GROUP",
+            siteId: SITE,
+            oldPath: "/old-acmeco",
+            targetPath: "/code/acmeco",
+            sourceEnumId: "SrsManual",
+            createdAt: ec.user.nowTimestamp
+        })
+        lib.set("mantle.smithy.SmithyGroup", {groupId}, {visibilityEnumId: "SmvPrivate"})
+        const hiddenGroup = op(null, "resolveRedirect", {path: "/old-acmeco"}).targetPath
+        const shownGroup = op("SGI_OWNER", "resolveRedirect", {path: "/old-acmeco"}).targetPath
+        lib.set("mantle.smithy.SmithyGroup", {groupId}, {visibilityEnumId: "SmvPublic"})
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: repositoryId()}, {visibilityEnumId: "SmvPublic"})
         const route = ec.resource
             .script("component://mr-mantle/script/PassRoutes.js")
             .find(([verb, path]) => verb === "POST" && path === "imports/{importId}/cancel")
-        return {out, run, hidden, route}
+        return {out, run, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route}
     },
-    then({out, run, hidden, route}) {
+    then({out, run, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route}) {
+        hiddenGroup == null
+        shownGroup == "/code/acmeco"
+        hiddenPage == null
+        shownPage == "/code/acmeco/widgets"
         out.done == true
         run.stage == "failed"
         run.reportList.some(item => item.errorText.startsWith("repositoryArchived"))
         hidden == null
         route[2] == "cancelImport"
+    }
+})
+
+feature("an account that signed in with GitHub before it joined claims the site's placeholders when its membership becomes active", {
+    when() {
+        const join = partyId =>
+            lib.make("mantle.public.PublicSiteParty", {
+                siteId: SITE,
+                partyId,
+                state: "active",
+                role: "member",
+                joinedAt: ec.user.nowTimestamp,
+                fromDate: ec.user.nowTimestamp,
+                revision: 1
+            })
+        const dj = partyOfLogin("dj")
+        const bob = partyOfLogin("bob")
+        // dj's account: a sign-in proved its id (the claim it made found no site it was a member of)
+        lib.account(SITE, "SGI_DJ")
+        lib.run("update#moqui.security.UserAccount", {userId: "SGI_DJ", externalUserId: "1004", externalAuthFlowId: "SGI_GITHUB"})
+        const before = lib.run("mantle.smithy.SmithyImportServices.claim#GithubAccount", {userId: "SGI_DJ", proven: true}).claimed
+        // bob's id written on an account outside a sign-in: never proven
+        lib.account(SITE, "SGI_BOB")
+        lib.run("update#moqui.security.UserAccount", {userId: "SGI_BOB", externalUserId: "1002", externalAuthFlowId: "SGI_GITHUB"})
+        join("SGI_DJ")
+        join("SGI_BOB")
+        // the claim runs after the membership's commit, on a worker: wait for it a little
+        for (const started = Date.now(); partyOfLogin("dj") !== "SGI_DJ" && Date.now() - started < 5000; )
+            ec.entity.find("mantle.smithy.SmithyAccount").condition({siteId: SITE}).disableAuthz().count()
+        return {dj, bob, before, djNow: partyOfLogin("dj"), bobNow: partyOfLogin("bob"),
+            proof: lib.row("mantle.smithy.SmithyGithubLink", {userId: "SGI_DJ"})}
+    },
+    then({dj, bob, before, djNow, bobNow, proof}) {
+        dj != null
+        before == 0
+        proof.githubUserId == "1004"
+        proof.githubHost == "github.com"
+        djNow == "SGI_DJ"
+        bobNow == bob
     }
 })

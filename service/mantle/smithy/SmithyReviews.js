@@ -960,7 +960,7 @@ kit => {
             // a thread Projects wrote before the merge request had a conversation is answered there
             if (!one(F + "ForumPostState", {communicationEventId: c.threadId})) invalid("That thread is answered in Projects")
             const made = post(siteId, row, c.body, c.sourceFormat, operationId, c.threadId)
-            return {postId: made.postId, threadId: c.threadId, state: made.state}
+            return {postId: made.postId, threadId: c.threadId, state: made.state, held: made.state === "pending"}
         }
         const path = text(c.path)
         const line = side => (c[side] == null || c[side] === "" ? null : Number(c[side]))
@@ -989,7 +989,8 @@ kit => {
             lineText: lineText.slice(0, 255) || null,
             outdated: "N"
         })
-        return {postId: made.postId, threadId: made.postId, state: made.state}
+        // held: the gate holds the post for a moderator (its author sees it, the thread list does not yet)
+        return {postId: made.postId, threadId: made.postId, state: made.state, held: made.state === "pending"}
     }
     methods.createReviewComment = p => {
         const {held} = requestWrite(p, false)

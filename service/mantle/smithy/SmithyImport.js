@@ -139,11 +139,12 @@ kit => {
         ec.message.pushErrors()
         try {
             const out = ec.service.sync().name(name).parameters(parameters).requireNewTransaction(true).disableAuthz().call()
+            // what a refusal says never carries a credential it was given (a fetch's address, its password)
             return ec.message.hasError()
-                ? {out: out || {}, problem: text(ec.message.getErrorsString()).split("\n")[0]}
+                ? {out: out || {}, problem: scrub({token: parameters?.password}, text(ec.message.getErrorsString()).split("\n")[0])}
                 : {out: out || {}, problem: null}
         } catch (error) {
-            return {out: {}, problem: firstLine(error)}
+            return {out: {}, problem: scrub({token: parameters?.password}, firstLine(error))}
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
@@ -217,7 +218,11 @@ kit => {
     const scrub = (ctx, value) => {
         let out = text(value)
         if (ctx?.token && ctx.token.length >= 4) out = out.split(ctx.token).join("[token]")
-        return out.replace(/(https?:\/\/)[^/@\s]*@/gi, "$1[credential]@")
+        return out
+            .replace(/(https?:\/\/)[^/@\s]*@/gi, "$1[credential]@")
+            .replace(/x-access-token:[^@\s]+@/gi, "x-access-token:[token]@")
+            .replace(/\b(Basic|Bearer|token)\s+[A-Za-z0-9+/=._~-]{8,}/gi, "$1 [credential]")
+            .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})\b/g, "[token]")
     }
     const hasNext = response => /rel="next"/.test(response.headers.link || "")
     const repoApi = run => {
@@ -287,9 +292,13 @@ kit => {
         const answer = request(repoApi({sourceRepository: source}), token)
         const limit = limitOf(answer)
         if (answer.status === 401) invalid("sourceRefused: GitHub refused the token")
-        if (answer.status !== 200 && !limit.limited)
+        // the run starts only once GitHub has said what the repository is (whether it is private among it): not while
+        // its rate limit holds the token
+        if (limit.limited)
+            invalid("rateLimited: GitHub's rate limit holds this token now; start the import again once it resets")
+        if (answer.status !== 200 || !answer.body)
             invalid("sourceRefused: GitHub has no repository " + source + " that the token may read")
-        const facts = answer.status === 200 && answer.body ? answer.body : {}
+        const facts = answer.body
         const sourcePrivate = facts.private === true || (!!facts.visibility && facts.visibility !== "public")
         // the receipt keeps no trace of the token, not even its hash
         return receipt({...p, token: undefined}, "startGitHubImport", () => {
@@ -581,6 +590,8 @@ kit => {
             fields.tokenRemoteId = null
         }
         update(run, fields)
+        // a run that ended (done or failed) leaves no hosted merge request of a failed item open, as a cancel does not
+        if (ended && !cancelled) closeLeftovers(run)
     }
     function end(ctx, statusId, sourceType, sourceId, errorText) {
         if (statusId !== "SmiDone") ctx.cursor.stage = ctx.statusId
@@ -1260,10 +1271,20 @@ kit => {
                     createdDate: now(),
                     lastUpdatedDate: now(),
                     mergeableEnumId: "GmaUnchecked",
-                    deleteSourceBranch: "N"
+                    deleteSourceBranch: "N",
+                    // hidden until Smithy's row and conversation are written (importPull shows it), as git-server
+                    // review-start-hidden starts a pushed one: a leftover of a failed item is read by nobody
+                    hiddenDate: now()
                 }))
                     mr.set(name, value)
                 mr.create()
+                // a repository that has held a hidden merge request reads commits by id through its refs only
+                ec.entity
+                    .find("moqui.resource.GitRepository")
+                    .condition("repositoryId", ctx.repositoryId)
+                    .condition("reviewHiddenDate", null)
+                    .disableAuthz()
+                    .updateAll({reviewHiddenDate: now()})
                 call("org.moqui.git.GitReviewServices.sync#MergeRequestHead", {mergeRequestId: mr.mergeRequestId, headCommitId: sha})
                 const compared = probe(GIT + "get#GitCompare", {
                     repositoryId: ctx.repositoryId,
@@ -1342,8 +1363,7 @@ kit => {
             lastUpdatedDate: stamp(when(pull.updated_at || pull.created_at)),
             mergedDate: merged ? stamp(when(pull.merged_at)) : null,
             mergeCommitId: merged && HEX40.test(text(pull.merge_commit_sha)) ? pull.merge_commit_sha : null,
-            closedDate: closed ? stamp(when(pull.closed_at || pull.merged_at)) : kept ? now() : null,
-            hiddenDate: null
+            closedDate: closed ? stamp(when(pull.closed_at || pull.merged_at)) : kept ? now() : null
         })
         const postId = openRecord(ctx, author, created, title, body)
         create(SMR, {
@@ -1360,6 +1380,8 @@ kit => {
         })
         if (merged) addPost(postId, {line: "merged", date: when(pull.merged_at)})
         else if (closed) addPost(postId, {line: "closed", date: when(pull.closed_at)})
+        // shown now that Smithy's row and conversation are there (the same transaction)
+        update(one(GMR, {mergeRequestId}, true), {hiddenDate: null})
         if (["GmrOpen", "GmrDraft"].includes(statusId)) kit.agreement.compute(mergeRequestId)
         mark(ctx, "pull", pull.id, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
         if (!kept) mark(ctx, "pullNumber", number, {targetType: "mergeRequest", targetId: mergeRequestId, statusId: "SmmDone"})
@@ -1623,7 +1645,13 @@ kit => {
                 }
             } catch (error) {
                 ec.message.clearErrors()
-                ec.logger.error("Smithy import " + run.importId + " was not stepped: " + firstLine(error))
+                let token = ""
+                try {
+                    token = tokenOf(run)
+                } catch (ignored) {
+                    token = ""
+                }
+                ec.logger.error("Smithy import " + run.importId + " was not stepped: " + scrub({token}, firstLine(error)))
             }
         }
         return {stepped}
@@ -1633,18 +1661,32 @@ kit => {
     /* claim#GithubAccount: an account whose sign-in through a GitHub provider (an OauthFlow of type OctGitHub) linked a
        GitHub id takes, in each site, the placeholder of that id: its login, and its posts, issues, merge requests,
        assignments and reactions. Safe to run twice. */
-    /* The GitHub a flow signs in with: github.com when none of its addresses is overridden, else the one host all of its
-       addresses are on (an Enterprise Server's); null when they are on several hosts (a delegate's or a proxy's), or
-       some are overridden to another host than github.com, whose defaults the others take. */
+    /* The GitHub a flow signs in with, only when its endpoints are exactly GitHub's own, so the id its user info gives
+       is the signed-in user's: github.com when each address is empty (the client type's defaults) or exactly github.com's
+       (https://github.com/login/oauth/authorize, .../access_token, https://api.github.com/user); an Enterprise Server's
+       host when all three are exactly its own (https://<host>/login/oauth/authorize, .../access_token,
+       https://<host>/api/v3/user). Any other address (a user's profile such as /users/<login>, a proxy, a delegate) is
+       null: nothing it links is claimed. */
+    const GITHUB_ENDPOINTS = [
+        "https://github.com/login/oauth/authorize",
+        "https://github.com/login/oauth/access_token",
+        "https://api.github.com/user"
+    ]
     function flowHost(oauth) {
-        const urls = [oauth.authorizeUrl, oauth.tokenUrl, oauth.userInfoUrl].map(text).filter(url => !!url.trim())
-        if (!urls.length) return "github.com"
-        const hosts = new Set(urls.map(hostOf))
-        if (hosts.has(null) || hosts.size !== 1) return null
-        const host = Array.from(hosts)[0]
-        return urls.length < 3 && host !== "github.com" ? null : host
+        const urls = [oauth.authorizeUrl, oauth.tokenUrl, oauth.userInfoUrl].map(url => text(url).trim())
+        if (urls.every((url, index) => !url || url === GITHUB_ENDPOINTS[index])) return "github.com"
+        const server = /^https:\/\/([a-z0-9.-]+)\/login\/oauth\/authorize$/.exec(urls[0])
+        const host = server ? server[1] : null
+        if (!host || host === "github.com" || host.endsWith(".github.com")) return null
+        return urls[1] === "https://" + host + "/login/oauth/access_token" && urls[2] === "https://" + host + "/api/v3/user"
+            ? normalHost(host)
+            : null
     }
-    function claimGithub(userId) {
+    const LINK = M + "SmithyGithubLink"
+    /* claim#GithubAccount. proven: the caller is a sign-in that just linked the id (handle#ExternalLink in an /sso/
+       request), which records the link as proven (SmithyGithubLink) when the flow's endpoints are GitHub's own; any
+       other call (a membership that became active) claims only for a link proven so, of the account's id and flow now. */
+    function claimGithub(userId, proven) {
         const account = userId ? one(ACCOUNT, {userId}) : null
         if (!account?.partyId || !account.externalUserId || !account.externalAuthFlowId) return {claimed: 0}
         const oauth = one("moqui.security.sso.OauthFlow", {authFlowId: account.externalAuthFlowId})
@@ -1652,6 +1694,16 @@ kit => {
         // the id is of the GitHub the flow's user info comes from; a placeholder is of the GitHub the import read
         const host = flowHost(oauth)
         if (!host) return {claimed: 0}
+        const githubUserId = text(account.externalUserId)
+        const link = {githubUserId, githubHost: host, authFlowId: account.externalAuthFlowId}
+        let held = one(LINK, {userId}, true)
+        if (proven) {
+            if (held) update(held, {...link, provenAt: now()})
+            else create(LINK, {userId, ...link, provenAt: now()})
+            held = one(LINK, {userId})
+        }
+        if (!held || held.githubUserId !== githubUserId || held.githubHost !== host || held.authFlowId !== link.authFlowId)
+            return {claimed: 0}
         let claimed = 0
         for (const found of Array.from(
             find(M + "SmithyAccount", {githubUserId: text(account.externalUserId)})
@@ -1800,11 +1852,15 @@ kit => {
                 hasCredential: !!row.hasCredential || !!row.credential,
                 lastPushDate: row.lastPushDate || null,
                 lastResult: row.lastResult || null,
-                lastError: row.lastError || null,
+                // a push's error may carry the address it was given with a credential in it
+                lastError: row.lastError ? scrub(null, row.lastError) : null,
                 nextAttemptDate: row.nextAttemptDate || null
             }))
         }
     }
+    /* What a mirror's receipt is of: the input without its secret. */
+    const mirrorReceipt = p => ({...p, secret: undefined})
+    kit.mirrorReceipt = mirrorReceipt
     methods.storeMirror = p => {
         const r = mirrored(p, true)
         const store = () => {
@@ -1814,20 +1870,28 @@ kit => {
                 invalid("url: An https address, with the credential given apart")
             const refs = text(p.refs).trim()
             if (refs.length > 1000 || /[\s;]/.test(refs.replace(/,\s*/g, ","))) invalid("refs: Ref patterns, comma separated")
+            const editing = given(p.mirrorId)
+            const removeCredential = flag(p.removeCredential)
+            if (removeCredential && (given(p.username) || given(p.secret)))
+                invalid("removeCredential: Remove the credential, or give a new one, not both")
             const out = hostCall("store#GitRepositoryMirror", {
                 repositoryId: r.repo.repositoryId,
-                ...(given(p.mirrorId) ? {mirrorId: p.mirrorId} : {}),
+                ...(editing ? {mirrorId: p.mirrorId} : {}),
                 ...(url ? {url} : {}),
                 ...(given(p.username) ? {username: text(p.username)} : {}),
                 ...(given(p.secret) ? {credential: text(p.secret)} : {}),
+                // the credential taken off: no username, no secret
+                ...(removeCredential ? {username: null, credential: null, clearCredential: true} : {}),
                 ...(given(p.hostKeyFingerprint) ? {hostKeyFingerprint: text(p.hostKeyFingerprint)} : {}),
-                ...(refs ? {refPattern: refs} : {}),
+                // refs posted empty on an edit is all branches and tags again: the pattern is cleared
+                ...(refs ? {refPattern: refs} : editing && p.refs !== undefined && p.refs !== null ? {refPattern: null, clearRefPattern: true} : {}),
                 ...(given(p.deleteRefs) ? {deleteRefs: flag(p.deleteRefs) ? "Y" : "N"} : {}),
                 ...(given(p.enabled) ? {enabled: flag(p.enabled) ? "Y" : "N"} : {})
             })
             return {mirrorId: out.mirrorId || p.mirrorId}
         }
-        return given(p.mirrorId) ? store() : receipt(p, "storeMirror", store)
+        // the receipt keeps no trace of the secret, not even its hash
+        return given(p.mirrorId) ? store() : receipt(mirrorReceipt(p), "storeMirror", store)
     }
     methods.deleteMirror = p => {
         const r = mirrored(p, true)

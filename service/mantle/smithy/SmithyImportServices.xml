@@ -58,16 +58,18 @@
     <service verb="find" noun="Mirrors" authenticate="anonymous-all" allow-remote="false">
         <description>A repository's push mirrors, for its Maintainers: the address, the refs, whether it deletes refs the
             repository no longer has, enabled, hasCredential (never the credential), the last push, its result and error,
-            and the next attempt. notBuilt until the framework has push mirrors (F6).</description>
+            and the next attempt (its error without any credential in it). notBuilt until the framework has push mirrors
+            (F6).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findMirrors", input)</script></actions>
     </service>
     <service verb="store" noun="Mirror" authenticate="anonymous-all" allow-remote="false">
         <description>Make a push mirror (operationId) or change one (mirrorId), by a Maintainer with a confirmed address: url
-            (https, with no credential in it), username and secret (a token; write-only), hostKeyFingerprint, refs (ref
-            patterns, comma separated), deleteRefs, enabled. Unprocessable for an address the framework's outbound rules
-            refuse. notBuilt until the framework has push mirrors (F6).</description>
+            (https, with no credential in it), username and secret (a token; write-only, and not in the receipt),
+            removeCredential (clears username and secret), hostKeyFingerprint, refs (ref patterns, comma separated; posted
+            empty on a change, all branches and tags again), deleteRefs, enabled. Unprocessable for an address the
+            framework's outbound rules refuse. notBuilt until the framework has push mirrors (F6).</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeMirror", input)</script></actions>
@@ -143,14 +145,45 @@
                 const name = "mantle.smithy.SmithyImportServices.claim#GithubAccount"
                 let later = false
                 try {
-                    ec.service.special().name(name).parameters({userId}).registerOnCommit()
+                    ec.service.special().name(name).parameters({userId, proven: true}).registerOnCommit()
                     later = true
                 } catch (err) {
                     // no transaction in place: the write is committed already
                 }
-                if (!later) ec.service.sync().name(name).parameter("userId", userId).requireNewTransaction(true).disableAuthz().call()
+                if (!later) ec.service.sync().name(name).parameters({userId, proven: true}).requireNewTransaction(true).disableAuthz().call()
             } catch (err) {
                 ec.logger.error("The GitHub placeholder of " + userId + " was not claimed: " + (err && err.message ? err.message : err))
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </service>
+    <service verb="handle" noun="MembershipActive" authenticate="false" allow-remote="false">
+        <description>For the SmithyClaimOnMembership rule (entity/Smithy.eecas.xml): a membership of a site became active,
+            so each account of the party claims, after the commit, the placeholders a sign-in already proved its GitHub id
+            for (claim#GithubAccount without proven: only for a SmithyGithubLink of its id and flow now). Never fails the
+            write: a failure is logged.</description>
+        <in-parameters><parameter name="partyId"/></in-parameters>
+        <actions><script><![CDATA[
+            if (!partyId) return
+            ec.message.pushErrors()
+            try {
+                const name = "mantle.smithy.SmithyImportServices.claim#GithubAccount"
+                const accounts = Array.from(ec.entity.find("moqui.security.UserAccount").condition("partyId", partyId)
+                        .disableAuthz().limit(5).list()).filter(account => !!account.externalUserId)
+                for (const account of accounts) {
+                    let later = false
+                    try {
+                        ec.service.special().name(name).parameters({userId: account.userId}).registerOnCommit()
+                        later = true
+                    } catch (err) {
+                        // no transaction in place: the membership is committed already
+                    }
+                    if (!later) ec.service.sync().name(name).parameters({userId: account.userId}).requireNewTransaction(true).disableAuthz().call()
+                }
+            } catch (err) {
+                ec.logger.error("The GitHub placeholders of party " + partyId + " were not claimed on joining: " + (err && err.message ? err.message : err))
             } finally {
                 ec.message.clearErrors()
                 ec.message.popErrors()
@@ -162,12 +195,16 @@
             (UserAccount.externalUserId) claims, in each site, the import's placeholder of that id: the account takes its
             GitHub login (SmithyAccount.githubLogin and githubUserId, so the agreement counts its imported commits) and its
             posts, issues, merge requests, assignments and reactions; the placeholder's profile ends. Only a placeholder of
-            the GitHub the flow signs in with (its addresses all github.com's defaults, or all on the placeholder's
-            githubHost), and only in a site where the account is an active member and not suspended; each site in a
-            transaction of its own, one that fails logged and left. Safe to run twice; nothing for another
-            provider.</description>
-        <in-parameters><parameter name="userId" required="true"/></in-parameters>
+            the GitHub the flow signs in with (its endpoints exactly GitHub's own: github.com's defaults or canonical
+            addresses, or an Enterprise Server's own canonical ones on the placeholder's githubHost), for an id a sign-in
+            proved (proven, which records SmithyGithubLink; else such a link of the account's id and flow now), and only
+            in a site where the account is an active member and not suspended; each site in a transaction of its own, one
+            that fails logged and left. Safe to run twice; nothing for another provider.</description>
+        <in-parameters>
+            <parameter name="userId" required="true"/>
+            <parameter name="proven" type="Boolean"><description>Only the sign-in that just linked the id (handle#ExternalLink)</description></parameter>
+        </in-parameters>
         <out-parameters><parameter name="claimed" type="Integer"/></out-parameters>
-        <actions><script>claimed = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").claimGithub(userId).claimed</script></actions>
+        <actions><script>claimed = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").claimGithub(userId, proven === true).claimed</script></actions>
     </service>
 </services>

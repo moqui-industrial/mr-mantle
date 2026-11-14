@@ -1148,6 +1148,43 @@ along with this software (see the LICENSE.md file). If not, see
             }
         ]]></script></actions>
     </service>
+    <service verb="handle" noun="GitReviewThread">
+        <description>git-server review-thread-service (the framework's handle#GitReviewThread contract): the review threads
+            of a merge request for the framework's REST, over get#ReviewThreads (find), create#ReviewComment (comment: a new
+            thread on a line or a reply, parentCommEventId the threadId) and resolve#ReviewThread (resolve: the thread's
+            communicationEventId), each with its own checks of the caller (who may view the repository; a client contact
+            reads no threads). Threads come back with threadId (their first comment's communicationEventId) and each
+            comment's commentId; a comment answers threadId (the new thread's, or the one answered) and held. For a
+            repository Smithy keeps the REST refuses comment and resolve first (check#RestWrite: Smithy's own operations
+            write threads through its post gate), and find reads both shapes.</description>
+        <implements service="org.moqui.git.GitServices.handle#GitReviewThread"/>
+        <actions><script><![CDATA[
+            const call = (name, parameters) => {
+                const out = ec.service.sync().name('mantle.work.GitServices.' + name).parameters(parameters).disableAuthz().call() || {}
+                return ec.message.hasError() ? null : out
+            }
+            threadList = null
+            held = false
+            if (operation === 'find') {
+                const out = call('get#ReviewThreads', {mergeRequestId, path: path || null})
+                if (!out) return
+                threadList = Array.from(out.threadList || []).map((thread) => ({...thread, threadId: thread.communicationEventId,
+                    commentList: Array.from(thread.commentList || []).map((comment) => ({...comment, commentId: comment.communicationEventId}))}))
+            } else if (operation === 'comment') {
+                const out = call('create#ReviewComment', {mergeRequestId, body, path: threadId ? null : (path || null),
+                    oldLine: threadId ? null : (oldLine ?? null), newLine: threadId ? null : (newLine ?? null),
+                    lineText: threadId ? null : (lineText || null), parentCommEventId: threadId || null})
+                if (!out) return
+                // a reply belongs to the thread it answers; a new comment is its own thread
+                threadId = threadId || out.communicationEventId || null
+                held = !!out.held
+            } else if (operation === 'resolve') {
+                const out = call('resolve#ReviewThread', {communicationEventId: threadId, resolved: resolved !== false})
+                if (!out) return
+                threadId = out.rootCommEventId || threadId
+            } else ec.message.addError('operation is find, comment or resolve')
+        ]]></script></actions>
+    </service>
     <service verb="refresh" noun="ReviewAnchors">
         <description>A merge request's source has a new head: each thread on a new line read at an older head is outdated when
             the line changed since (a deleted or changed line in the diff from its head to the new one, or its file gone).

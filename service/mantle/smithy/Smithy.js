@@ -1384,7 +1384,9 @@ function privileged(work) {
     // sign-in (SmithyImportServices.xml)
     runImport: p => privileged(() => core.withMemo(() => importModule.runStep(p || {}))),
     runImports: () => privileged(() => importModule.runImports()),
-    claimGithub: userId => privileged(() => core.withMemo(() => importModule.claimGithub(userId))),
+    // what a push mirror's receipt is of (the input without its secret)
+    mirrorReceipt: p => kit.mirrorReceipt(p || {}),
+    claimGithub: (userId, proven) => privileged(() => core.withMemo(() => importModule.claimGithub(userId, proven === true))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

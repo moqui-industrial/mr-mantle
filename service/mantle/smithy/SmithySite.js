@@ -1840,9 +1840,30 @@ kit => {
                     .list()
             )
             const found = (host && rows.find(row => row.oldHost === host)) || rows.find(row => !row.oldHost)
-            if (found) return {targetPath: found.targetPath, status: 301}
+            if (found) return targetViewable(p.siteId, found.targetPath) ? {targetPath: found.targetPath, status: 301} : null
         }
         return githubRedirect(p.siteId, raw)
+    }
+    /* Whether a redirect's target is there for the caller: one into a repository or a group under the Smithy mount (the
+       names before its /-/ part, or all of them) only for who may view it, so a redirect tells no private or hidden
+       repository's or group's path; any other target is. */
+    function targetViewable(siteId, targetPath) {
+        const target = text(targetPath)
+        if (!target.startsWith("/")) return true
+        const base = mountBase(siteId)
+        if (base && !target.toLowerCase().startsWith(base.toLowerCase() + "/")) return true
+        const all = target.slice(base.length).replace(/[?#].*$/, "").split("/").filter(Boolean)
+        const names = all.indexOf("-") >= 0 ? all.slice(0, all.indexOf("-")) : all
+        // the longest path that names something: a repository (two names or more), else a group (a renamed private or
+        // hidden one is not told either)
+        for (let length = Math.min(names.length, 9); length >= 1; length--) {
+            const path = names.slice(0, length).join("/")
+            const repo = length > 1 ? one(M + "SmithyRepository", {siteId, repositoryPath: path}) : null
+            if (repo) return core.repositoryViewable(repo, core.actor())
+            const group = one(M + "SmithyGroup", {siteId, groupPath: path})
+            if (group) return core.groupRights(group, core.actor()).canView
+        }
+        return true
     }
     /* A GitHub address of an imported repository whose owner/name is not its path here (the import's row of source
        github for /owner/name, whose target is the repository's page): its GitHub forms as the repository's sections. */

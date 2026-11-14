@@ -294,6 +294,18 @@
         <field name="blobId" type="text-short"><description>The file's blob the row was read from</description></field>
         <field name="checkedAt" type="date-time"/>
     </entity>
+    <entity entity-name="SmithyGithubLink" package="mantle.smithy">
+        <description>A GitHub id an account's sign-in proved (DG8 review): written by the sign-in that linked it
+            (UserAccount.externalUserId, in the framework's /sso/ callback) when the flow's endpoints are exactly GitHub's
+            own, so a claim made later, when a membership becomes active, claims only for an id proven so and still the
+            account's.</description>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="githubUserId" type="text-short"/>
+        <field name="githubHost" type="text-medium"><description>github.com or an Enterprise Server's host</description></field>
+        <field name="authFlowId" type="id"/>
+        <field name="provenAt" type="date-time"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+    </entity>
     <entity entity-name="SmithyAccount" package="mantle.smithy">
         <description>An account's Smithy settings in a site, made when first needed: its limits (each the site's default
             when empty), the bot mark and the GitHub login.</description>

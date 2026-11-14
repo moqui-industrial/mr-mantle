@@ -73,9 +73,12 @@
         <description>git-server rest-write-check-service (the framework's check#GitRestWrite contract): for a repository
             Smithy has, application smithy and restUrl Smithy's PASS REST of its site
             (/rest/s1/pass/v1/sites/[siteId]/smithy, on the site's canonical host when it has one); every write
-            through the framework's REST is refused (allowed false, a message naming Smithy's REST), since Smithy's own
-            operations keep its roles, confirmed address, gate and conversation; a read is allowed. Any other repository
-            is allowed, with no application.</description>
+            through the framework's REST is refused (allowed false, a message naming Smithy's REST and its operation for
+            it: rerunPipelineRun for pipeline.rerun, retryJobRun for job.retry, createReviewComment for
+            mergeRequest.comment, resolveReviewThread for mergeRequest.resolveThread...), since Smithy's own
+            operations keep its roles, confirmed address, gate and conversation; a read is allowed, and so is
+            commitStatus.create (an outside CI's status: the framework needs the push right and refuses the contexts
+            Smithy reserves, agreement/ and ci/). Any other repository is allowed, with no application.</description>
         <implements service="org.moqui.git.GitServices.check#GitRestWrite"/>
         <actions>
             <script><![CDATA[
@@ -88,8 +91,9 @@
             Smithy's REST for the site a client reaches (application: name smithy, restBase the site's
             /rest/s1/pass/v1/sites/[siteId]/smithy, siteId, pageUrl), forks true, for the site of the host the request
             came to, else of the server's own address, else the one published site that mounts Smithy; and Mantle's task
-            source (tasks: kind moqui-rest, path /rest/s1/mantle/my/tasks) when the offer has none. Asked for callers with
-            no credentials too: it names no account.</description>
+            source (tasks: kind moqui-rest, path /rest/s1/mantle/my/tasks) when the offer has none. It adds to the
+            framework's offer and keeps the rest of it (gateway, signIn, rest...). Asked for callers with no credentials
+            too: it names no account.</description>
         <implements service="org.moqui.git.GitServices.add#GitHostingOffer"/>
         <actions>
             <script>offer = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyHosting.js").hostingOffer({offer, userId})</script>
@@ -99,8 +103,10 @@
         <description>git-server agreement-check-service (the framework's check#GitAuthorSigned contract), over
             SmithyAgreementServices.get#AuthorSigned: for a repository Smithy has, whether the author (authorUserId or
             authorEmail) has signed its agreement file at the default branch, whether the repository requires it, what is
-            missing, and signUrl, the file's edit page on the default branch. known is false for any other
-            repository.</description>
+            missing (in message, only to the author asking of itself or a Maintainer of the repository: to anyone else
+            what is missing would tell whether an address is a member's confirmed one), and signUrl, the file's edit page
+            on the default branch, an absolute https page on the site's canonical host (none without one). known is
+            false for any other repository.</description>
         <implements service="org.moqui.git.GitServices.check#GitAuthorSigned"/>
         <actions>
             <script><![CDATA[
