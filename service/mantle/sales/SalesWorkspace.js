@@ -189,7 +189,8 @@ function ownerAccount(userId, permission = "SALES_OWNER_CHANGE") {
 function organizationName(partyId) {
     return one("mantle.party.Organization", {partyId})?.organizationName || partyId || ""
 }
-// The open deals a party owns now (a current owner row on a deal not Won or Lost).
+// The open deals a party owns now (a current owner row on a deal not Won or Lost). The cap is on the open deals: a closed deal keeps
+// its owner row, so capping the owner rows would leave out open deals of a long-serving owner.
 function ownedDeals(partyId) {
     const ids = Array.from(
         find(OPPORTUNITY_PARTY)
@@ -197,12 +198,21 @@ function ownedDeals(partyId) {
             .condition("roleTypeId", roles.owner)
             .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
             .selectField("salesOpportunityId")
-            .limit(ownedCap)
             .list()
     ).map(row => row.salesOpportunityId)
     if (!ids.length) return []
-    return Array.from(find(OPPORTUNITY).condition("salesOpportunityId", "in", ids).list()).filter(
-        row => !row.statusId || row.statusId === openStatus
+    const cf = ec.entity.conditionFactory
+    const open = cf.makeCondition(
+        [cf.makeCondition("statusId", "equals", openStatus), cf.makeCondition("statusId", "is-null", null)],
+        "or"
+    )
+    return Array.from(
+        find(OPPORTUNITY)
+            .condition("salesOpportunityId", "in", Array.from(new Set(ids)))
+            .condition(open)
+            .orderBy("salesOpportunityId")
+            .limit(ownedCap)
+            .list()
     )
 }
 // The accounts a party manages now (a current PrtAccountManager relationship from them).
@@ -239,12 +249,16 @@ function findOwnedAssignments(p) {
     const names = lib.partyNames(managedAccounts(partyId).map(row => row.toPartyId))
     for (const row of managedAccounts(partyId)) {
         const owner = one("mantle.party.Party", {partyId: row.toPartyId})?.ownerPartyId
+        // a shared account has no organization to manage it (set#AccountManager refuses one), so no new manager can take it: listed,
+        // not transferable, and its old relationship ends with the user's access
+        const shared = !owner || owner === "_NA_"
         resourceList.push({
             resourceId: "account:" + row.toPartyId,
-            resourceName: L("Account") + " " + (names[row.toPartyId] || row.toPartyId) + " · " + organizationName(owner),
+            resourceName:
+                L("Account") + " " + (names[row.toPartyId] || row.toPartyId) + (shared ? "" : " · " + organizationName(owner)),
             resourceKind: "account",
-            transferable: true,
-            note: ""
+            transferable: !shared,
+            note: shared ? L("A shared account has no account manager to hand over") : ""
         })
     }
     return {resourceList}

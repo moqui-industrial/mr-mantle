@@ -365,8 +365,11 @@ function userHolds(userId, permission) {
             .count() > 0
     )
 }
-// check#LeadRuleOwner: a mail rule saved with the createLead action (given, or the stored rule's when an update gives none) needs its
-// owner, the caller, to hold SALES_OPPORTUNITY_EDIT (the user's call of Nov 13, impl-sales P6).
+// check#LeadRuleOwner: a mail rule saved with the createLead action needs its owner to hold SALES_OPPORTUNITY_EDIT (the user's call
+// of Nov 13, impl-sales P6): on create the owner is the caller; on update the stored rule's owner (a mailbox manager may change
+// another's rule, and the rule runs as its owner). Only a save that gives the actions is looked at: an update leaving them as they
+// are (a rename, a disable) changes nothing the check is about, and create#LeadFromEmail checks the owner again each time the rule
+// runs. Refuses nothing but a createLead action of an owner without the permission.
 const leadAction = "createLead"
 function checkLeadRuleOwner(p) {
     let actions = p.actionList != null ? Array.from(p.actionList) : null
@@ -374,20 +377,17 @@ function checkLeadRuleOwner(p) {
         try {
             actions = JSON.parse(String(p.actionsJson))
         } catch (error) {
+            // not a list: the framework's normalize#EmailRule refuses it
             return {}
         }
     }
-    if (actions == null && text(p.emailRuleId)) {
-        const stored = one("moqui.basic.email.EmailRule", {emailRuleId: text(p.emailRuleId)})
-        try {
-            actions = stored?.actionsJson ? JSON.parse(String(stored.actionsJson)) : []
-        } catch (error) {
-            actions = []
-        }
-    }
-    const named = Array.isArray(actions) && actions.some(action => text(action?.action) === leadAction)
-    if (named && !userHolds(ec.user.userId, "SALES_OPPORTUNITY_EDIT"))
-        denied("RULE_NOT_ALLOWED", "Making sales leads from mail needs SALES_OPPORTUNITY_EDIT")
+    if (!Array.isArray(actions) || !actions.some(action => text(action?.action) === leadAction)) return {}
+    const ruleId = text(p.emailRuleId)
+    const ownerUserId = ruleId ? one("moqui.basic.email.EmailRule", {emailRuleId: ruleId})?.ownerUserId : ec.user.userId
+    // an unknown rule: the framework's update#EmailRule answers it
+    if (ruleId && !ownerUserId) return {}
+    if (!userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
+        denied("RULE_NOT_ALLOWED", "Making sales leads from mail needs the rule's owner to hold SALES_OPPORTUNITY_EDIT")
     return {}
 }
 // The source identity of a mail message: its Message-ID, so the same mail delivered to two addresses or accounts is one intake;

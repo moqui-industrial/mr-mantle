@@ -601,12 +601,52 @@ feature("a createLead rule files nothing for an owner without SALES_OPPORTUNITY_
                 login("john.doe")
             }
         }
+        // a createLead rule the reader owns from before the rule (made directly): disabling it changes no action and is not refused;
+        // giving it the action again is
+        const updateAs = (username, parameters) => {
+            login(username)
+            const was = ec.artifactExecution.disableAuthz()
+            ec.message.pushErrors()
+            try {
+                ec.service
+                    .sync()
+                    .name("org.moqui.mail.EmailClientServices.update#EmailRule")
+                    .parameters(parameters)
+                    .requireNewTransaction(true)
+                    .call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+                if (!was) ec.artifactExecution.enableAuthz()
+                login("john.doe")
+            }
+        }
+        const oldRuleId = prefix + "_OLDRULE"
+        system(() =>
+            call("create#moqui.basic.email.EmailRule", {
+                emailRuleId: oldRuleId,
+                ownerUserId: users.reader,
+                ruleName: "Old leads",
+                sequenceNum: 99,
+                enabled: "Y",
+                matchAllEnumId: "ErmAll",
+                conditionsJson: JSON.stringify([{field: "to", operator: "contains", value: "sales+old@"}]),
+                actionsJson: JSON.stringify([{action: "createLead", value: ""}]),
+                matchedCount: 0,
+                stopProcessing: "N"
+            })
+        )
         return {
             run,
             filed: system(() => rowsOf(INTAKE, {sourceId: "mid:shelving-777@prospect.example"}).length),
             readerSave: saveAs(users.reader, "createLead"),
             readerOther: saveAs(users.reader, "markRead"),
-            repSave: saveAs(users.rep, "createLead")
+            repSave: saveAs(users.rep, "createLead"),
+            readerDisable: updateAs(users.reader, {emailRuleId: oldRuleId, enabled: "N"}),
+            readerReadd: updateAs(users.reader, {emailRuleId: oldRuleId, actionList: [{action: "createLead", value: ""}]})
         }
     },
     then(r) {
@@ -615,5 +655,7 @@ feature("a createLead rule files nothing for an owner without SALES_OPPORTUNITY_
         r.readerSave.includes("RULE_NOT_ALLOWED")
         r.readerOther == ""
         r.repSave == ""
+        r.readerDisable == ""
+        r.readerReadd.includes("RULE_NOT_ALLOWED")
     }
 })

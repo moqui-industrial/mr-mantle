@@ -15,10 +15,10 @@ along with this software (see the LICENSE.md file). If not, see
 <!-- A mail rule's createLead action (the user's call of Nov 13, impl-sales P6, F121): saved only by an owner who holds
     SALES_OPPORTUNITY_EDIT. OpportunityServices check#LeadRuleOwner runs before the framework's create#EmailRule and update#EmailRule
     and refuses such a rule (RULE_NOT_ALLOWED), so the save is not made; create#LeadFromEmail checks the owner again each time the
-    rule runs. A rule without the action passes. Not a hot path: a person saves a rule now and then. -->
+    rule runs. A rule without the action passes, and an update that leaves the actions as they are (a rename, a disable) is not
+    looked at. No condition here: check#LeadRuleOwner reads the actions itself (a list or its JSON). Not a hot path: a person saves a rule now and then. -->
 <secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
     <seca id="SalesLeadRuleOwnerCreate" service="org.moqui.mail.EmailClientServices.create#EmailRule" when="pre-service">
-        <condition><expression>String(actionsJson || '').includes('createLead') || JSON.stringify(actionList || []).includes('createLead')</expression></condition>
         <actions><service-call name="mantle.sales.OpportunityServices.check#LeadRuleOwner"
                 in-map="{actionList:actionList, actionsJson:actionsJson}"/></actions>
     </seca>

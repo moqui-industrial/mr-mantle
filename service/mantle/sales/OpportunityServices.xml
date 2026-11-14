@@ -852,10 +852,10 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- P6 (the user's call of Nov 13, impl-sales §4): a mail rule's createLead action is saved only by an owner who holds
         SALES_OPPORTUNITY_EDIT; Sales.secas.xml calls this before the framework's create#EmailRule and update#EmailRule -->
     <service verb="check" noun="LeadRuleOwner" allow-remote="false">
-        <description>Whether the mail rule being saved may carry the createLead action (ErActCreateLead): its actions (actionList
-            or actionsJson; for an update that gives none, the stored rule's) name createLead only for an owner, the caller, who
-            holds SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, and the save is not made). A rule without the action is not
-            looked at.</description>
+        <description>Whether the mail rule being saved may carry the createLead action (ErActCreateLead): when the save gives the
+            actions (actionList or actionsJson) and they name createLead, the rule's owner (the caller on create, the stored rule's
+            owner on update) must hold SALES_OPPORTUNITY_EDIT (RULE_NOT_ALLOWED otherwise, and the save is not made). A rule without
+            the action, and an update that leaves the actions as they are (a rename, a disable), are not looked at.</description>
         <in-parameters>
             <parameter name="emailRuleId"/>
             <parameter name="actionList" type="List"/>

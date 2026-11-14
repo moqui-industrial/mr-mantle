@@ -250,9 +250,16 @@ function operationOf(operationKey) {
 }
 function validateRow(p) {
     const {organizationPartyId} = importer(p.scopeKey)
-    // at an apply: a row its key already made says valid, so the apply answers the first result
+    // at an apply: a row its key already made says valid, so the apply answers the first result (only this importer's import row of
+    // this organization: any other use of the key is the apply's OPERATION_KEY_CONFLICT)
     const operationKey = operationOf(p.operationKey)
-    if (operationKey && one(lib.operationEntity, {operationKey})) {
+    const done = operationKey ? one(lib.operationEntity, {operationKey}) : null
+    if (
+        done &&
+        done.operationType === operationType &&
+        done.organizationPartyId === organizationPartyId &&
+        done.userId === ec.user.userId
+    ) {
         const values = rowValues(p, organizationPartyId)
         return {
             valid: true,

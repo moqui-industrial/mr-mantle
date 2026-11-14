@@ -216,6 +216,21 @@ feature(
     "the lifecycle participant lists a rep's deals and accounts to SALES_OWNER_CHANGE and moves them to one who works there",
     {
         when() {
+            // a shared account the rep manages from before set#AccountManager refused one (made directly): listed, not transferable
+            const shared = prefix + "_SHARED"
+            system(() => {
+                make("mantle.party.Party", {partyId: shared, partyTypeEnumId: "PtyOrganization", ownerPartyId: "_NA_"})
+                make("mantle.party.Organization", {partyId: shared, organizationName: "Shared customer"})
+                make("mantle.party.PartyRole", {partyId: shared, roleTypeId: "Account"})
+                make("mantle.party.PartyRelationship", {
+                    relationshipTypeEnumId: "PrtAccountManager",
+                    fromPartyId: users.rep,
+                    fromRoleTypeId: "SalesRepresentative",
+                    toPartyId: shared,
+                    toRoleTypeId: "Account",
+                    fromDate: 0
+                })
+            })
             const lookup = username => as(username, () => invoke(W + "find#OwnedSalesAssignments", {userId: users.rep}))
             const owned = lookup(users.operator)
             const refused = lookup(users.reader)
@@ -247,6 +262,7 @@ feature(
                 names: Array.from(owned.resourceList || [])
                     .map(row => row.resourceName)
                     .join(" | "),
+                sharedRow: Array.from(owned.resourceList || []).find(row => row.resourceId === "account:" + shared) || null,
                 refused,
                 notEmployed,
                 readerMove,
@@ -264,6 +280,8 @@ feature(
             r.ids.includes("account:" + users.account)
             !r.ids.includes("deal:" + deals.mate)
             r.names.includes("Rep's open deal · Workspace A")
+            r.sharedRow != null
+            r.sharedRow.transferable == false
             r.refused.refused.includes("PERMISSION_DENIED")
             r.notEmployed.refused.includes("NOT_EMPLOYED")
             r.readerMove.refused.includes("PERMISSION_DENIED")
