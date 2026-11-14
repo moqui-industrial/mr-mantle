@@ -765,7 +765,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('statusId', 'CLPT_ACCEPTED').condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list())
                 const listIds = Array.from(new Set(memberRows.map((row) => row.contactListId)))
                 const defaults = {}
-                if (listIds.length) for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                if (listIds.length) for (const list of ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                         .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
                 mailboxOnlyIds = Array.from(new Set(memberRows.filter((row) => (row.deliveryEnumId || defaults[row.contactListId] || 'CldInbox') === 'CldMailboxOnly')
                         .map((row) => row.contactListId)))
@@ -1246,7 +1246,7 @@ along with this software (see the LICENSE.md file). If not, see
             const mailboxOnly = new Set()
             if (listIds.length) {
                 const defaults = {}
-                for (const list of ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+                for (const list of ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                         .selectField('contactListId').selectField('defaultDeliveryEnumId').list()) defaults[list.contactListId] = list.defaultDeliveryEnumId
                 for (const row of ec.entity.find('mantle.marketing.contact.ContactListParty').condition('partyId', partyId)
                         .condition('contactListId', 'in', listIds).condition('statusId', 'CLPT_ACCEPTED')
