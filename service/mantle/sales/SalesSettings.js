@@ -848,7 +848,15 @@ const enumOptionsOf = enumIds =>
 // Each finding names its owner's place as a route key (fixRoute, with fixId where it names a record) that the app showing it
 // resolves (the framework's readiness contract, moqui.server.ReadinessProvider sales.readiness): Sales' Stages, Teams and Sources.
 // Later phases add theirs (templates, policies, the commercial revision, the public app).
-const routes = {settings: "salesSettings", stages: "salesStages", teams: "salesTeams", sources: "salesLeadSources"}
+// P9 adds the defaults and the commercial revision (F9), both fixed in SalesDefaults.
+const routes = {
+    settings: "salesSettings",
+    stages: "salesStages",
+    teams: "salesTeams",
+    sources: "salesLeadSources",
+    defaults: "salesDefaults"
+}
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
 const readinessChecks = [
     {
         checkKey: "sales.defaultPipeline",
@@ -915,6 +923,39 @@ const readinessChecks = [
                     fixRoute: routes.sources
                 }
             return {state: "ready", message: sources.length + (sources.length === 1 ? " source" : " sources")}
+        }
+    },
+    // P9: the organization's Sales defaults (SalesPolicy) and the commercial revision a quote's issue binds (X2, F9)
+    {
+        checkKey: "sales.defaults",
+        title: "Sales defaults",
+        run: organizationPartyId => {
+            const policy = approvals().policyOf(organizationPartyId)
+            if (!policy)
+                return {
+                    state: "warning",
+                    reasonCode: "NO_SALES_POLICY",
+                    message: "No Sales defaults: quotes have no validity or default team, and intakes are kept 30 days",
+                    fixRoute: routes.defaults
+                }
+            return {state: "ready", message: "In effect from " + dateText(policy.fromDate)}
+        }
+    },
+    {
+        checkKey: "sales.commercialRevision",
+        title: "Commercial revision",
+        run: organizationPartyId => {
+            const found =
+                call("mantle.ledger.LedgerServices.find#PartyAcctgPreference", {organizationPartyId}).partyAcctgPreference || null
+            if (found?.salesCommercialRevisionOnly !== "Y")
+                return {
+                    state: "warning",
+                    reasonCode: "COMMERCIAL_REVISION_OFF",
+                    message:
+                        "Quotes cannot be issued: a stored PDF, a file or a note would end the issue (turn on the commercial revision)",
+                    fixRoute: routes.defaults
+                }
+            return {state: "ready", message: "A quote's issue is bound to its commercial changes only"}
         }
     }
 ]
