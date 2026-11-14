@@ -34,9 +34,15 @@ spec({
             users.consent = user(prefix, "consent", [orgA], consent)
             users.editorB = user(prefix, "editorB", [orgB], consent)
             users.reader = user(prefix, "reader", [orgA], ["MARKETING_VIEW"])
-            for (const name of ["Ana", "Ben", "Cyd", "Dee", "Eve"]) {
+            // P6: Pia the editor's own personal contact, Pat the reader's (privateOwnerUserId), each with an address
+            const personal = {Pia: users.editor, Pat: users.reader}
+            for (const name of ["Ana", "Ben", "Cyd", "Dee", "Eve", "Pia", "Pat"]) {
                 party[name] = prefix + "_" + name.toUpperCase()
-                make("mantle.party.Party", {partyId: party[name], partyTypeEnumId: "PtyPerson"})
+                make("mantle.party.Party", {
+                    partyId: party[name],
+                    partyTypeEnumId: "PtyPerson",
+                    ...(personal[name] ? {privateOwnerUserId: personal[name]} : {})
+                })
                 make("mantle.party.Person", {partyId: party[name], firstName: name, lastName: "Audiencespec"})
                 if (name === "Eve") continue
                 make("mantle.party.contact.ContactMech", {
@@ -117,10 +123,19 @@ feature("a request is pending without confirmation; one without an address is re
                 evidenceText: "Asked again"
             }),
             noEvidence: as(users.editor, L + "request#Subscriptions", {contactListId: listId, partyIdList: [party.Cyd]}),
+            // P6 (the user's call, Nov 14): a list takes directory contacts only, the caller's own personal contact refused by name
+            // and another user's as missing
+            personal: as(users.editor, L + "request#Subscriptions", {
+                contactListId: listId,
+                partyIdList: [party.Pia, party.Pat],
+                sourceEnumId: "PcsForm",
+                evidenceDate: ago(2),
+                evidenceText: "Met at the fair"
+            }),
             members: as(users.editor, L + "find#Members", {contactListId: listId, memberStatus: "pending"})
         }
     },
-    then({out, again, noEvidence, members}) {
+    then({out, again, noEvidence, personal, members}) {
         out.refusal == ""
         outcomes(out) == ["pending:", "pending:", "refused:MISSING_DESTINATION"]
         status(listId, party.Ana) == "CLPT_PENDING" && status(listId, party.Ben) == "CLPT_PENDING"
@@ -130,6 +145,8 @@ feature("a request is pending without confirmation; one without an address is re
         rows("mantle.party.PartyConsent", {partyId: party.Ana}).length == 0
         outcomes(again) == ["existing:ALREADY_PENDING"]
         noEvidence.refusal.includes("EVIDENCE_REQUIRED")
+        outcomes(personal) == ["refused:PERSONAL_CONTACT", "refused:RECORD_UNAVAILABLE"]
+        status(listId, party.Pia) == null && status(listId, party.Pat) == null
         members.memberListCount == 2
         Array.from(members.memberList).every(member => member.addressText.includes("***@example.com"))
     }
@@ -337,13 +354,18 @@ feature("the policy and template bindings are dated; a single-use list is held b
 feature("an unsubscribe link works for a visitor signed in as someone else; the token, not the user, decides", {
     when() {
         const token = system(() =>
-            lib.run(CONSENT + "create#UnsubscribeToken", {contactListId: listId, partyId: party.Ana, baseUrl: "https://shop.example.com"})
+            lib.run(CONSENT + "create#UnsubscribeToken", {
+                contactListId: listId,
+                partyId: party.Ana,
+                baseUrl: "https://shop.example.com"
+            })
         ).token
         return {
             before: status(listId, party.Ana),
             oneClick: as(users.reader, CONSENT + "unsubscribe#ContactListParty", {token, listUnsubscribe: "One-Click"}),
             after: status(listId, party.Ana),
-            withdrawals: rows("mantle.party.PartyConsent", {partyId: party.Ana, contactListId: listId, statusId: "PconWithdrawn"}).length
+            withdrawals: rows("mantle.party.PartyConsent", {partyId: party.Ana, contactListId: listId, statusId: "PconWithdrawn"})
+                .length
         }
     },
     then({before, oneClick, after, withdrawals}) {

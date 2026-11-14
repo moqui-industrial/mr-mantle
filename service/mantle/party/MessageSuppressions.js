@@ -200,11 +200,7 @@ function storeSuppression(p) {
         [sourceEnumId, "MessageSuppressionSource"]
     ])
         if (!one("moqui.basic.Enumeration", {enumId, enumTypeId: type})) denied("VALUE_INVALID", "Unknown " + type + " " + enumId)
-    const existing = Array.from(find(S, {channelEnumId, destinationKey, reasonEnumId, organizationPartyId}).list()).find(row =>
-        active(row)
-    )
-    if (existing) return {suppressionId: existing.suppressionId, created: false, ended: false}
-    const made = call("create#" + S, {
+    return addBlock({
         channelEnumId,
         destinationKey,
         organizationPartyId,
@@ -217,7 +213,35 @@ function storeSuppression(p) {
         thruDate: (scope.end && p.thruDate) || null,
         createdByUserId: ec.user.userId || null
     })
+}
+// A block made, or the active one of the same destination, organization and reason answered (never doubled).
+function addBlock(values) {
+    const {channelEnumId, destinationKey, reasonEnumId, organizationPartyId} = values
+    const existing = Array.from(find(S, {channelEnumId, destinationKey, reasonEnumId, organizationPartyId}).list()).find(row =>
+        active(row)
+    )
+    if (existing) return {suppressionId: existing.suppressionId, created: false, ended: false}
+    const made = call("create#" + S, values)
     return {suppressionId: made.suppressionId, created: true, ended: false}
+}
+// The bounce intake's block (impl-marketing P6, MessageDeliveryReports.js): internal, whoever's run it is (a report read in a
+// user's session too), from a delivery or abuse report, starting now; never doubled.
+function addFromIntake(p) {
+    const channelEnumId = text(p.channelEnumId) || "MdcEmail"
+    const destinationKey = normalize(channelEnumId, p.destination)
+    if (!destinationKey) return null
+    return addBlock({
+        channelEnumId,
+        destinationKey,
+        organizationPartyId: text(p.organizationPartyId) || null,
+        reasonEnumId: text(p.reasonEnumId) || "MsrHardBounce",
+        sourceEnumId: "MssReport",
+        sourceRef: text(p.sourceRef).slice(0, 255) || null,
+        evidenceText: text(p.evidenceText) || "Delivery report",
+        fromDate: ec.user.nowTimestamp,
+        thruDate: null,
+        createdByUserId: null
+    })
 }
 
 // The active blocks of destinations for an organization (its own and every organization's): {suppressed: [destinationKey],
@@ -258,6 +282,7 @@ const operations = {find: findSuppressions, store: storeSuppression, check: chec
     mask,
     suppressedOf,
     blocksEveryDelivery,
+    addFromIntake,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown suppression operation " + op)
         return operations[op](parameters || {})

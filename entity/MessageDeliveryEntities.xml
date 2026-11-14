@@ -27,6 +27,16 @@
     <field name="organizationPartyId" type="id"><description>The organization the delivery is from (a seller's quote, Sales P10;
       a campaign's, Marketing P9), whose suppressions it meets beside every organization's; empty: its store's organization, when
       it names a store (impl-marketing P3 review).</description></field>
+    <field name="sendingProfileId" type="id"><description>The sending profile it goes out from (impl-marketing P6, F13): its
+      relay, sender and reply-to, within its throttle and quiet hours, with the bounce address bounces+(deliveryId).(bounceKey)@ its bounce
+      domain; empty: as the template says.</description></field>
+    <field name="bounceKey" type="text-short"><description>The random key of its VERP bounce address,
+      bounces+(deliveryId).(bounceKey)@ the profile's bounce domain (P6 review): anyone can mail the bounce address, so the intake
+      takes a report for this delivery only with this key, never by the delivery id alone.</description></field>
+    <field name="receiptEnumId" type="id"><description>The strongest later fact of the delivery (MessageDeliveryReceipt, P6, F14):
+      delivered, soft bounce, hard bounce or complaint; apart from the hand-off's state, and never moved back by a weaker
+      one.</description></field>
+    <field name="receiptDate" type="date-time"/>
     <field name="parametersJson" type="text-long"><description>The template's body parameters as handed off, without
       secrets kept elsewhere (a link's token is put in only for the send and never stored).</description></field>
     <field name="transactional" type="text-indicator"><description>Y for a notice of the recipient's own purchase or
@@ -51,6 +61,10 @@
     <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
       <key-map field-name="channelEnumId" related="enumId"/>
     </relationship>
+    <relationship type="one" related="mantle.party.MessageSendingProfile"/>
+    <relationship type="one" title="MessageDeliveryReceipt" related="moqui.basic.Enumeration">
+      <key-map field-name="receiptEnumId" related="enumId"/>
+    </relationship>
     <index name="MESSAGE_DELIVERY_EVENT" unique="true">
       <index-field name="eventKey"/>
       <index-field name="recipientPartyId"/>
@@ -60,6 +74,10 @@
     <index name="MESSAGE_DELIVERY_DUE">
       <index-field name="stateEnumId"/>
       <index-field name="nextAttemptDate"/>
+    </index>
+    <index name="MESSAGE_DELIVERY_PROFILE">
+      <index-field name="sendingProfileId"/>
+      <index-field name="sentDate"/>
     </index>
     <seed-data>
       <moqui.basic.EnumerationType description="Message delivery state" enumTypeId="MessageDeliveryState"/>
@@ -141,4 +159,187 @@
       <moqui.basic.Enumeration enumId="MssStaff" description="Staff entry" sequenceNum="3" enumTypeId="MessageSuppressionSource"/>
     </seed-data>
   </entity>
+
+  <!-- ===== Marketing P6: templates, sending profiles and bounce intake (impl-marketing P6, F13, F14, F17, F18, F76, F78; design-marketing
+    §5 MessageTemplates, MessageTemplateDetail, §12 SendingProfiles, §14.1, §15.1, §15.2; Comms' owner contract, design-drawers-commons'
+    Mailboxes row) ===== -->
+  <!-- Comms' template library: a template of an organization, channel, purpose and locale, its EmailTemplate for email (the relay and a
+    sender a profile replaces), and its content as dated rows (MessageTemplateContent): a draft is edited, a published content is never
+    changed (a change is a new draft, published at its own date, which ends the one before). mantle.party.MessageServices
+    find#Templates, create#Template, store#Template, store#TemplateContent, preview#Template, publish#Template, end#Template
+    (MessageTemplates.js). -->
+  <entity entity-name="MessageTemplate" package="mantle.party" cache="never">
+    <description>A reusable message of an organization: its name, channel (MessageDeliveryChannel), purpose (MessageTemplatePurpose:
+      promotional or transactional, different kinds of one library, not delivery permissions), locale, its EmailTemplate for email
+      (made with it), and from and thru dates: a template ended is no longer offered; its contents stay.</description>
+    <field name="messageTemplateId" type="id" is-pk="true"/>
+    <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+    <field name="templateName" type="text-medium" enable-audit-log="true"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="purposeEnumId" type="id" enable-audit-log="true"/>
+    <field name="localeId" type="text-short"/>
+    <field name="emailTemplateId" type="id"/>
+    <field name="copiedFromTemplateId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="endReason" type="text-medium"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="createdDate" type="date-time"/>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryChannel" related="moqui.basic.Enumeration">
+      <key-map field-name="channelEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageTemplatePurpose" related="moqui.basic.Enumeration">
+      <key-map field-name="purposeEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" related="moqui.basic.email.EmailTemplate"/>
+    <index name="MESSAGE_TEMPLATE_ORG">
+      <index-field name="organizationPartyId"/>
+      <index-field name="templateName"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message template purpose" enumTypeId="MessageTemplatePurpose"/>
+      <moqui.basic.Enumeration enumId="MtpPromotional" description="Promotional" sequenceNum="1" enumTypeId="MessageTemplatePurpose"/>
+      <moqui.basic.Enumeration enumId="MtpTransactional" description="Transactional" sequenceNum="2" enumTypeId="MessageTemplatePurpose"/>
+    </seed-data>
+  </entity>
+  <entity entity-name="MessageTemplateContent" package="mantle.party" cache="never">
+    <description>One dated content of a template: its subject and preheader, the body as a dbresource:// file named .html.fancy-locked
+      and the text alternative as a .fancy-locked file (F78: the locked renderer renders by location with an explicit map, so each
+      store writes a file of its own), and the variables it may name with each one's label, fallback and whether it is required
+      (variablesJson). A draft has no fromDate; a published content has the date it takes effect and is never changed; the next
+      published content ends it (thruDate). Who wrote and who published it, with the publication's reason.</description>
+    <field name="messageTemplateId" type="id" is-pk="true"/>
+    <field name="contentSeqId" type="id" is-pk="true"/>
+    <field name="subject" type="text-medium" enable-audit-log="true"/>
+    <field name="preheader" type="text-medium"/>
+    <field name="bodyLocation" type="text-medium" enable-audit-log="true"/>
+    <field name="bodyTextLocation" type="text-medium"/>
+    <field name="variablesJson" type="text-long"/>
+    <field name="fromDate" type="date-time" enable-audit-log="true"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="createdByUserId" type="id"/>
+    <field name="createdDate" type="date-time"/>
+    <field name="changedByUserId" type="id"/>
+    <field name="publishedByUserId" type="id"/>
+    <field name="publishReason" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageTemplate"/>
+  </entity>
+
+  <!-- Comms' sending profiles: the business use of infrastructure Admin approved (an outgoing relay, an EmailServer no mail account
+    owns), with the sender, reply-to, purpose, throttle, quiet hours, tracking policy, bounce domain and permitted site; a profile shows
+    readiness, never a host or credential. find#SendingProfiles, get#SendingProfile, store#SendingProfile, check#SendingProfile
+    (MessageSendingProfiles.js). -->
+  <entity entity-name="MessageSendingProfile" package="mantle.party" cache="never">
+    <description>A sending profile of an organization: its name, channel, the relay it sends through (emailServerId: an EmailServer no
+      mail account owns), the sender (fromAddress, fromName) and reply-to, its purpose (MessageTemplatePurpose; empty: both), a throttle
+      (at most so many messages an hour), quiet hours (from and to as HH:mm in its time zone, when nothing is sent), its tracking policy
+      (MessageTrackingPolicy), the bounce domain of its VERP addresses (bounces+(delivery)@ the domain, received by the hosted account
+      bounces@ the domain), the PASS site whose Account page takes its unsubscribes, and dates; with its last readiness check.</description>
+    <field name="sendingProfileId" type="id" is-pk="true"/>
+    <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+    <field name="profileName" type="text-medium"/>
+    <field name="channelEnumId" type="id"/>
+    <field name="emailServerId" type="id" enable-audit-log="true"/>
+    <field name="fromAddress" type="text-medium" enable-audit-log="true"/>
+    <field name="fromName" type="text-medium"/>
+    <field name="replyToAddress" type="text-medium" enable-audit-log="true"/>
+    <field name="purposeEnumId" type="id"/>
+    <field name="throttlePerHour" type="number-integer"/>
+    <field name="quietFrom" type="text-short"/>
+    <field name="quietThru" type="text-short"/>
+    <field name="timeZone" type="text-short"/>
+    <field name="trackingPolicyEnumId" type="id"/>
+    <field name="bounceDomain" type="text-medium" enable-audit-log="true"/>
+    <field name="siteId" type="id"/>
+    <field name="fromDate" type="date-time"/>
+    <field name="thruDate" type="date-time" enable-audit-log="true"/>
+    <field name="lastCheckDate" type="date-time"/>
+    <field name="lastCheckReady" type="text-indicator"/>
+    <field name="createdByUserId" type="id"/>
+    <relationship type="one" title="Organization" related="mantle.party.Party">
+      <key-map field-name="organizationPartyId" related="partyId"/>
+    </relationship>
+    <relationship type="one" related="moqui.basic.email.EmailServer"/>
+    <relationship type="one" title="MessageTrackingPolicy" related="moqui.basic.Enumeration">
+      <key-map field-name="trackingPolicyEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_PROFILE_ORG">
+      <index-field name="organizationPartyId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message tracking policy" enumTypeId="MessageTrackingPolicy"/>
+      <moqui.basic.Enumeration enumId="MtrNone" description="No tracking" sequenceNum="1" enumTypeId="MessageTrackingPolicy"/>
+      <moqui.basic.Enumeration enumId="MtrConsented" description="Links and opens of recipients who allow tracking" sequenceNum="2" enumTypeId="MessageTrackingPolicy"/>
+    </seed-data>
+  </entity>
+
+  <!-- The ledger's receipts (F14): the later facts of a delivery apart from its hand-off, each kind recorded once; and each report
+    the intake read (process#DeliveryReport; MessageDeliveryReports.js), so a report read again changes nothing and the ones it
+    could not read stay listed. -->
+  <entity entity-name="MessageDeliveryReceipt" package="mantle.party" cache="never">
+    <description>One later fact of a delivery, once per kind (MessageDeliveryReceipt: delivered, soft bounce, hard bounce,
+      complaint): when, the report it came from and its safe detail (a status code and the remote server's diagnostic).</description>
+    <field name="deliveryId" type="id" is-pk="true"/>
+    <field name="receiptEnumId" type="id" is-pk="true"/>
+    <field name="receiptDate" type="date-time"/>
+    <field name="reportId" type="id"/>
+    <field name="detail" type="text-medium"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+    <relationship type="one" title="MessageDeliveryReceipt" related="moqui.basic.Enumeration">
+      <key-map field-name="receiptEnumId" related="enumId"/>
+    </relationship>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery receipt" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrDelivered" description="Delivered" sequenceNum="1" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrSoftBounce" description="Soft bounce" sequenceNum="2" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrHardBounce" description="Hard bounce" sequenceNum="3" enumTypeId="MessageDeliveryReceipt"/>
+      <moqui.basic.Enumeration enumId="MdrComplaint" description="Complaint" sequenceNum="4" enumTypeId="MessageDeliveryReceipt"/>
+    </seed-data>
+  </entity>
+  <entity entity-name="MessageDeliveryReport" package="mantle.party" cache="never">
+    <description>One message the bounce intake read: the EmailMessage (a report a bounce account received, or a sent message the edge
+      relay marked bounced), its kind (MessageDeliveryReportKind: DSN, ARF, the edge's bounce), the delivery its key found, the fact
+      it recorded, its outcome (MessageDeliveryReportStatus: applied, no change, unknown key, unreadable, ignored, failed) with the
+      reason, and the tries of a failed one. One row a message, so reading it again changes nothing.</description>
+    <field name="reportId" type="id" is-pk="true"/>
+    <field name="emailMessageId" type="id"/>
+    <field name="reportKindEnumId" type="id"/>
+    <field name="deliveryId" type="id"/>
+    <field name="receiptEnumId" type="id"/>
+    <field name="statusEnumId" type="id"/>
+    <field name="reasonText" type="text-medium"/>
+    <field name="attempts" type="number-integer"/>
+    <field name="receivedDate" type="date-time"/>
+    <field name="processedDate" type="date-time"/>
+    <relationship type="one" related="mantle.party.MessageDelivery"/>
+    <relationship type="one" title="MessageDeliveryReportKind" related="moqui.basic.Enumeration">
+      <key-map field-name="reportKindEnumId" related="enumId"/>
+    </relationship>
+    <relationship type="one" title="MessageDeliveryReportStatus" related="moqui.basic.Enumeration">
+      <key-map field-name="statusEnumId" related="enumId"/>
+    </relationship>
+    <index name="MESSAGE_REPORT_MESSAGE" unique="true">
+      <index-field name="emailMessageId"/>
+    </index>
+    <index name="MESSAGE_REPORT_STATUS">
+      <index-field name="statusEnumId"/>
+    </index>
+    <seed-data>
+      <moqui.basic.EnumerationType description="Message delivery report kind" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkDsn" description="Delivery status notification" sequenceNum="1" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkArf" description="Abuse feedback report" sequenceNum="2" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.Enumeration enumId="MrkEdge" description="Bounce reported by the edge relay" sequenceNum="3" enumTypeId="MessageDeliveryReportKind"/>
+      <moqui.basic.EnumerationType description="Message delivery report status" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsApplied" description="Applied" sequenceNum="1" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsNoChange" description="No change: already recorded" sequenceNum="2" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsUnknownKey" description="Unknown delivery" sequenceNum="3" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsUnreadable" description="Not a readable report" sequenceNum="4" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsIgnored" description="Nothing to record" sequenceNum="5" enumTypeId="MessageDeliveryReportStatus"/>
+      <moqui.basic.Enumeration enumId="MrsFailed" description="Failed, tried again" sequenceNum="6" enumTypeId="MessageDeliveryReportStatus"/>
+    </seed-data>
+  </entity>
+  <!-- ===== end of Marketing P6 ===== -->
 </entities>
