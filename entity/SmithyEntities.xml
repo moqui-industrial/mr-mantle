@@ -114,10 +114,17 @@
         <field name="docsEnabled" type="text-indicator"><description>N when empty</description></field>
         <field name="docsPath" type="text-medium"><description>docs when empty</description></field>
         <field name="workEffortId" type="id"><description>The project of its issues</description></field>
+        <field name="confidentialWorkEffortId" type="id"><description>The companion project of its confidential issues' tasks,
+            made on first need: restricted, never linked to the repository (no WorkEffortGitRepository), and with exactly
+            the internal accounts that are Smithy Owners of the repository or its groups as its managers. So Projects'
+            own rule, a task is seen by those on its project, keeps a confidential issue's task from everyone else.</description></field>
         <field name="contactListId" type="id"><description>Its forum subcategory, when it has one</description></field>
         <field name="nextIssueNumber" type="number-integer"><description>Starts at 1</description></field>
         <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
         <field name="agreementPath" type="text-medium"><description>Empty: inherited</description></field>
+        <field name="importedHistory" type="text-indicator"><description>Y: the repository's history was imported (DG8 sets it).
+            Only then does the agreement check take a commit that no push or write of an account brought (it came by the
+            import) as its author's own, by the author's confirmed address or linked GitHub login</description></field>
         <field name="pinnedSequence" type="number-integer"><description>Pinned on its group's Overview when set</description></field>
         <field name="componentName" type="text-medium"><description>From component.xml</description></field>
         <field name="componentVersion" type="text-short"/>
@@ -162,6 +169,121 @@
         <relationship type="one-nofk" title="SmithyRole" related="moqui.basic.Enumeration">
             <key-map field-name="roleEnumId" related="enumId"/></relationship>
         <index name="SMITHY_REPO_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
+    </entity>
+    <entity entity-name="SmithyIssue" package="mantle.smithy">
+        <description>An issue: a task of the repository's (or its group's) project with a number in the repository, its
+            confidential mark and its conversation, a ForumTopic of kind record. The number comes from
+            SmithyRepository.nextIssueNumber under a lock of that row. Its title is the task's name and the topic's
+            title; its text is the topic's first post, of which the task's description is a plain-text copy.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="issueNumber" type="number-integer" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="workEffortId" type="id"><description>The task</description></field>
+        <field name="rootCommEventId" type="id"><description>The record topic</description></field>
+        <field name="confidential" type="text-indicator"><description>Y: read and edited by the Owners of the repository and
+            its groups and by operators; its reporter keeps their own text and the replies addressed to them</description></field>
+        <field name="reporterPartyId" type="id"/>
+        <field name="createdAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one-nofk" related="mantle.forum.ForumTopic">
+            <key-map field-name="rootCommEventId"/></relationship>
+        <index name="SMITHY_ISSUE_TASK" unique="true"><index-field name="workEffortId"/></index>
+        <index name="SMITHY_ISSUE_TOPIC" unique="true"><index-field name="rootCommEventId"/></index>
+        <index name="SMITHY_ISSUE_LIST"><index-field name="siteId"/><index-field name="repositoryId"/><index-field name="confidential"/></index>
+    </entity>
+    <entity entity-name="SmithyLabel" package="mantle.smithy">
+        <description>A label made in a repository's tracker (storeLabel): the WorkEffortCategory of type WcatLabel is this
+            repository's alone, though its project may be shared by the group's other repositories. It is listed, changed
+            and deleted through this repository only. An organization's label (no row here) is shared and is changed in
+            Projects.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="workEffortCategoryId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="description" type="text-medium"><description>Plain text; the label's name is the category's description</description></field>
+        <relationship type="one" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffortCategory"/>
+        <index name="SMITHY_LABEL_CATEGORY"><index-field name="workEffortCategoryId"/></index>
+    </entity>
+    <entity entity-name="SmithyMilestone" package="mantle.smithy">
+        <description>A milestone made in a repository's tracker (storeMilestone): the WetMilestone of the project is this
+            repository's alone, listed, changed and set on issues through this repository only.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="workEffortId" type="id" is-pk="true"><description>The milestone</description></field>
+        <field name="siteId" type="id"/>
+        <relationship type="one" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort"/>
+        <index name="SMITHY_MILESTONE_WORK"><index-field name="workEffortId"/></index>
+    </entity>
+    <view-entity entity-name="SmithyIssueTask" package="mantle.smithy">
+        <description>An issue with what its lists filter and sort by: its task's name, status, resolution and visibility,
+            its topic's activity and count, and the visibility of its first post (a held one is its author's and the
+            moderators').</description>
+        <member-entity entity-alias="I" entity-name="mantle.smithy.SmithyIssue"/>
+        <member-entity entity-alias="W" entity-name="mantle.work.effort.WorkEffort" join-from-alias="I">
+            <key-map field-name="workEffortId"/></member-entity>
+        <member-entity entity-alias="T" entity-name="mantle.forum.ForumTopic" join-from-alias="I">
+            <key-map field-name="rootCommEventId"/></member-entity>
+        <member-entity entity-alias="P" entity-name="mantle.forum.ForumPostState" join-from-alias="I">
+            <key-map field-name="rootCommEventId" related="communicationEventId"/></member-entity>
+        <alias-all entity-alias="I"/>
+        <alias entity-alias="W" name="workEffortName"/>
+        <alias entity-alias="W" name="statusId"/>
+        <alias entity-alias="W" name="resolutionEnumId"/>
+        <alias entity-alias="W" name="visibilityEnumId"/>
+        <alias entity-alias="W" name="rootWorkEffortId"/>
+        <alias entity-alias="T" name="lastActivity"/>
+        <alias entity-alias="T" name="visiblePostCount"/>
+        <alias entity-alias="P" name="rootVisibility" field="visibility"/>
+    </view-entity>
+    <entity entity-name="SmithyMergeRequest" package="mantle.smithy">
+        <description>What Smithy keeps beside a merge request of the git host (moqui.resource.GitMergeRequest, which has its
+            number, branches, reviewers and merge): the site, the conversation (a ForumTopic of kind record whose first
+            post is the merge request's text; GitMergeRequest.description is a plain-text copy) and the result of the
+            contributor agreement check for its head. While the first post is held, GitMergeRequest.hiddenDate is set
+            (design-smithy §9.1, §9.3, §9.4).</description>
+        <field name="mergeRequestId" type="id" is-pk="true"><description>The moqui.resource.GitMergeRequest</description></field>
+        <field name="siteId" type="id"/>
+        <field name="repositoryId" type="id"><description>The target</description></field>
+        <field name="rootCommEventId" type="id"><description>The record topic</description></field>
+        <field name="authorPartyId" type="id"/>
+        <field name="agreementStateEnumId" type="id"><description>SmithyAgreementState</description></field>
+        <field name="agreementDetail" type="text-long"><description>JSON: who is missing what</description></field>
+        <field name="agreementCommitId" type="text-short"><description>The head it was computed for; while it is not the merge
+            request's head the result is not that head's, and reads as unsigned</description></field>
+        <field name="agreementCheckedAt" type="date-time"><description>When recheckAgreement last ran: once a minute</description></field>
+        <field name="botOperatorPartyId" type="id"><description>The operator who declared</description></field>
+        <field name="botConfirmedByPartyId" type="id"><description>The Maintainer who confirmed</description></field>
+        <field name="runApprovedByPartyId" type="id"><description>"Approve and run" (DG5)</description></field>
+        <field name="runApprovedAt" type="date-time"/>
+        <field name="createdAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one-nofk" related="moqui.resource.GitMergeRequest"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.forum.ForumTopic">
+            <key-map field-name="rootCommEventId"/></relationship>
+        <index name="SMITHY_MR_TOPIC" unique="true"><index-field name="rootCommEventId"/></index>
+        <index name="SMITHY_MR_REPO"><index-field name="siteId"/><index-field name="repositoryId"/></index>
+    </entity>
+    <entity entity-name="SmithyAgreementSignature" package="mantle.smithy">
+        <description>A cache of the contributor agreement check (design-smithy §9.4, step 3): a signature line of a list of
+            the agreement file at a branch, with the commit that added it and that commit's author when it is an account.
+            Rebuilt from the file when its blob at the branch is another.</description>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="refName" type="text-medium" is-pk="true"><description>The branch</description></field>
+        <field name="listEnumId" type="id" is-pk="true"><description>SmithyAgreementList</description></field>
+        <field name="login" type="text-medium" is-pk="true"><description>Lower case</description></field>
+        <field name="siteId" type="id"/>
+        <field name="lineText" type="text-medium"/>
+        <field name="commitId" type="text-short"><description>The commit that added the line; empty when none was found</description></field>
+        <field name="authorPartyId" type="id"><description>That commit's author, when an account</description></field>
+        <field name="authorEmail" type="text-medium"><description>The address that commit's author gave, lower case: the row counts
+            only while it is still a confirmed address of authorPartyId</description></field>
+        <field name="unverified" type="text-indicator"><description>Y: the history read was cut at its bound before the
+            commit that added the line was found, so whose it is cannot be said</description></field>
+        <field name="blobId" type="text-short"><description>The file's blob the row was read from</description></field>
+        <field name="checkedAt" type="date-time"/>
     </entity>
     <entity entity-name="SmithyAccount" package="mantle.smithy">
         <description>An account's Smithy settings in a site, made when first needed: its limits (each the site's default

@@ -343,7 +343,8 @@ function withoutRecurringBases(query) {
         cf.makeCondition(
             [
                 cf.makeCondition("orderPurposeEnumId", "is-null", null),
-                cf.makeCondition("orderPurposeEnumId", "not-equals", "OrpRecurringTemplate")
+                // Sales P12: nor is a quote template, never placed
+                cf.makeCondition("orderPurposeEnumId", "not-in", ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"])
             ],
             "or"
         )

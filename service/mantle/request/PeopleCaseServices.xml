@@ -197,8 +197,16 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="document" type="Map"/></out-parameters>
         <actions>
+            <set field="given" from="document"/>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').execute('documentData', context)"/>
             <set field="document" from="found.document"/>
+            <!-- a post of a record conversation (an issue's; ForumTopic.kind record, mr-pass design-smithy §12.1) is left out of
+                the index the same way: it is found by its app's own search, under the record's rule -->
+            <if condition="dataDocumentId == 'MantleCommunicationEvent' &amp;&amp; given?.communicationEventId">
+                <script>if (ec.resource.script('component://mr-mantle/service/mantle/forum/RecordPosts.js')
+                        .recordPostIds([given.communicationEventId])[given.communicationEventId])
+                    document = Object.assign({}, given, {confidentialCase: 'Y'})</script>
+            </if>
         </actions>
     </service>
 </services>

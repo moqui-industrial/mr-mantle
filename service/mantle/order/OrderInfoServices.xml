@@ -1419,7 +1419,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return/></if>
             <!-- a recurring base (RecurringTemplate, X5) sends no store email: it is never placed for the customer (mr-pass impl-shop P7) -->
-            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
+            <!-- nor does a Sales quote template (impl-sales P12), never placed -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader.orderPurposeEnumId)"><return/></if>
             <set field="productStoreId" from="orderHeader.productStoreId"/>
             <if condition="!productStoreId"><return/></if>
 

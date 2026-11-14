@@ -308,6 +308,11 @@ along with this software (see the LICENSE.md file). If not, see
                         .protectedTaskIds([current.workEffortId]).length > 0
                         && ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                             .hiddenTaskIds([current.workEffortId], userPartyId).length > 0) continue
+                // the task of a confidential issue of a public tracker only for its Smithy Owners and the operators (mr-pass
+                // design-smithy §8.3; check#TaskHidden, as get#RecordLinkInfo has it): it is in a project of its own, which
+                // this search does not read membership of
+                if (hit.documentId === 'MantleTask' && ec.service.sync().name('mantle.smithy.SmithyIssueServices.check#TaskHidden')
+                        .parameter('workEffortId', current.workEffortId).disableAuthz().call()?.hidden !== false) continue
                 // a maintenance work order and its steps only as Maintenance admits them, not to everyone of its organization
                 // (MaintenanceAccess.js workHidden, as get#RecordLinkInfo has it; impl-maintenance F69, P3 review)
                 if (hit.documentId === 'MantleTask' && ec.resource.script('component://mr-mantle/service/mantle/work/MaintenanceAccess.js')
