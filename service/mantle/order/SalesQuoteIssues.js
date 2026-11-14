@@ -249,7 +249,7 @@ function addressText(contactMechId) {
         .join(", ")
 }
 // The map the locked text sees (only these names, F70).
-function textMap(order, part, issue, part2) {
+function textMap(order, part, issue, part2, linkUrl) {
     const contact = contactOf(order)
     return {
         part: part2 || "cover",
@@ -262,12 +262,61 @@ function textMap(order, part, issue, part2) {
         issuedText: issue ? dayText(issue.issuedDate) : "",
         validThruText: dayText(issue ? issue.validThruDate : part.validThruDate),
         totalText: moneyText(order.grandTotal ?? 0, order.currencyUomId),
-        // the PASS quote link comes with PASS Sales (impl-sales P13); none until then
-        linkUrl: ""
+        // P13: the PASS link (a mail's: the recipient's own bearer link; the print's: the quote's page for a signed-in contact)
+        linkUrl: linkUrl || ""
     }
 }
-// The quote's print as it is now: the lines, the totals by kind, the cover and terms; draft Y when it is not an issue's.
-function printOf(order, part, issue) {
+
+// ===== P13: the customer's PASS links (impl-sales P13; design-sales §10.1, §16) =====
+const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+// The quote's page on the seller's published PASS Sales mount with no token (a signed-in contact's, or the customer's own
+// account's): the print's link and QR, so a forwarded PDF opens nothing by itself. Null with no published Sales site.
+function quotePageUrl(organizationPartyId, orderId) {
+    const siteId = publicApps().sitesFor("sales", organizationPartyId)[0]
+    return siteId ? publicApps().pageUrl(siteId, "sales", "/CustomerQuote?orderId=" + encodeURIComponent(orderId)) : null
+}
+// One recipient's bearer link to an issue (the SalesOrder kind's QuoteView and QuoteRespond, bound to the issue's revision and
+// ending with its validity): made for each mail as the ledger's rule is (a token is never stored), revoked by revise#Quote and
+// withdraw#Quote; null with no published Sales site or past the validity, and the mail then carries none.
+function quoteLink(issue) {
+    const thru = ms(issue.validThruDate)
+    if (thru == null || thru <= nowMs() || !publicApps().sitesFor("sales", issue.organizationPartyId).length) return null
+    try {
+        return (
+            externalAccess().create({
+                recordType: "SalesOrder",
+                recordId: issue.orderId,
+                scopes: externalAccess().quoteScopes,
+                recordRevision: Number(issue.orderRevision),
+                thruDate: issue.validThruDate
+            }).url || null
+        )
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.error(
+            "No PASS link for quote " + issue.orderId + " issue " + issue.issueId + ": " + String(error.message).split("\n")[0]
+        )
+        return null
+    }
+}
+// End the bearer links of a quote's issues (revise#Quote, withdraw#Quote): a link of an earlier offer no longer opens it.
+function revokeLinks(orderId) {
+    for (const scope of externalAccess().quoteScopes) externalAccess().revokeActive("SalesOrder", orderId, scope, null)
+}
+// The print's QR of a link (the framework's barcodes); empty when none.
+function qrOf(url) {
+    if (!url) return ""
+    try {
+        return ec.resource.barcodeSvg("QR", url) || ""
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.warn("No QR for " + url + ": " + String(error.message).split("\n")[0])
+        return ""
+    }
+}
+// The quote's lines and its totals by kind as text (the print's, and P13's PASS page's): no cost or margin.
+function offerOf(order) {
     const currencyUomId = order.currencyUomId
     const items = rows(ITEM, {orderId: order.orderId}).sort((a, b) =>
         String(a.orderItemSeqId).localeCompare(String(b.orderItemSeqId))
@@ -297,7 +346,21 @@ function printOf(order, part, issue) {
             requiredText: dayText(item.requiredByDate)
         })
     }
-    const map = textMap(order, part, issue)
+    return {
+        lines,
+        productsText: moneyText(totals.products, currencyUomId),
+        shippingText: totals.shipping.isZero() ? "" : moneyText(totals.shipping, currencyUomId),
+        taxText: totals.tax.isZero() ? "" : moneyText(totals.tax, currencyUomId),
+        totalText: moneyText(order.grandTotal ?? 0, currencyUomId)
+    }
+}
+// The quote's print as it is now: the lines, the totals by kind, the cover and terms; draft Y when it is not an issue's.
+function printOf(order, part, issue) {
+    const currencyUomId = order.currencyUomId
+    const offer = offerOf(order)
+    // P13: an issue's print carries the quote's PASS page and its QR (no token); a draft's none
+    const pageUrl = issue ? quotePageUrl(part.vendorPartyId, order.orderId) : null
+    const map = textMap(order, part, issue, null, pageUrl)
     const printHtml = ec.resource.template(printLocation, {
         orderId: order.orderId,
         orderName: order.orderName || "",
@@ -311,16 +374,16 @@ function printOf(order, part, issue) {
         validThruText: dayText(issue ? issue.validThruDate : part.validThruDate),
         shipToText: addressText(part.postalContactMechId),
         currencyText: currencyUomId || "",
-        productsText: moneyText(totals.products, currencyUomId),
-        shippingText: totals.shipping.isZero() ? "" : moneyText(totals.shipping, currencyUomId),
-        taxText: totals.tax.isZero() ? "" : moneyText(totals.tax, currencyUomId),
-        totalText: moneyText(order.grandTotal ?? 0, currencyUomId),
+        productsText: offer.productsText,
+        shippingText: offer.shippingText,
+        taxText: offer.taxText,
+        totalText: offer.totalText,
         coverHtml: storedText("quote", part.vendorPartyId, Object.assign({}, map, {part: "cover"})),
         termsHtml: storedText("quote", part.vendorPartyId, Object.assign({}, map, {part: "terms"})),
-        linkUrl: "",
-        qrSvg: "",
+        linkUrl: pageUrl || "",
+        qrSvg: qrOf(pageUrl),
         draft: issue ? "N" : "Y",
-        lines
+        lines: offer.lines
     })
     return {printHtml, fileName: "Quote-" + order.orderId + "-r" + revisionOf(order) + ".pdf"}
 }
@@ -506,7 +569,7 @@ function sendOwn(quote, issue, recipient, account, subject, note) {
         textHtml: storedText(
             "quote",
             quote.organizationPartyId,
-            Object.assign(textMap(quote.order, quote.part, issue), {part: "cover"})
+            Object.assign(textMap(quote.order, quote.part, issue, null, quoteLink(issue)), {part: "cover"})
         )
     })
     const draft = call("org.moqui.mail.EmailClientServices.save#Draft", {
@@ -715,7 +778,8 @@ function buildMessage(p, kind) {
     const delivery = one(DELIVERY, {deliveryId: p.deliveryId})
     const queued = lib.json(delivery?.parametersJson, {}) || {}
     const sender = senderOf(issue)
-    const map = textMap(order, part, issue)
+    // P13: this recipient's own bearer link, made for this attempt
+    const map = textMap(order, part, issue, null, quoteLink(issue))
     const subject =
         kind === "reminder"
             ? L("Reminder") + ": " + L("quote") + " " + order.orderId + " · " + partyName(issue.organizationPartyId)
@@ -819,17 +883,31 @@ function respondQuote(p) {
     const userScope = salesAccess.scope()
     // under the order's lock before the operation key is read (Sales P10 review), so a double submit answers the first
     const quote = editableQuote(userScope, p.orderId, true)
+    return respondTo(quote, p, {staff: true, operationType: "SalesQuoteRespond", operationKey: p.operationKey})
+}
+// The one response lifecycle of staff and the customer's own on PASS (P13: SalesPortal.js respond#CustomerQuote calls it with the
+// quote its capability or the signed-in contact reached, locked): actor {staff, operationType, operationKey, identity (what the
+// operation's request binds beside the payload: the capability or the customer's party, F36), contactPartyId, capabilityId,
+// acceptorName, acceptorTitle, issueId (the customer's: the issue its link binds)}. The customer's response is made now, carries no
+// evidence of staff's kind and names no contact of its choosing.
+function respondTo(quote, p, actor) {
     const action = text(p.responseType) || "accept"
     if (!Object.hasOwn(responseTypes, action)) denied("RESPONSE_INVALID", "Record an acceptance or a decline")
     const request = {
         orderId: quote.order.orderId,
-        issueId: text(p.issueId),
+        issueId: actor.staff ? text(p.issueId) : actor.issueId,
         action,
         otherPartyOrderId: text(p.otherPartyOrderId),
-        contactPartyId: text(p.contactPartyId),
+        contactPartyId: actor.staff ? text(p.contactPartyId) : actor.contactPartyId || null,
         reason: text(p.reason)
     }
-    const operation = lib.operation(p, "SalesQuoteRespond", quote.organizationPartyId, request)
+    if (!actor.staff)
+        Object.assign(request, {
+            acceptorName: text(actor.acceptorName),
+            acceptorTitle: text(actor.acceptorTitle),
+            identity: actor.identity
+        })
+    const operation = lib.operation({operationKey: actor.operationKey}, actor.operationType, quote.organizationPartyId, request)
     if (operation.old) return lib.previous(operation)
     const order = quote.order
     const issue = request.issueId ? one(ISSUE, {issueId: request.issueId}) : issuesOf(order.orderId)[0] || null
@@ -854,28 +932,38 @@ function respondQuote(p) {
             "ISSUE_SUPERSEDED",
             "Quote " + order.orderId + " changed after this issue; its current revision is " + revisionOf(order)
         )
-    const respondedMs = blank(p.respondedDate) ? nowMs() : ms(p.respondedDate)
+    const respondedMs = !actor.staff || blank(p.respondedDate) ? nowMs() : ms(p.respondedDate)
     if (!Number.isFinite(respondedMs) || respondedMs > nowMs() + 60000 || respondedMs < (ms(issue.issuedDate) ?? 0) - 60000)
         denied("DATE_INVALID", "The response is between the issue and now")
     const thru = ms(issue.validThruDate)
     if (thru != null && respondedMs > thru)
         denied("ISSUE_EXPIRED", "Issue " + issue.issueId + " expired " + dayText(issue.validThruDate))
-    if (request.contactPartyId && !recipientOptions(quote.customerPartyId).some(row => row.partyId === request.contactPartyId))
+    if (
+        actor.staff &&
+        request.contactPartyId &&
+        !recipientOptions(quote.customerPartyId).some(row => row.partyId === request.contactPartyId)
+    )
         denied("CONTACT_INVALID", "The contact is not the customer or one of its contacts")
-    const evidenceOrderContentId = text(p.evidenceOrderContentId)
+    const evidenceOrderContentId = actor.staff ? text(p.evidenceOrderContentId) : null
     if (evidenceOrderContentId && one(CONTENT, {orderContentId: evidenceOrderContentId})?.orderId !== order.orderId)
         denied("EVIDENCE_INVALID", "The evidence is not a file of quote " + order.orderId)
-    const evidenceEmailMessageId = text(p.evidenceEmailMessageId)
+    const evidenceEmailMessageId = actor.staff ? text(p.evidenceEmailMessageId) : null
     if (evidenceEmailMessageId && !one("moqui.basic.email.EmailMessage", {emailMessageId: evidenceEmailMessageId}))
         denied("EVIDENCE_INVALID", "The evidence mail is not available")
-    if (action === "decline" && !request.reason) denied("REASON_REQUIRED", "Give the customer's reason for the decline")
+    if (action === "decline" && !request.reason)
+        denied("REASON_REQUIRED", actor.staff ? "Give the customer's reason for the decline" : "Tell us why you decline")
     if (action === "accept" && policyOf(quote.organizationPartyId).responsePoRequired === "Y" && !request.otherPartyOrderId)
-        denied("PO_REQUIRED", "The organization records the customer's purchase order with an acceptance")
+        denied(
+            "PO_REQUIRED",
+            actor.staff
+                ? "The organization records the customer's purchase order with an acceptance"
+                : "Give your purchase order number to accept"
+        )
     const created = call("create#" + RESPONSE, {
         issueId: issue.issueId,
         orderId: order.orderId,
         responseTypeEnumId: responseTypes[action],
-        responseSourceEnumId: "SqsStaff",
+        responseSourceEnumId: actor.staff ? "SqsStaff" : "SqsPortal",
         respondedDate: new Date(respondedMs),
         recordedDate: ec.user.nowTimestamp,
         recordedByUserId: ec.user.userId,
@@ -884,7 +972,10 @@ function respondQuote(p) {
         evidenceEmailMessageId,
         evidenceOrderContentId,
         reasonText: request.reason,
-        operationKey: text(p.operationKey)
+        operationKey: text(actor.operationKey),
+        capabilityId: actor.staff ? null : actor.capabilityId || null,
+        acceptorName: request.acceptorName || null,
+        acceptorTitle: request.acceptorTitle || null
     })
     if (action === "accept") {
         if (request.otherPartyOrderId && request.otherPartyOrderId !== (quote.part.otherPartyOrderId || null))
@@ -943,6 +1034,8 @@ function withdrawQuote(p) {
     if (!reason) denied("REASON_REQUIRED", "Give the reason for withdrawing the quote")
     call("mantle.order.OrderServices.cancel#Order", {orderId: order.orderId})
     const ended = endIssues(order, ends.withdrawn, reason)
+    // P13: the customer's links end with the offer
+    revokeLinks(order.orderId)
     const after = one(ORDER, {orderId: order.orderId})
     return {orderId: after.orderId, statusId: after.statusId, endedCount: ended}
 }
@@ -955,6 +1048,8 @@ function reviseQuote(p) {
     if (order.statusId !== "OrderProposed") denied("QUOTE_NOT_PROPOSED", "Only a proposed quote is revised")
     requireRevision(order, p.orderRevision)
     endIssues(order, ends.revised, text(p.reason))
+    // P13: the customer's links of the earlier offer end with it
+    revokeLinks(order.orderId)
     call("mantle.order.OrderServices.update#OrderStatus", {orderId: order.orderId, statusId: "OrderBeingChanged"})
     call("mantle.order.OrderServices.increment#OrderRevision", {orderId: order.orderId, revisionKind: "commercial"})
     const after = one(ORDER, {orderId: order.orderId})
@@ -1201,5 +1296,21 @@ const operations = {
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown sales quote issue operation " + op)
         return operations[op](parameters || {})
-    }
+    },
+    // P13: what PASS Sales' customer services (SalesPortal.js) read and the one response lifecycle they call
+    issuesOf,
+    responseOf,
+    stands,
+    issueState,
+    stateTexts,
+    resultOf,
+    respondTo,
+    policyOf,
+    printOf,
+    offerOf,
+    storedText,
+    textMap,
+    ownerOf,
+    contactOf,
+    revisionOf
 })

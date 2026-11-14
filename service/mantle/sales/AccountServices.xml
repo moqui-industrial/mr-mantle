@@ -126,4 +126,55 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="partyRelationshipId" from="found.partyRelationshipId"/>
         </actions>
     </service>
+    <!-- P13: Invite to Sales (design-sales §4 Customer360 and ContactDetail, §10.1) -->
+    <service verb="get" noun="SalesInvite" read-only="true">
+        <description>What Invite to Sales offers on Customer360 (accountPartyId: the account's contacts and their own addresses) or
+            ContactDetail (contactPartyId: the person's customer accounts of the caller's sales scope and the person's addresses):
+            canInvite (SALES_CUSTOMER_INVITE, a customer account, an organization of the scope with a published PASS Sales site, an
+            address), the reason when not, the organizations, and the choices, each an account, contact and address as one value
+            ("account|contact|email").</description>
+        <in-parameters>
+            <parameter name="accountPartyId"/>
+            <parameter name="contactPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="canInvite" type="Boolean"/>
+            <parameter name="reason"/>
+            <parameter name="organizationOptions" type="List"/>
+            <parameter name="choices" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('salesInvite', context)"/>
+            <set field="canInvite" from="found.canInvite"/>
+            <set field="reason" from="found.reason"/>
+            <set field="organizationOptions" from="found.organizationOptions"/>
+            <set field="choices" from="found.choices"/>
+        </actions>
+    </service>
+    <service verb="invite" noun="SalesContact">
+        <description>Invite a contact of a customer account of the caller's sales scope (or a person account itself) to the
+            organization's PASS Sales pages at one of the contact's own addresses: mantle.party.ExternalAccessServices.invite#Contact
+            for the sales app, bound to the account and the organization (an organization of the scope serving the account, with a
+            published PASS Sales site). Redeeming it lets the account see the customer's issued quotes and accept them signed in.
+            Needs SALES_CUSTOMER_INVITE (PERMISSION_DENIED); an account or contact outside the scope answers as missing
+            (RECORD_UNAVAILABLE); PARTY_INVALID for an account that is not a customer, EMAIL_INVALID, SITE_UNAVAILABLE. The link is
+            answered once, for the user to send.</description>
+        <in-parameters>
+            <parameter name="accountPartyId" required="true"/>
+            <parameter name="contactPartyId" required="true"/>
+            <parameter name="emailAddress" required="true"/>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="invitationId"/>
+            <parameter name="invitationUrl"/>
+            <parameter name="expiresAt" type="Timestamp"/>
+        </out-parameters>
+        <actions>
+            <set field="invited" from="ec.resource.script('component://mr-mantle/service/mantle/sales/SalesAccounts.js').execute('inviteContact', context)"/>
+            <set field="invitationId" from="invited.invitationId"/>
+            <set field="invitationUrl" from="invited.invitationUrl"/>
+            <set field="expiresAt" from="invited.expiresAt"/>
+        </actions>
+    </service>
 </services>

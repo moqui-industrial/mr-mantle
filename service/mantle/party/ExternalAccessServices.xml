@@ -20,7 +20,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A capability over one record for its outside party: an issued customer invoice (Invoice, scope
             InvoicePay; RECEIVABLE_EDIT), a purchase order (Order, scopes BillUpload and OrderAcknowledgement;
             PAYABLE_EDIT or PURCHASE_ORDER_EDIT) or a supplier's quote order while requested or proposed (Quote, scope
-            QuoteResponse; PURCHASE_ORDER_EDIT), in the record's organization. The token is answered once and only its digest kept; it expires
+            QuoteResponse; PURCHASE_ORDER_EDIT), in the record's organization. A customer quote's scopes (SalesOrder QuoteView and
+            QuoteRespond, Sales P13) bind the issue's revision and are made only by send#Quote, never here (SCOPE_INVALID). The token is answered once and only its digest kept; it expires
             after validDays (60 by default, at most 366) or at thruDate.</description>
         <in-parameters>
             <parameter name="recordType" required="true"/>
@@ -39,7 +40,7 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <set field="access" from="ec.resource.script('component://mr-mantle/service/mantle/party/ExternalAccess.js')"/>
-            <script>access.requireIssuer(recordType, recordId)</script>
+            <script>access.requireIssuer(recordType, recordId, scopes)</script>
             <set field="created" from="access.create({recordType:recordType, recordId:recordId, scopes:scopes,
                 validDays:validDays, thruDate:thruDate})"/>
             <set field="capabilityId" from="created.capabilityId"/>
@@ -124,8 +125,8 @@ along with this software (see the LICENSE.md file). If not, see
             the party. Needs RECEIVABLE_EDIT for billing, and PAYABLE_EDIT or PURCHASE_ORDER_EDIT (a buyer, from
             Supplier360) for supplier, in the organization. Redeeming it
             makes the account's party a contact (PrtContact) of the party; it gives no user group.
-            For support (Customer Service P15) SUPPORT_CONTACT_INVITE, the party a customer of the organization, a person
-            (a consumer) or an organization; administrator Y makes the contact a customer administrator, who sees the
+            For support (Customer Service P15) SUPPORT_CONTACT_INVITE, and for sales (Sales P13, PASS Sales) SALES_CUSTOMER_INVITE,
+            the party a customer of the organization, a person (a consumer) or an organization; administrator Y makes the contact a customer administrator, who sees the
             customer's cases, not only their own.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>

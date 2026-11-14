@@ -1631,4 +1631,37 @@
         service: 'mantle.product.StoreChannelServices.get#ShopFeed',
         fields: ['siteId', 'feedKey', 'extension'],
     },
+    // IronStone Sales P13 (impl-sales P13; design-sales §10): PASS Sales' customer quotes (mantle.order.SalesPortalServices)
+    findSalesQuotes: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerQuotes',
+        fields: ['siteId', 'state', 'cursor', 'limit'],
+    },
+    getSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerQuote',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesQuoteDocument: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    respondSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.respond#CustomerQuote',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'action',
+            'expectedRevision',
+            'acknowledge',
+            'purchaseOrder',
+            'acceptorName',
+            'acceptorTitle',
+            'reason',
+            'operationId',
+        ],
+    },
+    getSalesQuoteResponse: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteResponse',
+        fields: ['siteId', 'token', 'orderId'],
+    },
 })

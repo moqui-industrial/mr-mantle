@@ -957,6 +957,22 @@ const readinessChecks = [
                 }
             return {state: "ready", message: "A quote's issue is bound to its commercial changes only"}
         }
+    },
+    // P13: PASS Sales, where a customer opens the quote's link and accepts it; the site and its mount are an operator's (PASS)
+    {
+        checkKey: "sales.publicApp",
+        title: "Customer quote pages",
+        run: organizationPartyId => {
+            const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+            if (!apps.sitesFor("sales", organizationPartyId).length)
+                return {
+                    state: "warning",
+                    reasonCode: "NO_SALES_SITE",
+                    message:
+                        "No published PASS site has the Sales app for this organization: quotes go out with no link, and customers cannot accept online"
+                }
+            return {state: "ready", message: "Quote links open the organization's PASS Sales pages"}
+        }
     }
 ]
 // The organizations that use Sales: a pipeline, a team, a source offered or an opportunity of theirs.
