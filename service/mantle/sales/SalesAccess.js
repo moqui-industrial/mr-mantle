@@ -385,6 +385,9 @@ function requireQuote(userScope, orderId, edit = false) {
 const orderPurposes = {direct: "OrpSalesOrder", quote: quotePurpose}
 const orderExcludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
 const approvalStatuses = ["OrderPlaced", "OrderHold"]
+// P14: the statuses in which a change operator (SALES_ORDER_CHANGE) sees the organization's orders, read only, to propose and apply
+// commercial changes (design §1.1 BOSS_SALES_CHANGE; mantle.order.OrderChangeServices checks the change itself)
+const changeStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
 // Whether an order header and its first part are a sales order of Sales' kind (above), the scope aside.
 function isSalesOrder(order, part) {
     if (!order || !part) return false
@@ -421,10 +424,12 @@ function orderOf(userScope, orderId) {
                 .condition("roleTypeId", "in", [quoteRoles.owner, quoteRoles.team])
                 .count() > 0
         if (!assigned) {
-            if (!orderApprover(userScope)) return null
             // P12 (the user's call of Nov 14, P11's review): an approver keeps read-only sight of an order they decided (an
             // OrderDecision of theirs) once it is approved; the organization's other approved orders stay out of sight
-            if (!approvalStatuses.includes(order.statusId) && !decidedBy(orderId)) return null
+            const approverReach = orderApprover(userScope) && (approvalStatuses.includes(order.statusId) || decidedBy(orderId))
+            // P14: a change operator's reach, read only (changeStatuses)
+            const changeReach = !!userScope.capabilities.orderChange && changeStatuses.includes(order.statusId)
+            if (!approverReach && !changeReach) return null
             approverOnly = true
         }
     }
@@ -669,6 +674,8 @@ function requireAgreement(userScope, agreementId, edit = false) {
     isSalesOrder,
     assignedOrderIds,
     orderApprover,
+    // P14: the change operator's statuses
+    changeStatuses,
     orderOf,
     requireOrder,
     // P12: quote templates; the orders an approver decided

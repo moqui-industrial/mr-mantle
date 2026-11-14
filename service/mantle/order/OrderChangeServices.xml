@@ -16,11 +16,12 @@ along with this software (see the LICENSE.md file). If not, see
     impl-customer-service §4, P10; OrderChanges.js, SupportOrderChangeEntities.xml). A proposal is its RqtOrderChange Request with
     RequestItem lines linked to the order's lines (RequestItemOrder); its revision is the time of the last change to its
     audit-logged key fields, and it binds the order's revision (expectedOrderRevision, the commercial revision under
-    PartyAcctgPreference.salesCommercialRevisionOnly). Two kinds are applied here: cancel (the open remainder of a line) and
-    substitute (a short pick's remainder, on Warehouse's ShipmentPickException); the commercial kinds (price, quantity
-    increase, ship date, address, ship method, carrier) are filed and routed to the order's owner, decided under SALES_APPROVE
-    and never applied here. Each service checks its permission and the order's selling organization itself and reads and
-    writes with artifact authorization off. Sales (design-sales §6) mounts the same services. -->
+    PartyAcctgPreference.salesCommercialRevisionOnly). Two kinds are applied by Customer Service: cancel (the open remainder of a
+    line) and substitute (a short pick's remainder, on Warehouse's ShipmentPickException); the commercial kinds (price, quantity
+    increase and a new line, ship date, address, ship method, carrier) are filed and routed to the order's owner, decided under
+    SALES_APPROVE and applied by the owner under SALES_ORDER_CHANGE (impl-sales P14, design-sales §6; SalesOrderChanges.js). Each
+    service checks its permission and the order's selling organization itself and reads and writes with artifact authorization
+    off. Sales (design-sales §6) mounts the same services. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
 
     <service verb="save" noun="OrderChange" allow-remote="false">
@@ -32,11 +33,18 @@ along with this software (see the LICENSE.md file). If not, see
             most the line's open remainder, never what shipped (ALREADY_SHIPPED); a substitute line names a short pick of the
             line (pickExceptionId) and a product that is a current PatEquivalent or PatReplacement of the line's product and
             usable for sale (check#ProductUsable; SUBSTITUTE_INVALID, PRODUCT_NOT_USABLE), at most the short quantity, with
-            the customer's consent (CONSENT_REQUIRED). Saving an existing proposal (requestId) replaces its lines and moves its
+            the customer's consent (CONSENT_REQUIRED). A commercial kind (impl-sales P14): a price line needs its new unit price
+            (PRICE_REQUIRED), a quantity line a quantity above the line's (QUANTITY_INVALID: Customer Service cancels a
+            remainder) or, with no order line, the product of a new line (PRODUCT_REQUIRED), a ship-date line its date
+            (DATE_REQUIRED); an address, ship method or carrier change names its part (orderPartSeqId, the order's only part when
+            empty; PART_REQUIRED) and a postal address of the customer (ADDRESS_REQUIRED, ADDRESS_INVALID), a ship method
+            (METHOD_INVALID) or a carrier (CARRIER_INVALID); its conflicts with the order (a pick, a shipment, an invoice) are
+            preview#OrderChange's. Saving an existing proposal (requestId) replaces its lines and moves its
             revision, so earlier decisions no longer count; an applied, withdrawn or rejected one is refused (CHANGE_CLOSED).
             The proposal goes to its approvers (OrderChangeApproval): ORDER_CHANGE_APPROVE holders for cancel and substitute,
             SALES_APPROVE holders for the commercial kinds. Requires ORDER_CHANGE_REQUEST and an order of the user's
-            organizations; without it a customer contact (the customer's own party, or a current contact or employee of it)
+            organizations, or for a commercial kind (impl-sales P14) SALES_ORDER_CHANGE or the order's editor in Sales
+            (SALES_ORDER_EDIT on an order of the user's sales scope they may change); without them a customer contact (the customer's own party, or a current contact or employee of it)
             may file a cancel of their own order, which under the organization's ServicePolicy.customerImmediateCancel (off by
             default) is applied at once, with the policy as its decision, while nothing on its lines is reserved, picked,
             shipped or invoiced and the order is not approved (immediate); otherwise it waits for an agent ("Cancellation
@@ -55,6 +63,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="addressContactMechId"/>
             <parameter name="shipmentMethodEnumId"/>
             <parameter name="carrierPartyId"/>
+            <parameter name="orderPartSeqId"><description>An address, ship method or carrier change: the part it changes
+                (impl-sales P14)</description></parameter>
             <parameter name="caseRequestId"/>
             <parameter name="lines" type="List"><description>Each a map: orderItemSeqId, changeActionEnumId, productId,
                 quantity, quantityUomId, requiredByDate, proposedUnitAmount, pickExceptionId</description></parameter>
@@ -93,8 +103,10 @@ along with this software (see the LICENSE.md file). If not, see
             when), its revision and the order's, its lines with their order lines, its decisions (current or not, expiry), the
             applied change's stored PDF, and what the user may do (save, decide, apply, withdraw), each false with the reason
             when not. Prices and amounts only for a price or finance reader (PRICE_VIEW, ACCOUNTING_VIEW, RECEIVABLE_VIEW,
-            ORDER_APPROVE), else withheld. Requires ORDER_CHANGE_REQUEST, ORDER_CHANGE_APPROVE, ORDER_CHANGE_APPLY,
-            SALES_APPROVE or SALES_ORDER_CHANGE (PERMISSION_DENIED), or the filer; refuses a missing proposal, another type and
+            ORDER_APPROVE, and for a commercial kind SALES_APPROVE or SALES_ORDER_CHANGE, or a Sales reader who sees the order),
+            else withheld. Requires ORDER_CHANGE_REQUEST, ORDER_CHANGE_APPROVE, ORDER_CHANGE_APPLY, SALES_APPROVE or
+            SALES_ORDER_CHANGE (PERMISSION_DENIED), the filer, or a Sales reader who sees the order in Sales
+            (impl-sales P14: its owner, its team, an approver or change operator of its organization); refuses a missing proposal, another type and
             another organization's alike (RECORD_UNAVAILABLE).</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
         <out-parameters><parameter name="change" type="Map"/></out-parameters>
@@ -108,8 +120,15 @@ along with this software (see the LICENSE.md file). If not, see
             order's resolver gives, get#OrderProductPrice, and the stock available to promise at the order's facility), the
             order's paid amount for a finance reader, and the conflicts apply would refuse (STALE_ORDER, ALREADY_SHIPPED,
             BILLING_CONFLICT, the packed quantity a reopen takes back, a finalized pack invoice), with previewVersion, the
-            fingerprint of the fulfillment facts apply compares (STOCK_CHANGED). Prices as get#OrderChange. Requires the read
-            permissions of get#OrderChange.</description>
+            fingerprint of the fulfillment facts apply compares (STOCK_CHANGED). A commercial kind (impl-sales P14): each line's
+            price, quantity, date or new line after, the part's address, method or carrier before and after, its conflicts
+            (ACTIVE_PICK: picked and not packed, or a shipment of the part being prepared; ALREADY_SHIPPED; BILLING_CONFLICT: a
+            finalized invoice, or a packed quantity's draft invoice that only a receivables editor may release;
+            PRODUCT_NOT_USABLE and PRICE_UNAVAILABLE for a new line) and its effects: the order's total before and after, the
+            tax (an estimate at the order's rate; the gateway recalculates it at apply), the freight and the credit (the
+            customer's credit now, for CUSTOMER_CREDIT_VIEW, ACCOUNTING_VIEW or an approver; Accounting's check again at apply on
+            a higher total). Prices as get#OrderChange. Requires the
+            read permissions of get#OrderChange.</description>
         <in-parameters><parameter name="requestId" required="true"/></in-parameters>
         <out-parameters><parameter name="preview" type="Map"/></out-parameters>
         <actions>
@@ -180,7 +199,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="apply" noun="OrderChange" allow-remote="false">
-        <description>Apply an approved cancel or substitute proposal (ApplyChange; D9, D7) once confirmed
+        <description>Apply an approved proposal (ApplyChange; D9, D7) once confirmed
             (CONFIRMATION_REQUIRED), every check repeated under the order's lock. The order is held through hold#Order with
             the Change reason (OhtChange) and released through release#OrderHold, which leaves any other open hold (a Credit
             hold of Accounting) in place. A cancel line is cancel#OrderItem of its quantity (the line's remainder re-reserved
@@ -199,7 +218,17 @@ along with this software (see the LICENSE.md file). If not, see
             fiscal period of today is closed); also STALE_REVISION (the proposal changed since its approval, naming the
             current revision), NOT_APPROVED, CHANGE_CLOSED and PREVIEW_REQUIRED. Requires ORDER_CHANGE_APPLY
             (PERMISSION_DENIED) and an order of the user's organizations; it never calls release#ShipmentDraftInvoice or
-            refund#OrderPayment. The same operation key answers the first result.</description>
+            refund#OrderPayment. A commercial kind (impl-sales P14, SalesOrderChanges.js) is applied by the order's owner,
+            SALES_ORDER_CHANGE in the seller's sales scope (FORBIDDEN without it, as before), with the same checks under the
+            lock and preview#OrderChange's conflicts refused by name (ACTIVE_PICK, ALREADY_SHIPPED, BILLING_CONFLICT,
+            QUANTITY_INVALID, PRODUCT_NOT_USABLE, PRICE_UNAVAILABLE): the Change hold placed; a packed price line's draft
+            invoice released through Accounting's release#ShipmentDraftInvoice (RECEIVABLE_EDIT); a price, an increased quantity
+            or a ship date through update#OrderItem (whose reservation rule releases and rebuilds the line's open reservations),
+            a new line through create#OrderItem at the seller's price (get#SellerProductPrice), the part's address, method or carrier through
+            update#OrderPart; the part retaxed by handle#OrderMajorChange (X1 for a storeless order); a higher total through
+            Accounting's evaluate#OrderCredit, which may leave a Credit hold; only its own Change hold released; the
+            approvals of the order's other open proposals ended; the proposal Completed and the changed document's PDF stored.
+            The same operation key answers the first result.</description>
         <in-parameters>
             <parameter name="requestId" required="true"/>
             <parameter name="sourceRevision" type="Long"/>
@@ -211,7 +240,9 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="result" type="Map"><description>requestId, orderId, statusId (the order's), orderRevision,
                 cancelled (orderItemSeqId, quantity), added (orderItemSeqId, productId, quantity), reopened (shipmentId,
-                shipmentPackageSeqId, productId, quantity), stillHeld, orderContentId, alreadyApplied</description></parameter>
+                shipmentPackageSeqId, productId, quantity), stillHeld, orderContentId, alreadyApplied; a commercial kind also
+                changed (orderItemSeqId or orderPartSeqId, action), released (the shipments whose draft invoice was released)
+                and endedApprovals (the other proposals whose approval ended)</description></parameter>
         </out-parameters>
         <actions>
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/order/OrderChanges.js').execute('apply', context)"/>
@@ -242,7 +273,10 @@ along with this software (see the LICENSE.md file). If not, see
             first, by order, customer, organization, the person who asked, the approver, the state (requested, needsInfo,
             approved, applied, rejected, cancelled, stale) and the period asked in, a page at a time; each row with its order
             and the order's current revision, the kind, the requested lines in words, the reason, who asked and when, the
-            decision and the approver, a hold or conflict, and the state. Requires the read permissions of get#OrderChange.</description>
+            decision and the approver, a hold or conflict, and the state; by kind (orderChangeKindEnumId) or by who applies it
+            (kindGroup: applied, Customer Service's cancel and substitute; owner, the commercial kinds; impl-sales P14). Requires
+            the read permissions of get#OrderChange; a Sales reader who sees an order lists that order's (orderId), and a holder of
+            SALES_TEAM_VIEW alone the organization's commercial kinds only.</description>
         <in-parameters>
             <parameter name="orderId"/>
             <parameter name="customerPartyId"/>
@@ -250,6 +284,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestedByPartyId"/>
             <parameter name="approverUserId"/>
             <parameter name="caseRequestId"/>
+            <parameter name="orderChangeKindEnumId"/>
+            <parameter name="kindGroup"/>
             <parameter name="state"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
