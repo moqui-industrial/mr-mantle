@@ -11,7 +11,7 @@
  *   three, news only with its list; "none": none). Each is unchecked until the buyer checks it, and says what it is and is
  *   not. The order's receipt and notices are transactional whatever is chosen.
  * - Recording, at placement: a signed-in buyer whose account email is verified and is the checkout's gets each choice granted
- *   (store#PartyConsent on a topic's list; set#ContactListPartySubscription on the news list). Anyone else's choice waits as
+ *   (record#PartyConsent on a topic's list; set#ContactListPartySubscription on the news list). Anyone else's choice waits as
  *   Mantle's pending membership (ContactListParty CLPT_PENDING on the list), never sent to, until it is confirmed: by the
  *   link in the order receipt (make#OptInConfirmLink: a code whose digest the checkout keeps; the page reads, its button
  *   confirms, so a mail scanner's fetch changes nothing) or, for a choice checked while signed in, by the account signing
@@ -269,7 +269,8 @@ function applyOptIn(p) {
         return {outcome: "granted"}
     }
     endPending(contactListId, partyId)
-    call("mantle.party.ConsentServices.store#PartyConsent", {
+    // the caller's check decides (the buyer's own account, or the confirmation link's code), not whoever is signed in
+    call("mantle.party.ConsentServices.record#PartyConsent", {
         partyId,
         purposeEnumId: topics[optIns[optInId].topic].purposeEnumId,
         statusId: "PconGranted",

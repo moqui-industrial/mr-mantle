@@ -333,3 +333,24 @@ feature("the policy and template bindings are dated; a single-use list is held b
         consumed.consumed && !s3.reserved && s3.reasonCode == "LIST_USED"
     }
 })
+
+feature("an unsubscribe link works for a visitor signed in as someone else; the token, not the user, decides", {
+    when() {
+        const token = system(() =>
+            lib.run(CONSENT + "create#UnsubscribeToken", {contactListId: listId, partyId: party.Ana, baseUrl: "https://shop.example.com"})
+        ).token
+        return {
+            before: status(listId, party.Ana),
+            oneClick: as(users.reader, CONSENT + "unsubscribe#ContactListParty", {token, listUnsubscribe: "One-Click"}),
+            after: status(listId, party.Ana),
+            withdrawals: rows("mantle.party.PartyConsent", {partyId: party.Ana, contactListId: listId, statusId: "PconWithdrawn"}).length
+        }
+    },
+    then({before, oneClick, after, withdrawals}) {
+        before == "CLPT_ACCEPTED"
+        oneClick.refusal == ""
+        Array.from(oneClick.failedContactListIds || []).length == 0
+        after == "CLPT_UNSUBSCRIBED"
+        withdrawals == 2
+    }
+})

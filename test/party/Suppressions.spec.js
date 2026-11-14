@@ -1,6 +1,7 @@
 // Comms' suppressions (impl-marketing P3, F13, F16; design-marketing §4 Suppressions; mantle.party.MessageServices over
 // MessageSuppressions.js and the ledger's attempt in MessageDeliveries.js): a suppressed destination is refused at the ledger's
-// attempt however its address is typed, another destination still sent; a new subscription does not end a suppression; ending
+// attempt however its address is typed (a hard bounce, for every delivery), another destination still sent; a complaint or staff
+// block stops promotional deliveries only; a new subscription does not end a suppression; ending
 // one needs MESSAGE_SUPPRESSION_REVIEW and new evidence, and the row stays; a Marketing audience editor adds a block for an
 // organization of their scope only, and reads another organization's not at all.
 // Standalone: spec-local organizations, users, parties, template and source. Run: ./moq test mr-mantle --spec Suppressions
@@ -200,5 +201,69 @@ feature("an audience editor blocks for an organization of their scope only, and 
         // a configurer without the audience read sees the addresses masked
         Array.from(configurer.suppressionList).every(block => block.destinationText.includes("***@"))
         otherOrg.refusal.includes("ORGANIZATION_DENIED")
+    }
+})
+
+feature("a complaint or staff block stops promotional deliveries only; a transactional notice still goes (the user's call, Nov 14)", {
+    when() {
+        system(() => {
+            for (const [destination, reasonEnumId] of [
+                ["noisy@suppress.example.test", "MsrComplaint"],
+                ["staff@suppress.example.test", "MsrStaff"]
+            ])
+                lib.run(M + "store#Suppression", {destination, reasonEnumId, evidenceText: "Spec block " + reasonEnumId})
+            // the buyer's marketing email granted, so a promotional delivery passes the consent and meets the block
+            lib.run("mantle.party.ConsentServices.store#PartyConsent", {
+                partyId: ids.buyer,
+                purposeEnumId: "PcpMarketingEmail",
+                statusId: "PconGranted",
+                evidenceText: "Spec grant"
+            })
+        })
+        const queue = (eventKey, toAddress, promotional) =>
+            system(() =>
+                lib.run(
+                    M + "queue#Delivery",
+                    Object.assign(
+                        {
+                            eventKey,
+                            sourceEnumId: ids.source,
+                            recipientPartyId: ids.buyer,
+                            toAddress,
+                            templateKey: ids.template,
+                            bodyParameters: {title: "Spec notice"},
+                            sendNow: true
+                        },
+                        promotional ? {transactional: false, marketingPurposeEnumId: "PcpMarketingEmail"} : {}
+                    )
+                )
+            ).stateEnumId
+        return {
+            complaintNotice: queue("spec:complaint-notice", "noisy@suppress.example.test", false),
+            complaintPromo: queue("spec:complaint-promo", "noisy@suppress.example.test", true),
+            staffNotice: queue("spec:staff-notice", "staff@suppress.example.test", false),
+            staffPromo: queue("spec:staff-promo", "staff@suppress.example.test", true),
+            openPromo: queue("spec:open-promo", "open@suppress.example.test", true),
+            checkNotice: system(() =>
+                lib.run(M + "check#Suppressions", {destinationList: ["noisy@suppress.example.test"], transactional: true})
+            ),
+            checkPromo: system(() => lib.run(M + "check#Suppressions", {destinationList: ["noisy@suppress.example.test"]})),
+            // an editor's block lasts until a reviewer ends it: its own end date is not taken
+            dated: as(users.editor, M + "store#Suppression", {
+                destination: "dated@suppress.example.test",
+                organizationPartyId: orgA,
+                reasonEnumId: "MsrComplaint",
+                evidenceText: "Spam report",
+                thruDate: new Date(Date.now() + 60000)
+            })
+        }
+    },
+    then({complaintNotice, complaintPromo, staffNotice, staffPromo, openPromo, checkNotice, checkPromo, dated}) {
+        complaintNotice == "MdsSent" && staffNotice == "MdsSent"
+        complaintPromo == "MdsSuppressed" && staffPromo == "MdsSuppressed"
+        openPromo == "MdsSent"
+        Array.from(checkNotice.suppressed).length == 0
+        Array.from(checkPromo.suppressed).length == 1
+        dated.refusal == "" && row("mantle.party.MessageSuppression", {suppressionId: dated.suppressionId}).thruDate == null
     }
 })

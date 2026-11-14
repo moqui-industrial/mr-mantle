@@ -68,7 +68,53 @@ along with this software (see the LICENSE.md file). If not, see
             address's allowSolicitation, which follows the global rows, and never undoes a global withdrawal
             (get#PartyConsentState). Another party's consent is recorded by a contact administrator, or by a holder of
             MARKETING_CONSENT_EDIT for a list whose owner, or an organization, is of their Marketing scope; a signed-in user's
-            own, and a run with no user, as before (mantle/marketing/MarketingAccess.js requireConsentChange, PERMISSION_DENIED).
+            own, and a run with no user, as before (mantle/marketing/MarketingAccess.js requireConsentChange, PERMISSION_DENIED); the rest is
+            record#PartyConsent, which the services that decide who may themselves (a link's token) call.
+        </description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="purposeEnumId" required="true"><description>PartyConsentPurpose</description></parameter>
+            <parameter name="statusId" required="true"><description>PconGranted or PconWithdrawn</description></parameter>
+            <parameter name="contactMechId"/>
+            <parameter name="contactListId"/>
+            <parameter name="consentDate" type="Timestamp"><description>Defaults to now; an import may give the original date</description></parameter>
+            <parameter name="sourceEnumId"><description>PartyConsentSource</description></parameter>
+            <parameter name="evidenceText"/>
+            <parameter name="comments"/>
+            <parameter name="organizationPartyId"><description>The organization a purpose is for; empty is global</description></parameter>
+            <parameter name="updateSolicitation" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyConsentId"/>
+            <parameter name="allowSolicitation"><description>The address's new allowSolicitation, when it follows this change</description></parameter>
+            <parameter name="solicitationUpdatedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            partyConsentId = null; allowSolicitation = null; solicitationUpdatedCount = 0
+            // another party's consent: a contact administrator, or Marketing's consent editor of the list's or purpose's organization
+            const consentList = contactListId ? ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one() : null
+            try {
+                ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js')
+                        .requireConsentChange(partyId, consentList ? consentList.ownerPartyId : organizationPartyId)
+            } catch (error) { ec.message.addError(String(error.message)); return }
+            const out = ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId,
+                purposeEnumId: purposeEnumId, statusId: statusId, contactMechId: contactMechId, contactListId: contactListId,
+                consentDate: consentDate, sourceEnumId: sourceEnumId, evidenceText: evidenceText, comments: comments,
+                organizationPartyId: organizationPartyId, updateSolicitation: updateSolicitation}).call() || {}
+            if (ec.message.hasError()) return
+            partyConsentId = out.partyConsentId ?? null
+            allowSolicitation = out.allowSolicitation ?? null
+            solicitationUpdatedCount = out.solicitationUpdatedCount ?? 0
+        ]]></script></actions>
+    </service>
+    <service verb="record" noun="PartyConsent" allow-remote="false">
+        <description>
+            Internal: store#PartyConsent without its rule of who may change another party's consent, for the services that
+            decided that themselves (impl-marketing P3 review): set#ContactListPartySubscription (for subscribe#ContactListParty,
+            unsubscribe#ContactListParty and apply#UnsubscribePreferences, which check the user or the link token), the token
+            paths of unsubscribe#ContactListParty and a store's confirmed checkout opt-in (StoreTopics.js, by its code). A link's
+            token, not whoever is signed in, decides there: a visitor signed in as someone else still unsubscribes. Everything
+            else as store#PartyConsent.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
@@ -128,11 +174,6 @@ along with this software (see the LICENSE.md file). If not, see
             if (contactListId && consentList == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             if (organizationPartyId && ec.entity.find('mantle.party.Organization').disableAuthz().condition('partyId', organizationPartyId).one() == null) {
                 ec.message.addError(`Organization ${organizationPartyId} not found`); return }
-            // another party's consent: a contact administrator, or Marketing's consent editor of the list's or purpose's organization
-            try {
-                ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js')
-                        .requireConsentChange(partyId, consentList ? consentList.ownerPartyId : organizationPartyId)
-            } catch (error) { ec.message.addError(String(error.message)); return }
 
             partyConsentId = ec.service.sync().name('create#mantle.party.PartyConsent').parameters({partyId: partyId, organizationPartyId: organizationPartyId || null,
                 contactMechId: contactMechId || null, purposeEnumId: purposeEnumId, statusId: statusId,
@@ -743,7 +784,7 @@ along with this software (see the LICENSE.md file). If not, see
             consents.sort(newestFirst)
             const lastListConsent = consents.find((row) => row.contactListId === contactListId) || null
             const record = (consentStatusId, extraEvidence, forList) => {
-                ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId,
+                ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId,
                     contactMechId: contactMechId, purposeEnumId: purposeEnumId, statusId: consentStatusId, sourceEnumId: sourceEnumId,
                     evidenceText: [evidenceText, extraEvidence].filter((part) => part).join('; ') || null,
                     comments: comments ? String(comments).trim().slice(0, 255) || null : null,
@@ -1145,7 +1186,7 @@ along with this software (see the LICENSE.md file). If not, see
                 for (const mechId of mechIds) {
                     const state = consents.find((row) => (row.contactMechId || null) === mechId)
                     if (state?.statusId === 'PconWithdrawn') continue
-                    ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
+                    ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
                         purposeEnumId: 'PcpMarketingEmail', statusId: 'PconWithdrawn', sourceEnumId: sourceEnumId,
                         evidenceText: [evidenceText, 'all marketing email'].filter((part) => part).join('; '), comments: reason}).call()
                     if (ec.message.hasError()) return

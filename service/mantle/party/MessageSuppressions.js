@@ -14,8 +14,12 @@
  *   destination, organization and reason is answered, never doubled.
  * - Who ends: a holder of MESSAGE_SUPPRESSION_REVIEW alone, with new evidence; the row stays, with its source and the reviewer's
  *   evidence. A subscription never ends one.
- * - check: the active blocks of destinations for an organization (its own and every organization's), for the ledger's attempt and
- *   the audience services; no permission (internal).
+ * - What a block stops (the user's call, Nov 14): a hard bounce every delivery to the address; any other reason (a complaint, a
+ *   staff block, repeated soft failures) promotional deliveries only (a list's, a campaign's, a topic's: the ledger's deliveries
+ *   that are not transactional), never a transactional notice (an order's confirmation, a password reset, a system notice).
+ * - check: the active blocks of destinations for an organization (its own and every organization's), of every delivery or, for a
+ *   transactional one, those that stop every delivery; for the ledger's attempt and the audience services; no permission
+ *   (internal).
  * Refusals carry reason codes (EntityLib.js denied): PERMISSION_DENIED, ORGANIZATION_DENIED, RECORD_UNAVAILABLE,
  * EVIDENCE_REQUIRED, DESTINATION_INVALID.
  */
@@ -25,6 +29,8 @@ const {find, one, denied, call} = lib
 const access = lib.access
 const S = "mantle.party.MessageSuppression"
 const channels = {MdcEmail: "Email"}
+// the reasons that stop every delivery, transactional notices too (the user's call, Nov 14); any other stops promotional ones only
+const blocksEveryDelivery = ["MsrHardBounce"]
 const text = value => (value == null ? "" : String(value).trim())
 
 // The normalized destination of a channel, or null when it is not one.
@@ -206,16 +212,17 @@ function storeSuppression(p) {
         sourceEnumId,
         sourceRef: text(p.sourceRef).slice(0, 255) || null,
         evidenceText: text(p.evidenceText),
-        fromDate: p.fromDate || ec.user.nowTimestamp,
-        thruDate: p.thruDate || null,
+        // a block's own dates are a reviewer's or the intake's: anyone else's starts now and lasts until a reviewer ends it
+        fromDate: (scope.end && p.fromDate) || ec.user.nowTimestamp,
+        thruDate: (scope.end && p.thruDate) || null,
         createdByUserId: ec.user.userId || null
     })
     return {suppressionId: made.suppressionId, created: true, ended: false}
 }
 
 // The active blocks of destinations for an organization (its own and every organization's): {suppressed: [destinationKey],
-// reasons: {destinationKey: reasonEnumId}}.
-function suppressedOf(channelEnumId, destinations, organizationPartyId) {
+// reasons: {destinationKey: reasonEnumId}}. For a transactional delivery only the blocks that stop every delivery (a hard bounce).
+function suppressedOf(channelEnumId, destinations, organizationPartyId, transactional = false) {
     const keys = Array.from(
         new Set(
             Array.from(destinations || [])
@@ -231,12 +238,18 @@ function suppressedOf(channelEnumId, destinations, organizationPartyId) {
         .list()) {
         if (!active(row)) continue
         if (row.organizationPartyId && row.organizationPartyId !== organizationPartyId) continue
+        if (transactional && !blocksEveryDelivery.includes(row.reasonEnumId)) continue
         if (!reasons[row.destinationKey]) reasons[row.destinationKey] = row.reasonEnumId
     }
     return {suppressed: Object.keys(reasons), reasons}
 }
 function checkSuppressions(p) {
-    return suppressedOf(text(p.channelEnumId) || "MdcEmail", p.destinationList, text(p.organizationPartyId) || null)
+    return suppressedOf(
+        text(p.channelEnumId) || "MdcEmail",
+        p.destinationList,
+        text(p.organizationPartyId) || null,
+        p.transactional === true || p.transactional === "true" || p.transactional === "Y"
+    )
 }
 
 const operations = {find: findSuppressions, store: storeSuppression, check: checkSuppressions}
@@ -244,6 +257,7 @@ const operations = {find: findSuppressions, store: storeSuppression, check: chec
     normalize,
     mask,
     suppressedOf,
+    blocksEveryDelivery,
     execute: (op, parameters) => {
         if (!operations[op]) throw new Error("Unknown suppression operation " + op)
         return operations[op](parameters || {})

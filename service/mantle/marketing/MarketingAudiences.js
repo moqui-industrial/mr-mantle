@@ -553,7 +553,7 @@ function destinationOf(partyId, channel, contactMechId) {
     )
 }
 // The contacts a Sales record names, under the caller's Sales read (Mantle's SalesAccess.js): a lead's current contacts; an
-// account's contacts, or the person an individual account is. A record the caller does not see is RECORD_UNAVAILABLE.
+// account's contacts, or the person an individual account is; each contact one the caller sees in Sales (visibleParty). A record the caller does not see is RECORD_UNAVAILABLE.
 function salesContacts(kind, recordId) {
     const salesAccess = ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
     const salesScope = salesAccess.scope()
@@ -569,7 +569,7 @@ function salesContacts(kind, recordId) {
                 .list()
         )
             .map(row => row.partyId)
-            .filter((partyId, index, all) => all.indexOf(partyId) === index)
+            .filter((partyId, index, all) => all.indexOf(partyId) === index && !!salesAccess.visibleParty(salesScope, partyId))
     }
     const account = salesAccess.requireAccount(salesScope, recordId)
     if (account.party.partyTypeEnumId === "PtyPerson") return [recordId]

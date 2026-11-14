@@ -41,7 +41,8 @@
     </service>
     <service verb="attempt" noun="Delivery" allow-remote="false" operation="message.delivery.attempt">
         <description>One attempt of a queued or retrying delivery, under its lock: its source builds the message, the consent
-            is snapshotted, a suppressed destination is refused (impl-marketing P3: the delivery suppressed, nothing handed off),
+            is snapshotted, a suppressed destination is refused (impl-marketing P3: the delivery suppressed, nothing handed off; a
+            hard bounce for every delivery, another block for a promotional one only),
             send#EmailTemplate hands it off, and its outcome is recorded (sent; retryable, again later;
             permanent, failed; anything else uncertain, kept for review). Another state is left as it is.</description>
         <in-parameters><parameter name="deliveryId" required="true"/></in-parameters>
@@ -178,7 +179,10 @@
             its reason (MessageSuppressionReason, staff by default), source (MessageSuppressionSource, staff for a user) and evidence
             (required); an active block of the same destination, organization and reason is answered (created false), never doubled.
             End: a holder of MESSAGE_SUPPRESSION_REVIEW alone, with new evidence (required); the row stays with its source and the
-            reviewer's evidence. A subscription never ends a suppression. Refuses PERMISSION_DENIED, ORGANIZATION_DENIED,
+            reviewer's evidence. A subscription never ends a suppression. A hard bounce stops every delivery of the ledger to the
+            address; any other reason promotional deliveries only, never a transactional notice (the user's call, Nov 14). A block's
+            own fromDate and thruDate are a reviewer's or the bounce intake's (a run with no user); anyone else's starts now and
+            has no end. Refuses PERMISSION_DENIED, ORGANIZATION_DENIED,
             EVIDENCE_REQUIRED, DESTINATION_INVALID, CHANNEL_INVALID, VALUE_INVALID, RECORD_UNAVAILABLE and ALREADY_ENDED.</description>
         <in-parameters>
             <parameter name="action"/>
@@ -207,10 +211,12 @@
     </service>
     <service verb="check" noun="Suppressions" allow-remote="false" read-only="true">
         <description>Internal: which of the destinations of a channel are suppressed now for an organization (its own blocks and
-            every organization's), with each one's reason; the ledger's attempt and the audience services ask it. No
-            permission.</description>
+            every organization's), with each one's reason; the ledger's attempt and the audience services ask it. For a
+            transactional delivery (transactional true) only a block that stops every delivery, a hard bounce; a complaint or staff
+            block stops promotional deliveries only (the user's call, Nov 14). No permission.</description>
         <in-parameters>
             <parameter name="channelEnumId" default-value="MdcEmail"/>
+            <parameter name="transactional" type="Boolean" default="false"/>
             <parameter name="destinationList" type="List" required="true"/>
             <parameter name="organizationPartyId"/>
         </in-parameters>
