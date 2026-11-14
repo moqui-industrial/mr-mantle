@@ -18,6 +18,8 @@
             <parameter name="templateKey" required="true"/>
             <parameter name="siteId"/>
             <parameter name="productStoreId"/>
+            <parameter name="organizationPartyId"><description>The organization the delivery is from, whose suppressions it
+                meets (empty: its store's, when it names one)</description></parameter>
             <parameter name="transactional" type="Boolean" default="true"/>
             <parameter name="marketingPurposeEnumId"/>
             <parameter name="consentContactListId"><description>A topic's list (Commerce P9 follow-up: a store's review

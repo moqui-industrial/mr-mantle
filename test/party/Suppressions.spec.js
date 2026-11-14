@@ -220,7 +220,16 @@ feature("a complaint or staff block stops promotional deliveries only; a transac
                 evidenceText: "Spec grant"
             })
         })
-        const queue = (eventKey, toAddress, promotional) =>
+        // a hard bounce of A's alone: a storeless delivery from A meets it, one from B does not
+        system(() =>
+            lib.run(M + "store#Suppression", {
+                destination: "bounced-a@suppress.example.test",
+                organizationPartyId: orgA,
+                reasonEnumId: "MsrHardBounce",
+                evidenceText: "550 at A's sender"
+            })
+        )
+        const queue = (eventKey, toAddress, promotional, organizationPartyId) =>
             system(() =>
                 lib.run(
                     M + "queue#Delivery",
@@ -234,7 +243,8 @@ feature("a complaint or staff block stops promotional deliveries only; a transac
                             bodyParameters: {title: "Spec notice"},
                             sendNow: true
                         },
-                        promotional ? {transactional: false, marketingPurposeEnumId: "PcpMarketingEmail"} : {}
+                        promotional ? {transactional: false, marketingPurposeEnumId: "PcpMarketingEmail"} : {},
+                        organizationPartyId ? {organizationPartyId} : {}
                     )
                 )
             ).stateEnumId
@@ -244,6 +254,8 @@ feature("a complaint or staff block stops promotional deliveries only; a transac
             staffNotice: queue("spec:staff-notice", "staff@suppress.example.test", false),
             staffPromo: queue("spec:staff-promo", "staff@suppress.example.test", true),
             openPromo: queue("spec:open-promo", "open@suppress.example.test", true),
+            fromA: queue("spec:bounce-a", "bounced-a@suppress.example.test", false, orgA),
+            fromB: queue("spec:bounce-b", "bounced-a@suppress.example.test", false, orgB),
             checkNotice: system(() =>
                 lib.run(M + "check#Suppressions", {destinationList: ["noisy@suppress.example.test"], transactional: true})
             ),
@@ -258,7 +270,8 @@ feature("a complaint or staff block stops promotional deliveries only; a transac
             })
         }
     },
-    then({complaintNotice, complaintPromo, staffNotice, staffPromo, openPromo, checkNotice, checkPromo, dated}) {
+    then({complaintNotice, complaintPromo, staffNotice, staffPromo, openPromo, fromA, fromB, checkNotice, checkPromo, dated}) {
+        fromA == "MdsSuppressed" && fromB == "MdsSent"
         complaintNotice == "MdsSent" && staffNotice == "MdsSent"
         complaintPromo == "MdsSuppressed" && staffPromo == "MdsSuppressed"
         openPromo == "MdsSent"

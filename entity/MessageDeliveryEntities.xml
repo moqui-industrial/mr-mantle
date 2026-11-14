@@ -24,6 +24,9 @@
     <field name="templateKey" type="id"><description>The EmailTemplate (emailTemplateId) for the email channel.</description></field>
     <field name="siteId" type="id"/>
     <field name="productStoreId" type="id"/>
+    <field name="organizationPartyId" type="id"><description>The organization the delivery is from (a seller's quote, Sales P10;
+      a campaign's, Marketing P9), whose suppressions it meets beside every organization's; empty: its store's organization, when
+      it names a store (impl-marketing P3 review).</description></field>
     <field name="parametersJson" type="text-long"><description>The template's body parameters as handed off, without
       secrets kept elsewhere (a link's token is put in only for the send and never stored).</description></field>
     <field name="transactional" type="text-indicator"><description>Y for a notice of the recipient's own purchase or

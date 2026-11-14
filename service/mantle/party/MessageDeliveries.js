@@ -52,6 +52,7 @@ function queue(p) {
             toAddress: text(p.toAddress) || null,
             siteId: p.siteId || null,
             productStoreId: p.productStoreId || null,
+            organizationPartyId: text(p.organizationPartyId) || null,
             transactional: p.transactional === false || p.transactional === "N" ? "N" : "Y",
             consentJson: p.marketingPurposeEnumId
                 ? JSON.stringify(
@@ -148,16 +149,17 @@ function consentOf(delivery) {
     )
 }
 // Whether the address is suppressed for the delivery: a block of every organization, or of the delivery's organization (its
-// store's, when it names one; P9 adds a campaign delivery's own); for a transactional notice only a block that stops every
-// delivery (a hard bounce), for a promotional one any.
+// own when queued with one, a seller's quote; else its store's, when it names one); for a transactional notice only a block that
+// stops every delivery (a hard bounce), for a promotional one any.
 function suppressedFor(delivery, toAddress) {
-    const store = delivery.productStoreId
-        ? one("mantle.product.store.ProductStore", {productStoreId: delivery.productStoreId})
-        : null
+    const store =
+        !delivery.organizationPartyId && delivery.productStoreId
+            ? one("mantle.product.store.ProductStore", {productStoreId: delivery.productStoreId})
+            : null
     const found = suppressions.suppressedOf(
         delivery.channelEnumId || "MdcEmail",
         [toAddress],
-        store?.organizationPartyId || null,
+        delivery.organizationPartyId || store?.organizationPartyId || null,
         delivery.transactional !== "N"
     )
     return found.suppressed.length > 0
@@ -209,7 +211,7 @@ function attemptStep(p) {
     const toAddress = text(built.toAddress) || text(delivery.toAddress)
     if (!toAddress) return record("MdsFailed", "permanent", {lastError: "The recipient has no address"})
     // a suppressed destination is never handed off (impl-marketing P3, F13): its block of every organization, or of the
-    // delivery's (its store's organization); a hard bounce whatever the message, another block a promotional one only (the
+    // delivery's (its own organization, else its store's); a hard bounce whatever the message, another block a promotional one only (the
     // user's call, Nov 14); a subscription never ends one
     if (suppressedFor(delivery, toAddress)) return record("MdsSuppressed", "suppressed", {lastError: "The address is suppressed"})
     let out
