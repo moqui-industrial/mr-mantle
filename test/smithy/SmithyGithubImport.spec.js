@@ -94,6 +94,13 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
                 operationId: "sgi-start-" + key
             })
         const byMaintainer = start("SGI_MAINT", "m").reason
+        // a clone address on another host than the API's: the token would go there, so the import is refused
+        setProperty("smithy_github_api", RECORDED + "elsewhere")
+        const repository = JSON.parse(ec.resource.getLocationText(FIXTURES + "repos_acme_widgets.json", false))
+        repository.body.clone_url = "https://git.example.com/acme/widgets.git"
+        ec.resource.getLocationReference(RECORDED + "elsewhere/repos_acme_widgets.json").putText(JSON.stringify(repository))
+        const elsewhere = start("SGI_OWNER", "e").reason
+        setProperty("smithy_github_api", RECORDED + "limited")
         const dots = op("SGI_OWNER", "startGitHubImport", {
             groupId,
             sourceRepository: "acme/..",
@@ -153,10 +160,11 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
             member: !!lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: bob.partyId}),
             discoverability: lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: bob.partyId}).discoverability
         }
-        return {byMaintainer, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}
+        return {byMaintainer, elsewhere, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}
     },
-    then({byMaintainer, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}) {
+    then({byMaintainer, elsewhere, dots, privateRefused, limitedStart, started, retried, waited, before, again, ended, repo, issue, closed, run, people}) {
         byMaintainer == "accessDenied"
+        elsewhere == "sourceRefused"
         dots == "nameInvalid"
         privateRefused == "policyRefused"
         limitedStart == "rateLimited"
@@ -363,6 +371,82 @@ feature("an account that signs in through GitHub with a placeholder's id takes i
     }
 })
 
+feature("the head fetch asks only for this run's held merge requests with no head, and takes a written ref only at the pull request's head", {
+    when() {
+        const groupId = lib.row("mantle.smithy.SmithyGroup", {siteId: SITE, groupPath: "acmeco"}).groupId
+        const id = lib.createRepository(lib.OPERATOR, {siteId: SITE, groupId, slug: "heads", visibility: "public"}).repositoryId
+        const onMain = lib.commit(id, "Start", {"README.md": "# Heads\n"})
+        const branchCommit = (branch, file) =>
+            lib.run("org.moqui.git.GitServices.commit#GitFiles", {repositoryId: id, message: branch, fileMap: {[file]: branch + "\n"}, newBranch: branch})
+                .commitId
+        const onBranch = branchCommit("feature", "feature.txt")
+        // a commit only a hidden merge request's ref reaches: its branch deleted after
+        const hiddenOnly = branchCommit("secret", "secret.txt")
+        const importId = "SGI_HEADS"
+        const imported = (number, more = {}) =>
+            lib.as("SGI_OWNER", () =>
+                lib.run("org.moqui.git.GitReviewServices.create#MergeRequest", {
+                    repositoryId: id,
+                    imported: true,
+                    mergeRequestNum: number,
+                    title: "Pull " + number,
+                    pushedForReview: true,
+                    hidden: true,
+                    ...more
+                })
+            ).mergeRequestId
+        const held = (number, more) => {
+            const mergeRequestId = imported(number, more)
+            lib.make("mantle.smithy.SmithyImportMap", {
+                siteId: SITE,
+                repositoryId: id,
+                sourceType: "pullNumber",
+                sourceId: String(number),
+                importId,
+                targetType: "mergeRequest",
+                targetId: mergeRequestId
+            })
+            return mergeRequestId
+        }
+        const headless = held(10)
+        held(11, {headCommitId: onMain})
+        // another merge request has number 12 (not this run's)
+        imported(12)
+        held(14)
+        const hiddenHeld = held(15)
+        imported(16, {headCommitId: hiddenOnly})
+        lib.run("org.moqui.git.GitServices.delete#GitRef", {repositoryId: id, refName: "secret", refType: "branch"})
+        const pull = (number, sha) => ({id: 9000 + number, number, head: {sha}})
+        const other = "a".repeat(40)
+        const ctx = {siteId: SITE, repositoryId: id, importId, report: {items: []}, cursor: {}, token: null}
+        const heads = (name, pulls, fetched) => ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").importHeads(name, ctx, pulls, fetched)
+        const refMap = heads("headRefMap", [pull(10, other), pull(11, onMain), pull(12, other), pull(13, other), pull(14, onBranch), pull(15, hiddenOnly)])
+        // as a fetch writes refs: #10 at its pull request's head, #15 at another commit than its head
+        const setRef = (mergeRequestId, commitId) =>
+            lib.run("org.moqui.git.GitReviewServices.sync#MergeRequestHead", {mergeRequestId, headCommitId: commitId})
+        setRef(headless, onMain)
+        setRef(hiddenHeld, onBranch)
+        const before = lib.row("moqui.resource.GitMergeRequest", {mergeRequestId: headless}).headCommitId || null
+        heads("takeFetchedHeads", [pull(10, onMain), pull(15, hiddenOnly)], ["refs/merge-requests/10/head", "refs/merge-requests/15/head"])
+        return {
+            refMap,
+            before,
+            taken: lib.row("moqui.resource.GitMergeRequest", {mergeRequestId: headless}).headCommitId,
+            onMain,
+            mismatched: lib.row("moqui.resource.GitMergeRequest", {mergeRequestId: hiddenHeld}).headCommitId || null,
+            report: ctx.report.items.map(item => item.errorText)
+        }
+    },
+    then({refMap, before, taken, onMain, mismatched, report}) {
+        Object.keys(refMap).sort().join() == "refs/pull/10/head,refs/pull/15/head"
+        refMap["refs/pull/10/head"] == "refs/merge-requests/10/head"
+        before == null
+        taken == onMain
+        mismatched == null
+        report.some(text => text.startsWith("headMismatch: The fetched head of pull request #15"))
+    }
+})
+
 feature("a claim needs a GitHub sign-in of the placeholder's host, in a site the account is a member of; an edit outside a sign-in claims nothing", {
     when() {
         lib.make("moqui.security.sso.AuthFlow", {authFlowId: "SGI_GHE", authFlowTypeEnumId: "AftOauth", description: "GHE", disabled: "Y"})
@@ -481,9 +565,25 @@ feature("work as an account ends its borrowed login without touching the account
         const ranOut = runAs()
         const stayedOut = flagNow()
         lib.set("moqui.security.UserAccount", {userId: "SGI_OWNER"}, {hasLoggedOut: "N"})
-        return {ran, stayedIn, ranOut, stayedOut}
+        // inside a signed-in user's work: that user again after; nobody when that account cannot sign in now
+        const forum = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        // (as its callers run it: an operation's privileged scope)
+        const nested = lib.as("SGI_MAINT", () =>
+            lib.privileged(() => forum.asUser("SGI_OWNER", () => ec.user.userId) + "/" + ec.user.userId)
+        )
+        const lost = lib.as("SGI_MAINT", () =>
+            lib.privileged(() => {
+                forum.asUser("SGI_OWNER", () => lib.set("moqui.security.UserAccount", {userId: "SGI_MAINT"}, {disabled: "Y"}))
+                const after = ec.user.userId || "nobody"
+                lib.set("moqui.security.UserAccount", {userId: "SGI_MAINT"}, {disabled: "N"})
+                return after
+            })
+        )
+        return {ran, stayedIn, ranOut, stayedOut, nested, lost}
     },
-    then({ran, stayedIn, ranOut, stayedOut}) {
+    then({ran, stayedIn, ranOut, stayedOut, nested, lost}) {
+        nested == "SGI_OWNER/SGI_MAINT"
+        lost == "nobody"
         ran == "SGI_OWNER/nobody"
         stayedIn == "N"
         ranOut == "SGI_OWNER/nobody"

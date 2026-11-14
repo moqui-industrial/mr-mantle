@@ -305,6 +305,27 @@ feature("the framework's review threads are Mantle's: found, commented, answered
             commitId: "0000000000000000000000000000000000000000",
             body: "Late"
         })
+        // a client contact (PROJECT_CLIENT) who views the repository (here as an administrator too) reads no threads and
+        // writes none
+        lib.account(SITE, "SDA_CLIENT")
+        lib.make("moqui.security.UserGroupMember", {userId: "SDA_CLIENT", userGroupId: "ADMIN", fromDate: 0})
+        lib.make("moqui.security.UserGroup", {userGroupId: "SDA_CLIENTS", description: "Smithy spec clients"})
+        lib.make("moqui.security.UserGroupMember", {userId: "SDA_CLIENT", userGroupId: "SDA_CLIENTS", fromDate: 0})
+        lib.make("moqui.security.UserGroupPermission", {userGroupId: "SDA_CLIENTS", userPermissionId: "PROJECT_CLIENT", fromDate: 0})
+        const asClient = (operation, more) =>
+            lib.service("SDA_CLIENT", "mantle.work.GitServices.handle#GitReviewThread", {operation, repositoryId: "sda_plain", mergeRequestId, ...more})
+        const clientFind = asClient("find", {})
+        const clientComment = asClient("comment", {threadId: opened.threadId, body: "From the client"})
+        // an account that may view nothing, calling the service itself with authorization disabled (with which the inner
+        // services' own checks pass anyone): refused by this service's check of the caller, before anything is written
+        const noViewComment = lib.service("SDA_OTHER", "mantle.work.GitServices.handle#GitReviewThread", {
+            operation: "comment",
+            repositoryId: "sda_plain",
+            mergeRequestId,
+            path: "plain.txt",
+            newLine: 1,
+            body: "Sneaky"
+        })
         // an account that may not view the repository, calling the service itself: the merge request is not there
         const noView = lib.service("SDA_OTHER", "mantle.work.GitServices.handle#GitReviewThread", {
             operation: "find",
@@ -338,10 +359,17 @@ feature("the framework's review threads are Mantle's: found, commented, answered
             repositoryId: "sda_plain",
             mergeRequestId: otherId
         })
-        return {opened, answered, resolvedOut, againOut, stale, noView, otherId, mergeRequestId, crossResolve, crossReply, hiddenFind,
-            found: thread("find", {}).threadList}
+        return {opened, answered, resolvedOut, againOut, stale, noView, noViewComment, clientFind, clientComment, otherId, mergeRequestId,
+            crossResolve, crossReply, hiddenFind, found: thread("find", {}).threadList}
     },
-    then({opened, answered, resolvedOut, againOut, stale, noView, otherId, mergeRequestId, crossResolve, crossReply, hiddenFind, found}) {
+    then({opened, answered, resolvedOut, againOut, stale, noView, noViewComment, clientFind, clientComment, otherId, mergeRequestId,
+            crossResolve, crossReply, hiddenFind, found}) {
+        clientFind.threadList.length == 0
+        clientComment.refused == true
+        clientComment.message.trim() == "No merge request " + mergeRequestId
+        noViewComment.refused == true
+        noViewComment.message.trim() == "No merge request " + mergeRequestId
+        noView.threadList == null
         crossResolve.refused == true
         crossResolve.message.includes("not found")
         crossReply.refused == true

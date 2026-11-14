@@ -106,6 +106,9 @@ feature("a Maintainer stores a mirror as itself; the list and the receipt hold n
 feature("an edit clears the refs and the credential; a new host without the secret again is refused", {
     when() {
         const edit = (fields, username = "SMI_MAINT") => on(username, "storeMirror", {mirrorId: ids.mirror, ...fields})
+        // another path on the same host is another repository: the stored token is not pointed at it without being given again
+        const samePath = edit({url: "https://mirror.invalid/acme/other.git", deleteRefs: "Y"})
+        const notMoved = mirrorRow(ids.mirror)
         const clearedRefs = edit({refs: ""})
         const refs = listed("SMI_MAINT")[0].refs
         const moved = edit({url: "https://elsewhere.invalid/acme/widgets.git"})
@@ -114,9 +117,12 @@ feature("an edit clears the refs and the credential; a new host without the secr
         const movedWithSecret = edit({url: "https://elsewhere.invalid/acme/widgets.git", secret: "another-secret-0123"})
         const removed = edit({removeCredential: "Y"})
         const after = listed("SMI_MAINT")[0]
-        return {clearedRefs, refs, moved, stillThere, both, movedWithSecret, removed, after, row: mirrorRow(ids.mirror)}
+        return {samePath, notMoved, clearedRefs, refs, moved, stillThere, both, movedWithSecret, removed, after, row: mirrorRow(ids.mirror)}
     },
-    then({clearedRefs, refs, moved, stillThere, both, movedWithSecret, removed, after, row}) {
+    then({samePath, notMoved, clearedRefs, refs, moved, stillThere, both, movedWithSecret, removed, after, row}) {
+        samePath.reason == "secretRequired"
+        notMoved.url == URL
+        notMoved.deleteRefs != "Y"
         clearedRefs.mirrorId == ids.mirror
         refs == null
         moved.reason == "secretRequired"

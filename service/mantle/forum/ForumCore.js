@@ -1117,10 +1117,20 @@ function asUser(username, work) {
         return work()
     } finally {
         if (signedIn || ec.user.username !== previous) {
-            if (previous) {
-                if (previous !== ec.user.username)
-                    ec.user.internalLoginUser(previous)
-            } else ec.user.logoutLocal()
+            // who was signed in again; when that account cannot sign in now, nobody (never the borrowed account)
+            if (!previous) ec.user.logoutLocal()
+            else if (previous !== ec.user.username) {
+                // a refused sign-in's message is not the work's
+                ec.message.pushErrors()
+                let back = false
+                try {
+                    back = ec.user.internalLoginUser(previous) === true && ec.user.username === previous
+                } finally {
+                    ec.message.clearErrors()
+                    ec.message.popErrors()
+                }
+                if (!back) ec.user.logoutLocal()
+            }
         }
     }
 }

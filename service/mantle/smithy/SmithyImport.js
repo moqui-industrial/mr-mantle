@@ -301,6 +301,9 @@ kit => {
         if (answer.status !== 200 || !answer.body)
             invalid("sourceRefused: GitHub has no repository " + source + " that the token may read")
         const facts = answer.body
+        // the token goes to the API's host alone: a clone address elsewhere is no source this import fetches from
+        if (facts.clone_url && !cloneOnApiHost(facts.clone_url))
+            invalid("sourceRefused: GitHub's clone address for " + source + " is not on the API's host")
         const sourcePrivate = facts.private === true || (!!facts.visibility && facts.visibility !== "public")
         // the receipt keeps no trace of the token, not even its hash
         return receipt({...p, token: undefined}, "startGitHubImport", () => {
@@ -1212,8 +1215,17 @@ kit => {
         return {row, ours}
     }
     /* The pull requests of a page that are not carried yet, each held by its number in the git host before its head is
-       fetched (openHosted), so the fetch writes the head of a merge request of this import and of no other. */
+       fetched (openHosted), so the fetch writes the head of a merge request of this import and of no other. The
+       repository reads commits by id through its refs only from now on (reviewHiddenDate, as a hidden merge request
+       would set it), so a commit that is only another fork's or a hidden merge request's is not present to the import. */
     function holdPulls(ctx, pulls) {
+        if (pulls.length)
+            ec.entity
+                .find("moqui.resource.GitRepository")
+                .condition("repositoryId", ctx.repositoryId)
+                .condition("reviewHiddenDate", null)
+                .disableAuthz()
+                .updateAll({reviewHiddenDate: now()})
         for (const pull of pulls) {
             const number = Number(pull.number)
             const done = mapRow(ctx, "pull", pull.id)
@@ -1222,16 +1234,10 @@ kit => {
             openHosted(ctx, number, text(pull.head?.sha), pull)
         }
     }
-    /* The heads of a page of pull requests, refs/pull/<n>/head into refs/merge-requests/<n>/head (fetch#GitRefs), for
-       the merge requests this import holds with no head whose commit is not in the repository yet; a head that is not
-       fetched is in the repository only when its commits are on a branch (a merged pull request's, with a merge commit).
-       The fetch runs with authorization disabled, as the import's other calls of the host: the import is the group
-       Owner's or an operator's (Smithy's check at its start), who holds no delete right of the framework's, and the
-       refs asked for are only those the framework would let a caller with authorization on write (the first head of
-       an imported merge request), of this import's merge requests. Its problems go to the run's report. Never against
-       recorded responses. */
-    function fetchHeads(ctx, pulls) {
-        if (!pulls.length || recorded(apiBase()) || !ctx.cursor.cloneUrl) return
+    /* What fetchHeads asks for of a page of pull requests: refs/pull/<n>/head into refs/merge-requests/<n>/head for each
+       merge request this import holds (heldRow) with no head whose commit the repository does not read yet; never one
+       of a number another merge request has, one with a head, or one of a pull request already carried. */
+    function headRefMap(ctx, pulls) {
         const refMap = {}
         for (const pull of pulls) {
             const number = Number(pull.number)
@@ -1240,6 +1246,47 @@ kit => {
             if (ours && !row.headCommitId && !commitPresent(ctx.repositoryId, text(pull.head?.sha)))
                 refMap["refs/pull/" + number + "/head"] = headRefOf(number)
         }
+        return refMap
+    }
+    /* After the fetch: each held merge request whose ref was written gets its head when the ref is the pull request's
+       head commit; a ref that names another commit (the remote moved, or sent something else) leaves it headless,
+       reported. */
+    function takeFetchedHeads(ctx, pulls, fetched) {
+        const written = new Set(Array.from(fetched || []).map(String))
+        for (const pull of pulls) {
+            const number = Number(pull.number)
+            if (!Number.isInteger(number) || !written.has(headRefOf(number))) continue
+            const sha = text(pull.head?.sha)
+            const {row, ours} = heldRow(ctx, number)
+            if (!ours || row.headCommitId) continue
+            const value = refCommit(ctx.repositoryId, headRefOf(number))
+            if (!HEX40.test(sha) || value !== sha) {
+                note(ctx, "pull", number, "headMismatch: The fetched head of pull request #" + number + " is not its head " + sha.slice(0, 12))
+                continue
+            }
+            try {
+                inNew(() => setHead(ctx, row, sha))
+            } catch (error) {
+                ec.message.clearErrors()
+                note(ctx, "pull", number, "headNotSet: " + scrub(ctx, firstLine(error)))
+            }
+        }
+    }
+    kit.importHeads = {headRefMap, takeFetchedHeads}
+    /* The heads of a page of pull requests (headRefMap) by fetch#GitRefs, then taken (takeFetchedHeads); a head that is
+       not fetched is in the repository only when its commits are on a branch (a merged pull request's, with a merge
+       commit). The fetch runs with authorization disabled, as the import's other calls of the host: the import is the
+       group Owner's or an operator's (Smithy's check at its start), who holds no delete right of the framework's, and
+       the refs asked for are only those the framework would let a caller with authorization on write (the first head
+       of an imported merge request), of this import's merge requests. The token goes only to the API's own host. Its
+       problems go to the run's report. Never against recorded responses. */
+    function fetchHeads(ctx, pulls) {
+        if (!pulls.length || recorded(apiBase()) || !ctx.cursor.cloneUrl) return
+        if (!cloneOnApiHost(ctx.cursor.cloneUrl)) {
+            note(ctx, "pull", "heads", "headsNotFetched: GitHub's clone address is not on the API's host")
+            return
+        }
+        const refMap = headRefMap(ctx, pulls)
         if (!Object.keys(refMap).length) return
         const {out, problem} = probe(FETCH_REFS, {
             repositoryId: ctx.repositoryId,
@@ -1251,20 +1298,35 @@ kit => {
         if (problem) note(ctx, "pull", "heads", "headsNotFetched: " + scrub(ctx, problem))
         for (const item of Array.from(out.problems || []).slice(0, 50))
             note(ctx, "pull", "heads", "headNotFetched: " + scrub(ctx, firstLine(item)))
+        takeFetchedHeads(ctx, pulls, out.fetched)
     }
+    /* Whether a clone address is https on the host the API is of (github.com for api.github.com, an Enterprise
+       Server's own host), so the token given for the API goes nowhere else. */
+    const cloneOnApiHost = url => /^https:\/\//i.test(text(url).trim()) && hostOf(url) === apiHost()
+    /* Whether the repository has a commit as its readers read it: in its store and on one of its branches or tags (not
+       only a hidden merge request's head, nor only another fork's commit of a shared store). A read by id with
+       authorization disabled finds any commit of the store, so the store is asked first (a commit not there costs no
+       walk) and then the refs that contain it (get#GitCommitRefs). */
     function commitPresent(repositoryId, commitId) {
-        if (!HEX40.test(text(commitId))) return false
+        if (!HEX40.test(text(commitId)) || readCommit(repositoryId, commitId, false) !== commitId) return false
+        const {out, problem} = probe(GIT + "get#GitCommitRefs", {repositoryId, commitId, limit: 500})
+        return problem == null && Array.from(out.refList || []).length > 0
+    }
+    /* The commit a merge request's own ref names (its head may be hidden: the import's are until Smithy's row is
+       written), or null. */
+    const refCommit = (repositoryId, refName) => readCommit(repositoryId, refName, true)
+    function readCommit(repositoryId, revision, includeHidden) {
         ec.message.pushErrors()
         try {
             const out = ec.service
                 .sync()
                 .name(GIT + "get#GitCommit")
-                .parameters({repositoryId, commitId, stats: false, includeHidden: true})
+                .parameters({repositoryId, commitId: revision, stats: false, includeHidden})
                 .disableAuthz()
                 .call()
-            return !ec.message.hasError() && text(out?.commit?.commitId) === commitId
+            return ec.message.hasError() ? null : text(out?.commit?.commitId) || null
         } catch (error) {
-            return false
+            return null
         } finally {
             ec.message.clearErrors()
             ec.message.popErrors()
@@ -1919,8 +1981,15 @@ kit => {
     methods.storeMirror = p => {
         const r = mirrored(p, true)
         const store = () => {
-            if (given(p.mirrorId) && !mirrorsOf(r.repo.repositoryId).some(row => row.mirrorId === p.mirrorId)) missing()
+            const stored = given(p.mirrorId) ? mirrorsOf(r.repo.repositoryId).find(row => row.mirrorId === p.mirrorId) : null
+            if (given(p.mirrorId) && !stored) missing()
             const url = text(p.url).trim()
+            // a stored credential goes only to the address it was given for: any other address (another path on the same
+            // host, where the framework would keep it, is another repository) needs it again, or its removal
+            if (stored && stored.hasCredential && url && url !== stored.url && !given(p.secret) && !flag(p.removeCredential))
+                invalid(
+                    "secretRequired[secret]: A new address, username or host key needs the token or password again, or remove the credential"
+                )
             if ((url || !given(p.mirrorId)) && !MIRROR_URL.test(url))
                 invalid("url: An https address, with the credential given apart")
             const refs = text(p.refs).trim()

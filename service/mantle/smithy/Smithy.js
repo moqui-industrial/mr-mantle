@@ -1389,6 +1389,8 @@ function privileged(work) {
     claimGithub: userId => privileged(() => core.withMemo(() => importModule.claimGithub(userId, false))),
     ssoLinked: p => privileged(() => core.withMemo(() => importModule.ssoLinked(p || {}))),
     mirrorFailure: p => privileged(() => core.withMemo(() => importModule.mirrorFailure(p || {}))),
+    // the import's head fetch, apart from the fetch itself: what it asks for (headRefMap) and what it takes (takeFetchedHeads)
+    importHeads: (name, ctx, pulls, fetched) => privileged(() => core.withMemo(() => kit.importHeads[name](ctx, pulls, fetched))),
     ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
     ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })
