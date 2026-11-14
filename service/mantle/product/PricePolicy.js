@@ -86,6 +86,10 @@ function access(r, write = false) {
         // a purchase agreement's price is part of the agreement, changed and approved with it (store#AgreementItem, P13)
         if (write && agr.agreementTypeEnumId === "AgrPurchase")
             throw new Error("A purchase agreement's price changes on the agreement")
+        // so is a customer agreement's, under SALES_AGREEMENT_EDIT at its revision (SalesAgreementServices.store#AgreementItem,
+        // impl-sales P15): a price editor's row, a bulk change or an import never adds to or changes an agreement's prices
+        if (write && ["AgrSales", "AgrProduct"].includes(agr.agreementTypeEnumId))
+            throw new Error("A customer agreement's price changes on the agreement")
     }
     if (d === "invalid" || (write && d === "public" && !admin))
         throw denied("direction", "Choose an internal sales vendor, or an external supplier and an internal buying organization")

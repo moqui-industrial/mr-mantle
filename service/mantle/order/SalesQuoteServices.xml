@@ -248,8 +248,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The safe explanation of a quote line's price for anyone who sees the quote (design §7, PriceExplain's Sales
             branch): the selected price, where it came from (a price, a customer price, a price list, the list price, an entered
             price with its reason, a free line), the calculated basis, the list price, the price list's name and today's price
-            when it differs; never the trace, a cost or another party's price, which stay Products' for a holder of PRICE_VIEW.
-            Refuses a quote the caller does not see (RECORD_UNAVAILABLE) and a line that is no product line of it
+            when it differs, and (P15) the customer agreement whose negotiated price it is, with its dates; never the trace, a cost
+            or another party's price, which stay Products' for a holder of PRICE_VIEW. Refuses a quote the caller does not see (RECORD_UNAVAILABLE) and a line that is no product line of it
             (ITEM_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
