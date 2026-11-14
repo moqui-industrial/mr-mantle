@@ -354,4 +354,41 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="attachments" from="out.attachments || null"/>
         </actions>
     </service>
+
+    <!-- ===== Sales P14 (impl-sales P14; design-sales §6 ShipmentDetail and InvoiceDetail, crosscut §3.8 and §3.16): the fulfillment
+        and billing handoffs, read only, over SalesOrderChanges.js ===== -->
+    <service verb="get" noun="SalesShipment" allow-remote="false">
+        <description>ShipmentDetail's Sales row: a shipment of a sales order the user sees in Sales (SalesAccess.js orderOf), read
+            only: its state, customer, destination and dates, the items and sources of those orders (another order's lines on a
+            mixed shipment left out), its packages and tracking. shipmentFound false for a missing shipment and one of no order the
+            user sees alike; pick, pack and ship stay Warehouse's.</description>
+        <in-parameters><parameter name="shipmentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="shipmentFound" type="Boolean"/>
+            <parameter name="shipment" type="Map"/>
+            <parameter name="orderIds" type="List"/>
+            <parameter name="itemRows" type="List"/>
+            <parameter name="packageRows" type="List"/>
+            <parameter name="trackingRows" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrderChanges.js').getShipment(context))</script>
+        </actions>
+    </service>
+    <service verb="check" noun="SalesInvoice" allow-remote="false">
+        <description>InvoiceDetail's Sales row: an invoice billing a sales order the user sees in Sales, for a receivable reader
+            (ACCOUNTING_VIEW or RECEIVABLE_VIEW, Accounting's; no Sales permission reads an invoice): the orders it bills among those.
+            Refuses a missing invoice, one of no such order and a user without the receivable read alike (RECORD_UNAVAILABLE);
+            mantle.account.InvoiceServices.get#InvoiceFinanceDetail answers the invoice itself.</description>
+        <in-parameters><parameter name="invoiceId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="orderIds" type="List"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="customerPartyId"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrderChanges.js').checkInvoice(context))</script>
+        </actions>
+    </service>
+    <!-- ===== end of Sales P14 ===== -->
 </services>
