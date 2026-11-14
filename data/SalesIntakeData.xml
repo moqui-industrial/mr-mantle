@@ -36,6 +36,11 @@ along with this software (see the LICENSE.md file). If not, see
 
     <moqui.basic.Enumeration enumId="ErActCreateLead" enumTypeId="EmailRuleAction" enumCode="createLead" sequenceNum="6"
             description="Make a sales lead" optionValue="mantle.sales.OpportunityServices.create#LeadFromEmail"/>
+    <!-- P8 (design-sales §5 QuoteRequests, CX-MAIL-INTAKE): createQuoteRequest, a message to a sales team's plus-tag address
+        (sales+rfq@...) or to the team the rule's value names as a request for quote in that team's queue (SalesQuoteServices
+        create#QuoteRequestFromEmail; its owner needs SALES_QUOTE_EDIT, check#LeadRuleOwner) -->
+    <moqui.basic.Enumeration enumId="ErActCreateQuoteRequest" enumTypeId="EmailRuleAction" enumCode="createQuoteRequest" sequenceNum="7"
+            description="Make a request for quote" optionValue="mantle.order.SalesQuoteServices.create#QuoteRequestFromEmail"/>
     <mantle.party.PartySettingType partySettingTypeId="SalesIntakePlusTag" description="Sales intake plus tag"/>
     <mantle.party.PartySettingType partySettingTypeId="SalesIntakeSource" description="Sales intake default lead source"/>
 

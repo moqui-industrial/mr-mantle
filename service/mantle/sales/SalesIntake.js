@@ -371,6 +371,7 @@ function userHolds(userId, permission) {
 // are (a rename, a disable) changes nothing the check is about, and create#LeadFromEmail checks the owner again each time the rule
 // runs. Refuses nothing but a createLead action of an owner without the permission.
 const leadAction = "createLead"
+const rfqAction = "createQuoteRequest"
 function checkLeadRuleOwner(p) {
     let actions = p.actionList != null ? Array.from(p.actionList) : null
     if (actions == null && !blank(p.actionsJson)) {
@@ -381,13 +382,19 @@ function checkLeadRuleOwner(p) {
             return {}
         }
     }
-    if (!Array.isArray(actions) || !actions.some(action => text(action?.action) === leadAction)) return {}
+    if (!Array.isArray(actions)) return {}
+    const lead = actions.some(action => text(action?.action) === leadAction)
+    // P8: the createQuoteRequest action likewise needs its owner to make quotes (SALES_QUOTE_EDIT)
+    const rfq = actions.some(action => text(action?.action) === rfqAction)
+    if (!lead && !rfq) return {}
     const ruleId = text(p.emailRuleId)
     const ownerUserId = ruleId ? one("moqui.basic.email.EmailRule", {emailRuleId: ruleId})?.ownerUserId : ec.user.userId
     // an unknown rule: the framework's update#EmailRule answers it
     if (ruleId && !ownerUserId) return {}
-    if (!userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
+    if (lead && !userHolds(ownerUserId, "SALES_OPPORTUNITY_EDIT"))
         denied("RULE_NOT_ALLOWED", "Making sales leads from mail needs the rule's owner to hold SALES_OPPORTUNITY_EDIT")
+    if (rfq && !userHolds(ownerUserId, "SALES_QUOTE_EDIT"))
+        denied("RULE_NOT_ALLOWED", "Taking requests for quote from mail needs the rule's owner to hold SALES_QUOTE_EDIT")
     return {}
 }
 // The source identity of a mail message: its Message-ID, so the same mail delivered to two addresses or accounts is one intake;
@@ -917,5 +924,10 @@ const operations = {
     details,
     sourceKinds,
     // for BOSS's Comms action on a mail message: the same source identity the mail rule writes
-    emailIdentity
+    emailIdentity,
+    // P8: for the createQuoteRequest mail rule action and Create RFQ (SalesQuoteRequests.js), the same team, owner check and text
+    intakeTeam,
+    userHolds,
+    subjectName,
+    plainText
 })
