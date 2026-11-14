@@ -16,7 +16,7 @@ along with this software (see the LICENSE.md file). If not, see
     P7, SAL-QUOTE): quote drafts over the native order (service/mantle/order/SalesQuotes.js; the scope in
     service/mantle/sales/SalesAccess.js quoteOf). Each checks its own permission, the selling organization and the assignment, and
     every party, opportunity, store, address and product given; each change names the order revision it read. Issue, send, the
-    response, revise and clone are P10's. P8: the requests for quote (RFQs, design §5 QuoteRequests and QuoteRequestDetail;
+    response, revise and clone are SalesQuoteIssueServices' (P10). P8: the requests for quote (RFQs, design §5 QuoteRequests and QuoteRequestDetail;
     SalesQuoteRequests.js, the scope in SalesAccess.js quoteRequestOf), in a block of their own at the end. P9: the approvals a quote
     needs are SalesApprovalServices' (preview#Quote, decide#Quote), get#Quote answers them, a free line follows the approval rules
     and propose#Quote is guarded by them. -->
@@ -562,8 +562,13 @@ along with this software (see the LICENSE.md file). If not, see
             caller may edit, at its current revision, with lines and every approval it needs current at that revision
             (SalesApprovalServices.preview#Quote), moved to Proposed through OrderServices.propose#Order, so a direct call cannot
             propose an unapproved quote. Needs SALES_QUOTE_EDIT on a quote the caller sees (RECORD_UNAVAILABLE, PERMISSION_DENIED);
-            refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT), a stale revision (REVISION_REQUIRED, REVISION_CHANGED), no
-            lines (LINES_REQUIRED) and an approval not given (APPROVAL_REQUIRED, naming the rules).</description>
+            refuses a quote that is no longer a draft (QUOTE_NOT_DRAFT; one being revised, Being changed, is one again), a stale
+            revision (REVISION_REQUIRED, REVISION_CHANGED), no lines (LINES_REQUIRED) and an approval not given (APPROVAL_REQUIRED,
+            naming the rules). P10's issue checks: one seller and customer on every part (PARTS_INVALID), each product line priced
+            (PRICE_UNAVAILABLE) and usable for selling (PRODUCT_NOT_USABLE), a total of zero or more (TOTAL_INVALID), a validity
+            set and in the future (VALIDITY_REQUIRED, QUOTE_EXPIRED, VALIDITY_INVALID), and the tax current (F151: a storeless quote
+            of a gateway seller with no address of its own is taxed at the customer's address, kept, and refused once with the new
+            total, TAX_UPDATED; with no address at all ADDRESS_REQUIRED).</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="orderRevision"/>
@@ -574,7 +579,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="orderRevision" type="Integer"/>
         </out-parameters>
         <actions>
-            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').execute('proposeQuote', context))</script>
+            <!-- P10: the issue's checks with P9's approval guard (SalesQuoteIssues.js proposeQuote) -->
+            <set field="proposed" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteIssues.js').execute('proposeQuote', context)"/>
+            <set field="statusId" from="proposed.statusId"/>
+            <set field="orderRevision" from="proposed.orderRevision"/>
         </actions>
     </service>
     <!-- ===== end of Sales P9 ===== -->

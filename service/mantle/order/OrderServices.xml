@@ -2745,6 +2745,9 @@ General Order Placement and eCommerce Usage
             <parameter name="disableTaxCalc"/>
             <parameter name="partTotal" type="BigDecimal"/>
             <parameter name="statusId"/>
+            <!-- impl-sales P10: the customer's reference and the new-customer mark, so a change of those alone is told apart -->
+            <parameter name="otherPartyOrderId"/>
+            <parameter name="isNewCustomer"/>
             <parameter name="originalValue" type="Map"/>
         </in-parameters>
         <actions>
@@ -2773,8 +2776,23 @@ General Order Placement and eCommerce Usage
                     &amp;&amp; shipmentMethodEnumId == originalValue.shipmentMethodEnumId &amp;&amp; customerPartyId == originalValue.customerPartyId"/>
                 <!-- the send's own Approved to Sent is the issue of the revision, not a change of it (send#PurchaseOrder) -->
                 <set field="issuedOnly" from="statusOnly &amp;&amp; statusId == 'OrderSent' &amp;&amp; originalValue.statusId == 'OrderApproved'"/>
+                <!-- the customer's reference (its purchase order recorded with an acceptance, impl-sales P10) and place#Order's
+                    new-customer mark are not commercial changes either: every other field of the part unchanged (Sales P10 review:
+                    the part as stored now against its original value, so a reference written with any other field counts) -->
+                <script><![CDATA[
+                    const same = (a, b) => (a == null || a === "" ? "" : String(a)) === (b == null || b === "" ? "" : String(b))
+                    const referenceFields = ["otherPartyOrderId", "otherPartyOrderDate", "isNewCustomer", "lastUpdatedStamp"]
+                    referenceOnly = false
+                    if (hasOriginal && !statusOnly && (!same(otherPartyOrderId, originalValue.otherPartyOrderId)
+                            || !same(isNewCustomer, originalValue.isNewCustomer))) {
+                        const stored = ec.entity.find("mantle.order.OrderPart").condition({orderId, orderPartSeqId}).disableAuthz().one()
+                        referenceOnly = stored != null && Object.keys(originalValue)
+                            .filter(name => !referenceFields.includes(name))
+                            .every(name => same(stored[name], originalValue[name]))
+                    }
+                ]]></script>
                 <service-call name="mantle.order.OrderServices.increment#OrderRevision"
-                        in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : null))}"/>
+                        in-map="{orderId:orderId, revisionKind:(issuedOnly ? 'issued' : (statusOnly ? 'status' : (referenceOnly ? 'reference' : null)))}"/>
             </else></if>
         </actions>
     </service>
@@ -2978,8 +2996,9 @@ General Order Placement and eCommerce Usage
             this revision); every other order counts as before.</description>
         <in-parameters>
             <parameter name="orderId"/>
-            <parameter name="revisionKind"><description>Empty or commercial: counts. content, note or status: not counted
-                where the order counts commercial changes only. item: counted only there. issued (the issued purchase
+            <parameter name="revisionKind"><description>Empty or commercial: counts. content, note, status, assignment (a
+                part's SalesRepresentative or SalesTeam row) or reference (the customer's reference, OrderPart.otherPartyOrderId, or
+                the new-customer mark alone; impl-sales P10): not counted where the order counts commercial changes only. item: counted only there. issued (the issued purchase
                 order's PDF and its Approved to Sent): never counted on an order with a purchase part, else as status.</description></parameter>
         </in-parameters>
         <actions>

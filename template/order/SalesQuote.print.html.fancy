@@ -1,0 +1,92 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- A sales quote as issued (mantle.order.SalesQuoteIssueServices send#Quote stores its PDF at the offered revision; OrderDetail's
+     Print renders the quote as it is now). Trusted; the cover and terms are the organization's stored text, rendered locked by the
+     service with an explicit map and passed in as coverHtml and termsHtml (F70). orderId, orderName, revisionText, organizationName,
+     customerName, contactName, ownerName, customerReference, issuedText, validThruText, shipToText, currencyText, productsText,
+     shippingText, taxText, totalText, linkUrl, qrSvg, draft (Y: a print of a draft, not the issue) and lines (seq, productText,
+     description, quantityText, priceText, amountText, requiredText). No cost or margin. -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>${ec.l10n.localize('Quote')} ${orderId}</title>
+<style>
+@page { size: A4; margin: 18mm; }
+body { font: 10pt Helvetica, Arial, sans-serif; color: #20252b; }
+h1 { font-size: 18pt; margin: 0 0 2mm; }
+.sub { color: #59606b; margin: 0 0 6mm; }
+.head { width: 100%; }
+.qr { width: 28mm; text-align: right; vertical-align: top; }
+.qr svg { width: 26mm; height: 26mm; }
+table { border-collapse: collapse; width: 100%; }
+td, th { padding: 4px 6px; text-align: left; vertical-align: top; }
+thead { display: table-header-group; }
+tbody tr { break-inside: avoid; }
+.facts th { width: 38mm; font-weight: bold; }
+.lines { margin-top: 6mm; }
+.lines th { border-bottom: 1px solid #20252b; }
+.lines td { border-bottom: 1px solid #ddd; }
+.amount { text-align: right; white-space: nowrap; }
+.note { color: #59606b; font-size: 9pt; }
+.sum td { border-bottom: none; }
+.total td { border-bottom: none; font-weight: bold; }
+.cover, .terms { margin-top: 6mm; }
+.draft { color: #b3261e; font-weight: bold; }
+</style></head>
+<body>
+<table class="head"><tbody><tr>
+<td>
+<h1>${ec.l10n.localize('Quote')} ${orderId}</h1>
+<p class="sub">${revisionText}<#if issuedText> · ${ec.l10n.localize('Issued')} ${issuedText}</#if><#if validThruText> · ${ec.l10n.localize('Valid through')} ${validThruText}</#if></p>
+<#if draft == 'Y'><p class="draft">${ec.l10n.localize('Draft: not an offer until it is issued')}</p></#if>
+</td>
+<#if qrSvg><td class="qr">${raw(qrSvg)}</td></#if>
+</tr></tbody></table>
+<table class="facts"><tbody>
+    <tr><th>${ec.l10n.localize('Seller')}</th><td>${organizationName}</td></tr>
+    <tr><th>${ec.l10n.localize('Customer')}</th><td>${customerName}</td></tr>
+    <#if contactName><tr><th>${ec.l10n.localize('Attention')}</th><td>${contactName}</td></tr></#if>
+    <#if orderName><tr><th>${ec.l10n.localize('Quote')}</th><td>${orderName}</td></tr></#if>
+    <#if customerReference><tr><th>${ec.l10n.localize('Your reference')}</th><td>${customerReference}</td></tr></#if>
+    <#if shipToText><tr><th>${ec.l10n.localize('Ship to')}</th><td>${shipToText}</td></tr></#if>
+    <#if ownerName><tr><th>${ec.l10n.localize('Your contact')}</th><td>${ownerName}</td></tr></#if>
+    <tr><th>${ec.l10n.localize('Currency')}</th><td>${currencyText}</td></tr>
+</tbody></table>
+<#if coverHtml><div class="cover">${raw(coverHtml)}</div></#if>
+<table class="lines">
+    <thead><tr>
+        <th>#</th>
+        <th>${ec.l10n.localize('Item')}</th>
+        <th class="amount">${ec.l10n.localize('Quantity')}</th>
+        <th class="amount">${ec.l10n.localize('Unit price')}</th>
+        <th class="amount">${ec.l10n.localize('Amount')}</th>
+        <th>${ec.l10n.localize('Required by')}</th>
+    </tr></thead>
+    <tbody>
+    <#list lines as line>
+        <tr>
+            <td>${line.seq}</td>
+            <td>${line.productText}<#if line.description><br><span class="note">${line.description}</span></#if></td>
+            <td class="amount">${line.quantityText}</td>
+            <td class="amount">${line.priceText}</td>
+            <td class="amount">${line.amountText}</td>
+            <td>${line.requiredText}</td>
+        </tr>
+    </#list>
+        <tr class="sum"><td></td><td></td><td></td><td class="amount">${ec.l10n.localize('Products')}</td><td class="amount">${productsText}</td><td></td></tr>
+        <#if shippingText><tr class="sum"><td></td><td></td><td></td><td class="amount">${ec.l10n.localize('Shipping')}</td><td class="amount">${shippingText}</td><td></td></tr></#if>
+        <#if taxText><tr class="sum"><td></td><td></td><td></td><td class="amount">${ec.l10n.localize('Tax')}</td><td class="amount">${taxText}</td><td></td></tr></#if>
+        <tr class="total"><td></td><td></td><td></td><td class="amount">${ec.l10n.localize('Total')}</td><td class="amount">${totalText}</td><td></td></tr>
+    </tbody>
+</table>
+<#if termsHtml><div class="terms">${raw(termsHtml)}</div></#if>
+<#if linkUrl><p class="note">${ec.l10n.localize('Open this quote')}: ${linkUrl}</p></#if>
+</body></html>

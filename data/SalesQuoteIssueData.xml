@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A quote's issue, send and reminders (IronStone Sales design §5, §13.2, §16; impl-sales P10, F16, F70;
+    mantle.order.SalesQuoteIssueServices): the issued PDF's content type; the delivery ledger's two sources, each with its build
+    service, so a send for another rep, a batch send and a reminder each go once to a recipient for an issue (X8); the quote's and
+    the reminder's EmailTemplates, whose subject, sender and body the build makes (the cover and reminder text a stored
+    .html.fancy-locked resource rendered with an explicit map, F70); and the reminder job, daily: reminders are off by default, as an
+    organization sends them only once it sets its reminder days (SalesPolicy.reminderDays). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.Enumeration enumId="OctSalesQuoteIssued" description="Issued quote" enumTypeId="OrderContentType"/>
+    <moqui.basic.Enumeration enumId="MdsrcSalesQuote" description="Sales quote" sequenceNum="20" enumTypeId="MessageDeliverySource"
+            enumCode="mantle.order.SalesQuoteIssueServices.build#QuoteMessage"/>
+    <moqui.basic.Enumeration enumId="MdsrcSalesQuoteReminder" description="Sales quote reminder" sequenceNum="21"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesQuoteIssueServices.build#QuoteReminderMessage"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_QUOTE" description="Sales quote to the customer" emailServerId="SYSTEM"
+            fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_QUOTE_REMINDER" description="Sales quote reminder to the customer"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+    <moqui.service.job.ServiceJob jobName="send_SalesQuoteReminders" description="Send reminders of issued sales quotes"
+            serviceName="mantle.order.SalesQuoteIssueServices.send#QuoteReminders" cronExpression="0 0 8 * * ?" paused="N"
+            errorHistoryOnly="Y" transactionTimeout="1800"/>
+</entity-facade-xml>
