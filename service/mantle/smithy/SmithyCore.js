@@ -386,7 +386,7 @@ function groupRights(group, a) {
 }
 /* What an actor holds on a repository (a SmithyRepository row): the effective role's rank among its own row, its
    groups' rows, its personal namespace and its projects' roles, and whether it may be viewed. */
-function repositoryRights(repo, a) {
+function repositoryRights(repo, a, depth = 0) {
     const access = siteAccess(repo.siteId, a)
     const chain = repo.groupId ? groupChain(repo.groupId) : repo.ownerPartyId ? [] : null
     const whole = chain && chain.every(g => g.siteId === repo.siteId) ? chain : null
@@ -401,7 +401,11 @@ function repositoryRights(repo, a) {
     }
     if (access.operator) rank = RANK.SmrOwner
     const visibility = whole
-        ? Math.max(visibilityRank(repo.visibilityEnumId), ...whole.map(g => visibilityRank(g.visibilityEnumId)))
+        ? Math.max(
+              visibilityRank(repo.visibilityEnumId),
+              ...whole.map(g => visibilityRank(g.visibilityEnumId)),
+              forkCeiling(repo.repositoryId)
+          )
         : 3
     const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt))
     return {
@@ -411,12 +415,41 @@ function repositoryRights(repo, a) {
         rank,
         visibility,
         hidden,
-        canView: viewable(access, a, whole, rank, visibility, hidden)
+        canView: viewable(access, a, whole, rank, visibility, hidden) && parentViewable(repo.repositoryId, a, depth)
     }
+}
+/* While a fork names a parent that is not public, viewing the fork also needs view of the parent (§9.2): the fork shares
+   the parent's code, so a role on the fork gives nothing the parent does not, and a forker who loses the parent loses the
+   fork's pages and its git (Not Found, to its Owner too: the repository is kept, and an operator sees it and can delete
+   it or hand it back). A public parent, and one Smithy does not keep, ask nothing. */
+function parentViewable(repositoryId, a, depth) {
+    if (depth >= 8) return false
+    const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+    const parent = parentId ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+    if (!parent) return true
+    const rights = repositoryRights(parent, a, depth + 1)
+    return rights.visibility === 1 || rights.canView
+}
+/* A fork is no wider than its parent's effective visibility while it names the parent (§5.1, §9.2): the order of the
+   narrowest visibility of the repositories a hosted repository was forked from, each with its groups', so a fork
+   narrows when its parent does; 1 (no ceiling) for one that is no fork, or whose parent Smithy does not keep. */
+function forkCeiling(repositoryId, depth = 0) {
+    return remember("fork|" + repositoryId, () => {
+        const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+        const parent = parentId && depth < 8 ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+        if (!parent) return 1
+        const chain = parent.groupId ? groupChain(parent.groupId) : []
+        return Math.max(
+            visibilityRank(parent.visibilityEnumId),
+            ...(chain || []).map(g => visibilityRank(g.visibilityEnumId)),
+            chain ? 1 : 3,
+            forkCeiling(parentId, depth + 1)
+        )
+    })
 }
 /* Whether an actor may view a repository of a list, without reading its role rows when it is public in effect. */
 function repositoryViewable(repo, a) {
-    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1) {
+    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1 && forkCeiling(repo.repositoryId) === 1) {
         const group = one(M + "SmithyGroup", {groupId: repo.groupId})
         const rights = group && group.siteId === repo.siteId ? groupRights(group, a) : null
         if (rights && rights.canView && rights.visibility === 1 && !rights.hidden) return true
@@ -465,6 +498,208 @@ function requireRole(r, roleEnumId) {
     if (r.rank >= RANK[roleEnumId]) return
     if (!me()) fail("AuthenticationRequired", "Sign in to continue")
     fail("Unauthorized", "accessDenied: This needs the " + ROLE_CODES[roleEnumId] + " role")
+}
+
+// ===== issues (§8) and the scope category of a conversation (§12.1) =====
+const F = "mantle.forum."
+/* A party as an actor that is not on a page (a notice's reader, an assignee): by its first enabled account. */
+function actorOfParty(partyId) {
+    if (!partyId) return {userId: null, partyId: null, pages: false}
+    if (partyId === me()) return actor()
+    const account = rows("moqui.security.UserAccount", {partyId}, 20).find(row => row.disabled !== "Y")
+    return {userId: account?.userId || null, partyId: account ? partyId : null, pages: false}
+}
+/* A category that is a scope only: a mailbox list nobody is a member of and a ForumCategory that is not published, so it
+   is in no category list and nobody reads it as a category (§12.5; DG6 publishes a group's with its forum). The list is
+   made as a row: the list service would make the caller its owner, and so a moderator of the scope. */
+function makeScopeCategory(siteId, name, parentContactListId) {
+    const list = ec.entity.makeValue("mantle.marketing.contact.ContactList")
+    list.setSequencedIdPrimary()
+    list.set("contactListTypeEnumId", "MAILBOX")
+    list.set("contactListName", String(name).slice(0, 100))
+    list.set("isPublic", "N")
+    list.set("postingEnumId", "ClpModerators")
+    list.create()
+    forum.create(F + "ForumCategory", {
+        contactListId: list.contactListId,
+        siteId,
+        parentContactListId: parentContactListId || null,
+        slug: list.contactListId,
+        sequenceNum: 0,
+        publicationState: "disabled",
+        visibility: "members",
+        mode: "discussion",
+        policyRevision: 1
+    })
+    return list.contactListId
+}
+/* ensure#GroupCategory: a group's category, made on first need under its parent group's (a top-level group's has no
+   parent). The group's row is locked, so two first needs make one. */
+function ensureGroupCategory(groupId) {
+    const group = one(M + "SmithyGroup", {groupId}, true)
+    if (!group) missing()
+    if (group.contactListId) return group.contactListId
+    const parent = group.parentGroupId ? ensureGroupCategory(group.parentGroupId) : null
+    const contactListId = makeScopeCategory(group.siteId, group.groupPath, parent)
+    update(group, {contactListId})
+    return contactListId
+}
+/* ensure#AccountCategory: the one scope category of a site's personal namespaces, made on first need. */
+function ensureAccountCategory(siteId) {
+    one(S + "PublicSite", {siteId}, true)
+    const row = one(M + "SmithySite", {siteId}, true)
+    if (row?.accountContactListId) return row.accountContactListId
+    const contactListId = makeScopeCategory(siteId, "Personal repositories", null)
+    if (row) update(row, {accountContactListId: contactListId})
+    else forum.create(M + "SmithySite", {siteId, accountContactListId: contactListId, revision: 1})
+    return contactListId
+}
+/* The scope category of a repository's conversations: its own, else its group's, else the site's account category. */
+const scopeCategory = repo =>
+    repo.contactListId || (repo.groupId ? ensureGroupCategory(repo.groupId) : ensureAccountCategory(repo.siteId))
+// ===== Report and Hide (§12.3) =====
+/* The scope whose moderators decide a report on a repository or a group, and where its hiding is logged: the category of
+   the group above it. None (the site's staff alone) for a top-level group and for a personal repository: a target's own
+   Owners do not decide a report on it. */
+const scopeAbove = (kind, row) => {
+    const groupId = kind === "group" ? row.parentGroupId : row.groupId
+    return groupId ? ensureGroupCategory(groupId) : null
+}
+/* Who may hide a repository or a group they view, and decides a report on it: the site's staff (owners, moderators, and
+   an operator on a page), and an Owner of a group above it. Never by a role on the target itself. r: its rights for a. */
+function mayHide(kind, r, a) {
+    if (!r.canView) return false
+    if (r.access.staff) return true
+    if (!a.partyId || r.access.suspended) return false
+    const above = kind === "group" ? r.chain.slice(1) : r.chain
+    return above.length > 0 && groupRank(above, a.partyId)[0] >= RANK.SmrOwner
+}
+/* The rights an actor holds on a repository or a group by its id and kind, with its row; null for none of the site. */
+function targetRights(siteId, kind, targetId, a) {
+    const entity = kind === "group" ? "SmithyGroup" : kind === "repository" ? "SmithyRepository" : null
+    const row = entity && typeof targetId === "string" && targetId ? one(M + entity, {[kind + "Id"]: targetId}) : null
+    if (!row || (siteId && row.siteId !== siteId)) return null
+    return {row, r: kind === "group" ? groupRights(row, a) : repositoryRights(row, a)}
+}
+/* Hides a repository or a group, or shows it again (the row is locked by the caller): Not Found from now to all but its
+   Owners and the site's staff, on the pages and in git (viewable). The audit row says whether staff hid it (hide-staff),
+   which an Owner cannot undo; it is logged in the scope above the target. Gives the new revision. */
+function setHidden(kind, row, hidden, a, byStaff, reason) {
+    const before = Number(row.revision || 1)
+    update(row, {
+        hiddenAt: hidden ? now() : null,
+        hiddenByPartyId: hidden ? a.partyId : null,
+        hideReason: hidden ? String(reason || "").slice(0, 2000) : null,
+        revision: before + 1
+    })
+    forum.audit(
+        row.siteId,
+        scopeAbove(kind, row),
+        kind,
+        row[kind + "Id"],
+        hidden ? (byStaff ? "hide-staff" : "hide") : "unhide",
+        reason,
+        before,
+        before + 1
+    )
+    return before + 1
+}
+/* Whether what is hidden was hidden by the site's staff: by the last hiding in the log. */
+const hiddenByStaff = (kind, row) =>
+    Array.from(
+        find(forum.F + "ForumModerationAction", {siteId: row.siteId, targetType: kind, targetId: row[kind + "Id"]})
+            .condition("action", "in", ["hide", "hide-staff"])
+            .orderBy("-createdAt")
+            .limit(1)
+            .list()
+    )[0]?.action === "hide-staff"
+
+/* What an actor holds on an issue (§5.3, §8.1, §8.3), from the rights it holds on the repository (r):
+   - read: a viewer of a repository with issues on, when the task is public (WevGeneral) or the actor is a Reporter; a
+     confidential one only its Owners (operators on a page among them) and its reporter;
+   - write (comment, react, flag, upload): a reader with a confirmed address who is not suspended or silenced, in a
+     repository that is not archived; writeRefusal says which of these refused;
+   - moderate: a reader who is an Owner; for an issue that is not confidential the site's staff and the scope
+     category's moderators too. */
+function issueAccess(r, issue, a, scopeContactListId) {
+    const task = one("mantle.work.effort.WorkEffort", {workEffortId: issue.workEffortId})
+    const confidential = issue.confidential === "Y"
+    const owner = r.rank >= RANK.SmrOwner
+    const reporter = !!a.partyId && issue.reporterPartyId === a.partyId
+    const canRead =
+        r.canView &&
+        r.repo.issuesEnabled === "Y" &&
+        !!task &&
+        (confidential ? owner || reporter : task.visibilityEnumId === "WevGeneral" || r.rank >= RANK.SmrReporter)
+    const isConfirmed = !!a.userId && confirmedAddress().confirmed(a.userId)
+    const silenced = !!a.partyId && sanctioned(r.repo.siteId, a.partyId, scopeContactListId || null, "silence")
+    const archived = !!(r.git || one("moqui.resource.GitRepository", {repositoryId: r.repo.repositoryId}))?.archivedDate
+    const writeRefusal =
+        !canRead || !a.partyId
+            ? null
+            : !isConfirmed
+              ? "addressUnconfirmed: Confirm your email address to continue"
+              : r.access.suspended || silenced
+                ? "accessDenied: Your account may not post on this site"
+                : archived
+                  ? "repositoryArchived: This repository is archived"
+                  : null
+    const listStaff = () => {
+        const row = scopeContactListId && a.partyId ? forum.listMember(scopeContactListId, a.partyId) : null
+        return !!row && ["ListOwner", "ListModerator"].includes(row.roleTypeId)
+    }
+    return {
+        issue,
+        task,
+        confidential,
+        owner,
+        reporter,
+        canRead,
+        // the reporter of a confidential issue who is no Owner reads their own text and the replies addressed to them
+        limited: confidential && !owner,
+        writable: canRead && !!a.partyId && !writeRefusal,
+        writeRefusal,
+        canModerate: canRead && !r.access.suspended && (owner || (!confidential && (r.access.staff || listStaff())))
+    }
+}
+
+/* What an actor holds on a merge request (§5.3, §9.1), from the rights it holds on the target repository (r) and the
+   SmithyMergeRequest row:
+   - read: a viewer of a repository whose merge requests are on;
+   - write (comment, review, react, flag): a reader with a confirmed address who is not suspended or silenced, in a
+     repository that is not archived; writeRefusal says which of these refused;
+   - moderate: a reader who is an Owner, the site's staff, or a moderator of the scope category. */
+function mergeRequestAccess(r, request, a, scopeContactListId) {
+    const canRead = r.canView && r.repo.mergeRequestsEnabled !== "N"
+    const isConfirmed = !!a.userId && confirmedAddress().confirmed(a.userId)
+    const silenced = !!a.partyId && sanctioned(r.repo.siteId, a.partyId, scopeContactListId || null, "silence")
+    const archived = !!(r.git || one("moqui.resource.GitRepository", {repositoryId: r.repo.repositoryId}))?.archivedDate
+    const writeRefusal =
+        !canRead || !a.partyId
+            ? null
+            : !isConfirmed
+              ? "addressUnconfirmed: Confirm your email address to continue"
+              : r.access.suspended || silenced
+                ? "accessDenied: Your account may not post on this site"
+                : archived
+                  ? "repositoryArchived: This repository is archived"
+                  : null
+    const listStaff = () => {
+        const row = scopeContactListId && a.partyId ? forum.listMember(scopeContactListId, a.partyId) : null
+        return !!row && ["ListOwner", "ListModerator"].includes(row.roleTypeId)
+    }
+    const owner = r.rank >= RANK.SmrOwner
+    return {
+        request,
+        confidential: false,
+        owner,
+        author: !!a.partyId && request.authorPartyId === a.partyId,
+        canRead,
+        limited: false,
+        writable: canRead && !!a.partyId && !writeRefusal,
+        writeRefusal,
+        canModerate: canRead && !r.access.suspended && (owner || r.access.staff || listStaff())
+    }
 }
 
 // ===== paths (§4.3, §4.4) =====
@@ -714,6 +949,19 @@ function resolvePath(siteId, path) {
     profileShown,
     accountShown,
     resolvePath,
+    actorOfParty,
+    ensureGroupCategory,
+    ensureAccountCategory,
+    makeScopeCategory,
+    scopeCategory,
+    scopeAbove,
+    mayHide,
+    targetRights,
+    setHidden,
+    hiddenByStaff,
+    issueAccess,
+    mergeRequestAccess,
+    forkCeiling,
     GROUP_REPOSITORY_LIMIT,
     mounted,
     // of an account by its userId (none: false), and of the signed-in account

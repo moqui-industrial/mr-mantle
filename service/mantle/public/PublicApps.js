@@ -42,6 +42,10 @@ const apps = {
         root: true,
         onePerSite: true,
         accountCard: 'mantle.smithy.SmithyServices.get#AccountCard',
+        // what the forum asks of Smithy for the conversation of an issue (design-smithy §12.1): the scope module, and the
+        // rows whose contactListId binds a category to a group or a repository
+        scope: 'component://mr-mantle/service/mantle/smithy/SmithyScope.js',
+        scopeEntities: ['mantle.smithy.SmithyGroup', 'mantle.smithy.SmithyRepository'],
     },
 }
 /* The first path segments no app mount, site page route or redirect may take: the BOSS apps, REST and RPC, the framework's

@@ -283,7 +283,8 @@
     }
     const importRow = (siteId, importId, lock) => {
         const v = one(F + 'ForumImportRun', { importId }, lock)
-        if (!v || v.siteId !== siteId) missing()
+        if (!v || v.siteId !== siteId || String(v.stage).startsWith('mbox-'))
+            missing()
         return v
     }
     const payloadOf = (siteId, sourceType, sourceId) => {
@@ -904,11 +905,14 @@
     methods.findImports = (p) => {
         ownerOrOperator(p.siteId)
         return {
+            // a mailing list's archive (an mbox import, ForumLists.js) is not a migration: it is read by getMboxImport
             importList: rows(
                 F + 'ForumImportRun',
                 { siteId: p.siteId },
                 100,
-            ).map((v) =>
+            )
+                .filter((v) => !String(v.stage).startsWith('mbox-'))
+                .map((v) =>
                 pick(
                     v,
                     'importId sourceName archiveName discourseVersion schemaVersion stage reconciliationRevision operatorRevision ownerRevision createdAt revision',

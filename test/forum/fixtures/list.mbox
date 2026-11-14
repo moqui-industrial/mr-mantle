@@ -1,0 +1,83 @@
+From alice@list-archive.test Mon Jan  1 10:00:00 2024
+Message-ID: <a1@list-archive.test>
+From: "Alice Example" <alice@list-archive.test>
+To: dev@lists.example.test
+Subject: =?UTF-8?B?R3LDtsOfZSBvZiB0aGUgY2FjaGU=?=
+Date: Mon, 1 Jan 2024 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8; format=flowed
+
+How large should the cache be? This first paragraph is wrapped by 
+the sender's client with soft line breaks, which the archive 
+joins again.
+
+>From what I measured, MBOXFIRST is the word to search for.
+
+From bob@list-archive.test Tue Jan  2 09:00:00 2024
+Message-ID: <c3@list-archive.test>
+In-Reply-To: <b2@list-archive.test>
+References: <a1@list-archive.test>
+ <b2@list-archive.test>
+From: bob@list-archive.test (Bob Builder)
+Subject: Re: cache size
+Date: Tue, 2 Jan 2024 09:00:00 +0000
+Content-Type: text/plain; charset=us-ascii
+
+A reply to the reply, which comes before it in the file.
+
+From carol@list-archive.test Tue Jan  2 10:00:00 2024
+Message-ID: <b2@list-archive.test>
+In-Reply-To: <a1@list-archive.test>
+From: =?ISO-8859-1?Q?Carol_M=FCller?= <carol@list-archive.test>
+Subject: Re: cache size
+Date: Tue, 2 Jan 2024 11:00:00 +0100
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-1"
+
+--alt-1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+The plain part is taken: caf=C3=A9 and a soft=
+ break.
+--alt-1
+Content-Type: text/html; charset=utf-8
+
+<p>The html part is not taken.</p>
+--alt-1--
+
+From alice@list-archive.test Mon Jan  1 10:00:00 2024
+Message-ID: <a1@list-archive.test>
+From: "Alice Example" <alice@list-archive.test>
+Subject: =?UTF-8?B?R3LDtsOfZSBvZiB0aGUgY2FjaGU=?=
+Date: Mon, 1 Jan 2024 10:00:00 +0000
+
+The same message again, as an export gives it twice.
+
+From alice@list-archive.test Fri Jan  5 08:00:00 2024
+Message-ID: <d4@list-archive.test>
+From: "Alice Example" <alice@list-archive.test>
+Subject: Release plans
+Date: Fri, 5 Jan 2024 08:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix-1"
+
+--mix-1
+Content-Type: text/html; charset=utf-8
+
+<p>The plan in <b>html</b> only.</p><script>alert(1)</script>
+--mix-1
+Content-Type: application/octet-stream; name="plan.bin"
+Content-Disposition: attachment; filename="plan.bin"
+Content-Transfer-Encoding: base64
+
+YmluYXJ5IGZpbGUgYnl0ZXMsIG5vdCBjYXJyaWVk
+--mix-1--
+
+From dave@list-archive.test Sat Jan  6 08:00:00 2024
+Message-ID: <e5@list-archive.test>
+From: Dave <dave@list-archive.test>
+Subject: Re: Release plans
+Date: Sat, 6 Jan 2024 08:00:00 +0000
+
+An answer by subject alone: this client sent no In-Reply-To.

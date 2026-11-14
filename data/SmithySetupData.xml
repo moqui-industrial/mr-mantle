@@ -28,6 +28,15 @@
     <moqui.basic.Enumeration enumId="SrkGroup" enumTypeId="SmithyRedirectKind" enumCode="group" sequenceNum="1" description="Group"/>
     <moqui.basic.Enumeration enumId="SrkAccount" enumTypeId="SmithyRedirectKind" enumCode="account" sequenceNum="2" description="Account"/>
 
+    <moqui.basic.EnumerationType description="Smithy Agreement State" enumTypeId="SmithyAgreementState"/>
+    <moqui.basic.Enumeration enumId="SmasOff" enumTypeId="SmithyAgreementState" enumCode="off" sequenceNum="1" description="Not required"/>
+    <moqui.basic.Enumeration enumId="SmasSigned" enumTypeId="SmithyAgreementState" enumCode="signed" sequenceNum="2" description="Signed"/>
+    <moqui.basic.Enumeration enumId="SmasUnsigned" enumTypeId="SmithyAgreementState" enumCode="unsigned" sequenceNum="3" description="Unsigned"/>
+    <moqui.basic.Enumeration enumId="SmasPending" enumTypeId="SmithyAgreementState" enumCode="pending" sequenceNum="4" description="Pending"/>
+    <moqui.basic.EnumerationType description="Smithy Agreement List" enumTypeId="SmithyAgreementList"/>
+    <moqui.basic.Enumeration enumId="SalCopyright" enumTypeId="SmithyAgreementList" enumCode="copyright" sequenceNum="1" description="Copyright Waiver"/>
+    <moqui.basic.Enumeration enumId="SalPatent" enumTypeId="SmithyAgreementList" enumCode="patent" sequenceNum="2" description="Grant of Patent License"/>
+
     <moqui.basic.StatusType description="Smithy Group" statusTypeId="SmithyGroup"/>
     <moqui.basic.StatusItem statusId="SmgRequested" statusTypeId="SmithyGroup" statusCode="requested" sequenceNum="1" description="Requested"/>
     <moqui.basic.StatusItem statusId="SmgActive" statusTypeId="SmithyGroup" statusCode="active" sequenceNum="2" description="Active"/>
