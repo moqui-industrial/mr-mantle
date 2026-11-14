@@ -3,7 +3,7 @@
  * group requests and their decision, groups and subgroups, repositories, members and roles, visibility, rename and
  * transfer, archive and delete, quotas and usage. Smithy.js calls this with its kit and each operation is a method of its
  * map, run through execute(). Every write needs a signed-in account with a confirmed address that is not suspended on
- * the site (kit.writer), a name or a description passes the forum's rules (checkText), and a role is checked after the
+ * the site (kit.writer), a name or a description passes the post gate (checkText), and a role is checked after the
  * view rule, so what the caller may not view is Not Found. The rules are SmithyCore.js's.
  */
 kit => {
@@ -23,9 +23,7 @@ kit => {
     } = kit
     const {pathFree, lockNames, MERGE_METHODS} = kit
     const {M, GIT, forum, VISIBILITY_CODES, VISIBILITY_IDS, RANK, ROLE_CODES, STATUS_CODES, POLICY_CODES} = core
-    const {S, now, me, find, one, create, update, fail, missing, invalid, requireUser, page, receipt, audit, sanctioned, active} =
-        forum
-    const FORUM = "component://mr-mantle/service/mantle/forum/Forum.js"
+    const {S, now, me, find, one, create, update, fail, missing, invalid, requireUser, page, receipt, audit, active} = forum
 
     // ===== what the writes share =====
     const given = value => value !== undefined
@@ -48,17 +46,25 @@ kit => {
         if (!parsed) invalid(name + " must be a date")
         return parsed
     }
-    /* A name or a description an account writes, before the gate of DG3 (§11 "Before the gate"): a silence on the site
-       refuses it, and so does a block or an approve rule of the forum (there is no queue to hold it in yet). */
-    function checkText(siteId, partyId, values) {
-        if (sanctioned(siteId, partyId, null, "silence")) denied("Your account may not post on this site")
+    /* A name or a description an account writes passes the post gate (§12.2) as a name does: the confirmed address, the
+       sanctions, and the forum's rules, where a rule that would hold a post refuses a name, which is not kept pending. */
+    function checkText(siteId, partyId, values, scopeContactListId = null) {
         const written = values
             .filter(value => value != null && value !== "")
             .map(text)
             .join("\n")
-        if (!written) return
-        const ruled = ec.resource.script(FORUM).applyRules(siteId, null, written)
-        if (ruled.block || ruled.approve) invalid("The site's rules do not allow that text")
+        // the caller is a writer (kit.writer): its address is confirmed, or it is an operator's
+        forum.gateRefuse(
+            forum.gate({
+                siteId,
+                actorPartyId: partyId,
+                // the scope's category when it has one: a silence there and the scope's own rules apply
+                contactListId: scopeContactListId,
+                kind: "repository",
+                confirmed: true,
+                ...(written ? {body: written} : {})
+            })
+        )
     }
     /* The site's owners and operators, never a moderator (§11 SiteSettings); a write also needs what every write does. */
     function siteOwner(siteId, write) {
@@ -372,7 +378,7 @@ kit => {
         core.requireRole(parent, "SmrOwner")
         lockNames(p.siteId)
         return receipt(p, "smithy.createSubgroup", () => {
-            checkText(p.siteId, partyId, [p.name, p.description])
+            checkText(p.siteId, partyId, [p.name, p.description], parent.group.contactListId || null)
             const made = makeGroup({...p, partyId, access, parent})
             return {groupId: made.groupId, groupPath: made.groupPath}
         })
@@ -414,7 +420,8 @@ kit => {
             if (!fields.name || fields.name.length > 255) invalid("name is 1 to 255 characters")
         }
         if (given(p.description)) fields.description = text(p.description) || null
-        if (given(p.name) || given(p.description)) checkText(p.siteId, partyId, [p.name, p.description])
+        if (given(p.name) || given(p.description))
+            checkText(p.siteId, partyId, [p.name, p.description], group.contactListId || null)
         if (given(p.avatarId)) fields.avatarId = avatar(p.siteId, partyId, p.avatarId, group.avatarId)
         let narrowedCount = 0
         if (given(p.visibility) && p.visibility !== "") {
@@ -686,7 +693,7 @@ kit => {
                 )
                     invalid("quotaExceeded: You have as many personal repositories as this site allows")
             }
-            checkText(p.siteId, partyId, [p.name, p.description])
+            checkText(p.siteId, partyId, [p.name, p.description], parent?.group.contactListId || null)
             // a new repository of the site's kind, never one that is there
             const made = makeRepository({
                 ...p,
@@ -728,13 +735,16 @@ kit => {
             if (text(p.description).length > 255) invalid("description is at most 255 characters")
             hostedFields.description = text(p.description)
         }
-        if (given(p.name) || given(p.description)) checkText(p.siteId, partyId, [p.name, p.description])
+        if (given(p.name) || given(p.description))
+            checkText(p.siteId, partyId, [p.name, p.description], repo.contactListId || r.chain[0]?.contactListId || null)
         if (given(p.defaultBranch) && p.defaultBranch !== "") hostedFields.branch = text(p.defaultBranch)
         if (given(p.defaultMergeMethod) && p.defaultMergeMethod !== "") {
             if (!["merge", "squash"].includes(p.defaultMergeMethod)) invalid("defaultMergeMethod must be merge or squash")
             hostedFields.defaultMergeMethodEnumId = core.idOfCode(MERGE_METHODS, p.defaultMergeMethod)
         }
         for (const name of FEATURES) if (given(p[name]) && p[name] !== "") fields[name] = flag(p[name]) ? "Y" : "N"
+        // issues turned on: the repository gets its project, its group's when the group has one (§8.1)
+        if (fields.issuesEnabled === "Y" && repo.issuesEnabled !== "Y") kit.issues.issueProject(repo)
         if (given(p.docsPath)) {
             const segments = text(p.docsPath)
                 .split("/")

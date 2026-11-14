@@ -57,6 +57,11 @@ along with this software (see the LICENSE.md file). If not, see
                             .map((row) => row.communicationEventId)
                 }
                 if (audience === 'customer') communicationEventTypeId = typeIds.filter((id) => !internalTypes.includes(id)).join(',') || '_NONE_'
+                // the party's posts in record conversations (an issue's; ForumTopic.kind record) are left out in the query, so a
+                // page is of what is shown; past 2000 of them the query takes them and the filter below drops them
+                recordPostIds = Array.from(ec.entity.find('mantle.forum.ForumPostSearch').condition('fromPartyId', partyId).condition('kind', 'record')
+                        .selectField('communicationEventId').limit(2001).list()).map((row) => row.communicationEventId)
+                if (recordPostIds.length > 2000) recordPostIds = []
             ]]></script>
             <!-- a row per party row of the event, so distinct; the select fields are the event's; the type is the in
                 condition below, which a search form equals on the comma-separated default would replace -->
@@ -69,6 +74,7 @@ along with this software (see the LICENSE.md file). If not, see
                 </econditions>
                 <econdition field-name="communicationEventTypeId" operator="in"/>
                 <econdition field-name="communicationEventId" operator="not-in" from="internalEventIds" ignore="!internalEventIds.length"/>
+                <econdition field-name="communicationEventId" operator="not-in" from="recordPostIds" ignore="!recordPostIds.length"/>
                 <econditions combine="or">
                     <econdition field-name="contactListId" operator="is-null" ignore="includeListPosts || contactListId"/>
                     <econdition field-name="communicationEventId" operator="in" from="linkedPostIds"
@@ -84,6 +90,10 @@ along with this software (see the LICENSE.md file). If not, see
                 const listedIds = Array.from(commEventList).map((row) => row.communicationEventId)
                 const onCase = listedIds.length ? ec.resource.script('component://mr-mantle/service/mantle/request/PeopleCases.js').caseEvents(listedIds) : {}
                 if (Object.keys(onCase).length) commEventList = Array.from(commEventList).filter((row) => !onCase[row.communicationEventId])
+                // a post of a record conversation (an issue's; ForumTopic.kind record) is read on its record's page under that
+                // record's rule, never as a party's message (mr-pass design-smithy §12.1)
+                const recordPosts = listedIds.length ? ec.resource.script('component://mr-mantle/service/mantle/forum/RecordPosts.js').recordPostIds(listedIds) : {}
+                if (Object.keys(recordPosts).length) commEventList = Array.from(commEventList).filter((row) => !recordPosts[row.communicationEventId])
             ]]></script>
         </actions>
     </service>
@@ -471,6 +481,9 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 // A PASS private conversation is read only by its current participants, in Comms as on the site.
                 const forumTopic = ec.entity.find('mantle.forum.ForumTopic').condition('rootCommEventId',threadId).one()
+                // The conversation of a record (an issue) is read on its record's page under that record's rule, never as
+                // an internal thread (mr-pass design-smithy §12.1).
+                if (forumTopic?.kind === 'record') continue
                 if (forumTopic?.kind === 'private') {
                     try { ec.resource.script('component://mr-mantle/service/mantle/forum/Forum.js').topic(threadId,forumTopic.siteId) }
                     catch(error) { if(error.moquiErrorKind==='NotFound') continue; throw error }
@@ -2805,6 +2818,10 @@ along with this software (see the LICENSE.md file). If not, see
                 const s = userScope()
                 if (entityName === WORK_EFFORT && protectedHidden(value.workEffortId, s.userPartyId)) return false
                 if (entityName === WORK_EFFORT && maintenanceHidden(value, s.userPartyId)) return false
+                // the task of a confidential issue of a public tracker is its Smithy Owners' and the operators' alone (mr-pass
+                // design-smithy §8.3): before any role on it or on its project, or an unfiltered organization scope, counts
+                if (entityName === WORK_EFFORT && ec.service.sync().name('mantle.smithy.SmithyIssueServices.check#TaskHidden')
+                        .parameter('workEffortId', value.workEffortId).disableAuthz().call()?.hidden !== false) return false
                 // a reported maintenance problem: its reporter, its people and Maintenance's, not every member of its organization
                 // (MaintenanceAccess.js requestHidden; impl-maintenance P4 review)
                 if (entityName === REQUEST && value.requestTypeEnumId === 'RqtMaintenance' && ec.resource
@@ -3623,7 +3640,11 @@ along with this software (see the LICENSE.md file). If not, see
                 } else {
                     found = find.limit(fetch).list()
                 }
+                // the posts of a record conversation (an issue's) are not a record's or a party's messages
+                const recordPosts = ec.resource.script('component://mr-mantle/service/mantle/forum/RecordPosts.js')
+                        .recordPostIds(Array.from(found).map((value) => value.communicationEventId))
                 for (const value of found) {
+                    if (recordPosts[value.communicationEventId]) continue
                     const commEvent = value.getMap()
                     const kind = commEvent.communicationEventTypeId === 'Comment' ? 'note' : 'message'
                     if (!wants(kind)) continue

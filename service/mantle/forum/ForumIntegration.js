@@ -387,7 +387,18 @@
     /* Internal staff who moderate the topic: the only people who see or make case links. */
     const caseStaff = (a) => a.canModerate && internalParty(me())
     methods.getTopicLinks = (p) => {
-        const { a } = topic(p.rootCommEventId, p.siteId)
+        const { t, a } = topic(p.rootCommEventId, p.siteId, false, true)
+        // A record's conversation is its record's: it has no product, article or case link, and none is made from it.
+        if (t.kind === 'record')
+            return {
+                linkList: [],
+                capabilities: {
+                    canCreateCase: false,
+                    canReplyFromCase: false,
+                    canLinkDiscussion: false,
+                    canDraftArticle: false,
+                },
+            }
         const staffView = caseStaff(a)
         const cards = []
         for (const link of activeLinks({

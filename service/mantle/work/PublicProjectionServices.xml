@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- The projection of work items for an audience outside the project (mr-pass plan/design-smithy.md §8.2; "Nothing
+        internal leaves", impl-projects §9.2): what the public sees of an issue in Smithy, and what a client sees of a shared
+        item. One place lists the fields that leave, so a field added to a task later does not leave by itself. The caller
+        has decided who asks and names the audience by the visibilities it may see; it maps the ids this answers (a party
+        to a handle, a repository to a path it may show) and drops what its audience may not view. -->
+    <service verb="get" noun="PublicItems" allow-remote="false">
+        <description>The public projection of tasks, in the order asked. A task is answered only when its visibility is one of
+            visibilityIds (WevGeneral when none is given: the public; a client's are WevAllUsers and WevGeneral) or its id is in
+            vouchedIdList (an item the caller answers for whatever its visibility: the audience's own confidential item); any
+            other is left out and counted in hiddenCount, so a caller shows it unnamed. Each item has exactly: workEffortId,
+            rootWorkEffortId, title, state (open, closed), stateReason (completed, notPlanned, duplicate; none while open),
+            duplicateOfWorkEffortId, statusId, closedAt, labels (labelId, name, color), milestone (milestoneId, name,
+            dueDate, state), assigneePartyIds and, with includeLinks, linkedCommits (repositoryId, commitId, summary, date),
+            linkedMergeRequests (repositoryId, mergeRequestId, mergeRequestNum, title, state: open, merged, closed) and
+            linkedRefs (repositoryId, refName, refType; current ones). Never: notes and Chatter, time entries, estimates and
+            actual time, cost and rates, allocations, a party that is no assignee, the parent and children, the purpose,
+            priority and type, or a setting of the project.</description>
+        <in-parameters>
+            <parameter name="workEffortIdList" type="List" required="true"/>
+            <parameter name="visibilityIds" type="List"/>
+            <parameter name="vouchedIdList" type="List"/>
+            <parameter name="includeLinks" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="itemList" type="List"><parameter name="item" type="Map"/></parameter>
+            <parameter name="hiddenCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            itemList = []
+            hiddenCount = 0
+            const ids = Array.from(new Set(Array.from(workEffortIdList || []).filter((id) => !!id).map(String)))
+            if (!ids.length) return
+            const allowed = new Set(visibilityIds && Array.from(visibilityIds).length ? Array.from(visibilityIds) : ['WevGeneral'])
+            const vouched = new Set(Array.from(vouchedIdList || []).map(String))
+            const E = 'mantle.work.effort.'
+            const list = (find) => Array.from(find.disableAuthz().list())
+            const tasks = new Map(list(ec.entity.find(E + 'WorkEffort').condition('workEffortId', 'in', ids)
+                    .condition('workEffortTypeEnumId', 'WetTask')).map((task) => [task.workEffortId, task]))
+            const shown = ids.filter((id) => tasks.has(id) && (vouched.has(id) || allowed.has(tasks.get(id).visibilityEnumId)))
+            hiddenCount = ids.length - shown.length
+            if (!shown.length) return
+            const group = (rows, key) => {
+                const out = new Map()
+                for (const row of rows) { if (!out.has(row[key])) out.set(row[key], []); out.get(row[key]).push(row) }
+                return out
+            }
+            const CLOSED = ['WeComplete', 'WeClosed', 'WeCancelled']
+            const NOT_PLANNED = ['WerWontComplete', 'WerCannotReproduce', 'WerInsufficient', 'WerIncomplete']
+            // labels
+            const appls = group(list(ec.entity.find(E + 'WorkEffortCategoryAppl').condition('workEffortId', 'in', shown)), 'workEffortId')
+            const labels = new Map()
+            const labelOf = (id) => {
+                if (!labels.has(id)) labels.set(id, ec.entity.find(E + 'WorkEffortCategory').condition('workEffortCategoryId', id).disableAuthz().one())
+                const label = labels.get(id)
+                return label && label.categoryTypeEnumId === 'WcatLabel' ? {labelId: id, name: label.description || '', color: label.colorName || 'grey'} : null
+            }
+            // milestones and duplicates: the current associations to the task, and from it
+            const now = ec.user.nowTimestamp
+            const milestoneOf = group(list(ec.entity.find(E + 'WorkEffortAssoc').condition('toWorkEffortId', 'in', shown)
+                    .condition('workEffortAssocTypeEnumId', 'WeatMilestone').conditionDate('fromDate', 'thruDate', now)), 'toWorkEffortId')
+            const duplicateOf = group(list(ec.entity.find(E + 'WorkEffortAssoc').condition('workEffortId', 'in', shown)
+                    .condition('workEffortAssocTypeEnumId', 'WeatDuplicates').conditionDate('fromDate', 'thruDate', now)), 'workEffortId')
+            const milestones = new Map()
+            const milestone = (id) => {
+                if (!milestones.has(id)) milestones.set(id, ec.entity.find(E + 'WorkEffort').condition('workEffortId', id).disableAuthz().one())
+                const row = milestones.get(id)
+                return row && row.workEffortTypeEnumId === 'WetMilestone' ? {milestoneId: id, name: row.workEffortName || '',
+                    dueDate: row.estimatedCompletionDate || null, state: CLOSED.includes(row.statusId) ? 'closed' : 'open'} : null
+            }
+            // assignees: the current Assignee rows that are not declined or unassigned
+            const assignees = group(list(ec.entity.find(E + 'WorkEffortParty').condition('workEffortId', 'in', shown)
+                    .condition('roleTypeId', 'Assignee').conditionDate('fromDate', 'thruDate', now))
+                    .filter((row) => !['WeptDeclined', 'WeptUnassigned'].includes(row.statusId)), 'workEffortId')
+            // links to git
+            const none = new Map()
+            const commits = includeLinks ? group(list(ec.entity.find(E + 'WorkEffortGitCommit').condition('workEffortId', 'in', shown)
+                    .orderBy('-commitDate').limit(2000)), 'workEffortId') : none
+            const requestLinks = includeLinks ? group(list(ec.entity.find(E + 'WorkEffortGitMergeRequest').condition('workEffortId', 'in', shown)
+                    .limit(2000)), 'workEffortId') : none
+            const refs = includeLinks ? group(list(ec.entity.find(E + 'WorkEffortGitRef').condition('workEffortId', 'in', shown)
+                    .condition('thruDate', null).limit(2000)), 'workEffortId') : none
+            const REQUEST_STATES = {GmrOpen: 'open', GmrDraft: 'draft', GmrMerged: 'merged', GmrClosed: 'closed'}
+            const requestOf = (link) => {
+                const request = ec.entity.find('moqui.resource.GitMergeRequest').condition('mergeRequestId', link.mergeRequestId).disableAuthz().one()
+                return request ? {repositoryId: request.repositoryId, mergeRequestId: request.mergeRequestId,
+                    mergeRequestNum: request.mergeRequestNum == null ? null : Number(request.mergeRequestNum), title: request.title || '',
+                    state: REQUEST_STATES[request.statusId] || (request.mergedDate ? 'merged' : 'open')} : null
+            }
+            for (const id of shown) {
+                const task = tasks.get(id)
+                const closed = CLOSED.includes(task.statusId)
+                const stateReason = !closed ? null : task.resolutionEnumId === 'WerDuplicate' ? 'duplicate'
+                        : task.statusId === 'WeCancelled' || NOT_PLANNED.includes(task.resolutionEnumId) ? 'notPlanned' : 'completed'
+                const item = {
+                    workEffortId: id,
+                    rootWorkEffortId: task.rootWorkEffortId || null,
+                    title: task.workEffortName || '',
+                    state: closed ? 'closed' : 'open',
+                    stateReason: stateReason,
+                    duplicateOfWorkEffortId: stateReason === 'duplicate' ? (duplicateOf.get(id) || [])[0]?.toWorkEffortId || null : null,
+                    statusId: task.statusId || null,
+                    closedAt: closed ? task.actualCompletionDate || task.lastUpdatedStamp || null : null,
+                    labels: (appls.get(id) || []).map((appl) => labelOf(appl.workEffortCategoryId)).filter((label) => !!label)
+                            .sort((left, right) => left.name.localeCompare(right.name)),
+                    milestone: (milestoneOf.get(id) || []).map((assoc) => milestone(assoc.workEffortId)).find((row) => !!row) || null,
+                    assigneePartyIds: Array.from(new Set((assignees.get(id) || []).map((row) => row.partyId)))
+                }
+                if (includeLinks) {
+                    item.linkedCommits = (commits.get(id) || []).map((row) => ({repositoryId: row.repositoryId, commitId: row.commitId,
+                        summary: row.summary || '', date: row.commitDate || null}))
+                    item.linkedMergeRequests = (requestLinks.get(id) || []).map(requestOf).filter((row) => !!row)
+                    item.linkedRefs = (refs.get(id) || []).map((row) => ({repositoryId: row.repositoryId, refName: row.refName, refType: row.refType || null}))
+                }
+                itemList.push(item)
+            }
+        ]]></script></actions>
+    </service>
+</services>

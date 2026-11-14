@@ -269,5 +269,114 @@
             "reason",
             "expectedRevision"
         ]
+    },
+    // DG3 (§15.4): issues
+    findIssues: {
+        service: "mantle.smithy.SmithyIssueServices.find#Issues",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "groupId",
+            "state",
+            "labelIds",
+            "milestoneId",
+            "assigneeHandle",
+            "authorHandle",
+            "query",
+            "confidential",
+            "sort",
+            "limit",
+            "cursor"
+        ]
+    },
+    getIssue: {
+        service: "mantle.smithy.SmithyIssueServices.get#Issue",
+        fields: ["siteId", "repositoryId", "issueNumber"]
+    },
+    createIssue: {
+        service: "mantle.smithy.SmithyIssueServices.create#Issue",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "title",
+            "body",
+            "sourceFormat",
+            "confidential",
+            "labelIds",
+            "assigneeHandles",
+            "milestoneId",
+            "attachmentIds",
+            "draftId",
+            "operationId"
+        ]
+    },
+    updateIssue: {
+        service: "mantle.smithy.SmithyIssueServices.update#Issue",
+        fields: ["siteId", "repositoryId", "issueNumber", "title", "expectedRevision"]
+    },
+    setIssueState: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueState",
+        fields: ["siteId", "repositoryId", "issueNumber", "state", "reason", "duplicateOfNumber", "expectedRevision"]
+    },
+    setIssueLabels: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueLabels",
+        fields: ["siteId", "repositoryId", "issueNumber", "labelIds", "expectedRevision"]
+    },
+    setIssueAssignees: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueAssignees",
+        fields: ["siteId", "repositoryId", "issueNumber", "assigneeHandles", "expectedRevision"]
+    },
+    setIssueMilestone: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueMilestone",
+        fields: ["siteId", "repositoryId", "issueNumber", "milestoneId", "expectedRevision"]
+    },
+    setIssueConfidential: {
+        service: "mantle.smithy.SmithyIssueServices.set#IssueConfidential",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "issueNumber",
+            "confidential",
+            "asNewIssue",
+            "title",
+            "body",
+            "sourceFormat",
+            "expectedRevision",
+            "operationId"
+        ]
+    },
+    findLabels: {
+        service: "mantle.smithy.SmithyIssueServices.find#Labels",
+        fields: ["siteId", "repositoryId"]
+    },
+    storeLabel: {
+        service: "mantle.smithy.SmithyIssueServices.store#Label",
+        fields: ["siteId", "repositoryId", "labelId", "name", "color", "description", "expectedRevision", "operationId"]
+    },
+    deleteLabel: {
+        service: "mantle.smithy.SmithyIssueServices.delete#Label",
+        fields: ["siteId", "repositoryId", "labelId"]
+    },
+    findMilestones: {
+        service: "mantle.smithy.SmithyIssueServices.find#Milestones",
+        fields: ["siteId", "repositoryId", "state"]
+    },
+    storeMilestone: {
+        service: "mantle.smithy.SmithyIssueServices.store#Milestone",
+        fields: [
+            "siteId",
+            "repositoryId",
+            "milestoneId",
+            "name",
+            "description",
+            "dueDate",
+            "state",
+            "expectedRevision",
+            "operationId"
+        ]
+    },
+    findAssignees: {
+        service: "mantle.smithy.SmithyIssueServices.find#Assignees",
+        fields: ["siteId", "repositoryId", "query", "limit"]
     }
 })

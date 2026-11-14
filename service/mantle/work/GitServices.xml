@@ -203,10 +203,15 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The tasks a text names: a word that is the ID of a task of a project linked to the repository
             (PROJ-100023), and each Task trailer value (an ID of any task). A word right after Fix, Fixes, Fixed,
             Close, Closes, Closed, Resolve, Resolves or Resolved (any case) marks its task to complete. At most 50
-            candidate words are read.</description>
+            candidate words are read. In a repository that has a Smithy row with issues on, #12 names that repository's
+            issue 12 and marks it to complete after the same words, and path#12 another repository's public issue as a
+            link only (mantle.smithy.SmithyIssueServices.find#IssueReferences, mr-pass design-smithy §8.4); the key and
+            trailer rules are unchanged. The text is a commit message as written: any characters, read as text.</description>
         <in-parameters>
             <parameter name="repositoryId" required="true"/>
-            <parameter name="text"/>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="userId"><description>Who pushed, when known: another repository's issue is linked only when
+                this user may view it</description></parameter>
             <parameter name="trailerValues" type="List"><description>The values of the Task trailers</description></parameter>
             <parameter name="projectIdList" type="List"><description>The linked projects, when the caller has them</description></parameter>
         </in-parameters>
@@ -276,6 +281,13 @@ along with this software (see the LICENSE.md file). If not, see
                     </if>
                 </iterate>
             </if>
+            <!-- a repository Smithy keeps (mr-pass design-smithy §8.4): a key and a trailer are kept only where that
+                repository may name the task (its own issue; another task only of a linked project the pusher has a role on),
+                and the issues the text names by number are added. Any other repository: unchanged. -->
+            <service-call name="mantle.smithy.SmithyIssueServices.find#IssueReferences" out-map="issueOut"
+                    in-map="{repositoryId:repositoryId, text:text, userId:userId, keyReferenceList:referenceList,
+                        projectIdList:projectIdList}"/>
+            <if condition="issueOut.known"><set field="referenceList" from="issueOut.referenceList"/></if>
         </actions>
     </service>
 
@@ -287,7 +299,7 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="repositoryId" required="true"/>
-            <parameter name="commit" type="Map" required="true"/>
+            <parameter name="commit" type="Map" required="true" allow-html="any"/>
             <parameter name="refName"/>
             <parameter name="linkSourceEnumId" default-value="WglsExplicit"/>
         </in-parameters>
@@ -331,8 +343,29 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="link" noun="CommitReferences">
-        <description>For the commit gitECA event: link the commit to each task its message names.</description>
+        <description>For the commit gitECA event: link the commit to each task its message names. A commit's message,
+            summary and names are text as their author wrote them (a '&lt;' among them), never markup.</description>
         <implements service="org.moqui.GitServices.process#GitEca"/>
+        <in-parameters>
+            <!-- the interface's commit, with the fields a person wrote taken as any text -->
+            <parameter name="commit" type="Map" allow-html="any"><description>commit event</description>
+                <parameter name="commitId"/>
+                <parameter name="shortId"/>
+                <parameter name="treeId"/>
+                <parameter name="parentIds" type="List"/>
+                <parameter name="authorName" allow-html="any"/>
+                <parameter name="authorEmail" allow-html="any"/>
+                <parameter name="authorDate" type="Timestamp"/>
+                <parameter name="committerName" allow-html="any"/>
+                <parameter name="committerEmail" allow-html="any"/>
+                <parameter name="committerDate" type="Timestamp"/>
+                <parameter name="summary" allow-html="any"/>
+                <parameter name="body" allow-html="any"/>
+                <parameter name="message" allow-html="any"/>
+                <parameter name="trailers" type="Map" allow-html="any"/>
+                <parameter name="moquiUserId"/>
+            </parameter>
+        </in-parameters>
         <actions>
             <set field="trailerValues" from="commit?.trailers?.Task ?? []"/>
             <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
@@ -340,7 +373,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!projectOut.projectIdList.length &amp;&amp; !trailerValues.length"><return/></if>
             <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
                     in-map="{repositoryId:repositoryId, text:commit.message, trailerValues:trailerValues,
-                        projectIdList:projectOut.projectIdList}"/>
+                        projectIdList:projectOut.projectIdList, userId:userId}"/>
             <iterate list="refOut.referenceList" entry="reference">
                 <service-call name="mantle.work.GitServices.store#TaskCommit" in-map="{workEffortId:reference.workEffortId,
                         repositoryId:repositoryId, commit:commit, refName:refName, linkSourceEnumId:reference.linkSourceEnumId}"/>
@@ -407,6 +440,19 @@ along with this software (see the LICENSE.md file). If not, see
             (1.4.0, v1.4.0), links that release of a linked project. A branch: its last path segment, or the part of it
             before a '-', is the ID of a task (PROJ-100023, feature/PROJ-100023-login-fix).</description>
         <implements service="org.moqui.GitServices.process#GitEca"/>
+        <in-parameters>
+            <!-- the interface's tag, with the fields a person wrote taken as any text -->
+            <parameter name="tag" type="Map" allow-html="any"><description>tag event</description>
+                <parameter name="tagName" allow-html="any"/>
+                <parameter name="targetId"/>
+                <parameter name="commitId"/>
+                <parameter name="annotated" type="Boolean"/>
+                <parameter name="message" allow-html="any"/>
+                <parameter name="taggerName" allow-html="any"/>
+                <parameter name="taggerEmail" allow-html="any"/>
+                <parameter name="taggerDate" type="Timestamp"/>
+            </parameter>
+        </in-parameters>
         <actions>
             <service-call name="mantle.work.GitServices.get#RepositoryProjects" in-map="{repositoryId:repositoryId}"
                     out-map="projectOut"/>
@@ -438,6 +484,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="named" from="candidateIds.map(id => namedList.find(we => we.workEffortId == id)).find(we => we != null
                     &amp;&amp; (isTag ? (projectIdList.includes(we.workEffortId) || projectIdList.includes(we.rootWorkEffortId))
                         : (we.workEffortTypeEnumId == 'WetTask' &amp;&amp; projectIdList.includes(we.rootWorkEffortId))))"/>
+            <!-- in a repository Smithy keeps, a branch or a tag names a task only as a commit there may (find#IssueReferences) -->
+            <if condition="named">
+                <service-call name="mantle.smithy.SmithyIssueServices.check#TaskReference" out-map="namedOut"
+                        in-map="{repositoryId:repositoryId, workEffortId:named.workEffortId, userId:userId, projectIdList:projectIdList}"/>
+                <if condition="!namedOut.allowed"><set field="named" from="null"/></if>
+            </if>
             <if condition="named">
                 <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:named.workEffortId,
                         repositoryId:repositoryId, refName:refName, objectId:objectId,
@@ -464,7 +516,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <if condition="isTag &amp;&amp; tag?.annotated">
                 <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
-                        in-map="{repositoryId:repositoryId, text:tag.message, projectIdList:projectIdList}"/>
+                        in-map="{repositoryId:repositoryId, text:tag.message, projectIdList:projectIdList, userId:userId}"/>
                 <iterate list="refOut.referenceList" entry="reference">
                     <if condition="reference.workEffortId != named?.workEffortId">
                         <service-call name="mantle.work.GitServices.store#WorkEffortRef" in-map="{workEffortId:reference.workEffortId,
@@ -505,7 +557,8 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{repositoryId:repositoryId, commitId:commitId, stats:false}"/>
                 <if condition="!found.commit"><continue/></if>
                 <service-call name="mantle.work.GitServices.find#TaskReferences" out-map="refOut"
-                        in-map="{repositoryId:repositoryId, text:found.commit.message, projectIdList:projectOut.projectIdList}"/>
+                        in-map="{repositoryId:repositoryId, text:found.commit.message, projectIdList:projectOut.projectIdList,
+                            userId:userId}"/>
                 <iterate list="refOut.referenceList" entry="reference">
                     <if condition="!reference.complete"><continue/></if>
                     <set field="link" from="projectOut.linkList.find(link => link.workEffortId == reference.rootWorkEffortId)"/>
@@ -576,10 +629,13 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('workEffortTypeEnumId', 'WetTask').condition('rootWorkEffortId', 'in', projectIds)
                         .selectField('workEffortId,rootWorkEffortId').disableAuthz().list())
                 const named = candidates.map((id) => rows.find((row) => row.workEffortId === id)).find((row) => row)
-                if (named) found.set(named.workEffortId, {rootWorkEffortId: named.rootWorkEffortId, source: 'WglsMergeRequestBranch', complete: false})
+                // in a repository Smithy keeps, a branch names a task only as a commit there may (check#TaskReference)
+                const allowed = !named || ec.service.sync().name('mantle.smithy.SmithyIssueServices.check#TaskReference').parameters({repositoryId: mr.repositoryId,
+                        workEffortId: named.workEffortId, userId: mr.authorUserId || null, projectIdList: projectIds}).disableAuthz().call()?.allowed === true
+                if (named && allowed) found.set(named.workEffortId, {rootWorkEffortId: named.rootWorkEffortId, source: 'WglsMergeRequestBranch', complete: false})
             }
             const refs = ec.service.sync().name('mantle.work.GitServices.find#TaskReferences').parameters({repositoryId: mr.repositoryId,
-                text: [mr.title || '', mr.description || ''].join('\n'), projectIdList: projectIds}).disableAuthz().call()
+                text: [mr.title || '', mr.description || ''].join('\n'), projectIdList: projectIds, userId: mr.authorUserId || null}).disableAuthz().call()
             const textIds = []
             for (const reference of Array.from(refs?.referenceList || [])) {
                 if (reference.linkSourceEnumId !== 'WglsMessage') continue

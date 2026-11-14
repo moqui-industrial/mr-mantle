@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- Smithy's issues (mr-pass plan/design-smithy.md §8, §15.4, DG3; SmithyIssues.js). Each operation takes PASS's input
+        map (its fields are SmithySchema.js's, siteId among them) and answers result. An issue the caller may not read is
+        Not Found, exactly as one that is not there: a confidential issue to all but its Owners and its reporter, a task
+        that is no longer public to all below a Reporter, a held first post to all but its author and its moderators. -->
+    <service verb="find" noun="Issues" authenticate="anonymous-all" allow-remote="false">
+        <description>The issues of a repository (repositoryId) or of a group's repositories (groupId) that the caller may read, newest first or by last activity, paged, with the counts of the open and the closed ones under the same filters: state (open, closed, all), labelIds (each applied), milestoneId, assigneeHandle, authorHandle, query (in the title), confidential only (an Owner's; accessDenied to anyone else). Each is the issue projection without its links. A confidential issue is listed and counted for its Owners and its reporter only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findIssues", input)</script></actions>
+    </service>
+    <service verb="get" noun="Issue" authenticate="anonymous-all" allow-remote="false">
+        <description>An issue by its number: the public projection of its task (design-smithy §8.2) and nothing else of it, the caller's capabilities, and pending (its first post waits for review). The reporter of a confidential issue who is no Owner gets the reporter's fields only. Never Chatter, time, cost, estimates, allocations or a party that is no author or assignee.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("getIssue", input)</script></actions>
+    </service>
+    <service verb="create" noun="Issue" authenticate="anonymous-all" allow-remote="false">
+        <description>File an issue, confidential or not, by an account with a confirmed address that may view the repository: a task of the repository's project, its number under the lock of the repository's row, and its conversation with the text as the first post (Markdown unless sourceFormat is html). The title and the text pass the post gate: its refusals, or state pending for a held first post. labelIds, assigneeHandles and milestoneId are a Reporter's (accessDenied). Refused in an archived repository (repositoryArchived). The same operationId answers the first result.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("createIssue", input)</script></actions>
+    </service>
+    <service verb="update" noun="Issue" authenticate="anonymous-all" allow-remote="false">
+        <description>An issue's title, by its author within the forum's edit window or by a Reporter; the title passes the gate. The task's name and the topic's title follow.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("updateIssue", input)</script></actions>
+    </service>
+    <service verb="set" noun="IssueState" authenticate="anonymous-all" allow-remote="false">
+        <description>Close an issue with a reason (completed, notPlanned, duplicate with duplicateOfNumber) or reopen it, along the task's status flow: Unprocessable when the flow has no way, naming the flow's moves to a Reporter. By its author (not duplicate) or a Reporter. The change is a line in the conversation.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setIssueState", input)</script></actions>
+    </service>
+    <service verb="set" noun="IssueLabels" authenticate="anonymous-all" allow-remote="false">
+        <description>The labels of an issue, by a Reporter: labelIds are labels of the repository's project.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setIssueLabels", input)</script></actions>
+    </service>
+    <service verb="set" noun="IssueAssignees" authenticate="anonymous-all" allow-remote="false">
+        <description>The assignees of an issue, by a Reporter: each handle is an account that may view the issue (a confidential one: an Owner), else Unprocessable.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setIssueAssignees", input)</script></actions>
+    </service>
+    <service verb="set" noun="IssueMilestone" authenticate="anonymous-all" allow-remote="false">
+        <description>The milestone of an issue, a milestone of the repository's project or none, by a Reporter.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setIssueMilestone", input)</script></actions>
+    </service>
+    <service verb="set" noun="IssueConfidential" authenticate="anonymous-all" allow-remote="false">
+        <description>By an Owner: mark a public issue confidential, or make a confidential one public, as it is (its task becomes public; a staff post stays staff) or with asNewIssue as a new issue with a title and a text the Owner writes, which pass the gate, while this one stays confidential.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("setIssueConfidential", input)</script></actions>
+    </service>
+    <service verb="find" noun="Labels" authenticate="anonymous-all" allow-remote="false">
+        <description>The labels of a repository's project, each with the count of the open issues the caller may read that have it.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findLabels", input)</script></actions>
+    </service>
+    <service verb="store" noun="Label" authenticate="anonymous-all" allow-remote="false">
+        <description>Make a label of the repository's project (with operationId) or change one (labelId, expectedRevision), by a Maintainer. The name passes the gate; a name the project's labels have is nameTaken. An organization's label is changed in Projects.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeLabel", input)</script></actions>
+    </service>
+    <service verb="delete" noun="Label" authenticate="anonymous-all" allow-remote="false">
+        <description>Delete a label of the repository's project and take it off its issues, by a Maintainer.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("deleteLabel", input)</script></actions>
+    </service>
+    <service verb="find" noun="Milestones" authenticate="anonymous-all" allow-remote="false">
+        <description>The milestones of a repository's project (state open, closed or all), each with the counts of the open and closed issues the caller may read.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findMilestones", input)</script></actions>
+    </service>
+    <service verb="store" noun="Milestone" authenticate="anonymous-all" allow-remote="false">
+        <description>Make a milestone of the repository's project (with operationId) or change one (milestoneId, expectedRevision): its name, description, due date and state (open, closed), by a Maintainer. The name passes the gate.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("storeMilestone", input)</script></actions>
+    </service>
+    <service verb="find" noun="Assignees" authenticate="anonymous-all" allow-remote="false">
+        <description>The accounts with a role on the repository, by their profiles (handle, displayName), for a Reporter to assign.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions><script>result = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").execute("findAssignees", input)</script></actions>
+    </service>
+
+    <!-- Not operations: called by rules (service/Smithy.secas.xml) and by mantle.work. -->
+    <service verb="ensure" noun="Issue" authenticate="anonymous-all" allow-remote="false">
+        <description>A task made public in Projects becomes an issue (design-smithy §8.1): a WevGeneral task with no SmithyIssue, of a project that is a SmithyRepository's with issues on or a SmithyGroup's with an issue repository, gets a number in that repository and its conversation, with its description as the first post through the gate as the caller. Never a task of a project that is only linked to a repository; called on a task's create and on a save of its visibility, so tasks that were public before issues were on get none until saved again. A refusal leaves the task without an issue and is logged.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters><parameter name="issueNumber" type="Integer"/><parameter name="repositoryId"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").ensureIssue({workEffortId}))</script></actions>
+    </service>
+    <service verb="note" noun="TaskStatus" authenticate="anonymous-all" allow-remote="false">
+        <description>The status of a task changed, in Smithy, in Projects or by a commit: when it is an issue's and the change closes or reopens it, its conversation gets the line (a post of kind event).</description>
+        <in-parameters><parameter name="workEffortId" required="true"/><parameter name="oldStatusId"/></in-parameters>
+        <actions><script>ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").noteTaskStatus({workEffortId, oldStatusId})</script></actions>
+    </service>
+    <service verb="get" noun="TaskIssue" authenticate="anonymous-all" allow-remote="false">
+        <description>The issue of a task, for Projects' work item page: its number, repository, confidential mark, conversation topic and public page. Every output is empty for a task that is no issue's, and for a confidential issue's task when the current user is no Owner of its repository by its Smithy rows (the ADMIN group sees it). publicUrl is empty when the site has no canonical host or Smithy mount.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="issueNumber" type="Integer"/>
+            <parameter name="siteId"/>
+            <parameter name="repositoryId"/>
+            <parameter name="repositoryPath"/>
+            <parameter name="confidential" type="Boolean"/>
+            <parameter name="rootCommEventId"/>
+            <parameter name="publicUrl"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").taskIssue(workEffortId, ec.user.userId))</script></actions>
+    </service>
+    <service verb="get" noun="HiddenTaskIds" authenticate="anonymous-all" allow-remote="false">
+        <description>The tasks a user does not see in Projects whatever its project roles (design-smithy §8.3): each confidential issue's task, of the projects in projectIdList and among the tasks in workEffortIdList, whose repository the user is no Owner of by its Smithy rows. Every such task is answered (read a page at a time, no cap). All of them for no user.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="projectIdList" type="List"/>
+            <parameter name="workEffortIdList" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="workEffortIdList" type="List"/></out-parameters>
+        <actions><script>workEffortIdList = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").hiddenTaskIds(userId, projectIdList, workEffortIdList)</script></actions>
+    </service>
+    <service verb="check" noun="TaskHidden" authenticate="anonymous-all" allow-remote="false">
+        <description>Whether one task is hidden from the current user in Projects: a confidential issue's task, unless the user is an Owner of its repository by its Smithy rows or in the ADMIN group. A read of one work item (its page, its timeline, its Chatter) asks this before any role on the task or its project counts.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters><parameter name="hidden" type="Boolean"/></out-parameters>
+        <actions><script>hidden = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").taskHidden(workEffortId, ec.user.userId)</script></actions>
+    </service>
+    <service verb="find" noun="IssueReferences" authenticate="anonymous-all" allow-remote="false">
+        <description>What a text pushed to a repository may name (design-smithy §8.4), for a repository with a Smithy row (known; false for any other, whose references are the project's own rule). keyReferenceList (the keys and Task trailers find#TaskReferences read) is kept only where the repository may name the task: an issue's task only when the issue is this repository's; any other task only of a project in projectIdList and when the pusher (userId) holds a role on that project that is not a client's. Then the issues named by number: #n, the issue n of this repository, marked to complete right after Fix, Close or Resolve; path#n, another repository's public issue the pusher may view, as a link only. At most 50 numbers are read.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="text" allow-html="any"/>
+            <parameter name="userId"/>
+            <parameter name="keyReferenceList" type="List"/>
+            <parameter name="projectIdList" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="known" type="Boolean"/><parameter name="referenceList" type="List"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").issueReferences({repositoryId, text, userId, keyReferenceList, projectIdList}))</script></actions>
+    </service>
+    <service verb="check" noun="TaskReference" authenticate="anonymous-all" allow-remote="false">
+        <description>Whether a branch or a tag of a repository may name one task (the rule of find#IssueReferences for a key); known is false, and allowed true, for a repository with no Smithy row.</description>
+        <in-parameters>
+            <parameter name="repositoryId" required="true"/>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="userId"/>
+            <parameter name="projectIdList" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="known" type="Boolean"/><parameter name="allowed" type="Boolean"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").taskReference({repositoryId, workEffortId, userId, projectIdList}))</script></actions>
+    </service>
+    <service verb="ensure" noun="GroupCategory" authenticate="anonymous-all" allow-remote="false">
+        <description>A group's scope category (design-smithy §12.1, §12.5), made on first need under its parent group's: a list nobody is a member of and a category that is not published.</description>
+        <in-parameters><parameter name="groupId" required="true"/></in-parameters>
+        <out-parameters><parameter name="contactListId"/></out-parameters>
+        <actions><script>contactListId = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").ensureGroupCategory(groupId)</script></actions>
+    </service>
+    <service verb="ensure" noun="AccountCategory" authenticate="anonymous-all" allow-remote="false">
+        <description>The scope category of a site's personal namespaces (SmithySite.accountContactListId), made on first need; readable by nobody as a category.</description>
+        <in-parameters><parameter name="siteId" required="true"/></in-parameters>
+        <out-parameters><parameter name="contactListId"/></out-parameters>
+        <actions><script>contactListId = ec.resource.script("component://mr-mantle/service/mantle/smithy/Smithy.js").ensureAccountCategory(siteId)</script></actions>
+    </service>
+</services>

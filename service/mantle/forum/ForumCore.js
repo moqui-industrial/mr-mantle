@@ -181,7 +181,14 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         !!lm &&
         ['ListOwner', 'ListModerator'].includes(lm.roleTypeId) &&
         !sanctioned(c.siteId, actor, contactListId, 'suspend')
-    let moderate = staff || categoryStaff || (actor === me() && isOperator())
+    // An Owner of the group or repository a category is bound to moderates the scope they own (the app's scope module).
+    let moderate =
+        staff ||
+        categoryStaff ||
+        (actor === me() && isOperator()) ||
+        (!!actor &&
+            !sanctioned(c.siteId, actor, contactListId, 'suspend') &&
+            scopeOwner(contactListId, actor))
     // Source grants for this category or the whole site count only from the sources the category qualifies.
     const qualifying = String(c.qualifyingSources || 'manual').split(',')
     const grant = actor
@@ -307,10 +314,17 @@ function sourceGate(rootCommEventId, partyId = me()) {
             return false
     return true
 }
-function topic(root, siteId, lock = false) {
+/* records: the caller handles the conversation of a record (an issue), whose access is its app's (recordAccess).
+   Every other caller refuses one, after the same Not Found for a reader who may not see it. */
+function topic(root, siteId, lock = false, records = false) {
     const t = one(F + 'ForumTopic', { rootCommEventId: root }, lock)
     if (!t || t.siteId !== siteId) missing()
     if (t.kind === 'private') return privateTopic(t)
+    if (t.kind === 'record') {
+        const out = recordTopic(t)
+        if (!records) notForRecord()
+        return out
+    }
     if (t.kind !== 'category') missing()
     const event = one(E + 'CommunicationEvent', { communicationEventId: root })
     if (!event) missing()
@@ -338,6 +352,8 @@ function topic(root, siteId, lock = false) {
     return { t, event, a }
 }
 function postVisible(state, event, a) {
+    // A staff post of a record is its Owners' alone, checked for each reader.
+    if (state.visibility === 'staff') return !!a.canReadStaff
     return (
         state.visibility === 'approved' ||
         event.fromPartyId === me() ||
@@ -829,6 +845,9 @@ function queueClassification(siteId, postId) {
             'private'
     )
         return
+    // The text of a confidential record, and of a staff post, never goes to the classifier.
+    if (st && (st.visibility === 'staff' || !classifiable(st.rootCommEventId)))
+        return
     create(F + 'ForumOutbox', {
         outboxId: id(),
         siteId,
@@ -898,6 +917,489 @@ function conversationAccess(t, actor = me()) {
         canModerate: false,
         canInvite: participant && part.role === 'owner',
     }
+}
+/* ---- Record conversations: the topic kind 'record' (an issue), whose access its app's scope module answers ---- */
+const publicApps = () =>
+    ec.resource.script(
+        'component://mr-mantle/service/mantle/public/PublicApps.js',
+    )
+/* The apps that keep records register a scope module (PublicApps.apps.<app>.scope) and the entities whose
+   contactListId binds a category to a group or repository (scopeEntities). A module is loaded on first need. */
+let scopeModules = null
+function scopes() {
+    if (!scopeModules)
+        scopeModules = Object.values(publicApps().apps)
+            .filter((app) => app.scope)
+            .map((app) => ec.resource.script(app.scope))
+    return scopeModules
+}
+/* What a party may do in the conversation of a record: the evaluator's shape, or null when no app knows the topic. */
+function recordAccess(rootCommEventId, actor = me()) {
+    for (const scope of scopes()) {
+        const a = scope.recordAccess(rootCommEventId, actor)
+        if (a) return a
+    }
+    return null
+}
+/* Whether a party may read one post of a record (a staff post: its Owners; a held one: its author and moderators). */
+function postAccess(postId, actor = me()) {
+    return scopes().some((scope) => scope.postAccess(postId, actor))
+}
+/* Whether a party owns the group or repository a category is bound to. The module is asked only for a bound one. */
+const scopeBound = new Map()
+function scopeOwner(contactListId, actor) {
+    // whether the category is bound at all is asked once for the life of this module's value (one call's work)
+    if (!scopeBound.has(contactListId))
+        scopeBound.set(
+            contactListId,
+            Object.values(publicApps().apps).some((app) =>
+                (app.scopeEntities || []).some(
+                    (entity) => find(entity, { contactListId }).count() > 0,
+                ),
+            ),
+        )
+    if (!scopeBound.get(contactListId)) return false
+    const key = contactListId + '|' + actor
+    if (!scopeBound.has(key))
+        scopeBound.set(
+            key,
+            scopes().some((scope) => scope.categoryOwner(contactListId, actor)),
+        )
+    return scopeBound.get(key)
+}
+/* The scope categories of the records a party owns without being staff of them as categories (a personal repository's,
+   a repository whose Owner is not its group's): where its own review queue is. */
+const recordScopes = (siteId, actor = me()) => [
+    ...new Set(scopes().flatMap((scope) => scope.ownedScopes(siteId, actor))),
+]
+/* Whether a record's posts may be sent to the classifier: never a confidential one's. */
+const classifiable = (rootCommEventId) =>
+    one(F + 'ForumTopic', { rootCommEventId })?.kind !== 'record' ||
+    !scopes().some((scope) => scope.confidential(rootCommEventId))
+/* The Owners of a confidential record, who are told of each of its posts whatever they watch. */
+const recordOwners = (rootCommEventId) =>
+    scopes().flatMap((scope) => scope.recordOwners(rootCommEventId))
+/* The page of a record (its path under the app's mount, its title and its mail's list id), for mail and notices. */
+function recordPage(rootCommEventId, actor) {
+    for (const scope of scopes()) {
+        const page = scope.recordPage(rootCommEventId, actor)
+        if (page) return page
+    }
+    return null
+}
+/* A record post's text as one reader sees it: its references linked where the reader may see their target. */
+function recordText(html, rootCommEventId) {
+    for (const scope of scopes()) {
+        const out = scope.linkText(html, rootCommEventId)
+        if (out != null) return out
+    }
+    return html
+}
+/* The first post of a record changed: its app keeps what it copies of the text. */
+function recordChanged(rootCommEventId) {
+    for (const scope of scopes()) scope.postChanged(rootCommEventId)
+}
+const notForRecord = () =>
+    invalid(
+        'This is not available for the conversation of an issue or a merge request',
+    )
+function recordTopic(t) {
+    const event = one(E + 'CommunicationEvent', {
+        communicationEventId: t.rootCommEventId,
+    })
+    const a = recordAccess(t.rootCommEventId)
+    if (!event || !a || !a.canRead) missing()
+    const state = one(F + 'ForumPostState', {
+        communicationEventId: t.rootCommEventId,
+    })
+    // A held first post is its author's and the record's moderators' until it is approved.
+    if (
+        state &&
+        state.visibility !== 'approved' &&
+        event.fromPartyId !== me() &&
+        !a.canModerate
+    )
+        missing()
+    return { t, event, a }
+}
+/* Who decides a review item: for a post of a record its moderators by recordAccess (the Owners alone for a confidential
+   one), never the category's or the site's staff by that alone; for anything else staff(). */
+function reviewRecord(r) {
+    if (r.targetType !== 'post') return null
+    const st = one(F + 'ForumPostState', { communicationEventId: r.targetId })
+    const t = st
+        ? one(F + 'ForumTopic', { rootCommEventId: st.rootCommEventId })
+        : null
+    return t?.kind === 'record' ? t : null
+}
+function reviewStaff(siteId, r) {
+    const t = reviewRecord(r)
+    if (!t) return staff(siteId, r.contactListId)
+    if (!reviewReadable(r, t))
+        fail('Unauthorized', 'Scoped moderator access required')
+    return null
+}
+/* A review item on a post of a record is its moderators' who may also read that post: a staff post's item, with its
+   text and its reports' evidence, is its Owners' alone. */
+const reviewReadable = (r, t) =>
+    !!recordAccess(t.rootCommEventId)?.canModerate && postAccess(r.targetId)
+/* ---- The post gate (mr-pass plan/design-smithy.md §12.2): who writes, the scope, the kind, the text -> allow, hold
+   for review, or refuse. publishPost, updatePost, mail in (through publishPost) and every Smithy write of public text
+   call it, and gateCommit after the write. ---- */
+const TRUST_EFFECTS = {
+    new: {
+        topics: 3,
+        replies: 10,
+        links: 2,
+        images: 1,
+        mentions: 2,
+        issue: 3,
+        mergeRequest: 2,
+    },
+    basic: {
+        topics: 10,
+        replies: 50,
+        links: 10,
+        images: 10,
+        mentions: 5,
+        issue: 10,
+        mergeRequest: 10,
+    },
+    member: {
+        topics: 20,
+        replies: 100,
+        links: 20,
+        images: 20,
+        mentions: 10,
+        issue: 20,
+        mergeRequest: 20,
+    },
+    regular: {
+        topics: 20,
+        replies: 100,
+        links: 20,
+        images: 20,
+        mentions: 10,
+        issue: 20,
+        mergeRequest: 20,
+    },
+}
+/* The day's counter of a kind; a kind with none (a name, and until DG6 a fork and a pipeline run) has no day's limit. */
+const GATE_COUNTERS = {
+    topic: 'topics',
+    reply: 'replies',
+    comment: 'replies',
+    review: 'replies',
+    reviewComment: 'replies',
+    issue: 'issue',
+    mergeRequest: 'mergeRequest',
+}
+/* A name's text (a group's or repository's name and description, a label, a milestone) is not kept pending: it passes
+   the address, the sanctions, the length and the rules, and a rule that would hold it refuses it. */
+const NAME_KINDS = ['repository', 'group', 'fork', 'pipelineRun']
+const mentionHandles = (html) => [
+    ...new Set(
+        Array.from(
+            plainText(html).matchAll(/(?:^|[^\w@.])@([A-Za-z0-9_.-]{2,40})/g),
+        ).map((m) => m[1].toLowerCase()),
+    ),
+]
+function applyRules(siteId, contactListId, html) {
+    const text = plainText(html) + ' ' + String(html),
+        out = { block: null, approve: false, flag: false, body: html }
+    for (const r of Array.from(
+        find(F + 'ForumRule', { siteId, enabled: 'Y' })
+            .orderBy('priority,ruleId')
+            .limit(200)
+            .list(),
+    )) {
+        if (r.contactListId && r.contactListId !== contactListId) continue
+        let re
+        try {
+            re = ruleRegex(r)
+        } catch (e) {
+            ec.logger.error('Forum rule ' + r.ruleId + ' is invalid; skipped')
+            continue
+        }
+        if (!re.test(r.action === 'censor' ? plainText(out.body) : text))
+            continue
+        if (r.action === 'block') out.block = r
+        else if (r.action === 'approve') out.approve = true
+        else if (r.action === 'flag') out.flag = true
+        else if (r.action === 'censor') out.body = censor(out.body, re)
+    }
+    return out
+}
+const SOURCE_FORMATS = ['html', 'markdown']
+/* The authoring format of a revision: rich text (html) unless Markdown is named. */
+function sourceFormatOf(value) {
+    if (value == null || value === '') return 'html'
+    if (!SOURCE_FORMATS.includes(value))
+        invalid('sourceFormat must be html or markdown')
+    return value
+}
+/* A revision's source as the cleaned HTML that is stored and shown: Markdown is rendered (CommonMark, fenced code as
+   code) and then cleaned exactly as rich text is. */
+const renderSource = (format, text) =>
+    StringUtilities.cleanHtml(
+        format === 'markdown'
+            ? ec.resource.markdownHtml(String(text || ''))
+            : text,
+    )
+function confirmedParty(partyId) {
+    const confirmed = ec.resource.script(
+        'component://mr-mantle/service/mantle/public/ConfirmedAddress.js',
+    )
+    if (partyId && partyId === me()) return confirmed.currentConfirmed()
+    return rows('moqui.security.UserAccount', { partyId }, 20).some(
+        (account) =>
+            account.disabled !== 'Y' && confirmed.confirmed(account.userId),
+    )
+}
+/* g: siteId, actorPartyId, contactListId (the scope category), kind ('topic' | 'reply' | 'issue' | 'comment' |
+   'mergeRequest' | 'review' | 'reviewComment' | 'fork' | 'repository' | 'group' | 'pipelineRun'), title and body (the
+   cleaned text of the revision; either may be absent), source (the text as typed, for the length), sourceFormat,
+   canModerate (the caller moderates the scope: limits and holds do not apply), isPrivate (no first-post hold),
+   confirmed (true: the caller has checked the address),
+   slowIntervalSeconds and rootCommEventId (a reply in a topic in slow mode), mailVerdict ({spam, reason}), edit (a new
+   revision of a post that is there: no interval, limit or first-post hold).
+   Answers decision ('allow' | 'hold' | 'refuse'), reasonFamily (a hold's), refusal ({kind, reason, message}), body and
+   title after censor rules, flag (a review item is due on an allowed post) and memberState (the locked row). */
+function gate(g) {
+    const actor = g.actorPartyId || me(),
+        refuse = (kind, message, reason) => ({
+            decision: 'refuse',
+            refusal: { kind, reason: reason || null, message },
+        }),
+        forumKind = g.kind === 'topic' || g.kind === 'reply',
+        nameKind = NAME_KINDS.includes(g.kind),
+        mod = !!g.canModerate && !nameKind
+    // 1. Every post needs an account with a confirmed email address (D17); confirmed: the caller has checked it. The
+    // forum's own topics and replies are a member's, and the forum asks for the address when an account joins.
+    if (!forumKind && g.confirmed !== true && !confirmedParty(actor))
+        return refuse(
+            'Unauthorized',
+            'addressUnconfirmed: Confirm your email address to continue',
+            'addressUnconfirmed',
+        )
+    // 2. A suspension in the site, or a silence in the site or the scope.
+    if (sanctioned(g.siteId, actor, null, 'suspend'))
+        return refuse(
+            'Unauthorized',
+            'accessDenied: Your account is suspended on this site',
+            'accessDenied',
+        )
+    if (sanctioned(g.siteId, actor, g.contactListId || null, 'silence'))
+        return refuse(
+            'Unauthorized',
+            'accessDenied: Your account may not post on this site',
+            'accessDenied',
+        )
+    const pol = policy(g.siteId)
+    // 5 (its first half comes first, as publishPost had it): the length of the text and of a title.
+    if (g.body !== undefined) {
+        const source = g.source !== undefined ? g.source : g.body
+        if (
+            !String(source || '').trim() ||
+            String(source).length > pol.maxPostLength
+        )
+            return refuse(
+                'Unprocessable',
+                'Body must contain 1–' + pol.maxPostLength + ' characters',
+            )
+    }
+    if (g.title !== undefined && (!g.title || String(g.title).length > 250))
+        return refuse(
+            'Unprocessable',
+            'A title of at most 250 characters is required',
+        )
+    const counter = GATE_COUNTERS[g.kind] || null
+    const limited = !nameKind && !g.edit
+    const memberState = limited ? memberStateFor(g.siteId, actor) : null
+    const effects =
+        TRUST_EFFECTS[memberState?.trustLevel || trustLevel(g.siteId, actor)] ||
+        TRUST_EFFECTS.new
+    if (limited) {
+        // 3. The interval between posts, which the forum asks of its moderators too, and a topic's slow mode.
+        if (
+            (forumKind || !mod) &&
+            memberState.lastPostedAt &&
+            millis(now()) - millis(memberState.lastPostedAt) <
+                pol.postIntervalSeconds * 1000
+        )
+            return refuse(
+                'Tarpit',
+                'Wait ' + pol.postIntervalSeconds + ' seconds between posts',
+            )
+        const slow = Number(g.slowIntervalSeconds || 0)
+        if (slow > 0 && !mod && g.rootCommEventId) {
+            const last = Array.from(
+                find(F + 'ForumPostSearch', {
+                    rootCommEventId: g.rootCommEventId,
+                    fromPartyId: actor,
+                })
+                    .orderBy('-entryDate')
+                    .limit(1)
+                    .list(),
+            )[0]
+            if (last && millis(now()) - millis(last.entryDate) < slow * 1000)
+                return refuse(
+                    'Tarpit',
+                    'This topic is in slow mode; wait ' +
+                        slow +
+                        ' seconds between replies',
+                )
+        }
+        // 4. The day's limit for the kind at the actor's trust level.
+        if (counter && !mod) {
+            const day = String(now()).slice(0, 10),
+                same = memberState.dayKey === day,
+                daily = !same
+                    ? 0
+                    : counter === 'topics'
+                      ? Number(memberState.dailyTopics)
+                      : counter === 'replies'
+                        ? Number(memberState.dailyReplies)
+                        : Number(json(memberState.dailyCounts, {})[counter] || 0)
+            if (daily >= effects[counter])
+                return refuse(
+                    'Tarpit',
+                    forumKind
+                        ? 'Daily contribution limit reached'
+                        : 'limitReached: Daily contribution limit reached',
+                    forumKind ? null : 'limitReached',
+                )
+        }
+    }
+    // 5. The links, images and mentions the trust level allows.
+    // An edit is counted as a new post is, so a post is not approved first and filled with links after.
+    let body = g.body
+    if (!nameKind && !mod && body != null) {
+        const count = (pattern) => (body.match(pattern) || []).length
+        if (
+            count(/<a\b/gi) > effects.links ||
+            count(/<img\b/gi) > effects.images ||
+            mentionHandles(body).length > effects.mentions
+        )
+            return refuse(
+                'Unprocessable',
+                'Your trust level allows ' +
+                    effects.links +
+                    ' links, ' +
+                    effects.images +
+                    ' images and ' +
+                    effects.mentions +
+                    ' mentions per post',
+            )
+    }
+    // 6. The rules, on the body and (but for the forum's own topics, whose titles they never read) on the title.
+    let title = g.title,
+        approve = false,
+        flag = false
+    const blocked = nameKind
+        ? "The site's rules do not allow that text"
+        : 'This post contains content the community does not allow'
+    if (body != null) {
+        const ruled = applyRules(g.siteId, g.contactListId || null, body)
+        if (ruled.block && (!mod || nameKind))
+            return refuse('Unprocessable', blocked)
+        body = ruled.body
+        approve = ruled.approve
+        flag = ruled.flag
+    }
+    if (title != null && title !== '' && !forumKind) {
+        const ruled = applyRules(g.siteId, g.contactListId || null, title)
+        if (ruled.block && (!mod || nameKind))
+            return refuse('Unprocessable', blocked)
+        title = ruled.body
+        approve = approve || ruled.approve
+        flag = flag || ruled.flag
+    }
+    if (nameKind) {
+        if (approve)
+            return refuse(
+                'Unprocessable',
+                "The site's rules do not allow that text",
+            )
+        return { decision: 'allow', body, title, flag: false }
+    }
+    // A new revision keeps the post's visibility. In the forum a rule that would hold or flag it files a review item,
+    // as updatePost always did; anywhere else a rule that would hold the text refuses the edit, so nothing a rule holds
+    // replaces what is published.
+    if (g.edit && approve && !mod && !forumKind)
+        return refuse(
+            'Unprocessable',
+            "The site's rules hold this text for review; it cannot replace what is published",
+        )
+    if (g.edit)
+        return {
+            decision: 'allow',
+            body,
+            title,
+            flag: (approve || flag) && !mod,
+        }
+    // 7, 8. A rule's hold, the mail gateway's verdict, and the first contributions of an account in the site.
+    const firstPost =
+            !g.isPrivate &&
+            !mod &&
+            Number(memberState.approvedContributions || 0) <
+                pol.firstContributionCount,
+        ruleHold = !g.isPrivate && approve && !mod,
+        spam = !!g.mailVerdict?.spam && !mod
+    if (firstPost || ruleHold || spam)
+        return {
+            decision: 'hold',
+            reasonFamily: firstPost
+                ? 'first-post'
+                : ruleHold
+                  ? 'rule'
+                  : 'mail-verdict',
+            body,
+            title,
+            flag: false,
+            memberState,
+            counter,
+        }
+    return {
+        decision: 'allow',
+        body,
+        title,
+        flag: flag || (!!g.isPrivate && approve),
+        memberState,
+        counter,
+    }
+}
+/* After the write a gate allowed or held: the time of the post, the day's counter of its kind and, for one that is
+   not pending, the approved contributions that trust and the first-post hold read. */
+function gateCommit(result, { pending } = {}) {
+    const m = result?.memberState
+    if (!m) return
+    const day = String(now()).slice(0, 10),
+        same = m.dayKey === day,
+        counter = result.counter,
+        counts = same ? json(m.dailyCounts, {}) : {}
+    if (counter && !['topics', 'replies'].includes(counter))
+        counts[counter] = Number(counts[counter] || 0) + 1
+    update(m, {
+        lastPostedAt: now(),
+        approvedContributions:
+            Number(m.approvedContributions || 0) + (pending ? 0 : 1),
+        dayKey: day,
+        dailyTopics:
+            (same ? Number(m.dailyTopics || 0) : 0) +
+            (counter === 'topics' ? 1 : 0),
+        dailyReplies:
+            (same ? Number(m.dailyReplies || 0) : 0) +
+            (counter === 'replies' ? 1 : 0),
+        dailyCounts: Object.keys(counts).length ? JSON.stringify(counts) : null,
+        revision: Number(m.revision) + 1,
+    })
+}
+/* Refuses as a gate's refusal says. */
+function gateRefuse(result) {
+    if (result.decision === 'refuse')
+        fail(result.refusal.kind, result.refusal.message)
+    return result
 }
 function privateTopic(t) {
     const event = one(E + 'CommunicationEvent', {
@@ -976,4 +1478,26 @@ function privateTopic(t) {
     memberBlocks,
     conversationAccess,
     privateTopic,
+    recordAccess,
+    postAccess,
+    scopeOwner,
+    classifiable,
+    recordPage,
+    recordOwners,
+    recordText,
+    recordTopic,
+    recordChanged,
+    notForRecord,
+    reviewRecord,
+    reviewStaff,
+    reviewReadable,
+    recordScopes,
+    TRUST_EFFECTS,
+    mentionHandles,
+    applyRules,
+    sourceFormatOf,
+    renderSource,
+    gate,
+    gateCommit,
+    gateRefuse,
 })

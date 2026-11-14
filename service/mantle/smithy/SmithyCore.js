@@ -467,6 +467,112 @@ function requireRole(r, roleEnumId) {
     fail("Unauthorized", "accessDenied: This needs the " + ROLE_CODES[roleEnumId] + " role")
 }
 
+// ===== issues (§8) and the scope category of a conversation (§12.1) =====
+const F = "mantle.forum."
+/* A party as an actor that is not on a page (a notice's reader, an assignee): by its first enabled account. */
+function actorOfParty(partyId) {
+    if (!partyId) return {userId: null, partyId: null, pages: false}
+    if (partyId === me()) return actor()
+    const account = rows("moqui.security.UserAccount", {partyId}, 20).find(row => row.disabled !== "Y")
+    return {userId: account?.userId || null, partyId: account ? partyId : null, pages: false}
+}
+/* A category that is a scope only: a mailbox list nobody is a member of and a ForumCategory that is not published, so it
+   is in no category list and nobody reads it as a category (§12.5; DG6 publishes a group's with its forum). The list is
+   made as a row: the list service would make the caller its owner, and so a moderator of the scope. */
+function makeScopeCategory(siteId, name, parentContactListId) {
+    const list = ec.entity.makeValue("mantle.marketing.contact.ContactList")
+    list.setSequencedIdPrimary()
+    list.set("contactListTypeEnumId", "MAILBOX")
+    list.set("contactListName", String(name).slice(0, 100))
+    list.set("isPublic", "N")
+    list.set("postingEnumId", "ClpModerators")
+    list.create()
+    forum.create(F + "ForumCategory", {
+        contactListId: list.contactListId,
+        siteId,
+        parentContactListId: parentContactListId || null,
+        slug: list.contactListId,
+        sequenceNum: 0,
+        publicationState: "disabled",
+        visibility: "members",
+        mode: "discussion",
+        policyRevision: 1
+    })
+    return list.contactListId
+}
+/* ensure#GroupCategory: a group's category, made on first need under its parent group's (a top-level group's has no
+   parent). The group's row is locked, so two first needs make one. */
+function ensureGroupCategory(groupId) {
+    const group = one(M + "SmithyGroup", {groupId}, true)
+    if (!group) missing()
+    if (group.contactListId) return group.contactListId
+    const parent = group.parentGroupId ? ensureGroupCategory(group.parentGroupId) : null
+    const contactListId = makeScopeCategory(group.siteId, group.groupPath, parent)
+    update(group, {contactListId})
+    return contactListId
+}
+/* ensure#AccountCategory: the one scope category of a site's personal namespaces, made on first need. */
+function ensureAccountCategory(siteId) {
+    one(S + "PublicSite", {siteId}, true)
+    const row = one(M + "SmithySite", {siteId}, true)
+    if (row?.accountContactListId) return row.accountContactListId
+    const contactListId = makeScopeCategory(siteId, "Personal repositories", null)
+    if (row) update(row, {accountContactListId: contactListId})
+    else forum.create(M + "SmithySite", {siteId, accountContactListId: contactListId, revision: 1})
+    return contactListId
+}
+/* The scope category of a repository's conversations: its own, else its group's, else the site's account category. */
+const scopeCategory = repo =>
+    repo.contactListId || (repo.groupId ? ensureGroupCategory(repo.groupId) : ensureAccountCategory(repo.siteId))
+/* What an actor holds on an issue (§5.3, §8.1, §8.3), from the rights it holds on the repository (r):
+   - read: a viewer of a repository with issues on, when the task is public (WevGeneral) or the actor is a Reporter; a
+     confidential one only its Owners (operators on a page among them) and its reporter;
+   - write (comment, react, flag, upload): a reader with a confirmed address who is not suspended or silenced, in a
+     repository that is not archived; writeRefusal says which of these refused;
+   - moderate: a reader who is an Owner; for an issue that is not confidential the site's staff and the scope
+     category's moderators too. */
+function issueAccess(r, issue, a, scopeContactListId) {
+    const task = one("mantle.work.effort.WorkEffort", {workEffortId: issue.workEffortId})
+    const confidential = issue.confidential === "Y"
+    const owner = r.rank >= RANK.SmrOwner
+    const reporter = !!a.partyId && issue.reporterPartyId === a.partyId
+    const canRead =
+        r.canView &&
+        r.repo.issuesEnabled === "Y" &&
+        !!task &&
+        (confidential ? owner || reporter : task.visibilityEnumId === "WevGeneral" || r.rank >= RANK.SmrReporter)
+    const isConfirmed = !!a.userId && confirmedAddress().confirmed(a.userId)
+    const silenced = !!a.partyId && sanctioned(r.repo.siteId, a.partyId, scopeContactListId || null, "silence")
+    const archived = !!(r.git || one("moqui.resource.GitRepository", {repositoryId: r.repo.repositoryId}))?.archivedDate
+    const writeRefusal =
+        !canRead || !a.partyId
+            ? null
+            : !isConfirmed
+              ? "addressUnconfirmed: Confirm your email address to continue"
+              : r.access.suspended || silenced
+                ? "accessDenied: Your account may not post on this site"
+                : archived
+                  ? "repositoryArchived: This repository is archived"
+                  : null
+    const listStaff = () => {
+        const row = scopeContactListId && a.partyId ? forum.listMember(scopeContactListId, a.partyId) : null
+        return !!row && ["ListOwner", "ListModerator"].includes(row.roleTypeId)
+    }
+    return {
+        issue,
+        task,
+        confidential,
+        owner,
+        reporter,
+        canRead,
+        // the reporter of a confidential issue who is no Owner reads their own text and the replies addressed to them
+        limited: confidential && !owner,
+        writable: canRead && !!a.partyId && !writeRefusal,
+        writeRefusal,
+        canModerate: canRead && !r.access.suspended && (owner || (!confidential && (r.access.staff || listStaff())))
+    }
+}
+
 // ===== paths (§4.3, §4.4) =====
 /* The one writer of a repository's path: the framework's set#GitRepositoryPath, which keeps the old path as a
    GitRepositoryPathRedirect, and the SmithyRepository row, in one transaction. */
@@ -714,6 +820,11 @@ function resolvePath(siteId, path) {
     profileShown,
     accountShown,
     resolvePath,
+    actorOfParty,
+    ensureGroupCategory,
+    ensureAccountCategory,
+    scopeCategory,
+    issueAccess,
     GROUP_REPOSITORY_LIMIT,
     mounted,
     // of an account by its userId (none: false), and of the signed-in account

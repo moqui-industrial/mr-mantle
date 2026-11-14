@@ -218,6 +218,17 @@ const refView = ref => ({kind: ref.kind, name: ref.name, fullName: ref.fullName,
    matched to an account, which would tell whose address it is. */
 function commitViews(repositoryId, commits) {
     const list = Array.from(commits || [])
+    // the issues a commit names: the numbers of those the caller may read, the rest a count (§8.2)
+    const repo = one(M + "SmithyRepository", {repositoryId})
+    const a = core.actor()
+    const named =
+        repo && list.length
+            ? issues.commitIssues(
+                  core.repositoryRights(repo, a),
+                  list.map(commit => commit.commitId),
+                  a
+              )
+            : new Map()
     const states = list.length
         ? git("get#GitCommitStatuses", {repositoryId, commitIdList: list.map(commit => commit.commitId)}).stateByCommit || {}
         : {}
@@ -232,8 +243,7 @@ function commitViews(repositoryId, commits) {
         commitDate: commit.committerDate || null,
         parentIds: Array.from(commit.parentIds || []),
         checkState: states[commit.commitId] || null,
-        // issues are DG3's
-        issueNumbers: []
+        issueNumbers: named.get(commit.commitId)?.issueNumbers || []
     }))
 }
 const lastCommitView = commit =>
@@ -668,7 +678,7 @@ methods.findCommits = p => {
     }
 }
 methods.getCommit = p => {
-    core.repository(p.repositoryId, p.siteId)
+    const r = core.repository(p.repositoryId, p.siteId)
     if (!core.HEX.test(text(p.commitId))) missing()
     const found = git("get#GitCommit", {repositoryId: p.repositoryId, commitId: p.commitId, stats: true})
     if (!found.commit?.commitId || !String(found.commit.commitId).startsWith(p.commitId.toLowerCase())) missing()
@@ -686,6 +696,8 @@ methods.getCommit = p => {
               )
     )
     const statuses = git("get#GitCommitStatuses", {repositoryId: p.repositoryId, commitId})
+    // the issues the commit names that the caller may read, and a count of the other items it names (§8.2)
+    const named = issues.linkedIssues(r, commitId, core.actor())
     return {
         commit: commitViews(p.repositoryId, [found.commit])[0],
         fileList: fileViews(files),
@@ -694,10 +706,10 @@ methods.getCommit = p => {
         fileDiffList: diffs.shown,
         truncated: diffs.truncated || tooMany,
         statusList: Array.from(statuses.statusList || []),
-        // issues and merge request links are DG3's and DG4's
-        linkedIssues: [],
+        linkedIssues: named.linkedIssues,
+        // merge request links are DG4's
         linkedMergeRequests: [],
-        hiddenItemCount: 0
+        hiddenItemCount: named.hiddenItemCount
     }
 }
 methods.getCompare = p => {
@@ -1052,6 +1064,9 @@ const kit = {
     MERGE_METHODS,
     GIT_REPOSITORY
 }
+// issues (§15.4): its own module; what the other modules need of it is in the kit
+const issues = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyIssues.js")(kit)
+kit.issues = issues
 ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyManage.js")(kit)
 const gitModule = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithyGit.js")(kit)
 
@@ -1073,8 +1088,13 @@ const NUMBERS = [
     "maxRepositories",
     "maxRepositoryBytes",
     "maxLfsBytes",
-    "runnerMinutesMonthly"
+    "runnerMinutesMonthly",
+    "issueNumber",
+    "duplicateOfNumber"
 ]
+/* Lists of ids or handles, and the one field that holds a post's text. */
+const LISTS = ["labelIds", "assigneeHandles", "attachmentIds"]
+const TEXTS = ["body"]
 const FLAGS = [
     "mine",
     "includeSubgroups",
@@ -1095,7 +1115,9 @@ const FLAGS = [
     "requireMergeRequest",
     "dismissStaleApprovals",
     "active",
-    "bot"
+    "bot",
+    "confidential",
+    "asNewIssue"
 ]
 function execute(operation, p) {
     const schema = ec.resource.script("component://mr-mantle/service/mantle/smithy/SmithySchema.js")[operation]
@@ -1105,6 +1127,15 @@ function execute(operation, p) {
         if (!schema.fields.includes(field)) invalid("Unsupported field: " + field)
         if (value == null) continue
         const kind = typeof value
+        if (LISTS.includes(field)) {
+            if (!Array.isArray(value) || value.length > 100 || value.some(item => typeof item !== "string" || item.length > 64))
+                invalid("Invalid list field: " + field)
+            continue
+        }
+        if (TEXTS.includes(field)) {
+            if (kind !== "string" || value.length > 200000) invalid("Invalid field type: " + field)
+            continue
+        }
         if (
             NUMBERS.includes(field)
                 ? !["number", "string"].includes(kind)
@@ -1115,8 +1146,12 @@ function execute(operation, p) {
             invalid("Invalid field type: " + field)
         if (kind === "string" && value.length > 4096) invalid("Field is too long: " + field)
     }
-    return privileged(() => core.withMemo(() => fn(p || {})))
+    const out = privileged(() => core.withMemo(() => fn(p || {})))
+    // a change of roles: the companion projects of confidential issues keep exactly the Owners as members
+    if (ROLE_CHANGES.includes(operation)) privileged(() => core.withMemo(() => issues.syncSite(p.siteId)))
+    return out
 }
+const ROLE_CHANGES = ["setGroupMember", "leaveGroup", "setRepositoryMember", "transferRepository", "decideGroupRequest"]
 function privileged(work) {
     const was = ec.artifactExecution.disableAuthz()
     try {
@@ -1136,5 +1171,17 @@ function privileged(work) {
     // the push gate and the LFS upload check (SmithyGitServices.xml): the problems that refuse, none to accept
     checkPush: context => privileged(() => core.withMemo(() => gitModule.checkPush(context))),
     checkLfsUpload: context => privileged(() => core.withMemo(() => gitModule.checkLfsUpload(context))),
-    accountCard: siteId => privileged(() => core.withMemo(() => gitModule.accountCard(siteId)))
+    accountCard: siteId => privileged(() => core.withMemo(() => gitModule.accountCard(siteId))),
+    // what the rules call of issues (SmithyIssueServices.xml): a public task's issue, the line of a status change, the
+    // tasks Projects hides, and the issues a commit message names
+    ensureIssue: p => privileged(() => core.withMemo(() => issues.ensureIssue(p || {}))),
+    noteTaskStatus: p => privileged(() => core.withMemo(() => issues.noteTaskStatus(p || {}))),
+    taskIssue: (workEffortId, userId) => privileged(() => core.withMemo(() => issues.taskIssue(workEffortId, userId))),
+    hiddenTaskIds: (userId, projectIds, workEffortIds) =>
+        privileged(() => core.withMemo(() => issues.hiddenTaskIds(userId, projectIds, workEffortIds))),
+    taskHidden: (workEffortId, userId) => privileged(() => core.withMemo(() => issues.taskHidden(workEffortId, userId))),
+    taskReference: p => privileged(() => core.withMemo(() => issues.taskReference(p || {}))),
+    issueReferences: p => privileged(() => core.withMemo(() => issues.issueReferences(p || {}))),
+    ensureGroupCategory: groupId => privileged(() => core.ensureGroupCategory(groupId)),
+    ensureAccountCategory: siteId => privileged(() => core.ensureAccountCategory(siteId))
 })

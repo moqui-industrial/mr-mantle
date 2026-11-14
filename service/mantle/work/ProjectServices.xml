@@ -417,6 +417,11 @@ along with this software (see the LICENSE.md file). If not, see
               groups (ADMIN too): isClient is true and itemVisibilityIds holds the visibilities of the items it sees (WevAllUsers,
               WevGeneral: shared with the client), which a find of tasks applies as well (visibilityEnumId in itemVisibilityIds).
               itemVisibilityIds is null for everyone else.
+            - hiddenItemIds: the tasks that are confidential issues of a public tracker (a SmithyIssue marked confidential,
+              mr-pass design-smithy §8.3) and that the user is no Owner of by its Smithy rows. They are seen by nobody else,
+              whatever the project role: a find of tasks leaves them out (workEffortId not in hiddenItemIds) even for a
+              manager of the project and for the task's own parties, and they are never in restrictedItemIds. Empty for
+              the ADMIN group (operators see them) and where no issue is confidential.
         </description>
         <out-parameters>
             <parameter name="allProjects" type="Boolean"/>
@@ -428,8 +433,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="memberProjectIds" type="List"><parameter name="workEffortId"/></parameter>
             <parameter name="managedProjectIds" type="List"><parameter name="workEffortId"/></parameter>
             <parameter name="restrictedItemIds" type="List"><parameter name="workEffortId"/></parameter>
+            <parameter name="hiddenItemIds" type="List"><parameter name="workEffortId"/></parameter>
         </out-parameters>
         <actions><script><![CDATA[
+            hiddenItemIds = []
             allProjects = false
             isClient = false
             itemVisibilityIds = null
@@ -488,6 +495,25 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 visibleProjectIds = Array.from(visible).sort()
                 managedProjectIds = Array.from(managed).sort()
+                // a confidential issue's task is its Smithy Owners' and the operators': strict, so a failure hides them all
+                if (!allProjects && ec.entity.find('mantle.smithy.SmithyIssue').condition('confidential', 'Y').count() > 0) {
+                    ec.message.pushErrors()
+                    try {
+                        // of the projects the user sees and of the tasks the user holds a role on, wherever they are
+                        hiddenItemIds = Array.from(ec.service.sync().name('mantle.smithy.SmithyIssueServices.get#HiddenTaskIds')
+                                .parameters({userId: ec.user.userId, projectIdList: visibleProjectIds, workEffortIdList: restrictedItemIds})
+                                .call()?.workEffortIdList || [])
+                        if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+                    } catch (err) {
+                        ec.logger.error(`Confidential issues hidden from user ${ec.user.userId} not read, all are hidden: ${err}`)
+                        hiddenItemIds = Array.from(ec.entity.find('mantle.smithy.SmithyIssue').condition('confidential', 'Y')
+                                .selectField('workEffortId').list()).map((row) => row.workEffortId)
+                    } finally {
+                        ec.message.clearErrors()
+                        ec.message.popErrors()
+                    }
+                    restrictedItemIds = restrictedItemIds.filter((id) => !hiddenItemIds.includes(id))
+                }
             } finally {
                 if (!wasDisabled) ec.artifactExecution.enableAuthz()
             }
@@ -812,6 +838,8 @@ along with this software (see the LICENSE.md file). If not, see
             const visible = new Set(Array.from(vis.visibleProjectIds || []))
             const managed = new Set(Array.from(vis.managedProjectIds || []))
             const restricted = new Set(Array.from(vis.restrictedItemIds || []))
+            // the confidential issues of a public tracker the user is no Owner of (get#VisibleProjectInfo hiddenItemIds)
+            const hiddenItems = new Set(Array.from(vis.hiddenItemIds || []))
             const me = vis.userPartyId || null
             const fields = ['workEffortId', 'workEffortName', 'parentWorkEffortId', 'rootWorkEffortId', 'workEffortTypeEnumId', 'statusId', 'purposeEnumId',
                 'priority', 'sequenceNum', 'visibilityEnumId', 'ownerPartyId', 'estimatedWorkTime', 'remainingWorkTime', 'actualWorkTime', 'totalTimeAllowed',
@@ -831,6 +859,7 @@ along with this software (see the LICENSE.md file). If not, see
             const myLooseIds = new Set()
             const seen = (row) => {
                 if (all) return true
+                if (hiddenItems.has(row.workEffortId)) return false
                 if (!row.rootWorkEffortId) return (!!me && row.ownerPartyId === me) || myLooseIds.has(row.workEffortId)
                 if (!visible.has(row.rootWorkEffortId)) return false
                 // a client sees the items shared with it only (impl-projects.md P10)
@@ -2668,6 +2697,7 @@ along with this software (see the LICENSE.md file). If not, see
             }
             const manages = !!vis.allProjects || Array.from(vis.managedProjectIds || []).includes(workEffortId)
             const restrictedOk = new Set(Array.from(vis.restrictedItemIds || []))
+            const hiddenItems = new Set(Array.from(vis.hiddenItemIds || []))
             // the project and its items, by id (an item it may not see is left out)
             const items = new Map([[workEffortId, project.workEffortName || workEffortId]])
             for (const row of ec.entity.find('mantle.work.effort.WorkEffort').condition('rootWorkEffortId', workEffortId).selectField('workEffortId')
@@ -2675,6 +2705,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (clientShared && row.workEffortTypeEnumId === 'WetTask' && !clientShared.has(row.visibilityEnumId)) continue
                 if (clientShared && !['WetTask', 'WetMilestone', 'WetRelease'].includes(row.workEffortTypeEnumId)) continue
                 if (!manages && ['WevRestricted', 'WevConfidential'].includes(row.visibilityEnumId) && !restrictedOk.has(row.workEffortId)) continue
+                if (hiddenItems.has(row.workEffortId)) continue
                 items.set(row.workEffortId, row.workEffortName || row.workEffortId)
             }
             const ids = Array.from(items.keys())

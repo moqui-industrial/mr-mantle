@@ -212,6 +212,7 @@
             'postRevision',
             'tags',
             'poll',
+            'sourceFormat',
         ],
     },
     findDrafts: {
@@ -224,7 +225,7 @@
     },
     previewPost: {
         service: 'mantle.forum.ForumServices.preview#Post',
-        fields: ['siteId', 'body'],
+        fields: ['siteId', 'body', 'sourceFormat'],
     },
     publishPost: {
         service: 'mantle.forum.ForumServices.publish#Post',
@@ -240,6 +241,8 @@
             'draftId',
             'tags',
             'poll',
+            'sourceFormat',
+            'ownersOnly',
         ],
     },
     updatePost: {
@@ -252,6 +255,7 @@
             'reason',
             'draftId',
             'attachmentIds',
+            'sourceFormat',
         ],
     },
     markRead: {

@@ -63,6 +63,15 @@ const {
     queueClassification,
     memberBlocks,
     conversationAccess,
+    TRUST_EFFECTS,
+    mentionHandles,
+    applyRules,
+    sourceFormatOf,
+    renderSource,
+    gate,
+    gateCommit,
+    gateRefuse,
+    notForRecord,
 } = core
 const capabilities = (a) =>
     pick(
@@ -105,7 +114,16 @@ function postProjection(state, event, a, t) {
         revision: Number(state.revision),
         author: pick(profile, 'handle displayName avatarId'),
         entryDate: event.entryDate,
-        body: deleted ? '' : StringUtilities.cleanHtml(event.body || ''),
+        // A record's post links what it names (#12, @handle) for this reader; a state change is a line with no text.
+        body: deleted
+            ? ''
+            : a.record
+              ? core.recordText(
+                    StringUtilities.cleanHtml(event.body || ''),
+                    state.rootCommEventId,
+                )
+              : StringUtilities.cleanHtml(event.body || ''),
+        postKind: state.postKind || null,
         visibility: state.visibility,
         parentCommEventId: event.parentCommEventId || null,
         wiki: state.wiki === 'Y',
@@ -222,8 +240,6 @@ const methods = {}
 const moderation = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumModeration.js',
 )(core, methods)
-// The word rules, for the integration module's exact case-reply preview.
-core.applyRules = applyRules
 const integration = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumIntegration.js',
 )(core, methods)
@@ -1033,7 +1049,7 @@ methods.getTopic = (p) => {
                 },
             }
     }
-    const { t, event, a } = topic(p.rootCommEventId, p.siteId)
+    const { t, event, a } = topic(p.rootCommEventId, p.siteId, false, true)
     return {
         topic: {
             ...pick(
@@ -1062,12 +1078,16 @@ methods.getTopic = (p) => {
                 t.kind === 'private'
                     ? participantProjection(p.siteId, t.rootCommEventId)
                     : null,
-            category: t.kind === 'private' ? null : categoryProjection(a),
+            category:
+                t.kind === 'private' || t.kind === 'record'
+                    ? null
+                    : categoryProjection(a),
             capabilities: {
                 ...capabilities(a),
                 canReply: a.canReply && event.statusId !== 'CeResolved',
                 canManageParticipants: t.kind === 'private' && a.isOwner,
                 canAccept:
+                    t.kind !== 'record' &&
                     a.category.mode === 'qa' &&
                     (a.canModerate ||
                         (event.fromPartyId === me() && a.canReply)),
@@ -1076,7 +1096,7 @@ methods.getTopic = (p) => {
     }
 }
 methods.getPosts = (p) => {
-    const { t, a } = topic(p.rootCommEventId, p.siteId)
+    const { t, a } = topic(p.rootCommEventId, p.siteId, false, true)
     const scope =
             'posts:' +
             p.siteId +
@@ -1093,7 +1113,11 @@ methods.getPosts = (p) => {
         const q = find(F + 'ForumPostSearch', {
             rootCommEventId: t.rootCommEventId,
         })
-        if (a.canModerate) return q
+        // A staff post of a record is read by its Owners, not by every moderator of the scope.
+        if (a.canModerate)
+            return a.record && !a.canReadStaff
+                ? q.condition('visibility', 'not-equals', 'staff')
+                : q
         const cf = ec.entity.conditionFactory
         return q.condition(
             cf.makeCondition(
@@ -1191,7 +1215,14 @@ methods.storeDraft = (p) => {
         invalid('The poll draft is too large')
     if (old) revision(old, p.expectedRevision)
     if (p.contactListId) category(p.contactListId, p.siteId)
-    if (p.rootCommEventId) topic(p.rootCommEventId, p.siteId)
+    // A record's conversation keeps a reply's or an edit's draft, never a new topic's.
+    if (p.rootCommEventId)
+        topic(
+            p.rootCommEventId,
+            p.siteId,
+            false,
+            ['reply', 'edit'].includes(p.mode),
+        )
     const fields = {
         draftId: old?.draftId || p.draftId || id(),
         siteId: p.siteId,
@@ -1204,7 +1235,7 @@ methods.storeDraft = (p) => {
         postRevision: p.postRevision || null,
         title: p.title || '',
         sourceText: p.body || '',
-        sourceFormat: 'html',
+        sourceFormat: sourceFormatOf(p.sourceFormat),
         tagsJson: p.tags ? JSON.stringify(p.tags) : null,
         // A draft keeps an unfinished poll as typed; publishing validates it.
         pollJson: p.poll ? JSON.stringify(p.poll) : null,
@@ -1250,7 +1281,9 @@ methods.discardDraft = (p) => {
 methods.previewPost = (p) => {
     site(p.siteId)
     requireUser()
-    return { body: StringUtilities.cleanHtml(p.body || '') }
+    return {
+        body: renderSource(sourceFormatOf(p.sourceFormat), p.body || ''),
+    }
 }
 methods.publishPost = (p) => {
     requireUser()
@@ -1279,14 +1312,22 @@ methods.publishPost = (p) => {
             !p.contactListId &&
             Array.isArray(p.participantHandles)
         const existing = p.rootCommEventId
-                ? topic(p.rootCommEventId, p.siteId, true)
+                ? topic(p.rootCommEventId, p.siteId, true, true)
                 : null,
             a =
                 existing?.a ||
                 (conversation
                     ? startAccess(p.siteId)
                     : category(p.contactListId, p.siteId)),
-            isPrivate = existing ? existing.t.kind === 'private' : conversation
+            isPrivate = existing ? existing.t.kind === 'private' : conversation,
+            // A post in the conversation of a record (an issue) is a comment: no category, tags or poll of its own.
+            isRecord = existing?.t.kind === 'record'
+        if (isRecord && (p.tags != null || p.poll != null || savedDraft?.pollJson))
+            notForRecord()
+        // "Owners only": a post of a record that its Owners alone read.
+        const staffOnly = p.ownersOnly === true
+        if (staffOnly && !(isRecord && a.canReadStaff))
+            fail('Unauthorized', 'Only the owners of a record post to its owners')
         const invited = conversation
             ? recipients(p.siteId, p.participantHandles, [me()])
             : []
@@ -1301,17 +1342,9 @@ methods.publishPost = (p) => {
                     ' recipients',
             )
         if (!(existing ? a.canReply : a.canStartTopic))
-            fail('Unauthorized', 'Posting is not permitted')
+            fail('Unauthorized', a.writeRefusal || 'Posting is not permitted')
         if (existing?.event.statusId === 'CeResolved')
             fail('Conflict', 'This topic is closed')
-        const pol = policy(p.siteId)
-        if (
-            !String(p.body || '').trim() ||
-            String(p.body).length > pol.maxPostLength
-        )
-            invalid('Body must contain 1–' + pol.maxPostLength + ' characters')
-        if (!existing && (!p.title || String(p.title).length > 250))
-            invalid('A title of at most 250 characters is required')
         if (p.parentCommEventId) {
             const parent = one(F + 'ForumPostState', {
                     communicationEventId: p.parentCommEventId,
@@ -1327,96 +1360,36 @@ methods.publishPost = (p) => {
             )
                 missing()
         }
-        const key = { siteId: p.siteId, partyId: me() }
-        let memberState = one(F + 'ForumMemberState', key, true)
-        if (!memberState)
-            memberState = create(F + 'ForumMemberState', {
-                ...key,
-                trustLevel: 'new',
-                approvedContributions: 0,
-                dailyTopics: 0,
-                dailyReplies: 0,
-                revision: 1,
-            })
-        if (
-            memberState.lastPostedAt &&
-            millis(now()) - millis(memberState.lastPostedAt) <
-                pol.postIntervalSeconds * 1000
+        // The gate: the length, the interval and slow mode, the day's limit, the trust level's links, the rules and
+        // the first-post hold, for every path that posts.
+        const format = sourceFormatOf(p.sourceFormat)
+        const gated = gateRefuse(
+            gate({
+                siteId: p.siteId,
+                contactListId: a.category.contactListId,
+                kind: isRecord ? 'comment' : existing ? 'reply' : 'topic',
+                ...(existing ? {} : { title: p.title ?? '' }),
+                body: renderSource(format, p.body || ''),
+                source: p.body ?? '',
+                sourceFormat: format,
+                canModerate: a.canModerate,
+                isPrivate,
+                slowIntervalSeconds: existing?.t.slowIntervalSeconds,
+                rootCommEventId: existing?.t.rootCommEventId,
+            }),
         )
-            fail(
-                'Tarpit',
-                'Wait ' + pol.postIntervalSeconds + ' seconds between posts',
-            )
-        // Slow mode spaces one member's replies in this topic; staff are not limited.
-        const slow = Number(existing?.t.slowIntervalSeconds || 0)
-        if (slow > 0 && !a.canModerate) {
-            const last = Array.from(
-                find(F + 'ForumPostSearch', {
-                    rootCommEventId: existing.t.rootCommEventId,
-                    fromPartyId: me(),
-                })
-                    .orderBy('-entryDate')
-                    .limit(1)
-                    .list(),
-            )[0]
-            if (last && millis(now()) - millis(last.entryDate) < slow * 1000)
-                fail(
-                    'Tarpit',
-                    'This topic is in slow mode; wait ' +
-                        slow +
-                        ' seconds between replies',
-                )
-        }
-        const day = String(now()).slice(0, 10),
-            daily =
-                memberState.dayKey === day
-                    ? existing
-                        ? Number(memberState.dailyReplies)
-                        : Number(memberState.dailyTopics)
-                    : 0
-        const effects =
-            TRUST_EFFECTS[memberState.trustLevel] || TRUST_EFFECTS.new
-        if (
-            !a.canModerate &&
-            daily >= (existing ? effects.replies : effects.topics)
-        )
-            fail('Tarpit', 'Daily contribution limit reached')
-        let body = StringUtilities.cleanHtml(p.body)
-        const count = (pattern) => (body.match(pattern) || []).length
-        if (
-            !a.canModerate &&
-            (count(/<a\b/gi) > effects.links ||
-                count(/<img\b/gi) > effects.images ||
-                mentionHandles(body).length > effects.mentions)
-        )
-            invalid(
-                'Your trust level allows ' +
-                    effects.links +
-                    ' links, ' +
-                    effects.images +
-                    ' images and ' +
-                    effects.mentions +
-                    ' mentions per post',
-            )
-        const ruled = applyRules(p.siteId, a.category.contactListId, body)
-        if (ruled.block && !a.canModerate)
-            invalid('This post contains content the community does not allow')
-        body = ruled.body
+        const body = gated.body
         const postId = id(),
             root = existing?.t.rootCommEventId || postId,
             ordinal = existing ? Number(existing.t.nextOrdinal) : 1
         // Private messages are not queued for staff by default; a held rule still files a scoped review.
-        const firstPost =
-                !isPrivate &&
-                Number(memberState.approvedContributions || 0) <
-                    pol.firstContributionCount &&
-                !a.canModerate,
-            pending =
-                firstPost || (!isPrivate && ruled.approve && !a.canModerate)
+        const pending = gated.decision === 'hold' && !staffOnly,
+            counted = !pending && !staffOnly
         create(E + 'CommunicationEvent', {
             communicationEventId: postId,
             communicationEventTypeId: 'Message',
-            contactListId: a.category.contactListId,
+            // A record's post has no category of its own: its topic names the scope.
+            contactListId: isRecord ? null : a.category.contactListId,
             fromPartyId: me(),
             rootCommEventId: existing ? root : null,
             parentCommEventId: p.parentCommEventId || (existing ? root : null),
@@ -1429,7 +1402,7 @@ methods.publishPost = (p) => {
             update(existing.t, {
                 nextOrdinal: ordinal + 1,
                 revision: Number(existing.t.revision) + 1,
-                ...(!pending
+                ...(counted
                     ? {
                           lastActivity: now(),
                           visiblePostCount:
@@ -1456,7 +1429,7 @@ methods.publishPost = (p) => {
             rootCommEventId: root,
             ordinal,
             revision: 1,
-            visibility: pending ? 'pending' : 'approved',
+            visibility: staffOnly ? 'staff' : pending ? 'pending' : 'approved',
             approvedRevision: pending ? null : 1,
             wiki: 'N',
             reactionCount: 0,
@@ -1464,7 +1437,7 @@ methods.publishPost = (p) => {
         create(F + 'ForumPostRevision', {
             communicationEventId: postId,
             revision: 1,
-            sourceFormat: 'html',
+            sourceFormat: format,
             sourceText: p.body,
             sanitizedBody: body,
             editorPartyId: me(),
@@ -1487,24 +1460,7 @@ methods.publishPost = (p) => {
             )
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
-        update(memberState, {
-            lastPostedAt: now(),
-            approvedContributions:
-                Number(memberState.approvedContributions || 0) +
-                (pending ? 0 : 1),
-            dayKey: day,
-            dailyTopics: existing
-                ? memberState.dayKey === day
-                    ? memberState.dailyTopics
-                    : 0
-                : daily + 1,
-            dailyReplies: existing
-                ? daily + 1
-                : memberState.dayKey === day
-                  ? memberState.dailyReplies
-                  : 0,
-            revision: Number(memberState.revision) + 1,
-        })
+        gateCommit(gated, { pending })
         if (pending)
             review(
                 p.siteId,
@@ -1512,10 +1468,10 @@ methods.publishPost = (p) => {
                 'post',
                 postId,
                 1,
-                firstPost ? 'first-post' : 'rule',
+                gated.reasonFamily,
             )
         else {
-            if (ruled.flag || (isPrivate && ruled.approve))
+            if (gated.flag)
                 review(
                     p.siteId,
                     a.category.contactListId,
@@ -1525,7 +1481,8 @@ methods.publishPost = (p) => {
                     'rule',
                 )
             if (isPrivate) allocatePrivate(postId, root, me())
-            else allocateInternal(postId, a.category.contactListId, me())
+            else if (!isRecord)
+                allocateInternal(postId, a.category.contactListId, me())
             create(F + 'ForumOutbox', {
                 outboxId: id(),
                 siteId: p.siteId,
@@ -1611,37 +1568,54 @@ methods.updatePost = (p) => {
         true,
     )
     if (!st) missing()
-    const { t, a } = topic(st.rootCommEventId, p.siteId, true),
+    const { t, a } = topic(st.rootCommEventId, p.siteId, true, true),
         event = one(E + 'CommunicationEvent', {
             communicationEventId: p.postId,
         })
+    if (st.visibility === 'staff' && !postVisible(st, event, a)) missing()
     revision(st, p.expectedRevision)
+    if (st.postKind === 'event') invalid('A state change has no text')
     if (!canEditPost(st, event, a))
-        fail('Unauthorized', 'Editing is not permitted')
+        fail('Unauthorized', a.writeRefusal || 'Editing is not permitted')
     // A wiki editor changes the text; the author's attachments stay the author's.
     if (p.attachmentIds != null && !a.canModerate && event.fromPartyId !== me())
         invalid('Only the author changes attachments')
     if (a.canModerate && event.fromPartyId !== me() && !p.reason)
         invalid('Staff edits require a reason')
-    const pol = policy(p.siteId)
-    if (
-        !String(p.body || '').trim() ||
-        String(p.body).length > pol.maxPostLength
+    // An edit keeps the post's authoring format unless it names one.
+    const format =
+        p.sourceFormat == null || p.sourceFormat === ''
+            ? one(F + 'ForumPostRevision', {
+                  communicationEventId: p.postId,
+                  revision: st.revision,
+              })?.sourceFormat === 'markdown'
+                ? 'markdown'
+                : 'html'
+            : sourceFormatOf(p.sourceFormat)
+    // The gate, for the new revision: the address, the sanctions, the length and the rules.
+    const gated = gateRefuse(
+        gate({
+            siteId: p.siteId,
+            contactListId: a.category.contactListId,
+            kind:
+                t.kind === 'record'
+                    ? 'comment'
+                    : p.postId === st.rootCommEventId
+                      ? 'topic'
+                      : 'reply',
+            body: renderSource(format, p.body || ''),
+            source: p.body ?? '',
+            sourceFormat: format,
+            canModerate: a.canModerate,
+            edit: true,
+        }),
     )
-        invalid('Body must contain 1–' + pol.maxPostLength + ' characters')
-    const ruled = applyRules(
-        p.siteId,
-        a.category.contactListId,
-        StringUtilities.cleanHtml(p.body),
-    )
-    if (ruled.block && !a.canModerate)
-        invalid('This post contains content the community does not allow')
     const r = Number(st.revision) + 1,
-        body = ruled.body
+        body = gated.body
     create(F + 'ForumPostRevision', {
         communicationEventId: p.postId,
         revision: r,
-        sourceFormat: 'html',
+        sourceFormat: format,
         sourceText: p.body,
         sanitizedBody: body,
         editorPartyId: me(),
@@ -1691,9 +1665,12 @@ methods.updatePost = (p) => {
         )
     // Open reports now concern the edited text; decisions bind to that revision.
     refreshReviews(p.siteId, p.postId, r)
-    if ((ruled.approve || ruled.flag) && !a.canModerate)
+    if (gated.flag)
         review(p.siteId, a.category.contactListId, 'post', p.postId, r, 'rule')
     queueClassification(p.siteId, p.postId)
+    // The first post of a record is its text: the record keeps what it copies of it.
+    if (t.kind === 'record' && p.postId === st.rootCommEventId)
+        core.recordChanged(st.rootCommEventId)
     bump(p.siteId)
     if (p.draftId) {
         const draft = one(F + 'ForumDraft', {
@@ -1710,7 +1687,7 @@ methods.updatePost = (p) => {
     }
 }
 methods.markRead = (p) => {
-    const { t, a } = topic(p.rootCommEventId, p.siteId),
+    const { t, a } = topic(p.rootCommEventId, p.siteId, false, true),
         partyId = requireUser(),
         key = { rootCommEventId: t.rootCommEventId, partyId }
     lockActor()
@@ -1879,7 +1856,7 @@ methods.setPreferences = (p) => {
     if (!['site', 'category', 'topic'].includes(key.scopeType))
         invalid('Invalid preference scope')
     if (key.scopeType === 'category') category(key.scopeId, p.siteId)
-    if (key.scopeType === 'topic') topic(key.scopeId, p.siteId)
+    if (key.scopeType === 'topic') topic(key.scopeId, p.siteId, false, true)
     const oldPreference = one(F + 'ForumPreference', key),
         oldDelivery = one(F + 'ForumDeliveryPreference', key),
         current = Math.max(
@@ -2494,7 +2471,7 @@ methods.stageAttachment = (p) => {
     } else {
         if (p.purpose && p.purpose !== 'post') invalid('Unknown upload purpose')
         const a = p.rootCommEventId
-            ? topic(p.rootCommEventId, p.siteId).a
+            ? topic(p.rootCommEventId, p.siteId, false, true).a
             : category(p.contactListId, p.siteId)
         if (!a.canUpload) fail('Unauthorized', 'Uploads are not permitted')
     }
@@ -2610,7 +2587,7 @@ methods.getAttachment = (p) => {
             communicationEventId: v.communicationEventId,
         })
         if (!st) missing()
-        const { a } = topic(st.rootCommEventId, p.siteId)
+        const { a } = topic(st.rootCommEventId, p.siteId, false, true)
         if (
             st.visibility === 'deleted' ||
             !postVisible(
@@ -2682,9 +2659,11 @@ methods.findNotifications = (p) => {
                       communicationEventId: box.communicationEventId,
                   })
                 : null
-        if (!st || st.visibility !== 'approved') continue
+        if (!st || !['approved', 'staff'].includes(st.visibility)) continue
         try {
-            const { event } = topic(st.rootCommEventId, p.siteId)
+            const { event, a } = topic(st.rootCommEventId, p.siteId, false, true)
+            // A notice of a record's post is shown while its reader may read that post (a staff post: its Owners).
+            if (st.visibility === 'staff' && !a.canReadStaff) continue
             visible.push({
                 deliveryId: item.deliveryId,
                 reason: box.eventType === 'reminder' ? 'reminder' : item.reason,
@@ -3016,7 +2995,7 @@ methods.getDraft = (p) => {
         partyId: requireUser(),
     })
     if (!d) missing()
-    if (d.rootCommEventId) topic(d.rootCommEventId, p.siteId)
+    if (d.rootCommEventId) topic(d.rootCommEventId, p.siteId, false, true)
     else if (d.contactListId) category(d.contactListId, p.siteId)
     return {
         draft: {
@@ -3026,7 +3005,12 @@ methods.getDraft = (p) => {
             ),
             tags: json(d.tagsJson, []),
             poll: json(d.pollJson, null),
-            body: StringUtilities.cleanHtml(d.sourceText || ''),
+            // a Markdown draft is its source as typed; rich text is cleaned as it always was
+            body:
+                d.sourceFormat === 'markdown'
+                    ? d.sourceText || ''
+                    : StringUtilities.cleanHtml(d.sourceText || ''),
+            sourceFormat: d.sourceFormat === 'markdown' ? 'markdown' : 'html',
             attachments: rows(
                 F + 'ForumAttachment',
                 {
@@ -3551,7 +3535,7 @@ methods.getFeed = (p) => {
 methods.getPostLocation = (p) => {
     const state = one(F + 'ForumPostState', { communicationEventId: p.postId })
     if (!state) missing()
-    const { event, a } = topic(state.rootCommEventId, p.siteId)
+    const { event, a } = topic(state.rootCommEventId, p.siteId, false, true)
     const post = one(E + 'CommunicationEvent', {
         communicationEventId: p.postId,
     })
@@ -3569,12 +3553,26 @@ methods.getEditablePost = (p) => {
     requireUser()
     const state = one(F + 'ForumPostState', { communicationEventId: p.postId })
     if (!state) missing()
-    const { event: root, a } = topic(state.rootCommEventId, p.siteId),
+    const { event: root, a } = topic(
+            state.rootCommEventId,
+            p.siteId,
+            false,
+            true,
+        ),
         event = one(E + 'CommunicationEvent', {
             communicationEventId: p.postId,
         })
+    if (state.visibility === 'staff' && !postVisible(state, event, a))
+        missing()
+    if (state.postKind === 'event') invalid('A state change has no text')
     if (!canEditPost(state, event, a))
-        fail('Unauthorized', 'Editing is not permitted')
+        fail('Unauthorized', a.writeRefusal || 'Editing is not permitted')
+    // A Markdown post is edited as its Markdown source.
+    const source = one(F + 'ForumPostRevision', {
+        communicationEventId: p.postId,
+        revision: state.revision,
+    })
+    const markdown = source?.sourceFormat === 'markdown'
     return {
         draft: {
             postId: p.postId,
@@ -3583,7 +3581,10 @@ methods.getEditablePost = (p) => {
             rootCommEventId: state.rootCommEventId,
             contactListId: event.contactListId,
             title: root.subject,
-            body: StringUtilities.cleanHtml(event.body || ''),
+            body: markdown
+                ? source.sourceText || ''
+                : StringUtilities.cleanHtml(event.body || ''),
+            sourceFormat: markdown ? 'markdown' : 'html',
             mode: 'edit',
             attachments: rows(
                 F + 'ForumAttachment',
@@ -3847,13 +3848,13 @@ methods.setReaction = (p) => {
         true,
     )
     if (!st) missing()
-    const { t, a } = topic(st.rootCommEventId, p.siteId, true),
+    const { t, a } = topic(st.rootCommEventId, p.siteId, true, true),
         event = one(E + 'CommunicationEvent', {
             communicationEventId: p.postId,
         })
     if (!postVisible(st, event, a)) missing()
-    if (!a.canReact || st.visibility !== 'approved')
-        fail('Unauthorized', 'Reacting is not permitted')
+    if (!a.canReact || st.visibility !== 'approved' || st.postKind === 'event')
+        fail('Unauthorized', a.writeRefusal || 'Reacting is not permitted')
     if (event.fromPartyId === partyId)
         fail('Unauthorized', 'You cannot react to your own post')
     const key = {
@@ -4111,7 +4112,7 @@ methods.votePoll = (p) => {
 function bookmarkTarget(siteId, postId) {
     const st = one(F + 'ForumPostState', { communicationEventId: postId })
     if (!st) missing()
-    const { event: root, a } = topic(st.rootCommEventId, siteId),
+    const { event: root, a } = topic(st.rootCommEventId, siteId, false, true),
         event = one(E + 'CommunicationEvent', { communicationEventId: postId })
     if (!postVisible(st, event, a) || st.visibility === 'deleted') missing()
     return { st, root }
@@ -4268,7 +4269,7 @@ function remindBookmark(bookmarkId) {
 function historyAccess(p) {
     const st = one(F + 'ForumPostState', { communicationEventId: p.postId })
     if (!st) missing()
-    const { a } = topic(st.rootCommEventId, p.siteId),
+    const { a } = topic(st.rootCommEventId, p.siteId, false, true),
         event = one(E + 'CommunicationEvent', {
             communicationEventId: p.postId,
         })
@@ -4366,11 +4367,12 @@ methods.deletePost = (p) => {
         true,
     )
     if (!st) missing()
-    const { t, a } = topic(st.rootCommEventId, p.siteId, true),
+    const { t, a } = topic(st.rootCommEventId, p.siteId, true, true),
         event = one(E + 'CommunicationEvent', {
             communicationEventId: p.postId,
         })
     if (!postVisible(st, event, a) || st.visibility === 'deleted') missing()
+    if (st.postKind === 'event') invalid('A state change is not deleted')
     revision(st, p.expectedRevision)
     const author =
         event.fromPartyId === me() &&
@@ -4408,46 +4410,7 @@ methods.deletePost = (p) => {
     return { postId: p.postId, revision: Number(st.revision), state: 'deleted' }
 }
 /* ---- Stage 2 moderation: versioned policy, trust, content rules, flag hiding, classifier, topic tools, timers ---- */
-const TRUST_EFFECTS = {
-    new: { topics: 3, replies: 10, links: 2, images: 1, mentions: 2 },
-    basic: { topics: 10, replies: 50, links: 10, images: 10, mentions: 5 },
-    member: { topics: 20, replies: 100, links: 20, images: 20, mentions: 10 },
-    regular: { topics: 20, replies: 100, links: 20, images: 20, mentions: 10 },
-}
 const editWindowMs = (siteId) => policy(siteId).editWindowHours * 3600000
-const mentionHandles = (html) => [
-    ...new Set(
-        Array.from(
-            plainText(html).matchAll(/(?:^|[^\w@.])@([A-Za-z0-9_.-]{2,40})/g),
-        ).map((m) => m[1].toLowerCase()),
-    ),
-]
-function applyRules(siteId, contactListId, html) {
-    const text = plainText(html) + ' ' + String(html),
-        out = { block: null, approve: false, flag: false, body: html }
-    for (const r of Array.from(
-        find(F + 'ForumRule', { siteId, enabled: 'Y' })
-            .orderBy('priority,ruleId')
-            .limit(200)
-            .list(),
-    )) {
-        if (r.contactListId && r.contactListId !== contactListId) continue
-        let re
-        try {
-            re = ruleRegex(r)
-        } catch (e) {
-            ec.logger.error('Forum rule ' + r.ruleId + ' is invalid; skipped')
-            continue
-        }
-        if (!re.test(r.action === 'censor' ? plainText(out.body) : text))
-            continue
-        if (r.action === 'block') out.block = r
-        else if (r.action === 'approve') out.approve = true
-        else if (r.action === 'flag') out.flag = true
-        else if (r.action === 'censor') out.body = censor(out.body, re)
-    }
-    return out
-}
 /* Reading telemetry is measured on the server from the reader's own position updates, never from client counters. */
 function recordReading(siteId, partyId, newlyRead, firstVisit) {
     const m = memberStateFor(siteId, partyId),
@@ -4893,7 +4856,13 @@ methods.testRoute = (p) => {
     return { sent: !!out.messageId, messageId: out.messageId || null }
 }
 /* The scoped reply address for one recipient of one thread, minted when the notice is sent. */
-function replyAddress(siteId, rootCommEventId, contactListId, partyId) {
+function replyAddress(
+    siteId,
+    rootCommEventId,
+    contactListId,
+    partyId,
+    communicationEventId = null,
+) {
     // The category's first route, else a site-wide route; the oldest wins so the address is stable.
     const first = (fields) =>
         Array.from(
@@ -4912,6 +4881,7 @@ function replyAddress(siteId, rootCommEventId, contactListId, partyId) {
         siteId,
         routeId: route.routeId,
         rootCommEventId,
+        communicationEventId,
         partyId,
         expiresAt: millis(now()) + 90 * 86400000,
     })
@@ -5122,7 +5092,9 @@ function processInbound(ctx) {
             'Sender domain was not authenticated by the mail gateway',
         )
     // The target: a reply token issued to this sender, else a thread this sender was mailed, else a new topic.
-    let root = null
+    // answered: the post the sender replies to, by the token or by the mail it answers
+    let root = null,
+        answered = null
     if (tag) {
         const t = one(F + 'ForumReplyToken', { tokenHash: hash(tag) })
         if (
@@ -5138,6 +5110,7 @@ function processInbound(ctx) {
                 'The reply address was issued to another member',
             )
         root = t.rootCommEventId
+        answered = t.communicationEventId || null
     } else {
         for (const ref of [
             ...messageIds(headerValues(headers, 'in-reply-to').join(' ')),
@@ -5165,6 +5138,7 @@ function processInbound(ctx) {
                 : null
             if (st) {
                 root = st.rootCommEventId
+                answered = st.communicationEventId
                 break
             }
         }
@@ -5176,6 +5150,12 @@ function processInbound(ctx) {
     }
     const body = replyText(rawText)
     if (!body) return record('rejected', 'The message has no new text')
+    // A reply to an Owners only post of a record is posted Owners only (publishPost refuses a sender who is no Owner
+    // now), never as a comment its other readers see.
+    const ownersOnly =
+        !!answered &&
+        one(F + 'ForumPostState', { communicationEventId: answered })
+            ?.visibility === 'staff'
     const files = parts.filter((b) => b.filename && b.contentBytes).slice(0, 10)
     try {
         // Its own transaction: a refusal rolls back every write of the attempt, and this receipt still records it.
@@ -5202,6 +5182,7 @@ function processInbound(ctx) {
                             .trim(),
                         contentBytes: b.contentBytes,
                     })),
+                    ownersOnly,
                     operationId: hash(receiptId)
                         .replace(/[^A-Za-z0-9_-]/g, '')
                         .slice(0, 60),
@@ -5283,6 +5264,7 @@ function postInbound(p) {
             ...(p.rootCommEventId ? {} : { title: p.title }),
             body: p.body,
             attachmentIds,
+            ...(p.ownersOnly === true ? { ownersOnly: true } : {}),
             operationId: p.operationId,
         })
         return { postId: out.postId, state: out.state, held }
@@ -5477,6 +5459,7 @@ function execute(operation, p) {
         'dryRun',
         'mine',
         'sourceFrozen',
+        'ownersOnly',
     ])
     const listFields = new Set([
         'attachmentIds',

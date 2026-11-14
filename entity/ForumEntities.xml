@@ -28,7 +28,10 @@
   <entity entity-name="ForumTopic" package="mantle.forum">
     <field name="rootCommEventId" type="id" is-pk="true"/>
     <field name="siteId" type="id"/>
-    <field name="kind" type="id"/>
+    <field name="kind" type="id"><description>category (a topic of a category), private (a conversation of named participants)
+      or record (the conversation of a record of another app: an issue). A record topic's contactListId is its scope
+      category and its posts' events have none; its access is its app's (ForumCore.js recordAccess), and it is in no
+      topic list, search, feed or digest.</description></field>
     <field name="revision" type="number-integer"/>
     <field name="nextOrdinal" type="number-integer"/>
     <field name="acceptedAnswerId" type="id"/>
@@ -74,6 +77,9 @@
     <field name="wiki" type="text-indicator"/>
     <field name="reactionCount" type="number-integer"/>
     <field name="reactionCounts" type="text-medium"/>
+    <field name="postKind" type="id"><description>Empty for a post; event for a state-change line of a record's conversation
+      (an issue closed or reopened), which has no text to edit, react to or moderate. visibility also takes staff: a post
+      of a record that only the record's Owners read, checked for each reader.</description></field>
     <relationship type="one" related="mantle.party.communication.CommunicationEvent"/>
     <index name="FORUM_POST_ORDINAL" unique="true">
       <index-field name="rootCommEventId"/>
@@ -277,6 +283,8 @@
     <field name="dayKey" type="id"/>
     <field name="dailyTopics" type="number-integer"/>
     <field name="dailyReplies" type="number-integer"/>
+    <field name="dailyCounts" type="text-medium"><description>The day's counts of the other kinds the post gate limits (issue,
+      mergeRequest), as JSON by kind; reset with dayKey.</description></field>
     <field name="topicsEntered" type="number-integer"/>
     <field name="postsRead" type="number-integer"/>
     <field name="readingSeconds" type="number-integer"/>
@@ -441,6 +449,8 @@
     <field name="siteId" type="id"/>
     <field name="routeId" type="id"/>
     <field name="rootCommEventId" type="id"/>
+    <field name="communicationEventId" type="id"><description>The post the mail was about, when known: a reply by mail to a
+      staff post of a record is posted as a staff post, or not at all.</description></field>
     <field name="partyId" type="id"/>
     <field name="expiresAt" type="date-time"/>
     <field name="revokedAt" type="date-time"/>

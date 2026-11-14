@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Smithy's issues on tasks (mr-pass plan/design-smithy.md §8.1, §8.5): a task that is public (WevGeneral) when it is made, or
+    whose visibility is saved as public, becomes an issue where its project is a Smithy tracker's (ensure#Issue returns at
+    once for any other); and a status change that closes or reopens an issue's task is a line in its conversation. Each
+    fails alone: the task's own change stays. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="SmithyIssueOfNewTask" service="create#mantle.work.effort.WorkEffort" when="post-service">
+        <condition><expression>visibilityEnumId == 'WevGeneral' &amp;&amp; workEffortTypeEnumId == 'WetTask' &amp;&amp; workEffortId</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyIssueServices.ensure#Issue" in-map="{workEffortId:workEffortId}"
+                ignore-error="true" disable-authz="true"/></actions>
+    </seca>
+    <seca id="SmithyIssueOfPublicTask" service="update#mantle.work.effort.WorkEffort" when="post-service">
+        <condition><expression>visibilityEnumId == 'WevGeneral' &amp;&amp; workEffortId</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyIssueServices.ensure#Issue" in-map="{workEffortId:workEffortId}"
+                ignore-error="true" disable-authz="true"/></actions>
+    </seca>
+    <seca id="SmithyIssueStatusLine" service="update#mantle.work.effort.WorkEffort" when="post-service">
+        <condition><expression>statusChanged &amp;&amp; workEffortId</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyIssueServices.note#TaskStatus"
+                in-map="{workEffortId:workEffortId, oldStatusId:context.oldStatusId}" ignore-error="true" disable-authz="true"/></actions>
+    </seca>
+</secas>
