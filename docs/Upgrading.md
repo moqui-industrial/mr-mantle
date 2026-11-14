@@ -194,3 +194,7 @@ moqui load location=runtime/components/addon/mr-boss/data/BossSetupSalesData.xml
 deployment that changed them loads only the P20 block's rows (the end of the file). Then start the server and refresh
 `mantle-sales-pipeline` and `mantle-sales-quotes` from Admin's data readiness, so the index takes the new mapping and the
 quotes already written.
+
+The same phase's review adds the request for quote acknowledgement (two SalesPolicy columns, which the table check adds on
+start, off until an organization turns it on in Sales' defaults) and its delivery source and mail template, seed rows in
+`SalesQuoteIssueData` that the `moqui load types=seed` above loads too.

@@ -1,0 +1,18 @@
+<#--
+This software is in the public domain under CC0 1.0 Universal plus a Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<#-- Mantle's default acknowledgement of a request for quote made from mail (locked, F70; impl-sales P20 review): the organization's
+     own text takes this one's place by SalesPolicy.rfqAcknowledgeTextLocation. It sees only its map: requestId (the reference) and
+     sellerName. Nothing of the request (its subject, text or files) is echoed. -->
+<p>${localize('Thank you for your request for a quote. We have received it and will reply to you.')}</p>
+<p>${localize('Your reference is')} ${requestId}.</p>
+<p>${localize('Kind regards')},<br>${sellerName}</p>

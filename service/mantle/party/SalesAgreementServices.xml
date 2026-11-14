@@ -91,6 +91,24 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="termTypes" from="found.termTypes || []"/>
         </actions>
     </service>
+    <service verb="get" noun="SalesAgreementPrint" allow-remote="false" read-only="true">
+        <description>The agreement's print as it is now (design-sales §7 AgreementDetail, §16 Agreement; html-print and PDF; Sales P20
+            review): its parties, items with their negotiated prices, terms and text from the agreement's own records, marked a draft
+            until it is active. For one who reads the agreement (a Sales reader of its organization); another organization's, a
+            purchase agreement and a missing one RECORD_UNAVAILABLE alike. No cost, margin or linked orders.</description>
+        <in-parameters><parameter name="agreementId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="agreementId"/>
+            <parameter name="printHtml"/>
+            <parameter name="fileName"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/SalesAgreements.js').execute('agreementPrint', context)"/>
+            <set field="agreementId" from="out.agreementId"/>
+            <set field="printHtml" from="out.printHtml"/>
+            <set field="fileName" from="out.fileName"/>
+        </actions>
+    </service>
     <service verb="create" noun="SalesAgreement" allow-remote="false">
         <description>NewAgreement (design §7): a draft customer agreement at revision 1 of a selling organization of the caller's scope
             (else the default one) with a customer that is an account of it or shared, a sales (AgrSales, the default) or product

@@ -378,7 +378,10 @@ along with this software (see the LICENSE.md file). If not, see
             it. The message's Message-ID is its identity, so the same mail delivered twice makes one request. A team is taken only when
             the rule's owner works for its organization (TEAM_UNAVAILABLE otherwise) and holds SALES_QUOTE_EDIT (RULE_NOT_ALLOWED
             otherwise, nothing filed; check#LeadRuleOwner refuses such a rule when it is saved too). Answers stopProcessing, so a later
-            rule (the lead intake's) does not take the same mail.</description>
+            rule (the lead intake's) does not take the same mail. Sales P20 review: when the organization's SalesPolicy turns it on
+            (rfqAcknowledge), a new request whose sender matched a contact or account is acknowledged once to the mail's From
+            address through the delivery ledger (MdsrcSalesRfqAck, transactional, from the organization, its suppressions applied),
+            never automatic, list or system mail; a failure to queue it is logged and never the request's.</description>
         <in-parameters>
             <parameter name="emailMessageId" required="true"/>
             <parameter name="emailAccountId"/>
@@ -390,12 +393,39 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="requestId"/>
             <parameter name="alreadyApplied" type="Boolean"/>
             <parameter name="stopProcessing" type="Boolean"/>
+            <parameter name="acknowledgementDeliveryId"/>
         </out-parameters>
         <actions>
             <set field="made" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('quoteRequestFromEmail', context)"/>
             <set field="requestId" from="made.requestId"/>
             <set field="alreadyApplied" from="!!made.alreadyApplied"/>
             <set field="stopProcessing" from="!!made.stopProcessing"/>
+            <set field="acknowledgementDeliveryId" from="made.acknowledgementDeliveryId || null"/>
+        </actions>
+    </service>
+    <service verb="build" noun="QuoteRequestAcknowledgement" allow-remote="false">
+        <description>The delivery ledger's build of a request for quote's acknowledgement (MdsrcSalesRfqAck; each attempt; Sales P20
+            review, design-sales §16): suppressed once the request is gone or the organization's SalesPolicy no longer asks for it;
+            else the organization as sender (none fails the delivery), the subject naming the request's reference and the
+            organization's stored text rendered locked with its explicit map (requestId, sellerName: nothing of the request's
+            content), marked an automatic reply. The address is the one queued, the mail's sender.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="suppress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="body"/>
+            <parameter name="extraHeaders" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="built" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesQuoteRequests.js').execute('buildAcknowledgement', context)"/>
+            <set field="suppress" from="built.suppress || null"/>
+            <set field="bodyParameters" from="built.bodyParameters || null"/>
+            <set field="body" from="built.body || null"/>
+            <set field="extraHeaders" from="built.extraHeaders || null"/>
         </actions>
     </service>
     <service verb="store" noun="QuoteRequestItem" allow-remote="false">

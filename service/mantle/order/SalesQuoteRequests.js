@@ -444,9 +444,176 @@ function quoteRequestFromEmail(p) {
             [],
             {kind: "email", message}
         )
-        return {requestId, alreadyApplied: false, stopProcessing: true}
+        // P20 review: the acknowledgement, once, when the organization asks for it (never the request's failure)
+        const acknowledgementDeliveryId = acknowledge(requestId, team.organizationPartyId, parties, message)
+        return {requestId, alreadyApplied: false, stopProcessing: true, acknowledgementDeliveryId}
     } finally {
         if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
+// ===== P20 review: the RFQ acknowledgement (design-sales §16; impl-sales §4 Nov 14, the user's call) =====
+// A request made from mail is acknowledged through the delivery ledger from the intake's organization (a transactional delivery
+// naming it, so its suppressions apply: a hard bounce stops it), only when the organization's SalesPolicy turns it on
+// (rfqAcknowledge Y; off by default), at most once a request (the ledger's key is the request), only to the address the mail came
+// from (its From, which matched a contact or account of the organization: an unknown sender gets none, so the intake answers no
+// forged or unknown address) and never to automatic, list, bulk or system mail. Its text is the organization's stored
+// .html.fancy-locked resource (rfqAcknowledgeTextLocation, else Mantle's default) with an explicit map: the request's reference and
+// the seller's name, nothing of the request's content. The attempt runs once the request commits; the mail goes out marked as an
+// automatic reply (RFC 3834), so a responder does not answer it.
+const ackSource = "MdsrcSalesRfqAck"
+const ackTemplate = "MANTLE_SALES_RFQ_ACK"
+const ackTextLocation = "component://mr-mantle/template/order/SalesQuoteRequestAck.html.fancy-locked"
+const ackBodyLocation = "component://mr-mantle/template/order/SalesQuoteEmail.html.fancy"
+const ackEventPrefix = "SalesRfqAck:"
+const approvals = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
+const ackOn = organizationPartyId => approvals().policyOf(organizationPartyId)?.rfqAcknowledge === "Y"
+// A header's value in a stored message's headers (its folded lines joined), or null.
+function headerOf(headers, name) {
+    let found = null
+    for (const line of String(headers || "").split(/\r?\n/)) {
+        if (found != null) {
+            if (/^[ \t]/.test(line)) {
+                found += " " + line.trim()
+                continue
+            }
+            break
+        }
+        const colon = line.indexOf(":")
+        if (colon > 0 && line.substring(0, colon).trim().toLowerCase() === name.toLowerCase())
+            found = line.substring(colon + 1).trim()
+    }
+    return found
+}
+// Why a mail gets no automatic answer (the mail client's automatic reply's rules, RFC 3834), or null.
+const systemSender = /^(mailer-daemon|postmaster|no[-_.]?reply|do[-_.]?not[-_.]?reply|bounces?|listserv|majordomo)([+@-]|$)/i
+function automated(message) {
+    const sender = String(message.fromAddress || "")
+        .trim()
+        .toLowerCase()
+    if (!sender.includes("@")) return "no sender"
+    if (systemSender.test(sender)) return "a no-reply or system sender"
+    const account = message.emailAccountId
+        ? one("moqui.basic.email.EmailAccount", {emailAccountId: message.emailAccountId})
+        : null
+    const own = new Set(
+        [account?.emailAddress]
+            .concat(
+                rows("moqui.basic.email.EmailIdentity", {emailAccountId: message.emailAccountId || "-"}).map(
+                    row => row.emailAddress
+                )
+            )
+            .filter(Boolean)
+            .map(address => String(address).trim().toLowerCase())
+    )
+    if (own.has(sender)) return "mail from the mailbox itself"
+    const headers = message.headersString
+    for (const name of ["List-Id", "List-Unsubscribe", "List-Post", "X-Autoreply", "X-Autorespond", "X-Auto-Response-Suppress"])
+        if (headerOf(headers, name) != null) return "the mail has " + name
+    const precedence = String(headerOf(headers, "Precedence") || "").toLowerCase()
+    if (["bulk", "list", "junk", "auto_reply"].includes(precedence)) return "the mail has Precedence: " + precedence
+    const submitted = String(headerOf(headers, "Auto-Submitted") || "").toLowerCase()
+    if (submitted && submitted !== "no") return "the mail has Auto-Submitted: " + submitted
+    const returnPath = headerOf(headers, "Return-Path")
+    if (returnPath != null && /^<\s*>$/.test(returnPath.trim())) return "a bounce"
+    return null
+}
+// Queue the acknowledgement of a request just made from a mail (its attempt registered for when the request commits): its delivery
+// id, or null when none is due. A failure is logged with the request and never fails it.
+function acknowledge(requestId, organizationPartyId, parties, message) {
+    ec.message.pushErrors()
+    try {
+        if (!ackOn(organizationPartyId)) return null
+        const recipientPartyId = parties.contactPartyId || parties.customerPartyId || null
+        const toAddress = text(message.fromAddress)?.toLowerCase() || null
+        if (!recipientPartyId || !toAddress) return null
+        const why = automated(message)
+        if (why) {
+            ec.logger.info("Request for quote " + requestId + " is not acknowledged: " + why)
+            return null
+        }
+        const queued = call("mantle.party.MessageServices.queue#Delivery", {
+            eventKey: ackEventPrefix + requestId,
+            sourceEnumId: ackSource,
+            recipientPartyId,
+            toAddress,
+            templateKey: ackTemplate,
+            // the intake's organization: the delivery meets its suppressions (a hard bounce) beside every organization's
+            organizationPartyId,
+            transactional: true
+        })
+        if (queued.created)
+            ec.service
+                .special()
+                .name("mantle.party.MessageServices.attempt#Delivery")
+                .parameters({deliveryId: queued.deliveryId})
+                .registerOnCommit()
+        return queued.deliveryId || null
+    } catch (error) {
+        ec.logger.error(
+            "Request for quote " + requestId + " was made but not acknowledged: " + String(error.message).split("\n")[0]
+        )
+        return null
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
+// An organization's own email, the primary one first (never a person's).
+function organizationEmail(partyId) {
+    const mechRows = rows("mantle.party.contact.PartyContactMech", {partyId}).filter(row => lib.active(row))
+    if (!mechRows.length) return null
+    const mechs = Object.fromEntries(
+        Array.from(
+            find("mantle.party.contact.ContactMech")
+                .condition(
+                    "contactMechId",
+                    "in",
+                    mechRows.map(row => row.contactMechId)
+                )
+                .condition("contactMechTypeEnumId", "CmtEmailAddress")
+                .list()
+        ).map(mech => [mech.contactMechId, mech])
+    )
+    const ordered = mechRows
+        .filter(row => mechs[row.contactMechId])
+        .sort((a, b) => (b.contactMechPurposeId === "EmailPrimary" ? 1 : 0) - (a.contactMechPurposeId === "EmailPrimary" ? 1 : 0))
+    return text(mechs[ordered[0]?.contactMechId]?.infoString)
+}
+// build#QuoteRequestAcknowledgement (each attempt): suppressed once the request is gone or no longer an RFQ, or the organization has
+// turned the acknowledgement off; else the address queued (the mail's sender), the organization as sender (none fails the delivery,
+// sent again once it has an email), the subject with the reference and the organization's text rendered locked.
+function buildAcknowledgement(p) {
+    const requestId = String(p.eventKey || "").startsWith(ackEventPrefix)
+        ? String(p.eventKey).substring(ackEventPrefix.length)
+        : ""
+    const request = requestId ? one(REQUEST, {requestId}) : null
+    if (!request || request.requestTypeEnumId !== rfqType) return {suppress: "The request for quote is gone"}
+    const organizationPartyId = rows(PARTY, {requestId, roleTypeId: roles.organization})[0]?.partyId || null
+    if (!organizationPartyId) return {suppress: "The request for quote has no organization"}
+    if (!ackOn(organizationPartyId)) return {suppress: "The organization does not acknowledge requests for quote"}
+    const fromAddress = organizationEmail(organizationPartyId)
+    if (!fromAddress) throw new Error(partyName(organizationPartyId) + " has no email address to acknowledge the request from")
+    const sellerName = partyName(organizationPartyId)
+    const location = text(approvals().policyOf(organizationPartyId)?.rfqAcknowledgeTextLocation) || ackTextLocation
+    let textHtml = ""
+    try {
+        if (ec.resource.getLocationReference(location).getExists())
+            textHtml = ec.resource.template(location, {requestId, sellerName}) || ""
+    } catch (error) {
+        ec.logger.error(
+            "The acknowledgement text of " + organizationPartyId + " at " + location + " did not render: " + error.message
+        )
+    }
+    if (!textHtml) throw new Error("The acknowledgement text of " + sellerName + " is empty")
+    return {
+        bodyParameters: {
+            subject: L("Request for quote received") + " · " + requestId + " · " + sellerName,
+            fromAddress,
+            fromName: sellerName
+        },
+        body: ec.resource.template(ackBodyLocation, {note: null, textHtml}),
+        extraHeaders: {"Auto-Submitted": "auto-replied", "X-Auto-Response-Suppress": "All"}
     }
 }
 
@@ -1241,6 +1408,7 @@ const operations = {
     getQuoteRequest,
     createQuoteRequest,
     quoteRequestFromEmail,
+    buildAcknowledgement,
     storeQuoteRequestItem,
     updateQuoteRequest,
     createQuoteFromRequest,

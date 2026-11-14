@@ -676,3 +676,94 @@ feature("a warranty claim's chargeable line becomes a quote without its diagnosi
         r.salesNotices.concat(r.serviceNotices).every(notice => !/water|Diagnosis|damage|180/i.test(notice.titleText))
     }
 })
+
+// Sales P20 review (design-sales §16 RFQ acknowledgement; impl-sales §4 Nov 14, the user's call)
+feature("an organization that turns it on acknowledges a mailed request once, to its sender, with its reference alone", {
+    when() {
+        const D = "mantle.party.MessageDelivery"
+        const ackOf = requestId => rowsOf(D, {eventKey: "SalesRfqAck:" + requestId})
+        // the first feature's request came while A had no SalesPolicy: none
+        const offBefore = ackOf(state.mailRequest)
+        const received = (key, values) =>
+            make(
+                "moqui.basic.email.EmailMessage",
+                Object.assign(
+                    {
+                        emailMessageId: prefix + "_" + key,
+                        emailAccountId: prefix + "_MAIL",
+                        statusId: "ES_RECEIVED",
+                        subject: "Quote for 40 shelves",
+                        bodyText: "Please quote 40 shelves in oak, confidential budget 9000.",
+                        fromAddress: "buyer@acme.example",
+                        toAddresses: "sales+rfq@quotes-a.example",
+                        messageId: "<ack-" + key.toLowerCase() + "@acme.example>",
+                        receivedDate: ec.user.nowTimestamp
+                    },
+                    values
+                )
+            )
+        system(() => {
+            email(orgA, "sales@quotes-a.example")
+            received("A0", {})
+            received("A1", {})
+            // an automatic reply, and a sender who is nobody's contact
+            received("A2", {headersString: "Auto-Submitted: auto-replied\nPrecedence: bulk"})
+            received("A3", {fromAddress: "stranger@elsewhere.example"})
+        })
+        const rule = {ruleOwnerUserId: users.manager}
+        // A's SalesPolicy (the warranty feature's) leaves the acknowledgement off: none; then it turns it on
+        const off = asSystem("create#QuoteRequestFromEmail", Object.assign({emailMessageId: prefix + "_A0"}, rule))
+        system(() => call("update#mantle.sales.policy.SalesPolicy", {salesPolicyId: prefix + "_POLICY", rfqAcknowledge: "Y"}))
+        const first = asSystem("create#QuoteRequestFromEmail", Object.assign({emailMessageId: prefix + "_A1"}, rule))
+        const again = asSystem("create#QuoteRequestFromEmail", Object.assign({emailMessageId: prefix + "_A1"}, rule))
+        const automatic = asSystem("create#QuoteRequestFromEmail", Object.assign({emailMessageId: prefix + "_A2"}, rule))
+        const stranger = asSystem("create#QuoteRequestFromEmail", Object.assign({emailMessageId: prefix + "_A3"}, rule))
+        const built = asSystem("build#QuoteRequestAcknowledgement", {eventKey: "SalesRfqAck:" + first.requestId})
+        // its attempt (after the request committed, or now): handed to the mail server, never failed or suppressed by its build
+        const attempted = asSystem("mantle.party.MessageServices.attempt#Delivery", {deliveryId: first.acknowledgementDeliveryId})
+        return {
+            offBefore,
+            off,
+            offDeliveries: ackOf(off.requestId),
+            first,
+            again,
+            automatic,
+            stranger,
+            deliveries: ackOf(first.requestId),
+            automaticDeliveries: ackOf(automatic.requestId),
+            strangerDeliveries: ackOf(stranger.requestId),
+            built: JSON.parse(JSON.stringify(built)),
+            attempted: rowsOf(D, {deliveryId: first.acknowledgementDeliveryId || "-"})[0]?.stateEnumId || attempted.refused
+        }
+    },
+    then(r) {
+        r.offBefore == []
+        r.off.refused == ""
+        r.offDeliveries == []
+        r.first.refused == ""
+        r.first.requestId != r.off.requestId
+        r.again.requestId == r.first.requestId
+        r.again.alreadyApplied == true
+        // one delivery of the intake's organization, transactional, to the address the mail came from
+        r.deliveries.length == 1
+        r.first.acknowledgementDeliveryId == r.deliveries[0].deliveryId
+        r.deliveries[0].toAddress == "buyer@acme.example"
+        r.deliveries[0].recipientPartyId == ids.contact
+        r.deliveries[0].organizationPartyId == orgA
+        r.deliveries[0].transactional == "Y"
+        r.deliveries[0].sourceEnumId == "MdsrcSalesRfqAck"
+        r.automatic.refused == ""
+        r.automaticDeliveries == []
+        r.stranger.refused == ""
+        r.strangerDeliveries == []
+        // the reference and the seller, nothing of the request's content; marked an automatic reply
+        r.built.refused == ""
+        r.built.bodyParameters.subject.includes(r.first.requestId)
+        r.built.bodyParameters.fromAddress == "sales@quotes-a.example"
+        r.built.body.includes(r.first.requestId)
+        r.built.body.includes("Requests A")
+        !/shelves|oak|9000|confidential/i.test(r.built.body + r.built.bodyParameters.subject)
+        r.built.extraHeaders["Auto-Submitted"] == "auto-replied"
+        r.attempted == "MdsSent" || r.attempted == "MdsRetry" || r.attempted == "MdsUncertain"
+    }
+})
