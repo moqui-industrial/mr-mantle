@@ -1,5 +1,6 @@
-// PASS Sales: a customer's quotes (mantle.order.SalesPortalServices, P of IronStone Sales design §12.1; design §10 CustomerQuotes,
-// CustomerQuote and QuoteResponse; impl-sales P13, X6, F17, F36, F42, F48). CC0 1.0 Universal plus Grant of Patent License.
+// PASS Sales: a customer's quotes and orders (mantle.order.SalesPortalServices, P of IronStone Sales design §12.1; design §10
+// CustomerQuotes, CustomerQuote, QuoteResponse, CustomerOrders and CustomerOrder; impl-sales P13, P17, X6, F17, F36, F42, F48).
+// CC0 1.0 Universal plus Grant of Patent License. The orders' rules are in the P17 block below.
 //
 // - Every operation first finds the organization the page serves: the sales mount's target on a published site, an internal
 //   organization. Then who asks: a bearer link (ExternalAccess.check, the SalesOrder kind's QuoteView or QuoteRespond scope, bound
@@ -204,8 +205,14 @@ function stateOf(q) {
 const stateTexts = {open: "Open", accepted: "Accepted", declined: "Declined", closed: "No longer open"}
 const fileNameOf = issue =>
     String(issue.contentLocation || "").substring(String(issue.contentLocation || "").lastIndexOf("/") + 1)
+// P17 (F236): once accepted, a commercial change of the placed order moves its revision past the issue's; the quote's page then shows
+// none of the changed order's lines or totals (the issued PDF stays the offer) and points to the order's page (CustomerOrder).
+const changedSinceAccepted = q =>
+    q.response?.responseTypeEnumId === "SqrAccept" && Number(q.issue.orderRevision) !== Number(issues.revisionOf(q.order))
+const noOffer = {lines: [], productsText: "", shippingText: "", taxText: "", totalText: ""}
 function quoteView(q) {
-    const offer = issues.offerOf(q.order)
+    const changed = changedSinceAccepted(q)
+    const offer = changed ? noOffer : issues.offerOf(q.order)
     const map = issues.textMap(q.order, q.part, q.issue, "terms", "")
     const termsText = String(issues.storedText("quote", q.organizationPartyId, map) || "")
         .replace(/<\/p>|<br\s*\/?>/gi, "\n")
@@ -241,7 +248,8 @@ function quoteView(q) {
             totalText: offer.totalText,
             termsText,
             state,
-            stateText: L(stateTexts[state])
+            stateText: L(stateTexts[state]),
+            changedSinceAccepted: changed
         },
         document: q.issue.contentLocation ? {fileName: fileNameOf(q.issue)} : null,
         response: responseView(q),
@@ -291,7 +299,7 @@ function findCustomerQuotes(p) {
             customerName: customers.length > 1 ? partyName(issue.customerPartyId) : "",
             issuedText: dayText(issue.issuedDate),
             validThruText: dayText(issue.validThruDate),
-            totalText: issues.offerOf(order).totalText,
+            totalText: changedSinceAccepted(q) ? "" : issues.offerOf(order).totalText,
             state,
             stateText: L(stateTexts[state])
         })
@@ -404,8 +412,8 @@ function appReadiness(p) {
         ]
     }
 }
-// get#AccountCard: the PASS Account hub's Quotes and orders card (orders join with P17): the open quotes of the customers the
-// account acts for; none for an account that acts for no customer here.
+// get#AccountCard: the PASS Account hub's Quotes and orders card: the open quotes and (P17) open orders of the customers the account
+// acts for; none for an account that acts for no customer here.
 function accountCard(p) {
     const organizationPartyId = served(p.siteId)
     if (!ec.user.userId) signInRequired()
@@ -413,11 +421,367 @@ function accountCard(p) {
     if (!customers.length) return null
     const open = findCustomerQuotes({siteId: p.siteId, state: "open", limit: LIST_CAP}).count
     const url = apps().pageUrl(p.siteId, "sales", "/CustomerQuotes")
+    // P17: the open orders (not completed) and My orders
+    const openOrders = findCustomerOrders({siteId: p.siteId, state: "open", limit: 1}).count
+    const ordersUrl = apps().pageUrl(p.siteId, "sales", "/CustomerOrders")
     return {
         title: L("Quotes and orders"),
-        lines: [open + " " + (open === 1 ? L("open quote") : L("open quotes"))],
+        lines: [
+            open + " " + (open === 1 ? L("open quote") : L("open quotes")),
+            openOrders + " " + (openOrders === 1 ? L("open order") : L("open orders"))
+        ],
         url,
-        links: [{text: L("My quotes"), url}]
+        links: [
+            {text: L("My quotes"), url},
+            {text: L("My orders"), url: ordersUrl}
+        ]
+    }
+}
+
+// ===== P17: a customer's orders (impl-sales P17; design-sales §10 CustomerOrders, CustomerOrder; SAL-R01, F42, F48) =====
+// - Who: a bearer link (the SalesOrder kind's OrderView, made for each recipient of the storeless confirmation, SalesOrders.js
+//   orderLink) reaches its one order and never lists; a signed-in account acting for the order's customer (a contact grant of the
+//   sales app, or the customer's own verified party: actingFor) reaches every order of the customers it acts for and lists them.
+// - What: a placed sales order of the site's organization to that customer, every part the seller's to it, with no store (a store
+//   order's one public page is Shop's, F42) and not a recurring base or a template (F7); an order being changed, a cart, a quote
+//   in progress and a cancelled or rejected order are not shown. Every miss is the same NotFound.
+// - The answers: the lines and totals as text, promised dates, the accepted quote, shipments with tracking (a carrier's https link
+//   only), invoices with their open amount (Billing's InvoicePay for a signed-in account where the site mounts Billing; the page
+//   never takes payment), Support's pages for a change, cancel or return where the site mounts Support (each app checks its own
+//   access), and the stored confirmation's PDF (streamed by the facade, its location never answered). Read only.
+const CONTENT = "mantle.order.OrderContent"
+const orderStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderSent", "OrderCompleted", "OrderHold"]
+const excludedPurposes = ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"]
+const cancellableStatuses = ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"]
+const issuedInvoices = ["InvoiceFinalized", "InvoiceSent", "InvoiceAcked", "InvoicePmtRecvd"]
+const shownShipments = ["ShipPacked", "ShipShipped", "ShipDelivered"]
+const openCaseStatuses = ["ReqSubmitted", "ReqReviewed", "ReqWaitingCustomer", "ReqInProgress"]
+const orderStateTexts = {
+    OrderPlaced: "Received",
+    OrderProcessing: "Received",
+    OrderApproved: "Confirmed",
+    OrderSent: "Shipped",
+    OrderCompleted: "Completed",
+    OrderHold: "Received, being reviewed"
+}
+const ORDER_LIST_CAP = 500
+const moneyText = (value, currencyUomId) =>
+    value == null ? "" : ec.l10n.formatCurrency(ec.l10n.roundCurrency(toDecimal(value), currencyUomId), currencyUomId)
+const statusName = statusId => (statusId ? one("moqui.basic.StatusItem", {statusId})?.description || "" : "")
+const enumName = enumId => (enumId ? one("moqui.basic.Enumeration", {enumId})?.description || "" : "")
+const httpsUrl = value => (/^https:\/\/[^\s"'<>]+$/i.test(String(value || "")) ? String(value) : null)
+// The order's sales part when it is a customer's order of the organization as above, else null.
+function customerOrderPart(order, organizationPartyId, customerPartyId) {
+    if (!order || order.productStoreId || !order.placedDate || order.recurCronExpression) return null
+    if (!orderStatuses.includes(order.statusId) || excludedPurposes.includes(order.orderPurposeEnumId)) return null
+    const parts = rows(PART, {orderId: order.orderId}).sort((a, b) =>
+        String(a.orderPartSeqId).localeCompare(String(b.orderPartSeqId))
+    )
+    if (
+        !parts.length ||
+        !parts.every(row => row.vendorPartyId === organizationPartyId && row.customerPartyId === customerPartyId)
+    )
+        return null
+    return parts[0]
+}
+// The order a request reaches: a token's one order (OrderView), an order ID beside it the token's own; else a signed-in account's
+// order of a customer it acts for. {order, part, organizationPartyId, customerPartyId, via, customers}.
+function orderFor(p, organizationPartyId) {
+    const token = text(p.token)
+    const orderId = text(p.orderId)
+    if (!token && !orderId) unavailable()
+    if (!token && !ec.user.userId) signInRequired()
+    let order
+    let customerPartyId
+    let customers = []
+    if (token) {
+        const checked = access().check({token, scope: "OrderView", recordType: RECORD_TYPE, organizationPartyId})
+        if (orderId && orderId !== checked.recordId) unavailable()
+        order = one(ORDER, {orderId: checked.recordId})
+        customerPartyId = checked.partyId
+    } else {
+        order = one(ORDER, {orderId})
+        customers = actingFor(organizationPartyId)
+        customerPartyId = order
+            ? rows(PART, {orderId: order.orderId}).find(row => customers.includes(row.customerPartyId))?.customerPartyId
+            : null
+        if (!customerPartyId) unavailable()
+    }
+    const part = customerOrderPart(order, organizationPartyId, customerPartyId)
+    if (!part) unavailable()
+    return {order, part, organizationPartyId, customerPartyId, via: token ? "token" : "account", customers}
+}
+const held = order =>
+    order.statusId === "OrderHold" ||
+    rows("mantle.order.OrderHoldReason", {orderId: order.orderId}).some(row => !row.releasedDate)
+const orderStateText = order => L(held(order) ? orderStateTexts.OrderHold : orderStateTexts[order.statusId] || "")
+// The order's shipments the customer may follow: packed, shipped or delivered, each with its carrier, tracking and items of this order.
+function orderShipments(orderId) {
+    const sources = rows("mantle.shipment.ShipmentItemSource", {orderId})
+    const ids = [...new Set(sources.map(row => row.shipmentId))]
+    if (!ids.length) return []
+    return Array.from(
+        find("mantle.shipment.Shipment")
+            .condition("shipmentId", "in", ids)
+            .condition("statusId", "in", shownShipments)
+            .orderBy("shipmentId")
+            .list()
+    ).map(shipment => {
+        const segments = rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: shipment.shipmentId})
+        const carrier = segments.find(row => row.carrierPartyId && row.carrierPartyId !== "_NA_")?.carrierPartyId
+        const method = segments.find(row => row.shipmentMethodEnumId)?.shipmentMethodEnumId
+        const arrival = segments.find(row => row.estimatedArrivalDate)?.estimatedArrivalDate
+        const tracking = rows("mantle.shipment.ShipmentPackageRouteSeg", {shipmentId: shipment.shipmentId})
+            .filter(row => row.trackingCode)
+            .map(row => ({code: row.trackingCode, url: httpsUrl(row.trackingUrl)}))
+        const items = sources
+            .filter(row => row.shipmentId === shipment.shipmentId)
+            .map(row => {
+                const product = row.productId ? one("mantle.product.Product", {productId: row.productId}) : null
+                return {
+                    productText: product
+                        ? [product.pseudoId || product.productId, product.productName].filter(Boolean).join(" · ")
+                        : "",
+                    quantityText: row.quantity == null ? "" : ec.l10n.format(toDecimal(row.quantity), "#,##0.###")
+                }
+            })
+        return {
+            shipmentId: shipment.shipmentId,
+            statusText: statusName(shipment.statusId),
+            shipped: ["ShipShipped", "ShipDelivered"].includes(shipment.statusId),
+            delivered: shipment.statusId === "ShipDelivered",
+            shippedText: dayText(shipment.shipDate || shipment.estimatedShipDate),
+            arrivalText: shipment.statusId === "ShipDelivered" ? "" : dayText(arrival || shipment.estimatedArrivalDate),
+            carrierText: [carrier ? partyName(carrier) : "", enumName(method)].filter(Boolean).join(" · "),
+            tracking,
+            items
+        }
+    })
+}
+// The order's issued invoices of the organization to the customer, with their open amount, and Billing's page for a signed-in
+// account where the site's Billing serves the organization (Billing checks its own access; a link's reader pays from the invoice's
+// own link).
+function orderInvoices(o, siteId) {
+    const ids = [...new Set(rows("mantle.order.OrderItemBilling", {orderId: o.order.orderId}).map(row => row.invoiceId))]
+    if (!ids.length) return []
+    const billingMount = o.via === "account" ? apps().mount(siteId, "billing") : null
+    const billing = billingMount?.targetId === o.organizationPartyId
+    return Array.from(
+        find("mantle.account.invoice.Invoice")
+            .condition("invoiceId", "in", ids)
+            .condition("statusId", "in", issuedInvoices)
+            .condition("fromPartyId", o.organizationPartyId)
+            .condition("toPartyId", o.customerPartyId)
+            .orderBy("invoiceDate")
+            .list()
+    ).map(invoice => {
+        const totals = lib.call("mantle.account.InvoiceServices.get#InvoiceTotal", {invoiceId: invoice.invoiceId})
+        const open = toDecimal(totals.unpaidTotal ?? 0)
+        return {
+            invoiceId: invoice.invoiceId,
+            invoiceDateText: dayText(invoice.invoiceDate),
+            dueText: dayText(invoice.dueDate),
+            totalText: moneyText(totals.invoiceTotal ?? 0, invoice.currencyUomId),
+            openText: open.compare(0) > 0 ? moneyText(open, invoice.currencyUomId) : "",
+            paid: open.compare(0) <= 0,
+            billingUrl: billing
+                ? apps().pageUrl(siteId, "billing", "/InvoicePay?invoiceId=" + encodeURIComponent(invoice.invoiceId))
+                : null
+        }
+    })
+}
+// Support's pages for this order where the site mounts Support (RequestReturn, NewCustomerCase with the order and its
+// OrderCancelRequest), and whether a cancellation request is open; Support checks its own access (a link's reader through the order
+// link the page keeps in its session, as Shop's guest's).
+function orderActions(o, siteId) {
+    // (a mount serving this organization: another organization's Support or Billing would not know the order)
+    const support = apps().mount(siteId, "support")?.targetId === o.organizationPartyId
+    const supportUrl = path => (support ? apps().pageUrl(siteId, "support", path) : null)
+    const openCancel = rows("mantle.request.Request", {
+        orderId: o.order.orderId,
+        requestTypeEnumId: "RqtOrderChange",
+        orderChangeKindEnumId: "OckCancel"
+    }).some(row => openCaseStatuses.includes(row.statusId))
+    const q = "?orderId=" + encodeURIComponent(o.order.orderId)
+    return {
+        askUrl: supportUrl("/NewCustomerCase" + q),
+        requestCancelUrl:
+            cancellableStatuses.includes(o.order.statusId) && !openCancel
+                ? supportUrl("/NewCustomerCase" + q + "#OrderCancelRequest")
+                : null,
+        requestReturnUrl: orderShipments(o.order.orderId).some(row => row.shipped) ? supportUrl("/RequestReturn" + q) : null,
+        cancellationRequested: openCancel
+    }
+}
+// The order's confirmation as placed (Customer Service's stored PDF, OctOrderConfirmation, the one the confirmation mail attached),
+// or null: never made here.
+const orderDocument = orderId =>
+    rows(CONTENT, {orderId, orderContentTypeEnumId: "OctOrderConfirmation"}).sort(
+        (a, b) => Number(ms(a.contentDate)) - Number(ms(b.contentDate))
+    )[0] || null
+const contentFileName = location => String(location || "").substring(String(location || "").lastIndexOf("/") + 1)
+// The quote the order was accepted from (a placed quote: its accepted issue and response), or null.
+function acceptedQuoteOf(order) {
+    if (order.orderPurposeEnumId !== "OrpSalesQuote") return null
+    for (const issue of issues.issuesOf(order.orderId)) {
+        const response = issues.responseOf(issue.issueId)
+        if (response?.responseTypeEnumId === "SqrAccept")
+            return {
+                orderId: order.orderId,
+                revision: Number(issue.orderRevision),
+                issuedText: dayText(issue.issuedDate),
+                acceptedText: dateText(response.respondedDate),
+                purchaseOrder: response.otherPartyOrderId || ""
+            }
+    }
+    return null
+}
+function orderLines(order) {
+    const offer = issues.offerOf(order)
+    return {
+        lines: offer.lines.map(line => ({
+            productText: line.productText,
+            description: line.description,
+            quantityText: line.quantityText,
+            priceText: line.priceText,
+            amountText: line.amountText,
+            promisedText: line.requiredText || ""
+        })),
+        productsText: offer.productsText,
+        shippingText: offer.shippingText,
+        taxText: offer.taxText,
+        totalText: offer.totalText
+    }
+}
+// The delivery and billing states of an order in words, for the list.
+function deliveryText(orderId) {
+    const shipments = orderShipments(orderId)
+    if (!shipments.length) return L("Not shipped yet")
+    if (shipments.every(row => row.delivered)) return L("Delivered")
+    return shipments.some(row => row.shipped) ? L("Shipped") : L("Being prepared")
+}
+function billingText(o, siteId) {
+    const invoices = orderInvoices(o, siteId)
+    if (!invoices.length) return L("Not invoiced yet")
+    const open = invoices.filter(row => !row.paid)
+    return open.length ? L("Open") + ": " + open.map(row => row.openText).join(", ") : L("Paid")
+}
+function orderView(o, siteId) {
+    const order = o.order
+    const part = o.part
+    const document = orderDocument(order.orderId)
+    const quote = acceptedQuoteOf(order)
+    return {
+        order: Object.assign(
+            {
+                orderId: order.orderId,
+                name: order.orderName || "",
+                sellerName: partyName(o.organizationPartyId),
+                customerName: partyName(o.customerPartyId),
+                repName: issues.ownerOf(order) ? partyName(issues.ownerOf(order)) : "",
+                placedText: dayText(order.placedDate),
+                stateText: orderStateText(order),
+                purchaseOrder: part.otherPartyOrderId || "",
+                currencyUomId: order.currencyUomId || "",
+                shipByText: dayText(part.estimatedShipDate || part.shipBeforeDate),
+                deliveryByText: dayText(part.estimatedDeliveryDate)
+            },
+            orderLines(order)
+        ),
+        acceptedQuote: quote,
+        shipments: orderShipments(order.orderId),
+        invoices: orderInvoices(o, siteId),
+        document: document ? {fileName: contentFileName(document.contentLocation)} : null,
+        actions: orderActions(o, siteId),
+        // a signed-in account opens the accepted quote's page by its order; a link's reader has no quote link
+        capabilities: {quoteLink: !!quote && o.via === "account"}
+    }
+}
+// find#CustomerOrders: a signed-in account's orders of the customers it acts for at the organization, newest first; state open
+// (not completed) or all; reference matches the order or the customer's PO, ignoring case. Never a bearer link's.
+function findCustomerOrders(p) {
+    const organizationPartyId = served(p.siteId)
+    if (!ec.user.userId) signInRequired()
+    const customers = actingFor(organizationPartyId)
+    const limit = Math.min(Math.max(Number(p.limit) || 20, 1), LIST_CAP)
+    const offset = Math.max(Number(p.cursor) || 0, 0)
+    if (!customers.length) return {orderList: [], count: 0, nextCursor: null, actingFor: 0}
+    const partFind = find(PART).condition("vendorPartyId", organizationPartyId).condition("customerPartyId", "in", customers)
+    const reference = text(String(p.reference ?? "").slice(0, 60))
+    if (reference) {
+        const like = "%" + reference.replace(/[\\%_]/g, character => "\\" + character) + "%"
+        const ecf = ec.entity.conditionFactory
+        partFind.condition(
+            ecf.makeCondition(
+                [
+                    ecf.makeCondition("orderId", "like", like).ignoreCase(),
+                    ecf.makeCondition("otherPartyOrderId", "like", like).ignoreCase()
+                ],
+                "or"
+            )
+        )
+    }
+    const ids = [
+        ...new Set(
+            Array.from(
+                partFind
+                    .selectField("orderId")
+                    .limit(ORDER_LIST_CAP * 2)
+                    .list()
+            ).map(row => row.orderId)
+        )
+    ]
+    if (!ids.length) return {orderList: [], count: 0, nextCursor: null, actingFor: customers.length}
+    const orders = Array.from(
+        find(ORDER)
+            .condition("orderId", "in", ids)
+            .condition("productStoreId", "is-null", null)
+            .condition("statusId", "in", p.state === "open" ? orderStatuses.filter(id => id !== "OrderCompleted") : orderStatuses)
+            .orderBy("-placedDate")
+            .orderBy("-orderId")
+            .limit(ORDER_LIST_CAP)
+            .list()
+    )
+    const all = []
+    for (const order of orders) {
+        const customerPartyId = rows(PART, {orderId: order.orderId}).find(row =>
+            customers.includes(row.customerPartyId)
+        )?.customerPartyId
+        const part = customerOrderPart(order, organizationPartyId, customerPartyId)
+        if (part) all.push({order, part, organizationPartyId, customerPartyId, via: "account"})
+    }
+    const page = all.slice(offset, offset + limit).map(o => ({
+        orderId: o.order.orderId,
+        name: o.order.orderName || "",
+        customerName: customers.length > 1 ? partyName(o.customerPartyId) : "",
+        placedText: dayText(o.order.placedDate),
+        purchaseOrder: o.part.otherPartyOrderId || "",
+        totalText: moneyText(o.order.grandTotal ?? 0, o.order.currencyUomId),
+        stateText: orderStateText(o.order),
+        deliveryText: deliveryText(o.order.orderId),
+        billingText: billingText(o, p.siteId)
+    }))
+    return {
+        orderList: page,
+        count: all.length,
+        nextCursor: offset + limit < all.length ? String(offset + limit) : null,
+        actingFor: customers.length
+    }
+}
+// get#CustomerOrder: the order a link or a signed-in account reaches: what was ordered, its delivery and billing, read only.
+function getCustomerOrder(p) {
+    const organizationPartyId = served(p.siteId)
+    return orderView(orderFor(p, organizationPartyId), p.siteId)
+}
+// get#OrderDocument: the order's stored confirmation as placed for the download (its location stays with the transport).
+function getOrderDocument(p) {
+    const organizationPartyId = served(p.siteId)
+    const o = orderFor(p, organizationPartyId)
+    const document = orderDocument(o.order.orderId)
+    if (!document?.contentLocation) unavailable()
+    return {
+        file: {mimeType: "application/pdf", filename: contentFileName(document.contentLocation)},
+        location: document.contentLocation
     }
 }
 
@@ -428,7 +792,11 @@ const operations = {
     getQuoteResponse,
     respondCustomerQuote,
     appReadiness,
-    accountCard
+    accountCard,
+    // P17
+    findCustomerOrders,
+    getCustomerOrder,
+    getOrderDocument
 }
 const internalOperations = new Set(["appReadiness"])
 ;({

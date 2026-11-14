@@ -1650,6 +1650,30 @@
         service: 'mantle.product.StoreChannelServices.get#ShopFeed',
         fields: ['siteId', 'feedKey', 'extension'],
     },
+    // Dogfood DG6 (plans/Dogfood.md §6.3): mailing lists. An mbox archive imported into a category, the invitations of
+    // a list's members, and a held message claimed by its sender
+    importMbox: {
+        service: 'mantle.forum.ImportServices.import#Mbox',
+        fields: [
+            'siteId',
+            'contactListId',
+            'archiveName',
+            'checksum',
+            'sourceName',
+        ],
+    },
+    getMboxImport: {
+        service: 'mantle.forum.ImportServices.get#MboxImport',
+        fields: ['siteId', 'importId'],
+    },
+    inviteListMembers: {
+        service: 'mantle.forum.DeliveryServices.invite#ListMembers',
+        fields: ['siteId', 'contactListId', 'addresses', 'operationId'],
+    },
+    claimHeldMail: {
+        service: 'mantle.forum.DeliveryServices.claim#HeldMail',
+        fields: ['siteId', 'token', 'operationId'],
+    },
     // IronStone Sales P13 (impl-sales P13; design-sales §10): PASS Sales' customer quotes (mantle.order.SalesPortalServices)
     findSalesQuotes: {
         service: 'mantle.order.SalesPortalServices.find#CustomerQuotes',
@@ -1683,28 +1707,17 @@
         service: 'mantle.order.SalesPortalServices.get#QuoteResponse',
         fields: ['siteId', 'token', 'orderId'],
     },
-    // Dogfood DG6 (plans/Dogfood.md §6.3): mailing lists. An mbox archive imported into a category, the invitations of
-    // a list's members, and a held message claimed by its sender
-    importMbox: {
-        service: 'mantle.forum.ImportServices.import#Mbox',
-        fields: [
-            'siteId',
-            'contactListId',
-            'archiveName',
-            'checksum',
-            'sourceName',
-        ],
+    // IronStone Sales P17 (impl-sales P17; design-sales §10): PASS Sales' customer orders, reads only
+    findSalesOrders: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerOrders',
+        fields: ['siteId', 'state', 'reference', 'cursor', 'limit'],
     },
-    getMboxImport: {
-        service: 'mantle.forum.ImportServices.get#MboxImport',
-        fields: ['siteId', 'importId'],
+    getSalesOrder: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerOrder',
+        fields: ['siteId', 'token', 'orderId'],
     },
-    inviteListMembers: {
-        service: 'mantle.forum.DeliveryServices.invite#ListMembers',
-        fields: ['siteId', 'contactListId', 'addresses', 'operationId'],
-    },
-    claimHeldMail: {
-        service: 'mantle.forum.DeliveryServices.claim#HeldMail',
-        fields: ['siteId', 'token', 'operationId'],
+    getSalesOrderDocument: {
+        service: 'mantle.order.SalesPortalServices.get#OrderDocument',
+        fields: ['siteId', 'token', 'orderId'],
     },
 })
