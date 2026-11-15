@@ -28,7 +28,8 @@ const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle
 const {find, one, denied, call} = lib
 const access = lib.access
 const S = "mantle.party.MessageSuppression"
-const channels = {MdcEmail: "Email"}
+// P22: a text message's number too, kept in E.164 (+ and its digits)
+const channels = {MdcEmail: "Email", MdcSms: "Text message"}
 // the reasons that stop every delivery, transactional notices too (the user's call, Nov 14); any other stops promotional ones only
 const blocksEveryDelivery = ["MsrHardBounce"]
 const text = value => (value == null ? "" : String(value).trim())
@@ -38,6 +39,11 @@ function normalize(channelEnumId, destination) {
     const value = text(destination).toLowerCase()
     if (!value) return null
     if ((channelEnumId || "MdcEmail") === "MdcEmail") return /^[^\s@]+@[^\s@]+$/.test(value) ? value : null
+    // P22: a phone number written with its country code (+1 555 123 4567), kept as + and its digits
+    if (channelEnumId === "MdcSms") {
+        const number = value.replace(/[\s().-]/g, "")
+        return /^\+[1-9]\d{6,14}$/.test(number) ? number : null
+    }
     return value
 }
 // An address shown masked: its first character and its domain.
@@ -183,9 +189,15 @@ function storeSuppression(p) {
     if (action !== "add") throw new Error("Choose add or end")
     if (!scope.add) denied("PERMISSION_DENIED", "Adding a suppression needs the audience edit or suppression review permission")
     const channelEnumId = text(p.channelEnumId) || "MdcEmail"
-    if (!channels[channelEnumId]) denied("CHANNEL_INVALID", "Suppressions are kept for email")
+    if (!channels[channelEnumId]) denied("CHANNEL_INVALID", "Suppressions are kept for email and text messages")
     const destinationKey = normalize(channelEnumId, p.destination)
-    if (!destinationKey) denied("DESTINATION_INVALID", "Give the email address to suppress")
+    if (!destinationKey)
+        denied(
+            "DESTINATION_INVALID",
+            channelEnumId === "MdcSms"
+                ? "Give the phone number with its country code, as +15551234567"
+                : "Give the email address to suppress"
+        )
     const organizationPartyId = text(p.organizationPartyId) || null
     // a Marketing editor blocks for an organization of their scope; every organization's block is a reviewer's or administrator's
     if (!scope.all) {
@@ -235,7 +247,8 @@ function addFromIntake(p) {
         destinationKey,
         organizationPartyId: text(p.organizationPartyId) || null,
         reasonEnumId: text(p.reasonEnumId) || "MsrHardBounce",
-        sourceEnumId: "MssReport",
+        // P22: a STOP reply's source (MssSmsReply), else a delivery or abuse report
+        sourceEnumId: text(p.sourceEnumId) || "MssReport",
         sourceRef: text(p.sourceRef).slice(0, 255) || null,
         evidenceText: text(p.evidenceText) || "Delivery report",
         fromDate: ec.user.nowTimestamp,

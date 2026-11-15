@@ -18,6 +18,9 @@
  *   relays, the profile itself).
  * - forDelivery: what the ledger's attempt sends with for a delivery naming a profile (its relay, sender, reply-to and VERP
  *   bounce address; its throttle and quiet hours), or why it waits.
+ * - P22: an SMS profile (channel MdcSms) is bound to one of the organization's messaging numbers instead of a relay, sender and
+ *   bounce domain, ready only while the number is the organization's with a messaging bridge (MessageSms.js smsChecks), with a
+ *   configured cost a segment for the estimate before approval; its deliveries go from the number (forDelivery's fromNumber).
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
@@ -25,7 +28,9 @@ const {find, one, denied, call, ms} = lib
 const access = lib.access
 const P = "mantle.party.MessageSendingProfile"
 const SERVER = "moqui.basic.email.EmailServer"
-const channels = {MdcEmail: "Email"}
+const channels = {MdcEmail: "Email", MdcSms: "Text message"}
+// P22: an SMS profile's number, readiness and estimate
+const sms = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js")
 const bounceLocal = "bounces"
 const text = value => (value == null ? "" : String(value).trim())
 const blank = value => text(value) === ""
@@ -140,6 +145,12 @@ function readinessOf(profile) {
     if ((ms(profile.fromDate) ?? -Infinity) > at || (profile.thruDate != null && ms(profile.thruDate) <= at))
         add("profile", "In effect", "blocked", "The profile is not in effect now", fixRoutes.profile)
     else add("profile", "In effect", "ready", "In effect")
+    // P22: an SMS profile's number and its messaging bridge, in place of the email checks
+    if (profile.channelEnumId === "MdcSms") {
+        sms().smsChecks(profile, add)
+        const ready = checks.every(check => check.state !== "blocked")
+        return {ready, checks, reasons: checks.filter(check => check.state === "blocked").map(check => check.message)}
+    }
     // transport: the relay Admin approved
     const server = blank(profile.emailServerId) ? null : one(SERVER, {emailServerId: profile.emailServerId})
     let relayTested = false
@@ -260,6 +271,11 @@ function profileDisplay(row, scope, withReadiness = true) {
         trackingText: enumText(row.trackingPolicyEnumId || "MtrNone"),
         bounceDomain: row.bounceDomain || "",
         siteId: row.siteId || null,
+        // P22: an SMS profile's number and its cost a segment
+        fromPhoneNumber: row.fromPhoneNumber || "",
+        segmentCost: row.segmentCost ?? null,
+        segmentCostUomId: row.segmentCostUomId || null,
+        senderText: row.channelEnumId === "MdcSms" ? row.fromPhoneNumber || "" : row.fromAddress || "",
         fromDate: row.fromDate,
         thruDate: row.thruDate,
         lastCheckText: row.lastCheckDate
@@ -297,7 +313,11 @@ function findProfiles(p) {
         )
     const found = lib.page(query, p, "profileList", query.count())
     found.profileList = found.rows.map(row => profileDisplay(row, scope))
-    return Object.assign(found, {canCreate: scope.configure, relayOptions: scope.configure ? relayOptions() : []})
+    return Object.assign(found, {
+        canCreate: scope.configure,
+        relayOptions: scope.configure ? relayOptions() : [],
+        numberOptions: scope.configure ? numberOptions(ids) : []
+    })
 }
 // get#SendingProfile: one profile with its readiness, and for a configurer the relays and trackings to choose from.
 function getProfile(p) {
@@ -308,8 +328,21 @@ function getProfile(p) {
         profile: profileDisplay(row, scope, false),
         ready: readiness.ready,
         checkList: readiness.checks,
-        relayOptions: scope.configure ? relayOptions() : []
+        relayOptions: scope.configure ? relayOptions() : [],
+        numberOptions: scope.configure ? numberOptions([row.organizationPartyId]) : []
     }
+}
+// P22: the messaging numbers of the organizations an SMS profile may be bound to, each named with its organization.
+function numberOptions(organizationPartyIds) {
+    const out = []
+    for (const organizationPartyId of organizationPartyIds.slice(0, 50))
+        for (const option of sms().organizationNumbers(organizationPartyId))
+            out.push({
+                value: option.value,
+                label: option.label + " — " + organizationName(organizationPartyId),
+                organizationPartyId
+            })
+    return out
 }
 // check#SendingProfile: the readiness of one profile now; with refresh, a configurer's check is kept as the last one.
 function checkProfile(p) {
@@ -378,7 +411,11 @@ function storeProfile(p) {
     const profileName = text(value("profileName"))
     if (!profileName) denied("NAME_REQUIRED", "Give the profile a name")
     const channelEnumId = text(value("channelEnumId")) || "MdcEmail"
-    if (!channels[channelEnumId]) denied("CHANNEL_INVALID", "Sending profiles are kept for email")
+    if (!channels[channelEnumId]) denied("CHANNEL_INVALID", "Sending profiles are kept for email and text messages")
+    if (existing && existing.channelEnumId && existing.channelEnumId !== channelEnumId)
+        denied("CHANNEL_INVALID", "A profile keeps its channel: make a new one")
+    // P22: an SMS profile, bound to one of the organization's messaging numbers
+    if (channelEnumId === "MdcSms") return storeSmsProfile(p, existing, value, organizationPartyId, profileName)
     const emailServerId = text(value("emailServerId"))
     if (!emailServerId || !one(SERVER, {emailServerId}) || accountOwned(emailServerId))
         denied("RELAY_INVALID", "Choose a relay Admin approved")
@@ -439,6 +476,62 @@ function storeProfile(p) {
     }
 }
 
+// P22: an SMS profile's values: one of the organization's messaging numbers (NUMBER_INVALID), the purpose, throttle, quiet hours,
+// its cost a segment and dates; no relay, sender or bounce domain.
+function storeSmsProfile(p, existing, value, organizationPartyId, profileName) {
+    const fromPhoneNumber = sms().e164Text(value("fromPhoneNumber"))
+    if (
+        !fromPhoneNumber ||
+        !sms()
+            .organizationNumbers(organizationPartyId)
+            .some(option => option.value === fromPhoneNumber)
+    )
+        denied("NUMBER_INVALID", "Choose one of the organization's messaging numbers")
+    const purposeEnumId = text(value("purposeEnumId")) || null
+    if (purposeEnumId && !one("moqui.basic.Enumeration", {enumId: purposeEnumId, enumTypeId: "MessageTemplatePurpose"}))
+        denied("VALUE_INVALID", "Unknown purpose " + purposeEnumId)
+    const throttle = value("throttlePerHour")
+    const throttlePerHour = blank(throttle) ? null : Number(throttle)
+    if (throttlePerHour != null && (!Number.isInteger(throttlePerHour) || throttlePerHour < 1 || throttlePerHour > 1000000))
+        denied("VALUE_INVALID", "The throttle is a whole number of messages an hour")
+    const quietFrom = timeOf(value("quietFrom"), "The start of the quiet hours")
+    const quietThru = timeOf(value("quietThru"), "The end of the quiet hours")
+    if (!quietFrom !== !quietThru) denied("VALUE_INVALID", "Give both ends of the quiet hours, or neither")
+    const cost = value("segmentCost")
+    const segmentCost = blank(cost) ? null : /^\d+(\.\d+)?$/.test(text(cost)) ? toNumber(text(cost)) : NaN
+    if (segmentCost != null && (!Number.isFinite(segmentCost) || segmentCost < 0 || segmentCost > 100))
+        denied("VALUE_INVALID", "The cost a segment is an amount of 0 or more")
+    const segmentCostUomId = text(value("segmentCostUomId")) || null
+    if (segmentCostUomId && !one("moqui.basic.Uom", {uomId: segmentCostUomId}))
+        denied("VALUE_INVALID", "Unknown currency " + segmentCostUomId)
+    const fromDate = value("fromDate") || ec.user.nowTimestamp
+    const thruDate = value("thruDate") || null
+    if (thruDate && ms(thruDate) <= ms(fromDate)) denied("DATE_INVALID", "A profile ends after it begins")
+    const values = {
+        organizationPartyId,
+        profileName: profileName.slice(0, 120),
+        channelEnumId: "MdcSms",
+        fromPhoneNumber,
+        purposeEnumId,
+        throttlePerHour,
+        quietFrom,
+        quietThru,
+        timeZone: text(value("timeZone")).slice(0, 40) || null,
+        trackingPolicyEnumId: "MtrNone",
+        segmentCost,
+        segmentCostUomId,
+        fromDate,
+        thruDate
+    }
+    if (existing) {
+        call("update#" + P, Object.assign({sendingProfileId: existing.sendingProfileId}, values))
+        return {sendingProfileId: existing.sendingProfileId}
+    }
+    return {
+        sendingProfileId: call("create#" + P, Object.assign(values, {createdByUserId: ec.user.userId || null})).sendingProfileId
+    }
+}
+
 // ===== the ledger (F13) =====
 // The minutes of the day in a time zone at a time.
 function minutesIn(timeZone, atMs) {
@@ -483,6 +576,9 @@ function forDelivery(sendingProfileId, deliveryId, bounceKey) {
             .count()
         if (sentLastHour >= Number(profile.throttlePerHour)) return {wait: {minutes: 5, reason: "The sending profile's throttle"}}
     }
+    // P22: a text goes from the profile's number (org.moqui.SmsServices.send#SmsMessage fromNumber)
+    if (profile.channelEnumId === "MdcSms")
+        return {send: {fromNumber: profile.fromPhoneNumber}, organizationPartyId: profile.organizationPartyId}
     return {
         send: {
             emailServerId: profile.emailServerId,

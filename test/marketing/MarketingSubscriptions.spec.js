@@ -549,3 +549,82 @@ feature(
         }
     }
 )
+
+feature("P22 review: a text message topic offered on the site is on the preferences page to leave, never to join", {
+    when() {
+        ec.user.setEffectiveTime(Date.now() + 5000)
+        const texts = prefix + "_TEXTS"
+        const partyId = partyOf(shared.newcomer)
+        system(() => {
+            make("mantle.marketing.contact.ContactList", {
+                contactListId: texts,
+                contactListName: "Text deals",
+                contactListTypeEnumId: "MARKETING",
+                contactMechTypeEnumId: "CmtTelecomNumber",
+                ownerPartyId: orgA
+            })
+            make("mantle.marketing.contact.ContactListPolicy", {
+                contactListId: texts,
+                fromDate: new Date(Date.now() - 10 * dayMs),
+                confirmationRequired: "Y",
+                purposeEnumId: "PcpSms",
+                publicOffer: "Y",
+                publicSiteId: site
+            })
+        })
+        const token = system(
+            () =>
+                lib.run("mantle.party.ConsentServices.create#UnsubscribeToken", {
+                    contactListId: list.garden,
+                    partyId,
+                    siteId: site
+                }).token
+        )
+        const hub = (verb, input) => {
+            logout()
+            try {
+                return lib.run("mantle.public.AccountHubServices." + verb, {input: Object.assign({siteId: site, token}, input)})
+                    .result
+            } finally {
+                login("john.doe")
+            }
+        }
+        const store = on => hub("store#EmailPreferences", {choices: JSON.stringify({marketing: {topics: {[texts]: on}}})})
+        const textTopic = shown => shown.marketing?.topics?.find(t => t.contactListId === texts) || null
+        // not on it: shown as a text message topic, and turning it on joins nothing
+        const before = textTopic(hub("get#EmailPreferences", {}))
+        store(true)
+        const joined = rows(CLP, {contactListId: texts, partyId}).length
+        const requests = rows("mantle.marketing.contact.SubscriptionRequest", {partyId, contactListId: texts}).length
+        // on it (an import's evidence): it may be left
+        system(() =>
+            make(CLP, {contactListId: texts, partyId, fromDate: new Date(Date.now() - dayMs), statusId: "CLPT_ACCEPTED"})
+        )
+        const member = textTopic(hub("get#EmailPreferences", {}))
+        store(false)
+        const left = statusOf(texts, partyId)
+        store(true)
+        return {
+            before,
+            joined,
+            requests,
+            member,
+            left,
+            again: statusOf(texts, partyId),
+            published: page("get#Publication", {})
+                .topics.map(t => t.name)
+                .join()
+        }
+    },
+    then(r) {
+        r.before.channelEnumId === "MdcSms"
+        r.before.state === "none"
+        r.joined === 0
+        r.requests === 0
+        r.member.state === "subscribed"
+        r.left === "CLPT_UNSUBSCRIBED"
+        r.again === "CLPT_UNSUBSCRIBED"
+        // the public subscription page offers lists of email only
+        !r.published.includes("Text deals")
+    }
+})

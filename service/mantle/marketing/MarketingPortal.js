@@ -136,15 +136,19 @@ function served(siteId) {
     if (!mount?.targetId || !one("mantle.party.PartyRole", {partyId: mount.targetId, roleTypeId: "OrgInternal"})) unavailable()
     return mount.targetId
 }
-// The list's offer on a site for an organization: {list, policy} while it is offered there, else null.
-function offerOf(contactListId, siteId, organizationPartyId) {
+// The list's offer on a site for an organization: {list, policy} while it is offered there, else null. A list of email only, unless
+// withText (P22 review: the email preferences page shows a text message topic, which it lets its member leave and never turns on).
+function offerOf(contactListId, siteId, organizationPartyId, withText = false) {
     const list = contactListId ? one(LIST, {contactListId}) : null
     const audience = audiences()
     if (
         !list ||
         list.ownerPartyId !== organizationPartyId ||
         !audience.listTypes.includes(list.contactListTypeEnumId) ||
-        (list.contactMechTypeEnumId || "CmtEmailAddress") !== "CmtEmailAddress" ||
+        !(
+            (list.contactMechTypeEnumId || "CmtEmailAddress") === "CmtEmailAddress" ||
+            (withText && list.contactMechTypeEnumId === "CmtTelecomNumber")
+        ) ||
         audience.archived(list)
     )
         return null
@@ -152,8 +156,8 @@ function offerOf(contactListId, siteId, organizationPartyId) {
     if (!policy || policy.publicSiteId !== siteId || !audience.offerState(policy).offered) return null
     return {list, policy}
 }
-// The lists offered on a site for its organization, by name.
-function offersOf(siteId, organizationPartyId) {
+// The lists offered on a site for its organization, by name (of email only, unless withText).
+function offersOf(siteId, organizationPartyId, withText = false) {
     const ids = [
         ...new Set(
             Array.from(find(POLICY, {publicSiteId: siteId, publicOffer: "Y"}).list())
@@ -162,15 +166,18 @@ function offersOf(siteId, organizationPartyId) {
         )
     ]
     return ids
-        .map(id => offerOf(id, siteId, organizationPartyId))
+        .map(id => offerOf(id, siteId, organizationPartyId, withText))
         .filter(Boolean)
         .sort((a, b) => String(a.list.contactListName || "").localeCompare(String(b.list.contactListName || "")))
 }
+// P22: a topic of text messages (a list of phone numbers) is named as one; the email preferences page lets its member leave it, and
+// never turns it on (a text message topic is joined with a phone number's own evidence, where it is offered)
 const topicView = ({list, policy}) => ({
     contactListId: list.contactListId,
     name: list.contactListName || list.contactListId,
     description: list.description || "",
-    channelText: L("Email"),
+    channelEnumId: list.contactMechTypeEnumId === "CmtTelecomNumber" ? "MdcSms" : "MdcEmail",
+    channelText: list.contactMechTypeEnumId === "CmtTelecomNumber" ? L("Text messages") : L("Email"),
     consentText: policy.evidenceText || L("Yes, send me") + " " + (list.contactListName || "") + "."
 })
 
@@ -1257,7 +1264,8 @@ function preferencesContext(siteId, organizationPartyId, partyId) {
     if (!siteId || !organizationPartyId) return null
     const mount = apps().mount(siteId, "marketing")
     if (!mount || mount.targetId !== organizationPartyId) return null
-    const offers = offersOf(siteId, organizationPartyId)
+    // P22 review: its text message topics too, to leave (changeTopics still takes lists of email only)
+    const offers = offersOf(siteId, organizationPartyId, true)
     if (!offers.length) return null
     const audience = audiences()
     return {

@@ -1,7 +1,9 @@
 // Marketing's automations (mantle.marketing.AutomationServices, N of IronStone Marketing design §14.2; design §6 Automations,
 // AutomationDetail and EnrollmentDetail, §15.3 the admission and step jobs; impl-marketing P11, §4). A drip sequence of a campaign:
 // its topic (a Marketing list of email of the organization), sending profile, enrollment rule and dated steps (Send email, Wait,
-// Condition: no loop or jump, at most the policy's automationMaxSteps, ten by default).
+// Condition: no loop or jump, at most the policy's automationMaxSteps, ten by default). P22: an automation whose topic is a list of
+// phone numbers sends text messages: its send steps are Send SMS (AskSendSms, a template's text alternative as the text) from an
+// SMS sending profile, and a Send email step is refused there (CHANNEL_INVALID), as Send SMS is in an email automation.
 //
 // - Authoring (MARKETING_SEND_EDIT, the automation's organization): create#Automation, store#EnrollmentRule, store#Steps. A change of
 //   the rule, topic, sender or steps raises automationRevision, ends the approval (MarketingApprovals.js supersede) and returns an
@@ -98,7 +100,9 @@ const triggers = [
     "AtrAttended"
 ]
 const offerTriggers = ["AtrRegistered", "AtrAttended"]
-const stepKinds = {send: "AskSendEmail", wait: "AskWait", condition: "AskCondition"}
+const stepKinds = {send: "AskSendEmail", wait: "AskWait", condition: "AskCondition", sms: "AskSendSms"}
+// P22: the send kinds (a send step of either channel runs alike: a recipient of the step's send handed to the ledger)
+const sendKinds = ["send", "sms"]
 const editableStatuses = ["MaDraft", "MaAwaitingApproval", "MaApproved", "MaActive", "MaPaused"]
 const closedCampaignStatuses = ["MKTG_CAMP_COMPLETED", "MKTG_CAMP_CANCELLED"]
 // A classification's reasons that end an enrollment (the topic left or withdrawn, a suppression: design §6) and those that skip only
@@ -453,7 +457,8 @@ function automationProblems(row) {
     else if (profile.thruDate != null && ms(profile.thruDate) <= nowMs()) problems.push("its sending profile has ended")
     else if (!profiles.readinessOf(profile).ready) problems.push("its sending profile is not ready")
     const steps = stepsAt(row.marketingAutomationId)
-    if (!steps.some(step => step.stepKindEnumId === stepKinds.send)) problems.push("it needs a send step")
+    if (!steps.some(step => step.stepKindEnumId === stepKinds.send || step.stepKindEnumId === stepKinds.sms))
+        problems.push("it needs a send step")
     if (steps.length > maxStepsOf(row.organizationPartyId)) problems.push("it has more steps than the policy allows")
     if (row.triggerEnumId === "AtrSegment" && !row.triggerSegmentId) problems.push("its trigger needs a segment")
     if (row.triggerEnumId === "AtrCartAbandoned" && !row.productStoreId) problems.push("its trigger needs a store")
@@ -539,14 +544,16 @@ function createAutomation(p) {
     const campaign = s.campaignFor(userScope, p.marketingCampaignId)
     const org = campaign.organizationPartyId
     const topic = s.topicFor(p.contactListId, org)
-    const profile = s.profileFor(p.sendingProfileId, org)
+    // P22: the topic's channel (a list of phone numbers sends text messages), its profile of the same channel
+    const channelEnumId = eligibility.channelOfList(topic)
+    const profile = s.profileFor(p.sendingProfileId, org, channelEnumId)
     const trigger = triggerFor(userScope, p, org)
     const marketingAutomationId = call("create#" + AUTOMATION, {
         marketingCampaignId: campaign.marketingCampaignId,
         organizationPartyId: org,
         automationName: nameOf(p.automationName),
         description: text(p.description) || null,
-        channelEnumId: "MdcEmail",
+        channelEnumId,
         contactListId: topic.contactListId,
         purposeEnumId: eligibility.purposeOf(topic),
         sendingProfileId: profile?.sendingProfileId || null,
@@ -580,12 +587,14 @@ function storeEnrollmentRule(p) {
     if (p.description != null) values.description = text(p.description) || null
     const material = {}
     if (!blank(p.contactListId) && text(p.contactListId) !== row.contactListId) {
-        const topic = s.topicFor(p.contactListId, org)
+        // an automation keeps its channel (P22)
+        const topic = s.topicFor(p.contactListId, org, row.channelEnumId || "MdcEmail")
         material.contactListId = topic.contactListId
         material.purposeEnumId = eligibility.purposeOf(topic)
     }
     if (p.sendingProfileId != null && text(p.sendingProfileId) !== text(row.sendingProfileId))
-        material.sendingProfileId = s.profileFor(p.sendingProfileId, org)?.sendingProfileId || null
+        material.sendingProfileId =
+            s.profileFor(p.sendingProfileId, org, row.channelEnumId || "MdcEmail")?.sendingProfileId || null
     if (p.triggerEnumId != null) {
         const trigger = triggerFor(userScope, p, org)
         for (const [field, value] of Object.entries(trigger)) if ((row[field] || null) !== value) material[field] = value
@@ -643,7 +652,14 @@ function storeSteps(p) {
         const position = "Step " + (index + 1)
         if (!Object.hasOwn(stepKinds, kind)) denied("VALUE_INVALID", position + " is a send, a wait or a condition")
         const base = {kind, stepName: text(step.stepName).slice(0, nameLimit) || null}
-        if (kind === "send") {
+        // P22: a send step of the automation's channel
+        const sms = (row.channelEnumId || "MdcEmail") === "MdcSms"
+        if ((kind === "send" && sms) || (kind === "sms" && !sms))
+            denied(
+                "CHANNEL_INVALID",
+                position + ": this automation sends " + (sms ? "text messages: use Send SMS" : "email: use Send email")
+            )
+        if (sendKinds.includes(kind)) {
             if (blank(step.messageTemplateId)) denied("TEMPLATE_REQUIRED", position + " needs its template")
             return Object.assign(base, {template: s.templateFor(userScope, step.messageTemplateId, org)})
         }
@@ -678,7 +694,7 @@ function storeSteps(p) {
             automationRevision: newRevision,
             fromDate: now
         }
-        if (step.kind === "send") {
+        if (sendKinds.includes(step.kind)) {
             values.messageTemplateId = step.template.row.messageTemplateId
             values.campaignSendId = s.stepSend({automation: current, template: step.template, stepName: step.stepName})
         } else if (step.kind === "wait") Object.assign(values, {waitAmount: step.waitAmount, waitUnitEnumId: step.waitUnitEnumId})
@@ -1604,6 +1620,8 @@ function automationRow(row, extra = {}) {
             organizationPartyId: row.organizationPartyId,
             organizationName: organizationName(row.organizationPartyId),
             channelText: enumText(row.channelEnumId) || "Email",
+            // P22: an automation of a list of phone numbers sends text messages (Send SMS steps)
+            channelEnumId: row.channelEnumId || "MdcEmail",
             contactListId: row.contactListId,
             topicName: topic ? topic.contactListName || topic.contactListId : "",
             sendingProfileId: row.sendingProfileId || null,
@@ -1633,19 +1651,29 @@ function stepRow(step, automation) {
         : null
     const kind = Object.keys(stepKinds).find(key => stepKinds[key] === step.stepKindEnumId)
     const detail =
-        kind === "send"
-            ? "Subject: " +
-              (send?.preparedSubject || "") +
+        kind === "sms"
+            ? "Text: " +
+              String(
+                  send?.preparedTextLocation
+                      ? ec.resource
+                            .script("component://mr-mantle/service/mantle/party/MessageTemplates.js")
+                            .readText(send.preparedTextLocation)
+                      : ""
+              ).slice(0, 80) +
               (template ? " · from " + (template.templateName || template.messageTemplateId) : "")
-            : kind === "wait"
-              ? waitText(step) +
-                (step.waitUnitEnumId === "AwuDays" || step.waitUnitEnumId === "AwuBusinessDays"
-                    ? " (" + (automation.timeZone || "the user's zone") + ")"
-                    : "")
-              : "Matches " +
-                (segment ? segments.segmentLabel(segment) : step.conditionSegmentId) +
-                ", else " +
-                enumText(step.conditionFalseEnumId).toLowerCase()
+            : kind === "send"
+              ? "Subject: " +
+                (send?.preparedSubject || "") +
+                (template ? " · from " + (template.templateName || template.messageTemplateId) : "")
+              : kind === "wait"
+                ? waitText(step) +
+                  (step.waitUnitEnumId === "AwuDays" || step.waitUnitEnumId === "AwuBusinessDays"
+                      ? " (" + (automation.timeZone || "the user's zone") + ")"
+                      : "")
+                : "Matches " +
+                  (segment ? segments.segmentLabel(segment) : step.conditionSegmentId) +
+                  ", else " +
+                  enumText(step.conditionFalseEnumId).toLowerCase()
     return {
         automationStepId: step.automationStepId,
         sequenceNum: Number(step.sequenceNum),

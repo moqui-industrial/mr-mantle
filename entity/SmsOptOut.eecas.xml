@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- A STOP the framework keeps (C4-SMS: Sms.js noteKeyword's moqui.call.SmsOptOut row; mr-moqui docs/interfaces/SMS.md "Opt-out")
+    becomes a PcpSms withdrawal with each organization that owns our number and an SMS suppression of their number
+    (mantle.party.MessageSmsServices note#SmsKeyword, MessageSms.js; mr-boss impl-marketing P22, F57). A START ends neither: new
+    consent needs new evidence. Its own transaction, and a failure is logged: the opt-out the framework keeps never waits on it. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <eeca id="SmsStopWithdrawsConsent" entity="moqui.call.SmsOptOut" on-create="true" on-update="true" run-on-error="false"
+            get-entire-entity="true">
+        <condition><expression>optedOut == 'Y' &amp;&amp; lastKeyword == 'STOP'</expression></condition>
+        <actions><script><![CDATA[
+            ec.message.pushErrors()
+            try {
+                ec.service.sync().name('mantle.party.MessageSmsServices.note#SmsKeyword').parameters({ourNumber: phoneNumber,
+                    theirNumber: otherNumber, optedOut: optedOut, lastKeyword: lastKeyword}).requireNewTransaction(true).disableAuthz().call()
+                if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+            } catch (error) {
+                ec.logger.error('The STOP from ' + otherNumber + ' to ' + phoneNumber + ' was not recorded as a withdrawal: ' + String(error.message).split('\n')[0])
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        ]]></script></actions>
+    </eeca>
+</eecas>

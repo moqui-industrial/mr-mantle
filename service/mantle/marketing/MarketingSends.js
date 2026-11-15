@@ -27,6 +27,10 @@
 // - Test (test#Send): to an address of the organization's policy test allowlist only (TEST_ADDRESS_NOT_ALLOWED), at most
 //   testDailyLimit a day a send, as a ledger delivery of its own source (MdsrcCampaignSendTest) naming the send's profile, marked
 //   TEST, never a recipient, an approval or a count.
+// - Text messages (P22): a topic that is a list of phone numbers makes a send of the SMS channel, offered only with a ready SMS
+//   sending profile of the organization (CHANNEL_UNAVAILABLE) and never with an email profile (PROFILE_CHANNEL); its content is one
+//   text (the text alternative's place: no subject, body or attachment), at most smsTextLimit characters, with its encoding, segments
+//   and the profile's cost estimate (MessageSms.js estimate) shown before approval; its test goes to a number of the test allowlist.
 // Refusals carry reason codes (EntityLib.js denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
@@ -53,6 +57,9 @@ const TEMPLATE = "mantle.party.MessageTemplate"
 const PROFILE = "mantle.party.MessageSendingProfile"
 const testTemplateId = "MANTLE_CAMPAIGN_SEND_TEST"
 const testDailyLimit = 20
+// P22: a text's length (the messaging bridge's default maxTextLength) and its estimate
+const smsTextLimit = 1600
+const sms = () => ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js")
 const sourceCap = 20
 const nameLimit = 120
 // the values a recipient gives a send's variables (design §5 Compose: a plain snapshot of allowlisted values), and the synthetic
@@ -164,11 +171,17 @@ function listFor(contactListId, organizationPartyId, what = "List") {
         denied("LIST_ARCHIVED", "List " + (row.contactListName || row.contactListId) + " is archived")
     return row
 }
-// A topic: a list of email (the email channel of this phase; SMS is P22).
-function topicFor(contactListId, organizationPartyId) {
+// A topic: a list of email, or (P22) of phone numbers for a text message send; channelEnumId, when given, the channel it must be.
+function topicFor(contactListId, organizationPartyId, channelEnumId = null) {
     const row = listFor(contactListId, organizationPartyId, "Topic")
-    if (eligibility.channelOfList(row) !== "MdcEmail")
-        denied("CHANNEL_UNAVAILABLE", "Topic " + (row.contactListName || row.contactListId) + " is a list of text messages")
+    if (channelEnumId && eligibility.channelOfList(row) !== channelEnumId)
+        denied(
+            "CHANNEL_INVALID",
+            "Topic " +
+                (row.contactListName || row.contactListId) +
+                " is a list of " +
+                (channelEnumId === "MdcSms" ? "email" : "phone numbers")
+        )
     return row
 }
 function segmentFor(userScope, marketSegmentId, organizationPartyId) {
@@ -192,8 +205,8 @@ function audienceFor(userScope, p, organizationPartyId) {
     return audience
 }
 // A sending profile a promotional send may name: one of the organization, in effect, promotional or for both (PROFILE_PURPOSE; the
-// P6 review: a profile's purpose is checked against the delivery's).
-function profileFor(sendingProfileId, organizationPartyId) {
+// P6 review: a profile's purpose is checked against the delivery's); P22: of the send's channel when it is given (PROFILE_CHANNEL).
+function profileFor(sendingProfileId, organizationPartyId, channelEnumId = null) {
     if (blank(sendingProfileId)) return null
     const row = one(PROFILE, {sendingProfileId: text(sendingProfileId)})
     if (!row || row.organizationPartyId !== organizationPartyId)
@@ -204,7 +217,29 @@ function profileFor(sendingProfileId, organizationPartyId) {
             "PROFILE_PURPOSE",
             "Sending profile " + (row.profileName || row.sendingProfileId) + " is for transactional messages"
         )
+    if (channelEnumId && (row.channelEnumId || "MdcEmail") !== channelEnumId)
+        denied(
+            "PROFILE_CHANNEL",
+            "Sending profile " +
+                (row.profileName || row.sendingProfileId) +
+                " sends " +
+                (channelEnumId === "MdcSms" ? "email" : "text messages")
+        )
     return row
+}
+// P22: a text message send needs a ready SMS sending profile (design §5: the SMS channel is offered only once a profile reports ready).
+function smsSendable(profile) {
+    if (!profile || !profiles.readinessOf(profile).ready)
+        denied(
+            "CHANNEL_UNAVAILABLE",
+            "Text messages need a ready SMS sending profile of the organization (Settings, Sending profiles)"
+        )
+}
+// P22: a text checked: one text of at most smsTextLimit characters, its links none to a staff page or a stored file.
+function checkSmsText(value) {
+    if (String(value || "").length > smsTextLimit)
+        denied("TEXT_TOO_LONG", "A text message is at most " + smsTextLimit + " characters")
+    checkLinks(value)
 }
 // A template a send may start from: one of the organization (P6 review R5), in use, promotional, with content in effect, read by a
 // holder of a template permission (TEMPLATE_UNAVAILABLE otherwise).
@@ -318,8 +353,13 @@ function sendProblems(row) {
     const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
     if (!profile) problems.push("it needs a sending profile")
     else if (profile.purposeEnumId === "MtpTransactional") problems.push("its sending profile is for transactional messages")
+    // P22: a text goes from an SMS profile, an email from an email one
+    else if ((profile.channelEnumId || "MdcEmail") !== (row.channelEnumId || "MdcEmail"))
+        problems.push("its sending profile is of another channel")
     else if (!profiles.readinessOf(profile).ready) problems.push("its sending profile is not ready")
-    if (blank(row.subject)) problems.push("it needs a subject")
+    if (row.channelEnumId === "MdcSms") {
+        if (blank(row.bodyTextLocation)) problems.push("it needs its text")
+    } else if (blank(row.subject)) problems.push("it needs a subject")
     // P10: an experiment's variants differ and were prepared with the send
     return problems.concat(experiments().problemsOf(row))
 }
@@ -450,11 +490,12 @@ function createSend(p) {
     const campaign = campaignFor(userScope, p.marketingCampaignId)
     const org = campaign.organizationPartyId
     const sendName = nameOf(p.sendName)
-    const channelEnumId = text(p.channelEnumId) || "MdcEmail"
-    if (channelEnumId !== "MdcEmail") denied("CHANNEL_UNAVAILABLE", "Sends go by email")
-    const topic = topicFor(p.contactListId, org)
+    // the topic's channel (P22: a list of phone numbers sends text messages)
+    const topic = topicFor(p.contactListId, org, blank(p.channelEnumId) ? null : text(p.channelEnumId))
+    const channelEnumId = eligibility.channelOfList(topic)
     const audience = audienceFor(userScope, p, org)
-    const profile = profileFor(p.sendingProfileId, org)
+    const profile = profileFor(p.sendingProfileId, org, channelEnumId)
+    if (channelEnumId === "MdcSms") smsSendable(profile)
     const template = templateFor(userScope, p.messageTemplateId, org)
     const made = call("create#" + SEND, {
         marketingCampaignId: campaign.marketingCampaignId,
@@ -474,8 +515,20 @@ function createSend(p) {
         createdDate: ec.user.nowTimestamp
     })
     const campaignSendId = made.campaignSendId
+    // P22: a text message send takes a template's text alternative as its text
+    if (template && channelEnumId === "MdcSms") {
+        const smsText = templates.readText(template.content.bodyTextLocation)
+        checkSmsText(smsText)
+        const files = writeFiles(campaignSendId, "draft", "", smsText)
+        call("update#" + SEND, {
+            campaignSendId,
+            bodyLocation: files.bodyLocation,
+            bodyTextLocation: files.bodyTextLocation,
+            variablesJson: template.content.variablesJson || "[]"
+        })
+    }
     // the template's content in effect, copied: the send's own from now on
-    if (template) {
+    else if (template) {
         const content = template.content
         const files = writeFiles(
             campaignSendId,
@@ -547,7 +600,8 @@ function storeSend(p) {
     const changed = []
     if (p.sendName != null && text(p.sendName) !== (row.sendName || "")) values.sendName = nameOf(p.sendName)
     if (p.contactListId != null && text(p.contactListId) !== (row.contactListId || "")) {
-        const topic = topicFor(p.contactListId, org)
+        // a send keeps its channel (P22): a new topic of the other channel is a new send
+        const topic = topicFor(p.contactListId, org, row.channelEnumId || "MdcEmail")
         values.contactListId = topic.contactListId
         values.purposeEnumId = eligibility.purposeOf(topic)
         changed.push("topic")
@@ -570,7 +624,7 @@ function storeSend(p) {
         }
     }
     if (p.sendingProfileId != null && text(p.sendingProfileId) !== (row.sendingProfileId || "")) {
-        values.sendingProfileId = profileFor(p.sendingProfileId, org)?.sendingProfileId || null
+        values.sendingProfileId = profileFor(p.sendingProfileId, org, row.channelEnumId || "MdcEmail")?.sendingProfileId || null
         changed.push("sender")
     }
     if (p.replyToAddress != null && text(p.replyToAddress) !== (row.replyToAddress || "")) {
@@ -593,6 +647,7 @@ function storeContent(p) {
     requireEditable(row)
     requireRevision(row, p.expectedRevision)
     const base = contentOf(row)
+    const isSms = row.channelEnumId === "MdcSms"
     const content = {
         subject: p.subject != null ? text(p.subject) : base.subject,
         preheader: p.preheader != null ? text(p.preheader) : base.preheader,
@@ -600,8 +655,11 @@ function storeContent(p) {
         bodyText: p.bodyText != null ? String(p.bodyText) : base.bodyText,
         variables: p.variables != null ? templates.declaredVariables(p.variables) : base.variables
     }
+    // P22: a text message is its text alone
+    if (isSms) Object.assign(content, {subject: "", preheader: "", body: ""})
     templates.checkContent(content)
     checkLinks(content.body)
+    if (isSms) checkSmsText(content.bodyText)
     const same =
         content.subject === base.subject &&
         content.preheader === base.preheader &&
@@ -749,6 +807,27 @@ function previewSend(p) {
     }
     const rendered = render(content, values)
     const findings = []
+    // P22: a text message: its text, as the person gets it (with the opt-out line), and its segments
+    if (row.channelEnumId === "MdcSms") {
+        const smsText = sms().withOptOut(rendered.bodyText)
+        if (!smsText) findings.push("The text is empty")
+        for (const name of unknownRequired(content.variables))
+            findings.push("${" + name + "} is required and is no recipient's value: give it a fallback or make it optional")
+        for (const name of rendered.missing) findings.push("${" + name + "} is required and has no value or fallback here")
+        const profile = row.sendingProfileId ? one(PROFILE, {sendingProfileId: row.sendingProfileId}) : null
+        return {
+            renderedSubject: "",
+            renderedPreheader: "",
+            safeBody: "",
+            renderedText: smsText,
+            smsEstimate: sms().estimate(smsText, profile, preparedCurrent(row) ? Number(row.eligibleCount || 0) : null),
+            missingVariables: rendered.missing,
+            findings,
+            sampleText,
+            prepared: !!usePrepared,
+            recipientFields: Object.entries(recipientFields).map(([name, title]) => ({name, title}))
+        }
+    }
     if (!rendered.subject) findings.push("The subject is empty")
     if (rendered.subject.length > 78) findings.push("The subject is longer than 78 characters: many mail apps cut it")
     if (!rendered.body.trim() && !rendered.bodyText.trim()) findings.push("The message has no body")
@@ -771,11 +850,14 @@ function previewSend(p) {
 
 // ===== test#Send and its ledger source =====
 // The organization's test allowlist (MarketingPolicy.testAddresses), normalized.
-function testAddressesOf(organizationPartyId) {
+// P22: a text message send's test numbers are the list's phone numbers (written with their country code).
+function testAddressesOf(organizationPartyId, channelEnumId = "MdcEmail") {
     const policy = approvals.policyOf(organizationPartyId)
     return String(policy?.testAddresses || "")
-        .split(/[\s,;]+/)
-        .map(address => suppressions.normalize("MdcEmail", address))
+        .split(/[\n,;]+/)
+        .map(address =>
+            suppressions.normalize(channelEnumId || "MdcEmail", channelEnumId === "MdcSms" ? address : address.trim())
+        )
         .filter(Boolean)
 }
 function testSend(p) {
@@ -784,8 +866,9 @@ function testSend(p) {
     const row = sendOf(userScope, p.campaignSendId, true)
     if (["CsCancelled", "CsCompleted", "CsCompletedFailures"].includes(row.statusId))
         denied("STATUS_INVALID", "Send " + row.campaignSendId + " is " + statusText(row.statusId).toLowerCase())
-    const toAddress = suppressions.normalize("MdcEmail", text(p.toAddress))
-    if (!toAddress || !testAddressesOf(row.organizationPartyId).includes(toAddress))
+    const channelEnumId = row.channelEnumId || "MdcEmail"
+    const toAddress = suppressions.normalize(channelEnumId, text(p.toAddress))
+    if (!toAddress || !testAddressesOf(row.organizationPartyId, channelEnumId).includes(toAddress))
         denied("TEST_ADDRESS_NOT_ALLOWED", "A test goes only to an address of the organization's test list (Campaign defaults)")
     if (!row.sendingProfileId) denied("PROFILE_REQUIRED", "Choose the send's sending profile first")
     profileFor(row.sendingProfileId, row.organizationPartyId)
@@ -797,8 +880,12 @@ function testSend(p) {
         body: templates.readText(draft.bodyLocation),
         bodyText: templates.readText(draft.bodyTextLocation)
     }
-    if (!content.subject || (!content.body.trim() && !content.bodyText.trim()))
-        denied("CONTENT_REQUIRED", "Write the subject and the body first")
+    if (
+        channelEnumId === "MdcSms"
+            ? !content.bodyText.trim()
+            : !content.subject || (!content.body.trim() && !content.bodyText.trim())
+    )
+        denied("CONTENT_REQUIRED", channelEnumId === "MdcSms" ? "Write the text first" : "Write the subject and the body first")
     const recipientPartyId = ec.user.userAccount?.partyId
     if (!recipientPartyId) denied("PARTY_REQUIRED", "A test is sent by a person")
     const dayAgo = new Date(nowMs() - 24 * 60 * 60 * 1000)
@@ -818,7 +905,7 @@ function testSend(p) {
             ":" +
             ec.user.randomString(6).replace(/[^A-Za-z0-9]/g, "x"),
         recipientPartyId,
-        channelEnumId: "MdcEmail",
+        channelEnumId,
         templateKey: testTemplateId,
         toAddress,
         organizationPartyId: row.organizationPartyId,
@@ -852,7 +939,12 @@ function buildTest(p) {
     const row = parameters.campaignSendId ? one(SEND, {campaignSendId: parameters.campaignSendId}) : null
     if (!row || row.organizationPartyId !== delivery.organizationPartyId) return {suppress: "The send is not available"}
     // the address still on the organization's test list at each attempt (P8 review): a test source never reaches anyone else
-    if (!testAddressesOf(row.organizationPartyId).includes(suppressions.normalize("MdcEmail", delivery.toAddress)))
+    const channelEnumId = delivery.channelEnumId || "MdcEmail"
+    if (
+        !testAddressesOf(row.organizationPartyId, channelEnumId).includes(
+            suppressions.normalize(channelEnumId, delivery.toAddress)
+        )
+    )
         return {suppress: "The address is no longer on the organization's test list"}
     // P10: a variant's test renders the variant as it is now; one no longer of the send's live experiment is not sent
     let draft = draftContent(row)
@@ -863,6 +955,12 @@ function buildTest(p) {
     }
     const rendered = render(draft, syntheticValues)
     const note = text(parameters.note)
+    // P22: a text message's test, marked TEST
+    if (channelEnumId === "MdcSms")
+        return {
+            bodyParameters: {},
+            smsText: "TEST" + (note ? " (" + note + ")" : "") + ": " + sms().withOptOut(rendered.bodyText)
+        }
     const banner =
         '<p style="padding:8px;border:2px solid #b00;color:#b00;font-weight:bold">TEST: not sent to the audience' +
         (note ? ". " + WebUtilities.encodeHtml(note) : "") +
@@ -902,8 +1000,14 @@ function prepareSend(p) {
     requireRevision(row, p.expectedRevision)
     const org = row.organizationPartyId
     const content = contentOf(row)
-    if (!content.subject) denied("SUBJECT_REQUIRED", "Give the subject before preparing")
-    if (!content.body.trim() && !content.bodyText.trim()) denied("BODY_REQUIRED", "Write the body before preparing")
+    // P22: a text message needs its text, not a subject
+    if (row.channelEnumId === "MdcSms") {
+        if (!content.bodyText.trim()) denied("BODY_REQUIRED", "Write the text before preparing")
+        checkSmsText(content.bodyText)
+    } else {
+        if (!content.subject) denied("SUBJECT_REQUIRED", "Give the subject before preparing")
+        if (!content.body.trim() && !content.bodyText.trim()) denied("BODY_REQUIRED", "Write the body before preparing")
+    }
     templates.checkContent(content)
     checkLinks(content.body)
     const unknown = unknownRequired(content.variables)
@@ -1094,8 +1198,15 @@ function stepSend(o) {
     const bodyText = templates.readText(content.bodyTextLocation)
     const variables = lib.json(content.variablesJson, []) || []
     const templateName = o.template.row.templateName || o.template.row.messageTemplateId
-    if (!subject) denied("SUBJECT_REQUIRED", "Template " + templateName + " has no subject")
-    if (!body.trim() && !bodyText.trim()) denied("BODY_REQUIRED", "Template " + templateName + " has no body")
+    // P22: a Send SMS step's text is the template's text alternative, with no subject or body
+    const isSms = automation.channelEnumId === "MdcSms"
+    if (isSms) {
+        if (!bodyText.trim()) denied("BODY_REQUIRED", "Template " + templateName + " has no text alternative to send as a text")
+        checkSmsText(bodyText)
+    } else {
+        if (!subject) denied("SUBJECT_REQUIRED", "Template " + templateName + " has no subject")
+        if (!body.trim() && !bodyText.trim()) denied("BODY_REQUIRED", "Template " + templateName + " has no body")
+    }
     templates.checkContent({subject, preheader: content.preheader || "", body, bodyText, variables})
     checkLinks(body)
     const unknown = unknownRequired(variables)
@@ -1122,13 +1233,13 @@ function stepSend(o) {
         createdDate: ec.user.nowTimestamp,
         marketingAutomationId: automation.marketingAutomationId
     }).campaignSendId
-    const draft = writeFiles(campaignSendId, "draft", body, bodyText)
-    const prepared = writeFiles(campaignSendId, "prepared-r1", body, bodyText)
+    const draft = writeFiles(campaignSendId, "draft", isSms ? "" : body, bodyText)
+    const prepared = writeFiles(campaignSendId, "prepared-r1", isSms ? "" : body, bodyText)
     const policy = approvals.policyOf(automation.organizationPartyId)
     call("update#" + SEND, {
         campaignSendId,
-        subject,
-        preheader: content.preheader || null,
+        subject: isSms ? null : subject,
+        preheader: isSms ? null : content.preheader || null,
         bodyLocation: draft.bodyLocation,
         bodyTextLocation: draft.bodyTextLocation,
         variablesJson: JSON.stringify(variables),
@@ -1138,8 +1249,8 @@ function stepSend(o) {
         contentDate: ec.user.nowTimestamp,
         marketingPolicyId: policy?.marketingPolicyId || null,
         policyFromDate: policy?.fromDate || null,
-        preparedSubject: subject,
-        preparedPreheader: content.preheader || null,
+        preparedSubject: isSms ? null : subject,
+        preparedPreheader: isSms ? null : content.preheader || null,
         preparedBodyLocation: prepared.bodyLocation,
         preparedTextLocation: prepared.bodyTextLocation,
         preparedVariablesJson: JSON.stringify(variables),
@@ -1174,7 +1285,19 @@ function getSend(p) {
     const counts = prepared ? lib.json(row.bucketCountsJson, {}) || {} : {}
     // P9: the dispatch's counts and the control's actions for the caller (MarketingDispatch.js)
     const control = dispatch().controlOf(userScope, row)
+    // P22: a text message's estimate before approval (the prepared text when current, else the draft; with the opt-out line)
+    const smsEstimate =
+        row.channelEnumId === "MdcSms"
+            ? sms().estimate(
+                  sms().withOptOut(
+                      prepared && row.preparedTextLocation ? templates.readText(row.preparedTextLocation) : content.bodyText
+                  ),
+                  profile,
+                  prepared ? Number(row.eligibleCount || 0) : null
+              )
+            : null
     return {
+        smsEstimate,
         delivery: control.delivery,
         control: control.capabilities,
         // P10: the send's experiment in short (its setup, variants and state), for SendDetail's Experiment box
@@ -1237,7 +1360,7 @@ function getSend(p) {
         },
         assets: assetRows(row.campaignSendId),
         tests: caps.sendEdit ? testRows(row.campaignSendId) : [],
-        testAddresses: caps.sendEdit ? testAddressesOf(row.organizationPartyId) : [],
+        testAddresses: caps.sendEdit ? testAddressesOf(row.organizationPartyId, row.channelEnumId || "MdcEmail") : [],
         decisions: approvals.decisionRows(kind, row.campaignSendId),
         approvalProblems: problems,
         awaitingApproval: !!pending,
