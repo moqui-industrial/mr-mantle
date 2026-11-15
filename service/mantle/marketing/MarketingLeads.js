@@ -6,7 +6,8 @@
 //   lead goes to, the Sales source it takes when the organization's UTM map has none, the published fields mapped to the inquiry's
 //   name, organization, email and phone and those entered in its notes, an optional condition on one answer, and the notice the page
 //   shows. One current rule per publication; a change starts a new rule from now and ends the one it replaces. A content author
-//   (MARKETING_CONTENT_EDIT) of the organization writes it; the team and source are Sales' own, checked against the organization.
+//   (MARKETING_CONTENT_EDIT) of the organization writes it; the team and source are Sales' own, checked against the organization, and
+//   the team is a sales manager's choice (SALES_TEAM_MANAGE; else Sales' default team; the user's call of Nov 14, 2026).
 // - A capture (MarketingLeadCapture) is one rule's handoff of one accepted submission: made after the answer commits (capture#
 //   FormSubmission, from the SubmitForm page's effects) or by the capture job for an answer with none, and handed to Sales'
 //   mantle.sales.OpportunityServices.store#LeadIntake once (hand#LeadCapture) under its own operation key, so the job's retry or an
@@ -28,6 +29,7 @@ const salesAccess = () => ec.resource.script("component://mr-mantle/service/mant
 const salesSettings = () => ec.resource.script("component://mr-mantle/service/mantle/sales/SalesSettings.js")
 const forms = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormDefinitions.js")
 const publications = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js")
+const salesPolicies = () => ec.resource.script("component://mr-mantle/service/mantle/order/SalesApprovals.js")
 const {find, one, rows, call, denied, ms} = lib
 
 const RULE = "mantle.marketing.lead.MarketingLeadRule"
@@ -54,6 +56,7 @@ const limits = {
     capturesPerRun: 200,
     rulesPerRun: 200,
     submissionsPerRule: 500,
+    pagesPerRule: 40,
     collectDays: 30,
     retryDays: 30,
     retryBaseMinutes: 5,
@@ -142,6 +145,22 @@ function ruleOf(userScope, leadRuleId) {
         denied("RECORD_UNAVAILABLE", "Lead rule " + (leadRuleId || "") + " is not available")
     return rule
 }
+// The sales team (the user's call of Nov 14, 2026): choosing or changing a rule's team needs SALES_TEAM_MANAGE in the organization (a
+// sales manager); without it a content author saves a rule only with the organization's default team of Sales' SalesPolicy, or with no
+// team, which hands each lead to the default team in effect at the handoff.
+const defaultTeamOf = organizationPartyId => salesPolicies().policyOf(organizationPartyId)?.defaultTeamPartyId || null
+function teamChooser(organizationPartyId) {
+    let salesScope = null
+    try {
+        salesScope = salesAccess().scope()
+    } catch (error) {
+        salesScope = null
+    }
+    return !!salesScope?.capabilities.teamManage && salesAccess().covers(salesScope, organizationPartyId)
+}
+// The team a rule hands its leads to now: its own, else the organization's default team.
+const queueOf = rule => rule.teamPartyId || defaultTeamOf(rule.organizationPartyId)
+const teamNameOf = teamPartyId => (teamPartyId ? salesSettings().teamRow(teamPartyId)?.teamName || teamPartyId : "")
 const campaignOfPublication = row => (row.contextEntityName === CAMPAIGN && row.contextId ? row.contextId : null)
 const campaignName = marketingCampaignId =>
     marketingCampaignId ? one(CAMPAIGN, {marketingCampaignId})?.campaignName || marketingCampaignId : ""
@@ -219,7 +238,7 @@ function getLeadHandoffs(p) {
 function ruleView(rule, fieldTitles = null) {
     const titleOf = name => (name ? fieldTitles?.[name] || name : "")
     const publication = one(PUBLICATION, {publicationId: rule.sourceId})
-    const team = rule.teamPartyId ? salesSettings().teamRow(rule.teamPartyId) : null
+    const queue = queueOf(rule)
     const current = lib.active(rule)
     const ended = rule.thruDate != null && Number(ms(rule.thruDate)) <= nowMs()
     return {
@@ -237,7 +256,11 @@ function ruleView(rule, fieldTitles = null) {
         marketingCampaignId: publication ? campaignOfPublication(publication) : rule.marketingCampaignId,
         campaignName: campaignName(publication ? campaignOfPublication(publication) : rule.marketingCampaignId),
         teamPartyId: rule.teamPartyId,
-        teamName: team?.teamName || rule.teamPartyId || "",
+        teamName: rule.teamPartyId
+            ? teamNameOf(rule.teamPartyId)
+            : queue
+              ? teamNameOf(queue) + " " + L("(Sales' default team)")
+              : L("Sales' default team (none set)"),
         dataSourceId: rule.dataSourceId || null,
         sourceText: rule.dataSourceId
             ? one("moqui.basic.DataSource", {dataSourceId: rule.dataSourceId})?.description || rule.dataSourceId
@@ -349,6 +372,8 @@ function getLeadRule(p) {
     const titles = Object.fromEntries(fields.map(field => [field.fieldName, field.title]))
     const view = rule ? ruleView(rule, titles) : null
     const settings = salesSettings()
+    const canChooseTeam = teamChooser(org)
+    const defaultTeamPartyId = defaultTeamOf(org)
     return {
         rule: view,
         publication: {
@@ -364,7 +389,15 @@ function getLeadRule(p) {
         choices: {
             fieldOptions: fields.map(field => ({value: field.fieldName, label: field.title})),
             teamOptions: settings.teamsOf(org).map(team => ({value: team.teamPartyId, label: team.teamName})),
-            sourceOptions: settings.sourcesOffered(org).map(source => ({value: source.dataSourceId, label: source.description}))
+            sourceOptions: settings.sourcesOffered(org).map(source => ({value: source.dataSourceId, label: source.description})),
+            // without SALES_TEAM_MANAGE the team is shown, not chosen: the rule's own, or Sales' default for a new rule
+            canChooseTeam,
+            defaultTeamPartyId,
+            teamText: view
+                ? view.teamName
+                : defaultTeamPartyId
+                  ? teamNameOf(defaultTeamPartyId) + " " + L("(Sales' default team)")
+                  : L("Sales' default team (none set): a sales manager chooses the team")
         },
         handoffs: rule ? Object.assign(countsOf({leadRuleId: rule.leadRuleId}, null), {}) : null,
         captures: rule ? captureRows(userScope, {leadRuleId: rule.leadRuleId}, 50) : [],
@@ -408,10 +441,28 @@ function storeLeadRule(p) {
     }
     values.ruleName = limited(values.ruleName, limits.name)
     values.noticeText = limited(values.noticeText, limits.notice)
-    // the team and the source: Sales' own, of the organization
-    const team = values.teamPartyId ? salesSettings().teamRow(values.teamPartyId) : null
-    if (!team || team.organizationPartyId !== org || !salesSettings().inEffect(team.relationship))
-        denied("TEAM_UNAVAILABLE", "Choose a current sales team of the organization as the queue")
+    // the team and the source: Sales' own, of the organization; a team other than the rule's own or Sales' default is a sales
+    // manager's choice (the user's call of Nov 14, 2026)
+    const defaultTeam = defaultTeamOf(org)
+    if (
+        values.teamPartyId &&
+        values.teamPartyId !== (previous?.teamPartyId || null) &&
+        values.teamPartyId !== defaultTeam &&
+        !teamChooser(org)
+    )
+        denied(
+            "TEAM_PERMISSION",
+            "A sales manager (SALES_TEAM_MANAGE) chooses the lead rule's sales team; without it the rule takes Sales' default team"
+        )
+    if (values.teamPartyId) {
+        const team = salesSettings().teamRow(values.teamPartyId)
+        if (!team || team.organizationPartyId !== org || !salesSettings().inEffect(team.relationship))
+            denied("TEAM_UNAVAILABLE", "Choose a current sales team of the organization as the queue")
+    } else if (!defaultTeam)
+        denied(
+            "TEAM_REQUIRED",
+            "The organization has no default sales team in Sales: a sales manager chooses the lead rule's team"
+        )
     if (
         values.dataSourceId &&
         !salesSettings()
@@ -530,7 +581,7 @@ function inquiryOf(rule, submission, publication, {sample = null, fields = null}
             verified,
             marketingCampaignId: campaignOfPublication(publication),
             defaultDataSourceId: rule.dataSourceId || null,
-            teamPartyId: rule.teamPartyId,
+            teamPartyId: queueOf(rule),
             opportunityName: limited([organization || name || L("Inquiry"), title].filter(Boolean).join(" · "), limits.name),
             description: limited(notes, limits.notes)
         }
@@ -687,36 +738,45 @@ function runLeadCaptures(p) {
     for (const rule of Array.from(ruleQuery.list())) {
         try {
             const from = Math.max(Number(ms(rule.fromDate) ?? 0), Number(ms(since)))
-            let submissions = find(SUBMISSION, {publicationId: rule.sourceId})
-                .condition("submittedDate", "greater-equals", new Date(from))
-                .orderBy("submittedDate")
-                .limit(limits.submissionsPerRule)
-            if (rule.thruDate != null) submissions = submissions.condition("submittedDate", "less", rule.thruDate)
-            const found = Array.from(submissions.list())
-            if (!found.length) continue
-            const captured = new Set(
-                Array.from(
-                    find(CAPTURE, {leadRuleId: rule.leadRuleId, sourceKindEnumId: SOURCE_SUBMISSION})
-                        .condition(
-                            "sourceId",
-                            "in",
-                            found.map(row => row.formSubmissionId)
+            // page past the answers already captured, so a busy form's later answers are reached (at most submissionsPerRule
+            // captured a run; the rest the next run)
+            let attempted = 0
+            for (let page = 0; page < limits.pagesPerRule && attempted < limits.submissionsPerRule; page++) {
+                let submissions = find(SUBMISSION, {publicationId: rule.sourceId})
+                    .condition("submittedDate", "greater-equals", new Date(from))
+                    .orderBy(["submittedDate", "formSubmissionId"])
+                    .offset(page * limits.submissionsPerRule)
+                    .limit(limits.submissionsPerRule)
+                if (rule.thruDate != null) submissions = submissions.condition("submittedDate", "less", rule.thruDate)
+                const found = Array.from(submissions.list())
+                if (!found.length) break
+                const captured = new Set(
+                    Array.from(
+                        find(CAPTURE, {leadRuleId: rule.leadRuleId, sourceKindEnumId: SOURCE_SUBMISSION})
+                            .condition(
+                                "sourceId",
+                                "in",
+                                found.map(row => row.formSubmissionId)
+                            )
+                            .selectField("sourceId")
+                            .list()
+                    ).map(row => row.sourceId)
+                )
+                for (const submission of found.filter(row => !captured.has(row.formSubmissionId))) {
+                    if (attempted >= limits.submissionsPerRule) break
+                    attempted++
+                    try {
+                        const out = apart(SERVICES + "capture#FormSubmission", {formSubmissionId: submission.formSubmissionId})
+                        if (out.captured) totals.captured++
+                        tally(out.statusEnumId)
+                    } catch (error) {
+                        totals.failed++
+                        ec.logger.error(
+                            "Lead form answer " + submission.formSubmissionId + " not captured: " + firstLine(error?.message)
                         )
-                        .selectField("sourceId")
-                        .list()
-                ).map(row => row.sourceId)
-            )
-            for (const submission of found.filter(row => !captured.has(row.formSubmissionId))) {
-                try {
-                    const out = apart(SERVICES + "capture#FormSubmission", {formSubmissionId: submission.formSubmissionId})
-                    if (out.captured) totals.captured++
-                    tally(out.statusEnumId)
-                } catch (error) {
-                    totals.failed++
-                    ec.logger.error(
-                        "Lead form answer " + submission.formSubmissionId + " not captured: " + firstLine(error?.message)
-                    )
+                    }
                 }
+                if (found.length < limits.submissionsPerRule) break
             }
         } catch (error) {
             ec.logger.error("Lead rule " + rule.leadRuleId + ": its answers were not read: " + firstLine(error?.message))
@@ -909,7 +969,8 @@ function previewLeadRule(p) {
     } catch (error) {
         denied(lib.reasonCode(error) || "PREVIEW_FAILED", firstLine(String(error?.message).replace(/^[A-Z_]+: /, "")))
     }
-    const team = draft.teamPartyId ? salesSettings().teamRow(draft.teamPartyId) : null
+    const queue = queueOf(draft)
+    const team = queue ? salesSettings().teamRow(queue) : null
     const capture =
         rule && submission.formSubmissionId
             ? one(CAPTURE, {

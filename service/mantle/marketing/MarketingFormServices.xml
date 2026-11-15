@@ -229,7 +229,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A new lead rule of a lead form's publication (publicationId; RULE_EXISTS when it has a current one), a change of a
             current rule (leadRuleId at expectedRevision: a new rule from now replacing it, REVISION_CHANGED, RULE_ENDED), or its end
             (end), by a content author (MARKETING_CONTENT_EDIT) of the publication's organization: the team (a current sales team of the
-            organization, TEAM_UNAVAILABLE), the Sales source (offered to the organization, SOURCE_INVALID), the questions mapped to the
+            organization, TEAM_UNAVAILABLE; chosen or changed only by a holder of SALES_TEAM_MANAGE in the organization, TEAM_PERMISSION,
+            else the rule's own or Sales' default team; empty hands each lead to Sales' default team, TEAM_REQUIRED when there is none:
+            the user's call of Nov 14, 2026), the Sales source (offered to the organization, SOURCE_INVALID), the questions mapped to the
             inquiry's name, organization, email and phone (at least one, MAPPING_REQUIRED) and to its notes, an optional condition on one
             answer (CONDITION_INVALID), each a customer-visible question of the form (FIELD_UNKNOWN), and the notice the page shows. A
             closed lead form takes no new rule (PUBLICATION_CLOSED).</description>

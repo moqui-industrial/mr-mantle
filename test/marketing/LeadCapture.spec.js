@@ -85,7 +85,15 @@ spec({
                 ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT", "MARKETING_CAMPAIGN_EDIT"]
             )
             users.rep = user(prefix, "rep", [orgA], ["SALES_VIEW", "SALES_OPPORTUNITY_EDIT", "SALES_TEAM_VIEW"])
+            // a sales manager who authors Marketing content: the one who chooses a lead rule's team (the user's call of Nov 14, 2026)
+            users.manager = user(
+                prefix,
+                "manager",
+                [orgA],
+                ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT", "SALES_VIEW", "SALES_TEAM_MANAGE"]
+            )
             ids.east = team("east", orgA)
+            ids.west = team("west", orgA)
             ids.north = team("north", orgB)
             ids.source = prefix + "_SRC_WEB"
             make("moqui.basic.DataSource", {dataSourceId: ids.source, dataSourceTypeEnumId: "WEB_SITE", description: "Lead form"})
@@ -180,16 +188,42 @@ feature("a content author routes a lead form to a sales team of the organization
         const unrouted = as(users.author, M + "publish#Publication", {publicationId: ids.publication})
         const byReader = as(users.reader, M + "store#LeadRule", rule())
         const byOther = as(users.authorB, M + "store#LeadRule", rule())
-        const otherTeam = as(users.author, M + "store#LeadRule", rule({teamPartyId: ids.north}))
-        const unknown = as(users.author, M + "store#LeadRule", rule({noteFieldNames: "interest,secret"}))
+        // the team is a sales manager's: an author is refused a named team, and with no Sales default, no team
+        const authorTeam = as(users.author, M + "store#LeadRule", rule())
+        const noDefault = as(users.author, M + "store#LeadRule", rule({teamPartyId: ""}))
+        const otherTeam = as(users.manager, M + "store#LeadRule", rule({teamPartyId: ids.north}))
+        const unknown = as(users.manager, M + "store#LeadRule", rule({noteFieldNames: "interest,secret"}))
         const unmapped = as(
-            users.author,
+            users.manager,
             M + "store#LeadRule",
             rule({nameFieldName: "", organizationFieldName: "", emailFieldName: "", phoneFieldName: ""})
         )
-        const made = as(users.author, M + "store#LeadRule", rule())
-        ids.rule = made.leadRuleId
+        const made = as(users.manager, M + "store#LeadRule", rule())
         const twice = as(users.author, M + "store#LeadRule", rule())
+        // with Sales' default team East, an author still may not change the team, but may save the rule with the default team (no
+        // team: the default at each handoff)
+        system(() =>
+            make("mantle.sales.policy.SalesPolicy", {
+                salesPolicyId: prefix + "_POLICY",
+                organizationPartyId: orgA,
+                fromDate: 0,
+                defaultTeamPartyId: ids.east
+            })
+        )
+        const revisionOf = leadRuleId => as(users.author, M + "get#LeadRule", {leadRuleId}).rule.revision
+        const changeTeam = as(users.author, M + "store#LeadRule", {
+            leadRuleId: made.leadRuleId,
+            expectedRevision: revisionOf(made.leadRuleId),
+            teamPartyId: ids.west
+        })
+        const toDefault = as(users.author, M + "store#LeadRule", {
+            leadRuleId: made.leadRuleId,
+            expectedRevision: revisionOf(made.leadRuleId),
+            teamPartyId: ""
+        })
+        ids.rule = toDefault.leadRuleId
+        const detail = as(users.author, M + "get#LeadRule", {leadRuleId: ids.rule})
+        const managerDetail = as(users.manager, M + "get#LeadRule", {leadRuleId: ids.rule})
         const published = as(users.author, M + "publish#Publication", {publicationId: ids.publication})
         const page = visitor("get#Form", {siteId: site, publicationId: ids.publication})
         const listed = as(users.author, M + "find#LeadRules", {publicationId: ids.publication})
@@ -199,6 +233,12 @@ feature("a content author routes a lead form to a sales team of the organization
             unrouted,
             byReader,
             byOther,
+            authorTeam,
+            noDefault,
+            changeTeam,
+            toDefault,
+            detail,
+            managerDetail,
             otherTeam,
             unknown,
             unmapped,
@@ -215,7 +255,13 @@ feature("a content author routes a lead form to a sales team of the organization
         r.unrouted.refusal.includes("NOT_READY")
         r.byReader.refusal.includes("PERMISSION_DENIED")
         r.byOther.refusal.includes("RECORD_UNAVAILABLE")
+        r.authorTeam.refusal.includes("TEAM_PERMISSION") && r.noDefault.refusal.includes("TEAM_REQUIRED")
         r.otherTeam.refusal.includes("TEAM_UNAVAILABLE")
+        r.changeTeam.refusal.includes("TEAM_PERMISSION")
+        r.toDefault.refusal === "" && r.toDefault.created === false && r.toDefault.leadRuleId !== r.made.leadRuleId
+        r.detail.choices.canChooseTeam === false && r.detail.rule.teamPartyId == null
+        r.detail.rule.teamName === "Team east (Sales' default team)"
+        r.managerDetail.choices.canChooseTeam === true
         r.unknown.refusal.includes("FIELD_UNKNOWN")
         r.unmapped.refusal.includes("MAPPING_REQUIRED")
         r.made.refusal === "" && r.made.created === true
@@ -223,7 +269,7 @@ feature("a content author routes a lead form to a sales team of the organization
         r.published.refusal === "" && r.published.state === "open"
         r.page.form.notice === "Our sales team will call you about your quote."
         r.page.form.fields.map(f => f.fieldName).join() === "fullName,company,email,budget,interest"
-        r.listed.ruleList.length === 1 && r.listed.ruleList[0].teamName === "Team east"
+        r.listed.ruleList.length === 1 && r.listed.ruleList[0].teamName.startsWith("Team east")
         r.listed.ruleList[0].campaignName === "Racking launch"
         r.listedByReader.refusal.includes("PERMISSION_DENIED")
         // the author reads no audience: the preview's sample is made of the questions, its queue the rule's team
