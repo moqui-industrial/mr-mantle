@@ -2140,6 +2140,11 @@ along with this software (see the LICENSE.md file). If not, see
             one (mantle.marketing.CampaignServices.check#CampaignAccess), for every caller, authorization disabled or not; a call with
             no user sees none.
 
+            An event registration (mantle.work.registration.EventRegistration, IronStone Marketing's Chatter and files host,
+            impl-marketing P17) and its files (EventRegistrationContent) are seen only by an events manager of its offer's organization
+            (mantle.work.EventRegistrationServices.check#RegistrationAccess), for every caller, authorization disabled or not; a call
+            with no user sees none.
+
             A marketing send (mantle.marketing.campaign.CampaignSend, IronStone Marketing's Chatter and files host, impl-marketing P8)
             and its files (CampaignSendContent) are seen only by a Marketing reader of its organization
             (mantle.marketing.CampaignSendServices.check#SendAccess), for every caller, authorization disabled or not; a call with no
@@ -2260,7 +2265,11 @@ along with this software (see the LICENSE.md file). If not, see
                 // IronStone Marketing's send files host (impl-marketing P8, design §14.3 CampaignSendContent): a send's files, its
                 // Marketing readers'
                 'mantle.marketing.campaign.CampaignSend': content('mantle.marketing.campaign.CampaignSendContent',
-                        'campaignSendId', 'contentTypeEnumId')}
+                        'campaignSendId', 'contentTypeEnumId'),
+                // IronStone Marketing's registration files host (impl-marketing P17, design §14.1 EventRegistrationContent): a
+                // registration's files, its organization's events managers'
+                'mantle.work.registration.EventRegistration': content('mantle.work.registration.EventRegistrationContent',
+                        'registrationId', 'contentTypeEnumId')}
 
             const PARTY = 'mantle.party.Party'
             const WORK_EFFORT = 'mantle.work.effort.WorkEffort'
@@ -2715,6 +2724,12 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === 'mantle.marketing.campaign.CampaignSend' || entityName === 'mantle.marketing.campaign.CampaignSendContent')
                     return !!ec.service.sync().name('mantle.marketing.CampaignSendServices.check#SendAccess')
                             .parameter('campaignSendId', value.campaignSendId).disableAuthz().call()?.recordVisible
+                // IronStone Marketing's event registration and its files (impl-marketing P17): an events manager of its offer's
+                // organization (mantle.work.EventRegistrationServices.check#RegistrationAccess), whatever the entity filters and
+                // authorization; a call with no user sees none
+                if (entityName === 'mantle.work.registration.EventRegistration' || entityName === 'mantle.work.registration.EventRegistrationContent')
+                    return !!ec.service.sync().name('mantle.work.EventRegistrationServices.check#RegistrationAccess')
+                            .parameter('registrationId', value.registrationId).disableAuthz().call()?.recordVisible
                 // IronStone Sales' quote not yet placed and its files (impl-sales P7 review): a Sales reader of its seller to whom it is
                 // assigned (or to a team of theirs), or a reader of the organization's quotes (SALES_TEAM_VIEW)
                 // (mantle.order.SalesQuoteServices.check#QuoteAccess), not every party of its organizations or its customer, whatever

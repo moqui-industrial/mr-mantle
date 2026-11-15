@@ -187,4 +187,17 @@ along with this software (see the LICENSE.md file). If not, see
             editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
             subscriptionPermission="MARKETING_APPROVE" sequenceNum="43"/>
     <!-- ===== end of Marketing P15 ===== -->
+
+    <!-- ===== Marketing P17: registrations, tickets and payment (impl-marketing P17; design-marketing §9, §18) ===== -->
+    <!-- The ledger's source of an event registration's messages (mantle.work.EventRegistrationServices build#RegistrationDelivery): the
+        receipt, the ticket with a new entry code, a waitlist offer, a status or a cancellation, and an offer's scheduled notices with
+        their Comms template; the EmailTemplate they go out under, whose subject, body and sender each call gives (the offer's
+        transactional sending profile's). -->
+    <moqui.basic.Enumeration enumId="MdsrcEventRegistration" description="Event registration" sequenceNum="45"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.work.EventRegistrationServices.build#RegistrationDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_EVENT_REGISTRATION" description="Event registration message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- a ticket order (EventRegistrationPayments.js): the native sales order of a paid registration -->
+    <moqui.basic.Enumeration enumId="OrpEventRegistration" description="Event registration" sequenceNum="10" enumTypeId="OrderPurpose"/>
+    <!-- ===== end of Marketing P17 ===== -->
 </entity-facade-xml>

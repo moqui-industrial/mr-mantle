@@ -1785,4 +1785,66 @@
         service: 'mantle.marketing.MarketingPortalServices.get#Event',
         fields: ['siteId', 'registrationPolicyId'],
     },
+    // IronStone Marketing P17 (impl-marketing P17; design-marketing §13 Register, Registration): a registration's reservation (an
+    // anonymous write PASS's request key and the authority's limits bound), and its completion, payment, read and cancellation by the
+    // reservation's capability (input.token), the signed-in buyer's own reservation (reservationId) or the provider's return
+    // (reference and key, the state alone)
+    reserveRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.reserve#Registration',
+        fields: [
+            'siteId',
+            'registrationPolicyId',
+            'lines',
+            'buyerName',
+            'buyerEmail',
+            'operationId',
+        ],
+    },
+    completeRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.complete#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'attendees',
+            'answers',
+            'acceptTerms',
+            'termsRevision',
+            'operationId',
+        ],
+    },
+    startRegistrationPayment: {
+        service: 'mantle.marketing.MarketingPortalServices.start#RegistrationPayment',
+        fields: ['siteId', 'token', 'reservationId', 'priceKey', 'operationId'],
+    },
+    // the user's call (Nov 15): the provider's posted form (Accept Hosted) of a pending payment, a fresh token for Register's relay
+    getRegistrationPaymentForm: {
+        service: 'mantle.marketing.MarketingPortalServices.get#RegistrationPaymentForm',
+        fields: ['siteId', 'token', 'reservationId', 'operationId'],
+    },
+    getRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'reference',
+            'key',
+            'returned',
+            'showTicket',
+            'operationId',
+        ],
+    },
+    cancelRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.cancel#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'registrationIds',
+            'reason',
+            'confirm',
+            'operationId',
+        ],
+    },
 })

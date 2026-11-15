@@ -410,10 +410,10 @@ feature("Home answers each source by name, those not built yet shown not availab
             .map(card => card.cardKey)
             .join(",") == "campaigns,approvals,dueSends,failedDeliveries,registrations,audienceChanges"
         // P2 counts the running campaigns and pending approvals, P3 the audience changes, P9 the sends due and the failed or uncertain
-        // deliveries; registrations are not built yet
+        // deliveries, P17 the places taken against the seats of the published offers (none here)
         Array.from(home.cards)
             .filter(card => card.cardKey == "registrations")
-            .every(card => card.state == "notAvailable" && card.value == null)
+            .every(card => card.state == "available" && card.value == "0 / 0")
         Array.from(home.cards)
             .filter(card => card.cardKey != "registrations")
             .every(card => card.state == "available" && card.value == 0)

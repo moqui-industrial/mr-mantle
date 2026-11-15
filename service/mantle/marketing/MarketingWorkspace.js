@@ -19,6 +19,8 @@ const audiences = () => ec.resource.script("component://mr-mantle/service/mantle
 const routes = {
     settings: "marketingSettings",
     adoption: "marketingAdoption",
+    // P17: the events (Home's registrations card)
+    events: "marketingEvents",
     // P2
     campaigns: "marketingCampaigns",
     approvals: "marketingApprovals",
@@ -191,7 +193,27 @@ const cardSources = [
             linkPath: routes.sends
         })
     },
-    {key: "registrations", title: "Registrations against capacity", phase: "P17"},
+    // P17: the places taken (held, pending the organizer, confirmed) against the seats of the published offers still to come
+    {
+        key: "registrations",
+        title: "Registrations against capacity",
+        phase: "P17",
+        run: context => {
+            if (!context.organizationPartyIds.length) return {value: "0 / 0", linkPath: routes.events}
+            const setup = ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrations.js")
+            const offers = Array.from(
+                find("mantle.work.registration.EventRegistrationPolicy")
+                    .condition("organizationPartyId", "in", context.organizationPartyIds)
+                    .condition("statusId", "ErpPublished")
+                    .condition("occurrenceEnd", "greater-than", ec.user.nowTimestamp)
+                    .limit(200)
+                    .list()
+            )
+            const taken = offers.reduce((sum, offer) => sum + setup.seatsTaken(offer.registrationPolicyId), 0)
+            const seats = offers.reduce((sum, offer) => sum + Number(offer.totalSeats || 0), 0)
+            return {value: taken + " / " + seats, linkPath: routes.events}
+        }
+    },
     // P3: the subscription requests of the last seven days for the organizations' lists (a count, no person)
     {
         key: "audienceChanges",

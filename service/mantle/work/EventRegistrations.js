@@ -1229,6 +1229,20 @@ function publicView(registrationPolicyId, siteId, organizationPartyId) {
         cancellationTerms: policy.cancellationTerms || ""
     }
 }
+// An offer's public facts for its registration messages and pages (P17): its title, when in its zone, and where or online.
+function publicFacts(policy) {
+    const workEffort = one(WORK_EFFORT, {workEffortId: policy.workEffortId})
+    const occurrence = workEffort ? occurrenceOf(workEffort, ms(policy.occurrenceStart)) : null
+    const zone = workEffort ? zoneOf(workEffort, policy) : String(ec.user.timeZone || "UTC")
+    const start = occurrence?.start ?? ms(policy.occurrenceStart)
+    return {
+        title: policy.publicTitle || workEffort?.workEffortName || "",
+        whenText: zoneText(start, zone, "EEEE d MMMM yyyy, HH:mm") + " (" + zone + ")",
+        where: workEffort?.location || (workEffort?.infoUrl ? L("Online") : ""),
+        startMs: start,
+        endMs: occurrence?.end ?? ms(policy.occurrenceEnd)
+    }
+}
 // The offers published on a site now (the Marketing app's readiness).
 const liveOffersOf = (siteId, organizationPartyId) =>
     rows(POLICY, {siteId, organizationPartyId, statusId: "ErpPublished"}).filter(
@@ -1255,6 +1269,8 @@ const operations = {
     gatewayOf,
     readinessOf,
     publicView,
+    publicFacts,
+    profileOf,
     liveOffersOf,
     // the event's organization (CampaignAssociation CakEvent, MarketingCampaigns.js): {owner, label} or null
     organizationOfEvent: workEffortId => {
