@@ -152,8 +152,11 @@ spec({
                 authzActionEnumId: "AUTHZA_ALL"
             })
             users.rep = user("rep", [orgA], ["SALES_VIEW", "SALES_OPPORTUNITY_EDIT", "SALES_ACCOUNT_EDIT"])
+            // a seller who qualifies deals but edits no account (SalesLeadToInvoiceWalk's seller)
+            users.qualifier = user("qualifier", [orgA], ["SALES_VIEW", "SALES_OPPORTUNITY_EDIT"])
             teams.east = team("east", orgA)
             member(users.rep, teams.east)
+            member(users.qualifier, teams.east)
             // B's account, and a person of A to join as a contact
             make("mantle.party.Party", {partyId: prefix + "_ACC_B", partyTypeEnumId: "PtyOrganization", ownerPartyId: orgB})
             make("mantle.party.Organization", {partyId: prefix + "_ACC_B", organizationName: "Account of B"})
@@ -161,6 +164,8 @@ spec({
             make("mantle.party.PartyRole", {partyId: prefix + "_ACC_B", roleTypeId: "Customer"})
             make("mantle.party.Party", {partyId: prefix + "_PERSON", partyTypeEnumId: "PtyPerson", ownerPartyId: orgA})
             make("mantle.party.Person", {partyId: prefix + "_PERSON", firstName: "Jo", lastName: "Known"})
+            make("mantle.party.Party", {partyId: prefix + "_PERSON2", partyTypeEnumId: "PtyPerson", ownerPartyId: orgA})
+            make("mantle.party.Person", {partyId: prefix + "_PERSON2", firstName: "Sam", lastName: "New"})
         })
         // two leads with no account, the first with an activity
         ids.lead = as(users.rep, "create#Opportunity", {
@@ -268,6 +273,7 @@ feature(
                 "qualify#Lead",
                 Object.assign(base(), {operationKey: prefix + "-again", accountName: "Third Co"})
             )
+            ids.joinedAccount = joined.accountPartyId
             return {crossed, stillLead, joined, contact, again}
         },
         then(r) {
@@ -280,3 +286,41 @@ feature(
         }
     }
 )
+feature("without SALES_ACCOUNT_EDIT a lead is qualified on an account's current contact, and refused making a new one", {
+    when() {
+        const q = users.qualifier
+        const lead = as(q, "create#Opportunity", {
+            typeEnumId: "SotLead",
+            organizationPartyId: orgA,
+            opportunityName: "Returning buyer"
+        }).salesOpportunityId
+        const base = () => ({salesOpportunityId: lead, expectedRevision: revision(q, lead), accountPartyId: ids.joinedAccount})
+        const stranger = as(
+            q,
+            "qualify#Lead",
+            Object.assign(base(), {operationKey: prefix + "-noedit-new", contactPartyId: prefix + "_PERSON2"})
+        )
+        const known = as(
+            q,
+            "qualify#Lead",
+            Object.assign(base(), {operationKey: prefix + "-noedit-known", contactPartyId: prefix + "_PERSON"})
+        )
+        const contacts = personId =>
+            system(
+                () =>
+                    rowsOf("mantle.party.PartyRelationship", {
+                        fromPartyId: personId,
+                        toPartyId: ids.joinedAccount,
+                        relationshipTypeEnumId: "PrtContact"
+                    }).length
+            )
+        return {stranger, known, knownContacts: contacts(prefix + "_PERSON"), newContacts: contacts(prefix + "_PERSON2")}
+    },
+    then(r) {
+        r.stranger.refused.includes("PERMISSION_DENIED")
+        r.newContacts == 0
+        r.known.refused == ""
+        r.known.contactPartyId == prefix + "_PERSON"
+        r.knownContacts == 1
+    }
+})
