@@ -62,7 +62,8 @@ const apps = {
     },
 }
 /* The framework's reserved first path segments (ec.web.reservedPaths: the host's own routes, the framework's screens and
- * its sign-in, token and asset paths), the one list of them; there with no request too. */
+ * its sign-in, token and asset paths, and the first segment of each servlet the conf declares, such as /search and PASS's
+ * /trk), the one list of them; there with no request too. */
 function frameworkPaths() {
     return Array.from(ec.web.reservedPaths, String)
 }

@@ -463,6 +463,9 @@ feature(
                 nav(users.merchandiser, {redirect: {oldPath, destinationTypeEnumId, destinationValue}})
             const toApi = redirect("/old-api", "SdtPath", "/api/v1")
             const fromReserved = redirect("/static/x", "SdtPath", "/pages/returns")
+            // a servlet answers on every host, so the framework reserves each declared one's first segment (the default
+            // conf's /dashboard proxy)
+            const fromServlet = redirect("/dashboard/old", "SdtPath", "/pages/returns")
             const offSite = redirect("/partner", "SdtExternal", "https://partner.example.com/")
             const intoAccount = redirect("/account/old", "SdtPath", "/pages/returns")
             // ci and .well-known are the host's only in the sub-paths it uses: /ci/runner is, /.well-known/security.txt is not
@@ -487,6 +490,7 @@ feature(
                 category,
                 toApi,
                 fromReserved,
+                fromServlet,
                 offSite,
                 intoAccount,
                 intoRunner,
@@ -510,6 +514,7 @@ feature(
             r.category.draftRevision == 4
             code(r.toApi) == "PATH_RESERVED"
             code(r.fromReserved) == "PATH_RESERVED"
+            code(r.fromServlet) == "PATH_RESERVED"
             code(r.offSite) == "REDIRECT_OFF_SITE"
             code(r.intoAccount) == "PATH_RESERVED"
             code(r.intoRunner) == "PATH_RESERVED"
