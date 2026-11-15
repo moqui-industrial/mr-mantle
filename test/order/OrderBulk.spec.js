@@ -1,5 +1,8 @@
 // Orders stored from an external source (store#Order create and revise) and bulk part status changes
 // (mantle.order.OrderBulkServices). New spec, no Groovy original.
+// the BOSS demo's Utah nexus of Retail (impl-marketing follow-up 1) is suspended for this spec: its figures are Mantle's own, untaxed
+const demoTax = ec.resource.script("component://mr-mantle/test/order/DemoTaxNexus.js")
+let retailNexus = null
 const effectiveTime = Date.now()
 const vendorId = "ORG_ZIZI_RETAIL", facilityId = "ZIRET_WH"
 let orderId, partSeqId, firstItemSeqId, otherOrderId
@@ -10,7 +13,9 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.user.setEffectiveTime(effectiveTime)
+        retailNexus = demoTax.suspend()
     },
+    cleanupSpec() { demoTax.restore(retailNexus) },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() { ec.artifactExecution.enableAuthz() },
 })

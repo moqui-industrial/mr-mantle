@@ -65,6 +65,17 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="waitlistLimit" type="number-integer" enable-audit-log="update"/>
         <field name="termsText" type="text-very-long" enable-audit-log="update"/>
         <field name="cancellationTerms" type="text-long" enable-audit-log="update"/>
+        <!-- Marketing follow-up 1 (§4 Nov 15, the user's call): the cancellation terms as a rule a buyer's cancellation and its refund
+            follow; part of the terms a registrant accepts (a change after publication raises termsRevision) -->
+        <field name="cancelDeadlineHours" type="number-integer" enable-audit-log="update"><description>Online cancellation closes
+            this many hours before the occurrence's start (a day is 24); empty: until the start</description></field>
+        <field name="refundPercent" type="number-decimal" enable-audit-log="update"><description>The share of a confirmed place's
+            price and tax refunded when it is cancelled online before the deadline, 0 to 100; empty: 100</description></field>
+        <field name="lateCancelAllowed" type="text-indicator" enable-audit-log="update"><description>Y: after the deadline a buyer
+            may still cancel online, with no refund (the seat freed for others); else online cancellation is refused then</description></field>
+        <field name="entryCodeKey" type="text-medium" encrypt="true"><description>The offer's secret its attendees' entry codes are
+            derived from (a keyed digest of the registration and its credential revision), made at the first code and encrypted
+            with the server's key; never shown, listed or exported</description></field>
         <field name="formPublicationId" type="id" enable-audit-log="update"/>
         <field name="questionScopeEnumId" type="id"><description>Whom the questions are for: each attendee or the buyer once</description></field>
         <field name="consentText" type="text-long" enable-audit-log="update"><description>The consent a registrant accepts with the
@@ -206,6 +217,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="cancelReason" type="text-medium"/>
         <field name="refundStatusEnumId" type="id" enable-audit-log="update"/>
         <field name="refundPaymentId" type="id"/>
+        <field name="refundPercent" type="number-decimal"><description>Follow-up 1: the share of the place's price and tax refunded,
+            decided when it was cancelled (the accepted terms' rule, 100 for a place not yet confirmed, or staff's with a
+            reason)</description></field>
         <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
         <relationship type="one" related="mantle.work.registration.EventTicketType" short-alias="ticketType"/>
         <relationship type="one" related="mantle.work.registration.EventReservation" short-alias="reservation"/>
@@ -308,6 +322,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="termsText" type="text-very-long"/>
         <field name="cancellationTerms" type="text-long"/>
         <field name="consentText" type="text-long"/>
+        <!-- follow-up 1: the cancellation rule of the revision, which a cancellation of a registration that accepted it follows -->
+        <field name="cancelDeadlineHours" type="number-integer"/>
+        <field name="refundPercent" type="number-decimal"/>
+        <field name="lateCancelAllowed" type="text-indicator"/>
         <field name="createdDate" type="date-time"/>
         <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
     </entity>
@@ -350,8 +368,12 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="Refund result" enumId="EraRefunded" enumTypeId="EventRegistrationAction" sequenceNum="12"/>
             <moqui.basic.Enumeration description="Corrected" enumId="EraCorrected" enumTypeId="EventRegistrationAction" sequenceNum="13"/>
             <moqui.basic.Enumeration description="Attendee substituted" enumId="EraSubstituted" enumTypeId="EventRegistrationAction" sequenceNum="14"/>
-            <moqui.basic.Enumeration description="Entry code issued again" enumId="EraTicketShown" enumTypeId="EventRegistrationAction" sequenceNum="15"/>
+            <moqui.basic.Enumeration description="Entry code shown" enumId="EraTicketShown" enumTypeId="EventRegistrationAction" sequenceNum="15"/>
             <moqui.basic.Enumeration description="Notice sent again" enumId="EraNotified" enumTypeId="EventRegistrationAction" sequenceNum="16"/>
+            <!-- follow-up 1: a new entry code by staff (the revision raised, the earlier code revoked) and a refund set against the terms -->
+            <moqui.basic.Enumeration description="New entry code issued" enumId="EraCodeReissued" enumTypeId="EventRegistrationAction" sequenceNum="17"/>
+            <moqui.basic.Enumeration description="Refund set against the terms" enumId="EraRefundOverride" enumTypeId="EventRegistrationAction" sequenceNum="18"/>
+            <moqui.basic.Enumeration description="Order invoiced and its payment captured" enumId="EraInvoiced" enumTypeId="EventRegistrationAction" sequenceNum="19"/>
         </seed-data>
     </entity>
 

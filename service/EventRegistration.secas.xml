@@ -24,4 +24,12 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><service-call name="mantle.work.EventRegistrationServices.handle#RegistrationOrderStatus" disable-authz="true"
                 in-map="{orderId:orderId, statusId:statusId}"/></actions>
     </seca>
+    <!-- follow-up 1 (§4 Nov 15, the user's call): once a ticket order's approval commits, it is invoiced through Accounting's
+        create#FulfillmentInvoice, which captures its authorized payment (EventRegistrationServices.invoice#RegistrationOrder, in a
+        transaction of its own under the part's lock, never failing the approval); any other order returns at once -->
+    <seca id="EventRegistrationApprovedInvoice" service="update#mantle.order.OrderHeader" when="tx-commit">
+        <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
+        <actions><service-call name="mantle.work.EventRegistrationServices.invoice#RegistrationOrder" in-map="{orderId:orderId}"
+                disable-authz="true" transaction="force-new" ignore-error="true"/></actions>
+    </seca>
 </secas>

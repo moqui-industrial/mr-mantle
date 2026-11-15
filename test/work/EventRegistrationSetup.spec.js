@@ -480,7 +480,7 @@ feature(
             view.event.tickets.map(ticket => ticket.name + " " + ticket.priceText).join(", ") == "Standard $40.00, Guest Free"
             view.event.registrationOpen && view.event.availability == "Places available"
             Object.keys(view.event).sort().join() ==
-                "availability,cancellationTerms,description,endText,location,online,organizationName,registrationOpen,registrationPolicyId,registrationText,startText,terms,tickets,timeZone,title"
+                "availability,cancelRule,cancellationTerms,description,endText,location,online,organizationName,registrationOpen,registrationPolicyId,registrationText,startText,terms,tickets,timeZone,title"
             Object.keys(view.event.tickets[0]).sort().join() == "availability,name,priceText,ticketTypeId"
             otherSite.kind == "NotFound"
             closed.refusal == "" && closedView.kind == "NotFound"

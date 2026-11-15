@@ -116,7 +116,10 @@ along with this software (see the LICENSE.md file). If not, see
             description, the zone its times are shown in, the site (an enabled Marketing mount of the organization), an optional
             store of the organization (a store order; storeless by default), the window (WINDOW_INVALID), the seats (never fewer than
             the places held or confirmed now: CAPACITY_BELOW_TAKEN), the hold in minutes, the waitlist, the terms and cancellation
-            terms (a change after publication raises termsRevision) and the notices' sending profile. A closed offer is not changed
+            terms, the cancellation rule (follow-up 1: cancelDeadlineHours before the start, empty until the start; refundPercent of
+            a confirmed place, empty 100; lateCancelAllowed, a cancellation after the deadline with no refund; DEADLINE_INVALID,
+            REFUND_INVALID) (a change of the terms or the rule after publication raises termsRevision) and the notices' sending
+            profile. A closed offer is not changed
             (POLICY_CLOSED). MARKETING_EVENT_MANAGE in the event's organization.</description>
         <in-parameters>
             <parameter name="registrationPolicyId"/>
@@ -136,6 +139,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="waitlistLimit"/>
             <parameter name="termsText"/>
             <parameter name="cancellationTerms"/>
+            <parameter name="cancelDeadlineHours"/>
+            <parameter name="refundPercent"/>
+            <parameter name="lateCancelAllowed"/>
             <parameter name="sendingProfileId"/>
         </in-parameters>
         <out-parameters>
@@ -333,9 +339,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="canCorrect" type="Boolean"/>
             <parameter name="canConfirm" type="Boolean"/>
             <parameter name="canNotify" type="Boolean"/>
+            <parameter name="canReissue" type="Boolean"/>
+            <parameter name="termsRefundPercent" type="BigDecimal"/>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js').execute('getRegistration', context)"/>
+            <set field="canReissue" from="out.canReissue"/>
+            <set field="termsRefundPercent" from="out.termsRefundPercent"/>
             <set field="registration" from="out.registration"/>
             <set field="actions" from="out.actions"/>
             <set field="canCancel" from="out.canCancel"/>
@@ -447,7 +457,34 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A live registration cancelled at the revision read with its reason (RegistrationChange): its seat released once
             under the offer's lock, its entry code revoked, a paid place's refund handed to Accounting's payment services after the
             commit and shown pending until the provider's result, its order cancelled once none of its places is left, then the
-            waitlist offered. MARKETING_EVENT_MANAGE.</description>
+            waitlist offered. The refund follows the cancellation rule of the terms the registration accepted (follow-up 1: a
+            confirmed place's percentage before the deadline, nothing after it; a place never confirmed in full) unless refundPercent
+            names another (0 to 100), an override recorded with the reason (EraRefundOverride). Staff may cancel after the deadline and
+            the start. MARKETING_EVENT_MANAGE.</description>
+        <in-parameters>
+            <parameter name="registrationId" required="true"/>
+            <parameter name="expectedRevision" required="true"/>
+            <parameter name="reason" required="true"/>
+            <parameter name="refundPercent"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationId"/>
+            <parameter name="statusId"/>
+            <parameter name="refundStatusEnumId"/>
+            <parameter name="refundPercent" type="BigDecimal"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js').execute('cancelRegistration', context)"/>
+            <set field="registrationId" from="out.registrationId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="refundStatusEnumId" from="out.refundStatusEnumId"/>
+            <set field="refundPercent" from="out.refundPercent"/>
+        </actions>
+    </service>
+    <service verb="reissue" noun="RegistrationCode" allow-remote="false">
+        <description>A new entry code for a confirmed place at the revision read, with its reason (follow-up 1; a lost or shared ticket):
+            the code's revision raised, so the earlier code no longer admits, the new code sent in a ticket notice; the code itself is
+            never kept or answered. STATUS_INVALID for a place not confirmed. MARKETING_EVENT_MANAGE.</description>
         <in-parameters>
             <parameter name="registrationId" required="true"/>
             <parameter name="expectedRevision" required="true"/>
@@ -455,14 +492,12 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters>
             <parameter name="registrationId"/>
-            <parameter name="statusId"/>
-            <parameter name="refundStatusEnumId"/>
+            <parameter name="credentialRevision" type="Integer"/>
         </out-parameters>
         <actions>
-            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js').execute('cancelRegistration', context)"/>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js').execute('reissueRegistrationCode', context)"/>
             <set field="registrationId" from="out.registrationId"/>
-            <set field="statusId" from="out.statusId"/>
-            <set field="refundStatusEnumId" from="out.refundStatusEnumId"/>
+            <set field="credentialRevision" from="out.credentialRevision"/>
         </actions>
     </service>
     <service verb="correct" noun="Registration" allow-remote="false">
@@ -494,6 +529,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="action" required="true"/>
             <parameter name="registrationIds" type="List" required="true"/>
             <parameter name="reason"/>
+            <parameter name="refundPercent"><description>For cancel: the refund of each paid place, against its terms' rule (an override
+                recorded with the reason); empty: each place's rule</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="results" type="List"/>
@@ -595,13 +632,26 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="refund" noun="RegistrationPayment" authenticate="anonymous-all" allow-remote="false">
         <description>Internal (after a cancellation commits, and the job): a cancelled paid place's refund handed to the payment
             services: release#SinglePayment of an authorization once none of its places is left, else refund#SinglePayment of the
-            place's line and tax once taken, each with the registration's operation key; the result kept on the place (refunded, or
+            place's line and tax once taken, at the percentage decided at its cancellation, each with the registration's operation key; the result kept on the place (refunded, or
             Accounting's to finish).</description>
         <in-parameters><parameter name="registrationId" required="true"/></in-parameters>
         <out-parameters><parameter name="refundStatusEnumId"/></out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPayments.js').execute('refundPayment', context)"/>
             <set field="refundStatusEnumId" from="out.refundStatusEnumId"/>
+        </actions>
+    </service>
+    <service verb="invoice" noun="RegistrationOrder" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (the EventRegistrationApprovedInvoice SECA, once an order's approval commits; follow-up 1): a ticket order's
+            approved parts invoiced once each through Accounting's create#FulfillmentInvoice, under the part's lock, whose payment
+            application captures the authorized payment; the lines of places cancelled before the approval left out, and a refund that
+            waited for the capture handed over. Any other order is left alone; a part that cannot be billed is logged, never failing
+            the approval.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters><parameter name="invoiceIds" type="List"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPayments.js').execute('invoiceOrder', context)"/>
+            <set field="invoiceIds" from="out.invoiceIds"/>
         </actions>
     </service>
     <service verb="refresh" noun="RegistrationPayment" authenticate="anonymous-all" allow-remote="false">
@@ -620,8 +670,8 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationNotices.js').execute('queueNotice', context)"/></actions>
     </service>
     <service verb="build" noun="RegistrationDelivery" allow-remote="false">
-        <description>The ledger's source MdsrcEventRegistration, before each attempt: the receipt, ticket (a new entry code, the earlier
-            one revoked, and an online occurrence's link), offer, status or cancellation of a registration, or an offer's notice with its
+        <description>The ledger's source MdsrcEventRegistration, before each attempt: the receipt, ticket (the entry code of the place's
+            current revision, and an online occurrence's link), offer, status or cancellation of a registration, or an offer's notice with its
             Comms template; a link to MyRegistration with a capability made for this attempt; suppressed when the registration, offer
             or event changed so it no longer applies. Internal.</description>
         <in-parameters>

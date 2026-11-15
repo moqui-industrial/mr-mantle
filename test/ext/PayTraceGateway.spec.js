@@ -17,9 +17,15 @@ let customerId, productId, addressId
 let tokenCount = 0
 const tokensSent = []
 
+// the BOSS demo's Utah nexus of Retail (impl-marketing follow-up 1) and the LOCAL gateway it inherits from ORG_ZIZI_CORP (Marketing P17
+// review) are suspended for this spec: its storeless order keeps the tax lines it is written with
+const demoTax = ec.resource.script("component://mr-mantle/test/order/DemoTaxNexus.js")
+let retailNexus = null
+
 spec({
     setupSpec() {
         login("john.doe")
+        retailNexus = demoTax.suspend({gateway: true})
         ec.artifactExecution.disableAuthz()
         call("create#moqui.service.message.SystemMessageRemote", {
             systemMessageRemoteId: "PT_SPEC",
@@ -94,6 +100,7 @@ spec({
         ec.artifactExecution.enableAuthz()
     },
     cleanupSpec() {
+        demoTax.restore(retailNexus)
         // the spec's payments stay in the database: with no endpoint their gateway sends nothing when a later spec's
         // poll job asks for their details, as the fixtures are off then
         ec.artifactExecution.disableAuthz()

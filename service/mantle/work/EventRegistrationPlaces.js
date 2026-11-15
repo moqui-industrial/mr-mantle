@@ -18,8 +18,13 @@
 //   hands a paid place's refund to Accounting (EventRegistrationPayments.js), shown pending until the provider's result; then the
 //   first waiting reservation that fits is offered whole (FIFO by its waitlist time, then id; none split, none passed) with a hold
 //   of its own, or confirmed at once when it is completed and free.
-// - The entry code is never kept: its digest and revision are; a new code (a ticket notice, Show my entry code, a correction)
-//   revokes the earlier one. A substitution names the new attendee with a reason and revokes the old attendee's code.
+// - The entry code is never kept: its digest and revision are. It is one code per revision, derived again whenever it is shown (a
+//   ticket notice, Send again, Show my entry code) from a keyed digest of the registration and its revision with the offer's secret
+//   (EventRegistrationPolicy.entryCodeKey, encrypted by the server's key); a correction, a substitution, a cancellation or a staff
+//   reissue raises the revision, so the earlier code stops matching (follow-up 1; §4 Nov 15, the user's call).
+// - A cancellation follows the cancellation rule of the terms the registration accepted (follow-up 1): a confirmed place is cancelled
+//   online until the rule's deadline for its refund percentage, after it with no refund where the rule allows it, else not online;
+//   a place not yet confirmed is refunded in full; staff may set another percentage with a reason, recorded as its own action.
 // - Staff services ask MARKETING_EVENT_MANAGE in the offer's organization (another organization's registration answers as a missing
 //   one) and read and write with artifact authorization off below that check; the portal (MarketingPortal.js) reaches the same
 //   functions only after its own checks of the site, the offer's publication and the visitor's capability.
@@ -108,6 +113,7 @@ function lockOffer(registrationPolicyId) {
 }
 
 // ===== actions and the entry code =====
+const HOUR = 3600000
 function record(row, actionEnumId, values = {}) {
     call("create#" + ACTION, {
         registrationId: row.registrationId,
@@ -132,33 +138,82 @@ function move(row, statusId, actionEnumId, values = {}, reason = null) {
     )
     record(row, actionEnumId, {fromStatusId: row.statusId, toStatusId: statusId, reason})
 }
-// A new entry code for a confirmed place: the code (returned once, never kept), its digest and the next revision, the earlier one
-// revoked. {code, revision}.
-function issueCode(registrationId, actionEnumId = null, operationKey = null) {
-    const row = find(REGISTRATION, {registrationId}).forUpdate(true).one()
-    if (!row || row.statusId !== "EvrConfirmed") return null
-    const code =
+// The offer's secret its entry codes are derived from: made at publication (EventRegistrations.js), else here once under the offer's
+// row lock (an offer published before follow-up 1). Read before a registration's row is locked, so the lock order stays the offer's
+// first.
+function entryKeyOf(registrationPolicyId) {
+    const policy = one(POLICY, {registrationPolicyId})
+    if (!policy) return null
+    if (policy.entryCodeKey) return String(policy.entryCodeKey)
+    const locked = find(POLICY, {registrationPolicyId}).forUpdate(true).one()
+    if (locked.entryCodeKey) return String(locked.entryCodeKey)
+    const entryCodeKey = ec.user.randomString(64)
+    call("update#" + POLICY, {registrationPolicyId, entryCodeKey})
+    return entryCodeKey
+}
+// The code of a registration's revision: a keyed digest (SHA-256 over the secret and the inner digest of the secret, the
+// registration and the revision, as HMAC nests it; the script host gives digests as hex) cut to 24 characters. The same revision
+// gives the same code; only the secret's holder (the server) can make it.
+function codeOf(entryCodeKey, registrationId, revision) {
+    const inner = ec.resource.digestText(entryCodeKey + "\n" + registrationId + "\n" + revision)
+    return (
         "EV" +
-        ec.user
-            .randomString(30)
-            .replace(/[^A-Za-z0-9]/g, "")
+        ec.resource
+            .digestText(entryCodeKey + "\n" + inner)
             .slice(0, 24)
             .toUpperCase()
+    )
+}
+const codeDigest = code => ec.user.singleUseCodeHash("event-entry:" + code)
+// The entry code of a confirmed place at its current revision ({code, revision}), shown again as often as it is asked: its digest
+// is written at the first issue of a revision (a revoked code's next revision, or the first), and a code made before follow-up 1
+// (random, so it cannot be derived again) is replaced by the next revision's. With an action (EraTicketShown) the showing is recorded.
+function issueCode(registrationId, actionEnumId = null, operationKey = null) {
+    const found = one(REGISTRATION, {registrationId})
+    if (!found || found.statusId !== "EvrConfirmed") return null
+    const entryCodeKey = entryKeyOf(found.registrationPolicyId)
+    const row = find(REGISTRATION, {registrationId}).forUpdate(true).one()
+    if (!row || row.statusId !== "EvrConfirmed" || !entryCodeKey) return null
+    let revision = Math.max(Number(row.credentialRevision || 0), 1)
+    let code = codeOf(entryCodeKey, registrationId, revision)
+    if (row.credentialDigest !== codeDigest(code)) {
+        if (row.credentialDigest) {
+            revision += 1
+            code = codeOf(entryCodeKey, registrationId, revision)
+        }
+        call("update#" + REGISTRATION, {
+            registrationId,
+            credentialDigest: codeDigest(code),
+            credentialRevision: revision,
+            credentialDate: ec.user.nowTimestamp
+        })
+    }
+    if (actionEnumId) record({registrationId, statusId: row.statusId, credentialRevision: revision}, actionEnumId, {operationKey})
+    return {code, revision}
+}
+// A new code for a confirmed place (staff's reissue): the revision raised and its digest written, the earlier code revoked.
+function reissueCode(registrationId, reason, operationKey = null) {
+    const found = one(REGISTRATION, {registrationId})
+    if (!found) return null
+    const entryCodeKey = entryKeyOf(found.registrationPolicyId)
+    const row = find(REGISTRATION, {registrationId}).forUpdate(true).one()
+    if (!row || row.statusId !== "EvrConfirmed" || !entryCodeKey) return null
     const revision = Number(row.credentialRevision || 0) + 1
+    const code = codeOf(entryCodeKey, registrationId, revision)
     call("update#" + REGISTRATION, {
         registrationId,
-        credentialDigest: ec.user.singleUseCodeHash("event-entry:" + code),
+        credentialDigest: codeDigest(code),
         credentialRevision: revision,
         credentialDate: ec.user.nowTimestamp
     })
-    if (actionEnumId) record({registrationId, statusId: row.statusId, credentialRevision: revision}, actionEnumId, {operationKey})
+    record({registrationId, statusId: row.statusId, credentialRevision: revision}, "EraCodeReissued", {reason, operationKey})
     return {code, revision}
 }
 // The registration an entry code names (its digest, the current revision), for check-in (P18); null for anything else.
 function registrationOfCode(code) {
     const value = text(code)
     if (!value || value.length > 64) return null
-    return one(REGISTRATION, {credentialDigest: ec.user.singleUseCodeHash("event-entry:" + value)}) || null
+    return one(REGISTRATION, {credentialDigest: codeDigest(value)}) || null
 }
 // The words of the offer's current terms revision, kept once (EventRegistrationTerms).
 function keepTerms(policy) {
@@ -170,11 +225,44 @@ function keepTerms(policy) {
             termsText: policy.termsText || null,
             cancellationTerms: policy.cancellationTerms || null,
             consentText: policy.consentText || null,
+            cancelDeadlineHours: policy.cancelDeadlineHours ?? null,
+            refundPercent: policy.refundPercent ?? null,
+            lateCancelAllowed: policy.lateCancelAllowed || null,
             createdDate: ec.user.nowTimestamp
         })
     return termsRevision
 }
-const hasTerms = policy => !blank(policy.termsText) || !blank(policy.cancellationTerms) || !blank(policy.consentText)
+const hasTerms = policy =>
+    !blank(policy.termsText) || !blank(policy.cancellationTerms) || !blank(policy.consentText) || setup().hasCancelRule(policy)
+
+// ===== the cancellation rule (follow-up 1) =====
+// The rule a registration (or a reservation) accepted: its terms revision's words and rule, else the offer's now (a place that
+// accepted no terms).
+function ruleSourceOf(policy, termsRevision) {
+    const terms =
+        termsRevision != null
+            ? one(TERMS, {registrationPolicyId: policy.registrationPolicyId, termsRevision: Number(termsRevision)})
+            : null
+    return terms || policy
+}
+// When the place's occurrence starts (the event's rule may have moved it), in millis.
+function startOf(policy) {
+    const workEffort = one(WORK_EFFORT, {workEffortId: policy.workEffortId})
+    const occurrence = workEffort ? setup().occurrenceOf(workEffort, ms(policy.occurrenceStart)) : null
+    return occurrence?.start ?? ms(policy.occurrenceStart)
+}
+// What the rule says of cancelling a place now: {allowed, refundPercent, late}. Only a confirmed place is bound by it (one held,
+// pending the organizer's approval, waitlisted or under review was never sold, so it is refunded in full); after the start nothing is
+// cancelled online.
+function cancelTermsOf(row, policy, at = nowMs()) {
+    const startMs = startOf(policy)
+    if (startMs != null && startMs <= at) return {allowed: false, refundPercent: 0, started: true}
+    if (row.statusId !== "EvrConfirmed") return {allowed: true, refundPercent: 100}
+    const rule = setup().cancelRuleOf(ruleSourceOf(policy, row.termsRevision))
+    const deadline = rule.deadlineHours == null || startMs == null ? startMs : startMs - rule.deadlineHours * HOUR
+    if (deadline == null || at < deadline) return {allowed: true, refundPercent: rule.refundPercent}
+    return rule.lateAllowed ? {allowed: true, refundPercent: 0, late: true} : {allowed: false, refundPercent: 0, late: true}
+}
 
 // ===== the people =====
 // The party for a typed person: by address, the address's directory party or a new person (MarketingPortal.js subscriberOf, never
@@ -440,7 +528,8 @@ function stateOfReservation(reservation, policy) {
 // ===== cancel and the waitlist =====
 // Places cancelled once under the offer's lock: each live place's seat released, its entry code revoked, a paid place's refund
 // handed to Accounting after the commit; then the waitlist offered and the order cancelled when none of its places is left.
-function cancelPlaces(registrationIds, reason, operationKey = null) {
+// percentOf(row, policy) gives each paid place's refund percentage (the caller's decision: the rule, 100, or staff's); none: 100.
+function cancelPlaces(registrationIds, reason, operationKey = null, percentOf = null) {
     const byPolicy = new Map()
     for (const registrationId of registrationIds) {
         const row = one(REGISTRATION, {registrationId})
@@ -450,11 +539,12 @@ function cancelPlaces(registrationIds, reason, operationKey = null) {
     const refunds = []
     const orders = new Set()
     for (const [registrationPolicyId, ids] of byPolicy) {
-        lockOffer(registrationPolicyId)
+        const {policy} = lockOffer(registrationPolicyId)
         for (const registrationId of ids) {
             const row = find(REGISTRATION, {registrationId}).forUpdate(true).one()
             if (!row || !LIVE_STATES.includes(row.statusId)) continue
             const paid = payments().paidFor(row)
+            const refundPercent = paid ? (percentOf ? percentOf(row, policy) : 100) : null
             move(
                 row,
                 "EvrCancelled",
@@ -465,7 +555,8 @@ function cancelPlaces(registrationIds, reason, operationKey = null) {
                     holdExpireDate: null,
                     credentialDigest: null,
                     credentialRevision: row.credentialDigest ? Number(row.credentialRevision || 0) + 1 : row.credentialRevision,
-                    refundStatusEnumId: paid ? "ErfRequested" : row.refundStatusEnumId || null
+                    refundStatusEnumId: paid ? "ErfRequested" : row.refundStatusEnumId || null,
+                    refundPercent
                 },
                 reason
             )
@@ -779,7 +870,9 @@ function getRegistration(p) {
             termsRevision: row.termsRevision,
             termsText: terms?.termsText || "",
             cancellationTerms: terms?.cancellationTerms || "",
+            cancelRuleText: setup().cancelRuleText(terms || policy),
             consentText: terms?.consentText || "",
+            refundPercent: row.refundPercent == null ? null : Number(toDecimal(row.refundPercent).toString()),
             orderId: row.orderId || "",
             paymentText: payments().paymentText(row),
             formResponseId: row.formResponseId || "",
@@ -795,6 +888,9 @@ function getRegistration(p) {
         actions,
         canCancel: live,
         canCorrect: live && row.statusId !== "EvrReview",
+        canReissue: row.statusId === "EvrConfirmed",
+        // what the accepted terms give a cancellation now (staff may set another percentage with a reason)
+        termsRefundPercent: live ? (cancelTermsOf(row, policy).started ? 0 : cancelTermsOf(row, policy).refundPercent) : null,
         canConfirm:
             (row.statusId === "EvrHeld" && !payments().paidFor(row) && !paidOf(row, policy)) || row.statusId === "EvrReview",
         canNotify: ["EvrConfirmed", "EvrPending", "EvrWaitlisted"].includes(row.statusId)
@@ -884,8 +980,34 @@ function confirmRegistration(p) {
     confirmPlaces([row.registrationId], reason)
     return {registrationId: row.registrationId, statusId: "EvrConfirmed"}
 }
+// A refund percentage a staff member names (0 to 100, at most two decimals), or null when none is named.
+function percentInput(value) {
+    if (blank(value)) return null
+    const percent = Number(String(value).trim())
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100 || Math.round(percent * 100) !== percent * 100)
+        denied("VALUE_INVALID[refundPercent]", "The refund is a percentage from 0 to 100, at most two decimals")
+    return percent
+}
+// Staff's refund for a paid place: the accepted terms' rule as a buyer cancelling now would have it (after the deadline nothing,
+// whether or not a buyer could still cancel online), or the percentage staff name; one that differs from the rule's is an override,
+// recorded with the reason (EraRefundOverride; follow-up 1).
+function staffPercentOf(named, reason) {
+    return (row, policy) => {
+        const terms = cancelTermsOf(row, policy)
+        const byTerms = terms.started ? 0 : terms.refundPercent
+        if (named == null || named === byTerms) return byTerms
+        record(row, "EraRefundOverride", {
+            reason: (L("Refund") + " " + named + "% " + L("instead of the terms'") + " " + byTerms + "%: " + reason).slice(
+                0,
+                limits.reason
+            )
+        })
+        return named
+    }
+}
 // cancel#Registration (RegistrationChange): a live place cancelled at the revision read, with its reason; its seat released once, its
-// code revoked and a paid place's refund handed to Accounting (pending until the provider's result).
+// code revoked and a paid place's refund handed to Accounting (pending until the provider's result), by the accepted terms' rule or
+// the percentage staff name (an override, recorded with the reason). Staff may cancel after the rule's deadline and after the start.
 function cancelRegistration(p) {
     const userScope = manageScope()
     const {row} = registrationOf(userScope, p.registrationId)
@@ -894,9 +1016,34 @@ function cancelRegistration(p) {
     requireRevision(row, p.expectedRevision)
     const reason = text(p.reason)
     if (!reason) denied("VALUE_INVALID[reason]", "Give the reason for the cancellation")
-    cancelPlaces([row.registrationId], reason + " (" + (ec.user.username || ec.user.userId) + ")")
+    const named = percentInput(p.refundPercent)
+    cancelPlaces(
+        [row.registrationId],
+        reason + " (" + (ec.user.username || ec.user.userId) + ")",
+        null,
+        staffPercentOf(named, reason)
+    )
     const after = one(REGISTRATION, {registrationId: row.registrationId})
-    return {registrationId: row.registrationId, statusId: after.statusId, refundStatusEnumId: after.refundStatusEnumId || null}
+    return {
+        registrationId: row.registrationId,
+        statusId: after.statusId,
+        refundStatusEnumId: after.refundStatusEnumId || null,
+        refundPercent: after.refundPercent == null ? null : Number(toDecimal(after.refundPercent).toString())
+    }
+}
+// reissue#RegistrationCode (RegistrationDetail): a new entry code for a confirmed place at the revision read, with its reason (a lost
+// or shared ticket): the code's revision raised, the earlier code revoked, the new one sent in a ticket notice (follow-up 1).
+function reissueRegistrationCode(p) {
+    const userScope = manageScope()
+    const {row} = registrationOf(userScope, p.registrationId)
+    requireRevision(row, p.expectedRevision)
+    if (row.statusId !== "EvrConfirmed") denied("STATUS_INVALID", "Only a confirmed place has an entry code")
+    const reason = text(p.reason)
+    if (!reason) denied("VALUE_INVALID[reason]", "Give the reason for the new code")
+    const issued = reissueCode(row.registrationId, reason + " (" + (ec.user.username || ec.user.userId) + ")")
+    if (!issued) denied("STATUS_INVALID", "Only a confirmed place has an entry code")
+    notices().afterCommit("ticket", row.registrationId, "reissue-" + issued.revision)
+    return {registrationId: row.registrationId, credentialRevision: issued.revision}
 }
 // correct#Registration (RegistrationChange): a correction of the attendee's name or address, or a substitution by another person, with
 // its reason; the old attendee's entry code is revoked and a confirmed place's new code goes to the new attendee. Check-in history
@@ -924,7 +1071,8 @@ function correctRegistration(p) {
         reason: reason + (substituted ? " (was " + partyName(row.attendeePartyId) + ")" : ""),
         credentialRevision: row.credentialDigest ? Number(row.credentialRevision || 0) + 1 : row.credentialRevision
     })
-    if (row.statusId === "EvrConfirmed") notices().afterCommit("ticket", row.registrationId)
+    // the new revision's code in a ticket of its own (a key apart from the first ticket's, which the ledger keeps once)
+    if (row.statusId === "EvrConfirmed") notices().afterCommit("ticket", row.registrationId, "corrected-" + nowMs())
     return {registrationId: row.registrationId, substituted}
 }
 // change#Registrations (RegistrationBatch): cancel or notify again each of the selected registrations of the caller's organizations,
@@ -935,6 +1083,7 @@ function changeRegistrations(p) {
     if (!["cancel", "notify"].includes(action)) denied("ACTION_INVALID", "Cancel or notify")
     const reason = text(p.reason)
     if (action === "cancel" && !reason) denied("VALUE_INVALID[reason]", "Give the reason for the cancellation")
+    const named = action === "cancel" ? percentInput(p.refundPercent) : null
     const ids = [
         ...new Set(
             Array.from(p.registrationIds || [])
@@ -953,7 +1102,12 @@ function changeRegistrations(p) {
                         results.push({registrationId, outcome: "skipped", message: L("Not live")})
                         return
                     }
-                    cancelPlaces([registrationId], reason + " (" + (ec.user.username || ec.user.userId) + ")")
+                    cancelPlaces(
+                        [registrationId],
+                        reason + " (" + (ec.user.username || ec.user.userId) + ")",
+                        null,
+                        staffPercentOf(named, reason)
+                    )
                     results.push({registrationId, outcome: "cancelled", message: ""})
                 } else {
                     const kind =
@@ -1060,6 +1214,7 @@ const operations = {
     reserveRegistration,
     confirmRegistration,
     cancelRegistration,
+    reissueRegistrationCode,
     correctRegistration,
     changeRegistrations,
     checkRegistrationAccess,
@@ -1087,7 +1242,10 @@ const operations = {
     questionsOf,
     stateOfReservation,
     issueCode,
+    reissueCode,
     registrationOfCode,
+    cancelTermsOf,
+    ruleSourceOf,
     personOf,
     personInput,
     partyName,
