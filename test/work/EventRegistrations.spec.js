@@ -9,7 +9,8 @@
 // the terms accepted keep their words; staff access is the events manager's of the organization. Follow-up 1: a ticket order's
 // approval invoices it once and so captures its payment, a cancellation before it refunded from the capture; the cancellation rule of
 // the accepted terms (a deadline, a refund percentage, a late cancellation without refund) and staff's override with a reason; one
-// entry code per revision, shown again alike, a staff reissue revoking it. Standalone: spec-local
+// entry code per revision, shown again alike, a staff reissue revoking it. Follow-up 5: a ticket payment's visitor key kept as its
+// digest on the order only where allowed, read again before the placement, and the order attributed by it. Standalone: spec-local
 // organizations, users, sites, a sending profile, a hosted test gateway, ticket products, a tax authority and events.
 // Run: ./moq test mr-mantle --spec EventRegistrations
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
@@ -337,6 +338,8 @@ spec({
                 lateCancelAllowed: "N"
             })
             ids.code = offerFor(orgA, siteA, "CODE", 5, [{priceSourceEnumId: "EtpFree"}])
+            // follow-up 5: the ticket payments that carry a remote frontend's visitor key
+            ids.visitor = offerFor(orgA, siteA, "VISITOR", 10, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_A"}])
             make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
             make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -1262,6 +1265,138 @@ feature(
         }
     }
 )
+
+// Marketing follow-up 5: Register's payment start forwards a remote frontend's visitor key as Shop's submit does. Its digest is
+// kept with the ticket order only where Marketing keeps the key (the seller's policy, never a buyer who withdrew tracking), a
+// malformed key dropped and never refused, a repeat start the same attempt with nothing changed; read again before place#Order
+// (the policy ended before the provider's return clears it); and the placed order is attributed by it.
+feature("a ticket payment's visitor key: its digest kept only where allowed, read again before placement, attributed by it", {
+    when() {
+        freshLimits()
+        const policyId = prefix + "_MKT_POLICY"
+        const keyOf = n => "MkrgVisitorKey" + n + "_0123456789ab"
+        const offer = ids.visitor
+        const reservationDone = (email, before) => {
+            const reserved = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, email)
+            if (before) before(reservationOf(reserved.reference))
+            complete(siteA, reserved.token, ["Visitor " + email.split("@")[0]])
+            return reserved
+        }
+        const payWith = (token, visitorKey) =>
+            visitor("start#RegistrationPayment", {
+                siteId: siteA,
+                token,
+                priceKey: visitor("get#Registration", {siteId: siteA, token}).registration?.priceKey,
+                operationId: key(),
+                visitorKey
+            })
+        const kept = reference =>
+            row("mantle.order.OrderHeader", {orderId: reservationOf(reference).orderId}).marketingVisitorKeyHash
+        const r = {digest: String(ec.resource.digestText("mkt-visitor:" + keyOf(2), "sha256")), key: keyOf(2)}
+        // A keeps no visitor keys by policy and the buyer has not allowed tracking: nothing kept
+        const none = reservationDone("vk-none@mkrg.example.test")
+        r.noneStart = payWith(none.token, keyOf(1))
+        r.none = kept(none.reference)
+        // A's policy keeps visitor keys; a remote visitor's click of a campaign's link by the key, an hour ago
+        system(() => {
+            make("mantle.marketing.campaign.MarketingPolicy", {
+                marketingPolicyId: policyId,
+                organizationPartyId: orgA,
+                fromDate: new Date(Date.now() - 60000),
+                visitorKeys: "Y"
+            })
+            make("mantle.marketing.campaign.MarketingCampaign", {
+                marketingCampaignId: prefix + "_CAMPAIGN",
+                organizationPartyId: orgA,
+                campaignName: "Visitor key campaign"
+            })
+            make("mantle.marketing.tracking.TrackingCode", {
+                trackingCodeId: prefix + "_LINK",
+                marketingCampaignId: prefix + "_CAMPAIGN",
+                organizationPartyId: orgA,
+                trackingCodeTypeEnumId: "EXTERNAL",
+                publicCode: prefix + "VKCODE",
+                trackableLifetime: 30
+            })
+            make("mantle.marketing.tracking.MarketingTrackingEvent", {
+                trackingEventId: prefix + "_EV_VK",
+                organizationPartyId: orgA,
+                siteId: siteA,
+                trackingCodeId: prefix + "_LINK",
+                marketingCampaignId: prefix + "_CAMPAIGN",
+                eventKindEnumId: "MteClick",
+                visitorKeyHash: r.digest,
+                eventDate: new Date(Date.now() - 3600000)
+            })
+        })
+        try {
+            // kept as its digest; a repeat start with another key answers the same attempt and changes nothing; placed and attributed
+            const paid = reservationDone("vk-kept@mkrg.example.test")
+            r.started = payWith(paid.token, keyOf(2))
+            r.kept = kept(paid.reference)
+            r.again = payWith(paid.token, keyOf(3))
+            r.afterAgain = kept(paid.reference)
+            r.result = returned(siteA, paid.token)
+            r.placed = row("mantle.order.OrderHeader", {orderId: reservationOf(paid.reference).orderId})
+            r.attribution = rows("mantle.marketing.tracking.MarketingOutcomeLink", {orderId: r.placed.orderId}).filter(
+                link => !link.thruDate
+            )
+            // a key not of the cookie's form: dropped, the payment started
+            const bad = reservationDone("vk-bad@mkrg.example.test")
+            r.badStart = payWith(bad.token, "not a key; drop table")
+            r.bad = kept(bad.reference)
+            // a buyer who withdrew tracking with A: never kept, even under A's policy
+            const withdrawn = reservationDone("vk-withdrawn@mkrg.example.test", reservation =>
+                system(() =>
+                    make("mantle.party.PartyConsent", {
+                        partyId: reservation.buyerPartyId,
+                        purposeEnumId: "PcpTracking",
+                        statusId: "PconWithdrawn",
+                        organizationPartyId: orgA,
+                        consentDate: new Date(Date.now() - 60000),
+                        sourceEnumId: "PcsForm"
+                    })
+                )
+            )
+            r.withdrawnStart = payWith(withdrawn.token, keyOf(4))
+            r.withdrawn = kept(withdrawn.reference)
+            // kept at the start, then A's policy ends before the provider's return: the placement keeps no digest
+            const late = reservationDone("vk-late@mkrg.example.test")
+            payWith(late.token, keyOf(5))
+            r.lateKept = kept(late.reference)
+            system(() =>
+                ec.service
+                    .sync()
+                    .name("update#mantle.marketing.campaign.MarketingPolicy")
+                    .parameters({marketingPolicyId: policyId, thruDate: new Date()})
+                    .disableAuthz()
+                    .call()
+            )
+            r.lateResult = returned(siteA, late.token)
+            r.latePlaced = row("mantle.order.OrderHeader", {orderId: reservationOf(late.reference).orderId})
+        } finally {
+            system(() =>
+                ec.entity.find("mantle.marketing.campaign.MarketingPolicy").condition({marketingPolicyId: policyId}).deleteAll()
+            )
+        }
+        return r
+    },
+    then(r) {
+        r.noneStart.payment.paymentState == "pending" && r.none == null
+        // the digest is the events' digest, never the raw key
+        r.started.payment.paymentState == "pending" && r.kept == r.digest && r.kept != r.key
+        r.again.payment.alreadyStarted == true && r.afterAgain == r.digest
+        r.result.registration.state == "confirmed" && r.placed.placedDate != null && r.placed.marketingVisitorKeyHash == r.digest
+        // the ticket order, with no local visit, attributed by the key's digest
+        r.attribution.length == 1 && r.attribution[0].basisEnumId == "MobTrackingEvent"
+        r.attribution[0].trackingEventId == prefix + "_EV_VK" && r.attribution[0].marketingCampaignId == prefix + "_CAMPAIGN"
+        r.badStart.payment.paymentState == "pending" && r.bad == null
+        r.withdrawnStart.payment.paymentState == "pending" && r.withdrawn == null
+        r.lateKept == String(ec.resource.digestText("mkt-visitor:MkrgVisitorKey5_0123456789ab", "sha256"))
+        r.lateResult.registration.state == "confirmed" && r.latePlaced.placedDate != null
+        r.latePlaced.marketingVisitorKeyHash == null
+    }
+})
 
 function entityRevisionOf(entityName, keys) {
     return ec.resource

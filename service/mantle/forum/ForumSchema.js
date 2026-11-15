@@ -1817,7 +1817,15 @@
     },
     startRegistrationPayment: {
         service: 'mantle.marketing.MarketingPortalServices.start#RegistrationPayment',
-        fields: ['siteId', 'token', 'reservationId', 'priceKey', 'operationId'],
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'priceKey',
+            'operationId',
+            // Marketing follow-up 5: the frontend's first-party visitor key; the authority keeps only its digest, where allowed
+            'visitorKey',
+        ],
     },
     // the user's call (Nov 15): the provider's posted form (Accept Hosted) of a pending payment, a fresh token for Register's relay
     getRegistrationPaymentForm: {
