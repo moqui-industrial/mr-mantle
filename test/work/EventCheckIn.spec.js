@@ -231,6 +231,16 @@ spec({
         system(() => {
             ec.entity.find("moqui.security.DeviceCredential").condition("displayUserId", state.display).deleteAll()
             ec.entity.find("moqui.security.DeviceRouteGroup").condition("routeGroupId", prefix).deleteAll()
+            // its Marketing bundle row and its groups' MARKETING_CHECKIN grants, so Admin's registry of Marketing's bundles and the
+            // permission's holders are the seeded ones for a later spec of the worker (MarketingAccess; follow-up 7)
+            ec.entity
+                .find("moqui.security.UserGroupPermission")
+                .condition("userPermissionId", "MARKETING_CHECKIN")
+                .condition("userGroupId", "like", prefix + "_%")
+                .deleteAll()
+            if (state.display) ec.entity.find("moqui.security.CapabilityBundlePermission").condition("userGroupId", state.display).deleteAll()
+            if (state.display) ec.entity.find("moqui.security.CapabilityBundleArtifact").condition("userGroupId", state.display).deleteAll()
+            if (state.display) ec.entity.find("moqui.security.CapabilityBundle").condition("userGroupId", state.display).deleteAll()
         })
     }
 })
