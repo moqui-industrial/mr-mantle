@@ -1193,6 +1193,7 @@ feature(
             const stored = row(R, {registrationId: place.registrationId})
             const actions = rows("mantle.work.registration.EventRegistrationAction", {registrationId: place.registrationId})
             const found = system(() => placesJs.registrationOfCode(first.code))
+            const foundTyped = system(() => placesJs.registrationOfCode(first.code.toLowerCase()))
             // a reader may not reissue; a stale read refused; the manager's reissue raises the revision
             const reader = as(users.reader, E + "reissue#RegistrationCode", {
                 registrationId: place.registrationId,
@@ -1220,6 +1221,7 @@ feature(
                 reason: "Spelling"
             })
             const fourth = show()
+            const thirdAfter = system(() => placesJs.registrationOfCode(third.code))
             const staffView = as(users.manager, E + "get#Registration", {registrationId: place.registrationId})
             const offer = row("mantle.work.registration.EventRegistrationPolicy", {
                 registrationPolicyId: ids.code.registrationPolicyId
@@ -1230,6 +1232,8 @@ feature(
                 stored,
                 actions,
                 found,
+                foundTyped,
+                thirdAfter,
                 reader,
                 stale,
                 reissued,
@@ -1247,12 +1251,12 @@ feature(
             r.stored.credentialRevision == 1 && r.stored.credentialDigest != r.first.code
             !JSON.stringify(r.stored).includes(r.first.code) && !JSON.stringify(r.actions).includes(r.first.code)
             r.actions.filter(action => action.actionEnumId == "EraTicketShown").length == 2
-            r.found?.registrationId == r.stored.registrationId
+            r.found?.registrationId == r.stored.registrationId && r.foundTyped?.registrationId == r.stored.registrationId
             code(r.reader) == "PERMISSION_DENIED"
             code(r.stale) == "STALE_REVISION"
             r.reissued.refusal == "" && r.reissued.credentialRevision == 2
             r.third.code != r.first.code && r.oldFound == null && r.newFound?.registrationId == r.stored.registrationId
-            r.corrected.refusal == "" && r.fourth.code != r.third.code
+            r.corrected.refusal == "" && r.fourth.code != r.third.code && r.thirdAfter == null
             !!r.offer.entryCodeKey && !JSON.stringify(r.staffView).includes(String(r.offer.entryCodeKey))
             r.staffView.canReissue == true
         }

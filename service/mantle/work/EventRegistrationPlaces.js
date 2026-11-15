@@ -213,7 +213,13 @@ function reissueCode(registrationId, reason, operationKey = null) {
 function registrationOfCode(code) {
     const value = text(code)
     if (!value || value.length > 64) return null
-    return one(REGISTRATION, {credentialDigest: codeDigest(value)}) || null
+    // a derived code is "EV" and upper-case hex: one typed in lower case is the same code (a code made before follow-up 1, random
+    // and mixed case, still matches exactly)
+    return (
+        one(REGISTRATION, {credentialDigest: codeDigest(value)}) ||
+        (value !== value.toUpperCase() ? one(REGISTRATION, {credentialDigest: codeDigest(value.toUpperCase())}) : null) ||
+        null
+    )
 }
 // The words of the offer's current terms revision, kept once (EventRegistrationTerms).
 function keepTerms(policy) {
