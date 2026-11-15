@@ -3,7 +3,8 @@
 // facility is published in its Sales defaults (a warehouse of its own, never another organization's or an office); a quote and a
 // direct order made, copied or placed with none ship from it, and an inventory product placed with no stock reserves there; a seller
 // with no default leaves its parts as they were; the facility is changed on the order by its editor, to a warehouse of the seller
-// only, at the order's revision, until the order is reserved; another organization's order answers as missing. Standalone:
+// only, at the order's revision, until the order is reserved, and only on Sales' own orders (a store's or another app's keeps its
+// owner's); a facility set on the part is kept when it is placed; another organization's order answers as missing. Standalone:
 // SalesQuoteIssueFixtures (A with a default, B without), spec-local users, facilities and an inventory product.
 // Run: ./moq test mr-mantle --spec SalesOrderFacility
 const fx = ec.resource.script("component://mr-mantle/test/order/SalesQuoteIssueFixtures.js")
@@ -168,7 +169,43 @@ feature(
             const shown = as(users.seller, orders + "get#SalesOrder", {orderId})
             const reserved = changeFacility(users.seller, f.placed, facilities.a2)
             const otherOrganization = changeFacility(users.seller, f.quoteB, facilities.a)
-            return {byReader, others, stale, changed, after: facilityOf(orderId), shown, reserved, otherOrganization}
+            // a facility set on the part is kept when it is placed (the default fills only an empty one)
+            place(orderId)
+            // a store's or another app's placed order of the seller (no Sales purpose): its facility stays its owner's
+            const storeOrder = "SOF_STORE_ORDER"
+            system(() => {
+                make("mantle.order.OrderHeader", {
+                    orderId: storeOrder,
+                    statusId: "OrderPlaced",
+                    placedDate: ec.user.nowTimestamp,
+                    currencyUomId: "USD",
+                    orderRevision: 1
+                })
+                make("mantle.order.OrderPart", {
+                    orderId: storeOrder,
+                    orderPartSeqId: "01",
+                    statusId: "OrderPlaced",
+                    vendorPartyId: f.orgA,
+                    customerPartyId: f.accounts.a
+                })
+            })
+            const notSales = changeFacility(users.seller, storeOrder, facilities.a)
+            const storeShown = as(users.seller, orders + "get#SalesOrder", {orderId: storeOrder})
+            return {
+                byReader,
+                others,
+                stale,
+                changed,
+                after: facilityOf(orderId),
+                shown,
+                reserved,
+                otherOrganization,
+                placedFacility: facilityOf(orderId),
+                placedStatus: status(orderId),
+                notSales,
+                storeShown,
+                storeFacility: facilityOf(storeOrder)
+            }
         },
         then(r) {
             r.byReader.refused.includes("PERMISSION_DENIED")
@@ -178,6 +215,9 @@ feature(
             r.shown.order.facilityName == "Facility a2" && r.shown.can.changeFacility == true
             r.reserved.refused.includes("FACILITY_LOCKED")
             r.otherOrganization.refused.includes("RECORD_UNAVAILABLE")
+            r.placedStatus != "OrderOpen" && r.placedFacility == facilities.a2
+            r.notSales.refused.includes("ORDER_NOT_SALES") && r.storeFacility == null
+            r.storeShown.can.changeFacility == false
         }
     }
 )

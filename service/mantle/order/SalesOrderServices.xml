@@ -126,7 +126,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="update" noun="SalesOrderFacility" allow-remote="false">
         <description>The facility a Sales order part ships from (impl-sales follow-up 5; a part is given its seller's default,
             SalesPolicy.defaultFacilityId, when it is made), at the revision read: for a sales order, SALES_ORDER_EDIT on one the caller
-            may change, a direct draft or one placed, approved or held (ORDER_NOT_OPEN) with nothing reserved or shipped
+            may change and Sales' own (a direct order, an accepted quote or a Sales recurring occurrence; a store's or another app's
+            order keeps its owner's facility: ORDER_NOT_SALES), a direct draft or one placed, approved or held (ORDER_NOT_OPEN) with nothing reserved or shipped
             (FACILITY_LOCKED: a reservation is Warehouse's to move); for a quote, SALES_QUOTE_EDIT on a draft the caller may change
             (QUOTE_NOT_DRAFT). Refuses another organization's order as missing (RECORD_UNAVAILABLE), a stale revision
             (REVISION_CHANGED), no facility (FACILITY_REQUIRED) and one that is not a warehouse, store or plant of the seller

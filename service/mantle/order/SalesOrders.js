@@ -204,12 +204,20 @@ function placeOrder(p) {
 // The facility a Sales order part ships from, changed at the revision read by one who may change the order (a direct draft, or
 // placed, approved or held while nothing of it is reserved or shipped: a reservation is Warehouse's to move) or the quote (a
 // draft); only a warehouse, store or plant of the seller (SalesApprovals.js facilityRefusal).
+// Whether a sales order is Sales' own (a direct order, an accepted quote or an occurrence of a Sales recurring base), whose facility
+// Sales sets; a store's or another app's order keeps the facility its owner gave it (follow-up 5 review).
+function salesOwned(order) {
+    if ([salesAccess.orderPurposes.direct, salesAccess.quotePurpose].includes(order.orderPurposeEnumId)) return true
+    return !!order.parentOrderId && one(ORDER, {orderId: order.parentOrderId})?.orderPurposeEnumId === "OrpRecurringTemplate"
+}
 function updateFacility(p) {
     const userScope = salesAccess.scope()
     const orderId = text(p.orderId)
     let target
     if (salesAccess.orderOf(userScope, orderId)) {
         target = salesAccess.requireOrder(userScope, orderId, true)
+        if (!salesOwned(target.order))
+            denied("ORDER_NOT_SALES", "Order " + orderId + " is a store's or another app's; it ships from where its owner set")
         if (!isDirectDraft(target) && !openStatuses.includes(target.order.statusId))
             denied("ORDER_NOT_OPEN", "Order " + orderId + " is " + statusText(target.order.statusId))
         if (rows("mantle.product.issuance.AssetReservation", {orderId}).length || rows(SOURCE, {orderId}).length)
@@ -849,6 +857,7 @@ function getOrder(p) {
             // follow-up 5: while nothing is reserved or shipped (update#SalesOrderFacility)
             changeFacility:
                 editable &&
+                salesOwned(order) &&
                 (isDirectDraft(so) || openStatuses.includes(order.statusId)) &&
                 !shipmentIds.length &&
                 !rows("mantle.product.issuance.AssetReservation", {orderId}).length
