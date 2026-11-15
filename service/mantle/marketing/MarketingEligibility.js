@@ -95,7 +95,8 @@ function phoneOf(contactMechId) {
         .join(" ")
     const digits = shown.replace(/\D/g, "")
     if (digits.length < 7) return {address: shown, key: null}
-    const key = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js").e164Of(number) || "+" + digits
+    // never a guessed country: a number with no E.164 form has no key (P22 review: + and the digits named another country's number)
+    const key = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js").e164Of(number) || null
     return {address: shown, key}
 }
 // The consent state of a purpose for an address in an organization, from a party's rows newest first: withdrawn when its latest
