@@ -31,7 +31,10 @@ const sourceKinds = {
     communicationEvent: "SlisCommEvent",
     chatMessage: "SlisChatMessage",
     voicemail: "SlisVoicemail",
-    staff: "SlisStaff"
+    staff: "SlisStaff",
+    // Marketing P18: an event offer's lead rules (a registration, an attendance)
+    eventRegistration: "SlisEventRegistration",
+    eventAttendance: "SlisEventAttendance"
 }
 const outcomes = {created: "SlioCreated", duplicate: "SlioDuplicate"}
 const defaultRetentionDays = 30
