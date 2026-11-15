@@ -151,23 +151,23 @@ function entryKeyOf(registrationPolicyId) {
     call("update#" + POLICY, {registrationPolicyId, entryCodeKey})
     return entryCodeKey
 }
-// The code of a registration's revision: a keyed digest (SHA-256 over the secret and the inner digest of the secret, the
-// registration and the revision, as HMAC nests it; the script host gives digests as hex) cut to 24 characters. The same revision
-// gives the same code; only the secret's holder (the server) can make it.
+// The code of a registration's revision: HMAC-SHA256 with the offer's secret over the registration and the revision, cut to 24 hex
+// characters. The same revision gives the same code; only the secret's holder (the server) can make it. Follow-up 2 replaced
+// follow-up 1's nested digest with the host's hmac: a code issued before still checks in (its digest is what is stored), and the
+// registration's next issue writes the next revision's code (issueCode below), as a random code from before follow-up 1 is replaced.
 function codeOf(entryCodeKey, registrationId, revision) {
-    const inner = ec.resource.digestText(entryCodeKey + "\n" + registrationId + "\n" + revision)
     return (
         "EV" +
         ec.resource
-            .digestText(entryCodeKey + "\n" + inner)
+            .hmac(entryCodeKey, registrationId + "\n" + revision)
             .slice(0, 24)
             .toUpperCase()
     )
 }
 const codeDigest = code => ec.user.singleUseCodeHash("event-entry:" + code)
 // The entry code of a confirmed place at its current revision ({code, revision}), shown again as often as it is asked: its digest
-// is written at the first issue of a revision (a revoked code's next revision, or the first), and a code made before follow-up 1
-// (random, so it cannot be derived again) is replaced by the next revision's. With an action (EraTicketShown) the showing is recorded.
+// is written at the first issue of a revision (a revoked code's next revision, or the first), and a code made another way (random
+// before follow-up 1, the nested digest of follow-up 1) is replaced by the next revision's. With an action (EraTicketShown) the showing is recorded.
 function issueCode(registrationId, actionEnumId = null, operationKey = null) {
     const found = one(REGISTRATION, {registrationId})
     if (!found || found.statusId !== "EvrConfirmed") return null
