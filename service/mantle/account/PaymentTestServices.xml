@@ -286,6 +286,23 @@ along with this software (see the LICENSE.md file). If not, see
                         resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
         </actions>
     </service>
+    <service verb="hostedAuthorize" noun="PaymentAuthorization">
+        <description>A hosted gateway that only authorizes (impl-marketing follow-up 1): as hostedPending, the payment waits at its
+            page, but its operation is an authorization, so alwaysApprove#PaymentDetails resolves it to Authorized and the money is
+            taken only by a later capture (an event ticket order's, when the order is approved and invoiced).</description>
+        <implements service="mantle.account.PaymentServices.authorize#Payment"/>
+        <actions>
+            <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
+            <set field="redirectUrl"
+                    from="returnUrl ? returnUrl + (returnUrl.includes('?') ? '&amp;' : '?') + 'result=paid' : null"/>
+            <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
+                    in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
+                        paymentId:payment.paymentId, paymentMethodId:payment.paymentMethodId, amount:payment.amount,
+                        amountUomId:payment.amountUomId, referenceNum:'TEST-HOSTED-' + payment.paymentId,
+                        transactionDate:ec.user.nowTimestamp, idempotencyKey:idempotencyKey, transactionStatus:'Pending', redirectUrl:redirectUrl,
+                        resultSuccess:'N', resultDeclined:'N', resultNsf:'N', resultBadExpire:'N', resultBadCardNumber:'N'}"/>
+        </actions>
+    </service>
     <service verb="hostedForm" noun="PaymentAuthorization">
         <description>A hosted gateway whose page takes a posted form token, as Authorize.Net Accept Hosted (impl-marketing P17
             review): the payment waits (transactionStatus HostedPending, no redirect address); get#HostedPaymentForm gives the

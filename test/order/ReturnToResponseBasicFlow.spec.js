@@ -1,5 +1,8 @@
 // Port of ReturnToResponseBasicFlow.groovy: return of a sales order with replace, refund and credit responses,
 // partial receipt, replacement order shipment, and a purchase paid with the customer credit financial account.
+// the BOSS demo's Utah nexus of Retail (impl-marketing follow-up 1) is suspended for this spec: its figures are Mantle's own, untaxed
+const demoTax = ec.resource.script("component://mr-mantle/test/order/DemoTaxNexus.js")
+let retailNexus = null
 const effectiveTime = Date.now()
 let returnId = null, returnShipmentId
 const originalOrderId = "55500"
@@ -29,7 +32,9 @@ spec({
     setupSpec() {
         // set an effective date so data check works, etc
         ec.user.setEffectiveTime(effectiveTime)
+        retailNexus = demoTax.suspend()
     },
+    cleanupSpec() { demoTax.restore(retailNexus) },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() { ec.artifactExecution.enableAuthz() },
 })

@@ -18,10 +18,15 @@
 //   handleOrderStatus); otherwise the order waits in Sales' Awaiting approval with its places pending. Approved after a place's
 //   hold ended: no seat is taken and the places are left for review (paid, unallocated), the order never placed. Declined or
 //   cancelled: the payment cancelled, the places still held until their hold ends.
+// - The capture is Accounting's (follow-up 1; §4 Nov 15, the user's call): once a ticket order's approval commits it is invoiced
+//   through create#FulfillmentInvoice, whose payment application (apply#OrderPaymentsToInvoice) captures the authorized payment, as
+//   Shop's digital lines and Sales' recurring orders are billed; once per order part, under the part's lock. A place cancelled
+//   before the approval is left off the invoice and its share refunded from the capture.
 // - A refund is Accounting's: a cancelled paid place's refund is handed to the payment services after the commit (release of an
-//   authorization once none of its places is left, else refund#SinglePayment of the place's line and its tax once captured), each
-//   with an operation key of the registration, and shown pending until the provider's result; a failed one is Accounting's to
-//   finish (ErfFailed), never retried blind.
+//   authorization once none of its places is left, else refund#SinglePayment of the place's line and its tax once captured, at the
+//   percentage decided at its cancellation: the accepted terms' rule, 100 for a place never confirmed, or staff's), each with an
+//   operation key of the registration, and shown pending until the provider's result; a failed one is Accounting's to finish
+//   (ErfFailed), never retried blind.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const places = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js")
 const setup = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrations.js")
@@ -47,6 +52,8 @@ const nowMs = () => Number(ms(ec.user.nowTimestamp))
 const L = words => ec.l10n.localize(words)
 const dec = value => toDecimal(value == null || value === "" ? 0 : value)
 const moneyText = (amount, currencyUomId) => ec.l10n.formatCurrency(dec(amount), currencyUomId)
+const roundMoney = (amount, currencyUomId) =>
+    currencyUomId ? dec(ec.l10n.roundCurrency(amount, currencyUomId)) : dec(amount).setScale(2, "HALF_UP")
 
 // A unit of work in a transaction of its own, so no provider is asked while the offer or order is locked: {result} or {error}.
 function step(label, work) {
@@ -75,13 +82,22 @@ function step(label, work) {
 const paymentOf = row => (row?.paymentId ? one(P, {paymentId: row.paymentId}) : null)
 // Whether a place's payment was received (authorized or taken).
 const paidFor = row => approvedStatuses.includes(paymentOf(row)?.statusId)
-// A place's share of its order: its line and that line's tax, or zero for a free place.
+// A place's share of its order: its line and that line's tax, or zero for a free place. A line whose quantity a cancellation of the
+// order took to zero counts what was billed of it (follow-up 1: an invoiced order's last place).
 function shareOf(row) {
     if (!row.orderId || !row.orderItemSeqId) return dec(0)
     const lines = rows("mantle.order.OrderItem", {orderId: row.orderId})
+    const quantityOf = line => {
+        const quantity = dec(line.quantity ?? 1)
+        if (!quantity.isZero()) return quantity
+        return rows("mantle.order.OrderItemBilling", {orderId: line.orderId, orderItemSeqId: line.orderItemSeqId}).reduce(
+            (sum, billing) => sum.add(dec(billing.quantity)),
+            dec(0)
+        )
+    }
     return lines
         .filter(line => line.orderItemSeqId === row.orderItemSeqId || line.parentItemSeqId === row.orderItemSeqId)
-        .reduce((sum, line) => sum.add(dec(line.quantity ?? 1).multiply(dec(line.unitAmount))), dec(0))
+        .reduce((sum, line) => sum.add(quantityOf(line).multiply(dec(line.unitAmount))), dec(0))
 }
 function paymentText(row) {
     const payment = paymentOf(row)
@@ -562,9 +578,17 @@ function refundPayment(p) {
         else setRefund(requested, "ErfFailed", {}, "The release was not confirmed; Accounting finishes it")
         return {refundStatusEnumId: one(REGISTRATION, {registrationId}).refundStatusEnumId}
     }
-    const amount = shareOf(row)
-    if (amount.compare(dec(0)) <= 0) {
+    const share = shareOf(row)
+    if (share.compare(dec(0)) <= 0) {
         setRefund([registrationId], "ErfNone", {}, "A free place")
+        return {refundStatusEnumId: "ErfNone"}
+    }
+    // the percentage decided at the cancellation (none kept: a cancellation before follow-up 1, refunded in full)
+    const percent = row.refundPercent == null ? dec(100) : dec(row.refundPercent)
+    const amount =
+        percent.compare(dec(100)) >= 0 ? share : roundMoney(share.multiply(percent).divide(dec(100)), payment.amountUomId)
+    if (amount.compare(dec(0)) <= 0) {
+        setRefund([registrationId], "ErfNone", {}, "Not refundable under the terms")
         return {refundStatusEnumId: "ErfNone"}
     }
     let out
@@ -589,19 +613,107 @@ function refundPayment(p) {
     else setRefund([registrationId], "ErfFailed", {}, "The refund was not confirmed; Accounting finishes it")
     return {refundStatusEnumId: one(REGISTRATION, {registrationId}).refundStatusEnumId}
 }
-// The order of cancelled places cancelled through the order's own service once none of them is left (an unplaced order too).
+// The order of cancelled places cancelled through the order's own service once none of them is left (an unplaced order too). An order
+// already invoiced (approved, its payment captured; follow-up 1) is left as it is: its places' refunds are Accounting's payments.
 function cancelOrderIfEmpty(orderId) {
     const order = one("mantle.order.OrderHeader", {orderId})
     if (!order || ["OrderCancelled", "OrderRejected", "OrderCompleted"].includes(order.statusId)) return
     if (rows(REGISTRATION, {orderId}).some(row => places().LIVE_STATES.includes(row.statusId))) return
+    if (find("mantle.order.OrderItemBilling", {orderId}).count() > 0) return
     call("mantle.order.OrderServices.cancel#Order", {orderId})
+}
+
+// ===== capture on approval (follow-up 1; §4 Nov 15, the user's call) =====
+// invoice#RegistrationOrder, from the EventRegistrationApprovedInvoice SECA once an order's approval commits (autoApprove#Order on the
+// payment's result, or a Sales approver later): a ticket order (OrpEventRegistration) has each approved part with nothing billed
+// yet invoiced through Accounting's create#FulfillmentInvoice (the ordered basis), whose payment application captures the authorized
+// payment and applies it, as Shop's digital lines are billed; each part in its own transaction under its lock, read again there, so
+// two approvals' rules at once bill it once (Sales follow-up 2's invoice#RecurringOrder). The lines of places cancelled before the
+// approval are left out (their share is refunded from the capture). Then a refund waiting on the capture is handed over. A part
+// that cannot be billed is logged naming the order and never fails the approval. Any other order is left as it is.
+function invoiceOrder(p) {
+    const orderId = text(p.orderId)
+    const order = orderId ? one("mantle.order.OrderHeader", {orderId}) : null
+    if (!order || order.orderPurposeEnumId !== "OrpEventRegistration") return {invoiceIds: []}
+    const invoiceIds = []
+    const partOfInvoice = new Map()
+    for (const listed of rows("mantle.order.OrderPart", {orderId})) {
+        ec.message.pushErrors()
+        try {
+            ec.transaction.runRequireNew(null, "Invoicing registration order " + orderId + " failed", () => {
+                const part = find("mantle.order.OrderPart", {orderId, orderPartSeqId: listed.orderPartSeqId})
+                    .forUpdate(true)
+                    .one()
+                if (!part || part.statusId !== "OrderApproved") return
+                if (find("mantle.order.OrderItemBilling", {orderId}).count() > 0) return
+                const lines = rows(REGISTRATION, {orderId}).filter(row => row.orderItemSeqId)
+                const kept = lines.filter(row => row.statusId !== "EvrCancelled")
+                if (!kept.length) return
+                const made = call(
+                    "mantle.account.InvoiceServices.create#FulfillmentInvoice",
+                    Object.assign(
+                        {orderId, orderPartSeqId: part.orderPartSeqId},
+                        kept.length === lines.length ? {} : {orderItemSeqIds: kept.map(row => row.orderItemSeqId)}
+                    )
+                )
+                if (!made.invoiceId) return
+                invoiceIds.push(made.invoiceId)
+                partOfInvoice.set(made.invoiceId, part.orderPartSeqId)
+                const payment = one(P, {paymentId: kept[0].paymentId})
+                for (const row of kept)
+                    places().record(row, "EraInvoiced", {
+                        reason:
+                            "Invoice " +
+                            made.invoiceId +
+                            (payment ? ", payment " + L(payment.statusId === "PmntDelivered" ? "captured" : "not captured") : "")
+                    })
+            })
+        } catch (error) {
+            ec.logger.error(
+                "Registration order " +
+                    orderId +
+                    " part " +
+                    listed.orderPartSeqId +
+                    " was not invoiced on approval: " +
+                    String(ec.message.hasError() ? ec.message.getErrorsString() : error.message || error).split("\n")[0]
+            )
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+    }
+    // each new invoice finalized and the captured payment applied to it (create#FulfillmentInvoice leaves it in process, to which
+    // apply#InvoicePayment applies nothing; as Shop's finalize step and create#SalesShipmentInvoices), in a transaction of its
+    // own: a finalization Accounting refuses (its posting not set up) keeps the invoice and the capture, logged, for Accounting
+    for (const invoiceId of invoiceIds) {
+        const out = step("Registration invoice " + invoiceId, () => {
+            const invoice = find("mantle.account.invoice.Invoice", {invoiceId}).forUpdate(true).one()
+            if (invoice?.statusId === "InvoiceInProcess")
+                call("update#mantle.account.invoice.Invoice", {invoiceId, statusId: "InvoiceFinalized"})
+            call("mantle.account.PaymentServices.apply#OrderPaymentsToInvoice", {
+                orderId,
+                orderPartSeqId: partOfInvoice.get(invoiceId),
+                invoiceId
+            })
+            return {}
+        })
+        if (out.error)
+            ec.logger.error("Registration order " + orderId + " invoice " + invoiceId + " was not finalized: " + out.error)
+    }
+    // a partial cancellation's refund that waited for the capture
+    for (const row of rows(REGISTRATION, {orderId, refundStatusEnumId: "ErfRequested"})) {
+        const out = step("Registration refund " + row.registrationId, () => refundPayment({registrationId: row.registrationId}))
+        if (out.error) ec.logger.warn("Registration " + row.registrationId + " refund after the capture: " + out.error)
+    }
+    return {invoiceIds}
 }
 
 // ===== the job's part =====
 // The attempts of registrations due for a lookup, placements to try again and refunds waiting on a capture; each apart.
 function reconcile(p) {
     let looked = 0,
-        refunded = 0
+        refunded = 0,
+        invoiced = 0
     const due = attempts().due("eventRegistration", Number(p.limit || limits.batch))
     for (const row of due) {
         const reservation = one(RESERVATION, {paymentId: row.paymentId})
@@ -630,6 +742,27 @@ function reconcile(p) {
                 "Registration " + reservation.reservationId + " placement: " + String(error?.message || error).split("\n")[0]
             )
         }
+    // approved ticket orders not invoiced (the approval's invoice failed, or its SECA never ran: it is not retried there), tried
+    // again while their payment is still only authorized; invoiceOrder bills a part once under its lock
+    const unbilled = new Set(
+        Array.from(
+            find(P, {statusId: "PmntAuthorized"})
+                .condition("orderId", "is-not-null", null)
+                .selectField("orderId")
+                .limit(limits.batch * 4)
+                .list()
+        ).map(payment => payment.orderId)
+    )
+    for (const orderId of unbilled) {
+        const order = one("mantle.order.OrderHeader", {orderId})
+        if (order?.orderPurposeEnumId !== "OrpEventRegistration" || order.statusId !== "OrderApproved") continue
+        if (find("mantle.order.OrderItemBilling", {orderId}).count() > 0) continue
+        try {
+            invoiced += invoiceOrder({orderId}).invoiceIds.length
+        } catch (error) {
+            ec.logger.error("Registration order " + orderId + " invoice: " + String(error?.message || error).split("\n")[0])
+        }
+    }
     for (const row of Array.from(find(REGISTRATION, {refundStatusEnumId: "ErfRequested"}).limit(limits.batch).list()))
         try {
             const out = step("Registration refund " + row.registrationId, () =>
@@ -639,7 +772,7 @@ function reconcile(p) {
         } catch (error) {
             ec.logger.error("Registration " + row.registrationId + " refund: " + String(error?.message || error).split("\n")[0])
         }
-    return {looked, refunded}
+    return {looked, refunded, invoiced}
 }
 
 ;({
@@ -661,6 +794,7 @@ function reconcile(p) {
     execute(op, parameters) {
         const operations = {
             refundPayment,
+            invoiceOrder,
             refresh: p => refresh(text(p.reservationId), "job")
         }
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown event registration payment operation " + op)

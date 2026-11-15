@@ -186,9 +186,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>getRegistration (a capability read as a POST, TOKEN_WRITES; or the provider's return by
             reference and key, which reads the state alone): the reservation's state with its payment looked up at the provider
             (bounded) and its order placed once paid: the event's public facts, each place's attendee name, ticket and state, the
-            payment and any refund pending, the terms accepted, whether it may be cancelled, the link to join for a confirmed place
-            only, and while not completed the terms and questions. With showTicket and a fresh operationId, a confirmed place's new
-            entry code and its QR, once, revoking the earlier code. Never another attendee's answers or anything internal; an unknown
+            payment and any refund pending, the terms accepted, whether it may be cancelled under the accepted cancellation rule
+            (and the rule in words), the link to join for a confirmed place only, and while not completed the terms and questions.
+            With showTicket and a fresh operationId, a confirmed place's entry code (its current revision's, the same each time) and
+            its QR. Never another attendee's answers or anything internal; an unknown
             or expired capability, another site's reservation and a bad key the one NotFound.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
@@ -198,9 +199,11 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="cancel" noun="Registration" authenticate="anonymous-all" allow-remote="false">
         <description>cancelRegistration (a bearer write, TOKEN_WRITES; scope RegistrationCancel): the buyer's
-            confirmed cancellation of the reservation's live places (or the ones named) before the occurrence starts
-            (CANCELLATION_CLOSED after), with PASS's request key: each seat released once, its entry code revoked, a paid place's
-            refund handed to Accounting and shown pending until the provider's result, then the waitlist offered.</description>
+            confirmed cancellation of the reservation's live places (or the ones named) before the occurrence starts, as the
+            accepted terms' cancellation rule allows (follow-up 1: a confirmed place until the deadline for the rule's refund
+            percentage, after it with no refund only where the rule allows; CANCELLATION_CLOSED otherwise, nothing changed), with
+            PASS's request key: each seat released once, its entry code revoked, a paid place's refund handed to Accounting and
+            shown pending until the provider's result, then the waitlist offered.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

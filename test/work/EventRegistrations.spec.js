@@ -6,7 +6,10 @@
 // cancellation releases its seat once and hands its refund over; a calendar RSVP is no seat; a storeless ticket order is taxed
 // through the organization's gateway and approved with no store; with the seller's Sales approval setting on, a paid order stays
 // placed with its place pending and no ticket until it is approved, which confirms it once, and a cancelled one releases the place;
-// the terms accepted keep their words; staff access is the events manager's of the organization. Standalone: spec-local
+// the terms accepted keep their words; staff access is the events manager's of the organization. Follow-up 1: a ticket order's
+// approval invoices it once and so captures its payment, a cancellation before it refunded from the capture; the cancellation rule of
+// the accepted terms (a deadline, a refund percentage, a late cancellation without refund) and staff's override with a reason; one
+// entry code per revision, shown again alike, a staff reissue revoking it. Standalone: spec-local
 // organizations, users, sites, a sending profile, a hosted test gateway, ticket products, a tax authority and events.
 // Run: ./moq test mr-mantle --spec EventRegistrations
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
@@ -271,7 +274,8 @@ spec({
                 paymentGatewayConfigId: gateway,
                 paymentGatewayTypeEnumId: "PgtTest",
                 description: "Registration hosted test gateway",
-                authorizeServiceName: T + "hostedPending#PaymentAuthorization",
+                // follow-up 1: the hosted page only authorizes; the order's approval invoices it and so captures
+                authorizeServiceName: T + "hostedAuthorize#PaymentAuthorization",
                 captureServiceName: T + "alwaysApprove#PaymentCapture",
                 releaseServiceName: T + "alwaysApprove#PaymentRelease",
                 refundServiceName: T + "alwaysApprove#PaymentRefund",
@@ -325,6 +329,14 @@ spec({
             ids.group = offerFor(orgA, siteA, "GROUP", 2, [{priceSourceEnumId: "EtpFree"}])
             ids.price = offerFor(orgA, siteA, "PRICE", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_P"}])
             ids.form = offerFor(orgC, siteC, "FORM", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_C"}])
+            // follow-up 1: a split order of a seller whose orders wait for approval, the cancellation rule, the entry code
+            ids.split = offerFor(orgB, siteB, "SPLIT", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_B"}])
+            ids.terms = offerFor(orgA, siteA, "TERMS", 10, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_A"}], {
+                cancelDeadlineHours: 48,
+                refundPercent: 50,
+                lateCancelAllowed: "N"
+            })
+            ids.code = offerFor(orgA, siteA, "CODE", 5, [{priceSourceEnumId: "EtpFree"}])
             make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
             make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -890,6 +902,372 @@ feature("a cancelled order releases its places; a client's reservations past its
         r.after - r.taken <= 10
     }
 })
+
+// ===== follow-up 1 (§4 Nov 15, the user's calls) =====
+// the request limits are spent by the features above (the last one on purpose): these start from none
+const freshLimits = () => system(() => ec.entity.find("moqui.security.public.AccountAttempt").deleteAll())
+const P = "mantle.account.payment.Payment"
+const billedInvoices = orderId => [...new Set(rows("mantle.order.OrderItemBilling", {orderId}).map(billing => billing.invoiceId))]
+const invoiceTotal = invoiceId =>
+    system(
+        () =>
+            ec.service
+                .sync()
+                .name("mantle.account.InvoiceServices.get#InvoiceTotal")
+                .parameters({invoiceId})
+                .disableAuthz()
+                .call().invoiceTotal
+    )
+const buyerCancel = (siteId, token, registrationIds) =>
+    visitor("cancel#Registration", {
+        siteId,
+        token,
+        registrationIds: registrationIds.join(","),
+        confirm: "Y",
+        operationId: key()
+    })
+// a value read again until it is truthy, for up to five seconds: the invoice and capture run once the approval commits, on a
+// service worker (SalesRecurrence's waitFor)
+function waitFor(read, millis = 5000) {
+    const end = Date.now() + millis
+    let value = read()
+    while (!value && Date.now() < end) value = read()
+    return value
+}
+const captured = paymentId => waitFor(() => row(P, {paymentId}).statusId === "PmntDelivered")
+const approve = orderId =>
+    system(() =>
+        ec.service
+            .sync()
+            .name("mantle.order.OrderServices.update#OrderStatus")
+            .parameters({orderId, statusId: "OrderApproved"})
+            .disableAuthz()
+            .call()
+    )
+
+feature(
+    "a ticket order's approval invoices it once and captures its payment; a place cancelled before it is refunded from the capture",
+    {
+        when() {
+            freshLimits()
+            // the storeless order approved at its payment's result above: invoiced once, its authorization captured
+            const paidOrder = rows("mantle.work.registration.EventReservation", {
+                registrationPolicyId: ids.paid.registrationPolicyId
+            }).find(found => !!found.orderId)
+            const paidInvoices = billedInvoices(paidOrder.orderId)
+            const paidPayment = row(P, {paymentId: paidOrder.paymentId})
+            const again = system(
+                () =>
+                    ec.service
+                        .sync()
+                        .name(E + "invoice#RegistrationOrder")
+                        .parameters({orderId: paidOrder.orderId})
+                        .disableAuthz()
+                        .call().invoiceIds
+            )
+            // a seller whose orders wait for approval: two places paid (authorized only), one cancelled by the buyer while it waits
+            const reserved = reserve(siteB, ids.split.registrationPolicyId, ids.split.ticketTypeId, 2, "split@mkrg.example.test")
+            complete(siteB, reserved.token, ["Splitter", "Guest"])
+            pay(siteB, reserved.token)
+            returned(siteB, reserved.token)
+            const reservation = reservationOf(reserved.reference)
+            const [first, second] = places(reserved.reference)
+            const authorized = row(P, {paymentId: reservation.paymentId}).statusId
+            const cancelled = buyerCancel(siteB, reserved.token, [second.registrationId])
+            const waiting = row(R, {registrationId: second.registrationId}).refundStatusEnumId
+            approve(reservation.orderId)
+            waitFor(() => row(R, {registrationId: second.registrationId}).refundStatusEnumId === "ErfRefunded")
+            const splitInvoices = billedInvoices(reservation.orderId)
+            return {
+                paidInvoices,
+                paidTotal: paidInvoices.length ? invoiceTotal(paidInvoices[0]) : null,
+                paidStatus: paidPayment.statusId,
+                paidInvoice: paidInvoices.length ? row("mantle.account.invoice.Invoice", {invoiceId: paidInvoices[0]}) : null,
+                again,
+                authorized,
+                cancelled,
+                waiting,
+                splitInvoices,
+                splitTotal: splitInvoices.length ? invoiceTotal(splitInvoices[0]) : null,
+                captured: row(P, {paymentId: reservation.paymentId}).statusId,
+                refunds: rows(P, {refundForPaymentId: reservation.paymentId}),
+                secondAfter: row(R, {registrationId: second.registrationId}),
+                states: states(reserved.reference),
+                invoicedActions: rows("mantle.work.registration.EventRegistrationAction", {
+                    registrationId: first.registrationId,
+                    actionEnumId: "EraInvoiced"
+                }).length
+            }
+        },
+        then(r) {
+            r.paidInvoices.length == 1 && toDecimal(r.paidTotal).eq(toDecimal("84.80"))
+            r.paidStatus == "PmntDelivered"
+            // the spec's organizations have no posting set up, so Accounting refuses the invoice's finalization: the invoice and the
+            // capture are kept (the finalization in a transaction of its own), the payment left for Accounting to apply
+            r.paidInvoice.statusId == "InvoiceInProcess"
+            r.again.length == 0
+            r.authorized == "PmntAuthorized"
+            r.cancelled.registration.places.some(place => place.statusId == "EvrCancelled")
+            r.waiting == "ErfRequested"
+            r.splitInvoices.length == 1 && toDecimal(r.splitTotal).eq(toDecimal("40.00"))
+            r.captured == "PmntDelivered"
+            r.refunds.length == 1 && toDecimal(r.refunds[0].amount).eq(toDecimal("40.00"))
+            r.secondAfter.refundStatusEnumId == "ErfRefunded" && toDecimal(r.secondAfter.refundPercent).eq(toDecimal("100"))
+            r.states == "EvrConfirmed,EvrCancelled"
+            r.invoicedActions == 1
+        }
+    }
+)
+
+// follow-up 1 review: an approval whose invoice did not run (here approved without the order's services, so no SECA ran; as a
+// capture that failed at the approval) is invoiced by the job while the payment is only authorized, once
+feature("the job invoices an approved ticket order its approval did not invoice, and captures its payment", {
+    when() {
+        freshLimits()
+        const reserved = reserve(siteB, ids.split.registrationPolicyId, ids.split.ticketTypeId, 1, "retry@mkrg.example.test")
+        complete(siteB, reserved.token, ["Retry"])
+        pay(siteB, reserved.token)
+        returned(siteB, reserved.token)
+        const reservation = reservationOf(reserved.reference)
+        system(() => {
+            for (const entityName of ["mantle.order.OrderPart", "mantle.order.OrderHeader"])
+                for (const value of Array.from(ec.entity.find(entityName).condition({orderId: reservation.orderId}).list())) {
+                    value.statusId = "OrderApproved"
+                    value.update()
+                }
+        })
+        const before = billedInvoices(reservation.orderId)
+        const authorized = row(P, {paymentId: reservation.paymentId}).statusId
+        const first = runHolds()
+        const second = runHolds()
+        const invoices = billedInvoices(reservation.orderId)
+        return {
+            before,
+            authorized,
+            first,
+            second,
+            invoices,
+            captured: row(P, {paymentId: reservation.paymentId}).statusId
+        }
+    },
+    then(r) {
+        r.before.length == 0
+        r.authorized == "PmntAuthorized"
+        r.first.invoiced == 1
+        r.second.invoiced == 0
+        r.invoices.length == 1
+        r.captured == "PmntDelivered"
+    }
+})
+
+feature(
+    "a buyer's cancellation follows the accepted terms' rule: its refund before the deadline, none or refused after; staff override with a reason",
+    {
+        when() {
+            freshLimits()
+            const reserved = reserve(siteA, ids.terms.registrationPolicyId, ids.terms.ticketTypeId, 3, "terms@mkrg.example.test")
+            complete(siteA, reserved.token, ["Rule one", "Rule two", "Rule three"])
+            pay(siteA, reserved.token)
+            const confirmed = returned(siteA, reserved.token)
+            const [one, two, three] = places(reserved.reference)
+            const reservation = reservationOf(reserved.reference)
+            captured(reservation.paymentId)
+            // five days before the start, two days' deadline: half of 42.40 back
+            const early = buyerCancel(siteA, reserved.token, [one.registrationId])
+            const oneAfter = waitFor(() => {
+                const found = row(R, {registrationId: one.registrationId})
+                return found.refundStatusEnumId === "ErfRequested" ? null : found
+            })
+            // the deadline passes (the accepted revision's rule moved past now): refused online, nothing changed
+            const terms = {registrationPolicyId: ids.terms.registrationPolicyId, termsRevision: 0}
+            const setTerms = values =>
+                system(() =>
+                    ec.service
+                        .sync()
+                        .name("update#mantle.work.registration.EventRegistrationTerms")
+                        .parameters(Object.assign({}, terms, values))
+                        .disableAuthz()
+                        .call()
+                )
+            setTerms({cancelDeadlineHours: 200})
+            const lateView = visitor("get#Registration", {siteId: siteA, token: reserved.token})
+            const late = buyerCancel(siteA, reserved.token, [two.registrationId])
+            const twoState = row(R, {registrationId: two.registrationId}).statusId
+            // a rule that allows a late cancellation: cancelled with no refund
+            setTerms({lateCancelAllowed: "Y"})
+            const lateAllowed = buyerCancel(siteA, reserved.token, [three.registrationId])
+            const threeAfter = row(R, {registrationId: three.registrationId})
+            // staff refund the second place in full against the rule, with a reason; a stale read refused
+            const read = as(users.manager, E + "get#Registration", {registrationId: two.registrationId})
+            const staff = as(users.manager, E + "cancel#Registration", {
+                registrationId: two.registrationId,
+                expectedRevision: read.registration.revision,
+                reason: "Organizer moved the date",
+                refundPercent: "100"
+            })
+            const override = rows("mantle.work.registration.EventRegistrationAction", {
+                registrationId: two.registrationId,
+                actionEnumId: "EraRefundOverride"
+            })
+            // a change of the rule after publication is a new terms revision; the accepted one stays the registrations'
+            const offerKeys = {registrationPolicyId: ids.terms.registrationPolicyId}
+            const changed = as(users.manager, E + "store#RegistrationPolicy", {
+                registrationPolicyId: ids.terms.registrationPolicyId,
+                expectedRevision: entityRevisionOf("mantle.work.registration.EventRegistrationPolicy", offerKeys),
+                refundPercent: "25"
+            })
+            const badPercent = as(users.manager, E + "store#RegistrationPolicy", {
+                registrationPolicyId: ids.terms.registrationPolicyId,
+                expectedRevision: entityRevisionOf("mantle.work.registration.EventRegistrationPolicy", {
+                    registrationPolicyId: ids.terms.registrationPolicyId
+                }),
+                refundPercent: "120"
+            })
+            // the staff cancellation's refund is handed over by the job here, as the cancellation feature above has it
+            runHolds()
+            return {
+                confirmed,
+                early,
+                oneAfter,
+                lateView,
+                late,
+                twoState,
+                lateAllowed,
+                threeAfter,
+                read,
+                staff,
+                override,
+                changed,
+                badPercent,
+                termsRevision: row("mantle.work.registration.EventRegistrationPolicy", {
+                    registrationPolicyId: ids.terms.registrationPolicyId
+                }).termsRevision,
+                refunds: rows(P, {refundForPaymentId: reservation.paymentId})
+                    .map(refund => toDecimal(refund.amount).toString())
+                    .sort()
+                    .join()
+            }
+        },
+        then(r) {
+            r.confirmed.registration.state == "confirmed"
+            r.confirmed.registration.cancelRule.includes("up to 2 days before the event starts") &&
+                r.confirmed.registration.cancelRule.includes("50%") &&
+                r.confirmed.registration.cancelRule.includes("not available online")
+            r.early.registration && toDecimal(r.oneAfter.refundPercent).eq(toDecimal("50"))
+            r.oneAfter.refundStatusEnumId == "ErfRefunded"
+            r.lateView.registration.canCancel == false && r.lateView.registration.places.every(place => !place.canCancel)
+            r.late.kind == "Conflict" && r.late.message.includes("CANCELLATION_CLOSED")
+            r.twoState == "EvrConfirmed"
+            r.lateAllowed.registration && r.threeAfter.statusId == "EvrCancelled"
+            r.threeAfter.refundStatusEnumId == "ErfNone" && toDecimal(r.threeAfter.refundPercent).eq(toDecimal("0"))
+            r.read.termsRefundPercent != null && toDecimal(r.read.termsRefundPercent).eq(toDecimal("0"))
+            r.staff.refusal == "" &&
+                toDecimal(r.staff.refundPercent).eq(toDecimal("100")) &&
+                r.staff.refundStatusEnumId == "ErfRequested"
+            r.override.length == 1 && r.override[0].reason.includes("Organizer moved the date")
+            r.refunds == "21.2,42.4"
+            r.changed.refusal == "" && r.termsRevision == 1
+            code(r.badPercent) == "REFUND_INVALID"
+        }
+    }
+)
+
+feature(
+    "one entry code per revision, shown again alike from its keyed derivation, never stored; a staff reissue or a correction changes it",
+    {
+        when() {
+            freshLimits()
+            const placesJs = ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js")
+            const reserved = reserve(siteA, ids.code.registrationPolicyId, ids.code.ticketTypeId, 1, "code@mkrg.example.test")
+            complete(siteA, reserved.token, ["Code holder"])
+            const place = places(reserved.reference)[0]
+            const show = () =>
+                visitor("get#Registration", {
+                    siteId: siteA,
+                    token: reserved.token,
+                    showTicket: place.registrationId,
+                    operationId: key()
+                }).registration?.ticket
+            const first = show()
+            const second = show()
+            const stored = row(R, {registrationId: place.registrationId})
+            const actions = rows("mantle.work.registration.EventRegistrationAction", {registrationId: place.registrationId})
+            const found = system(() => placesJs.registrationOfCode(first.code))
+            const foundTyped = system(() => placesJs.registrationOfCode(first.code.toLowerCase()))
+            // a reader may not reissue; a stale read refused; the manager's reissue raises the revision
+            const reader = as(users.reader, E + "reissue#RegistrationCode", {
+                registrationId: place.registrationId,
+                expectedRevision: entityRevision(place.registrationId),
+                reason: "Lost"
+            })
+            const stale = as(users.manager, E + "reissue#RegistrationCode", {
+                registrationId: place.registrationId,
+                expectedRevision: 1,
+                reason: "Lost"
+            })
+            const reissued = as(users.manager, E + "reissue#RegistrationCode", {
+                registrationId: place.registrationId,
+                expectedRevision: entityRevision(place.registrationId),
+                reason: "Ticket shared by mistake"
+            })
+            const third = show()
+            const oldFound = system(() => placesJs.registrationOfCode(first.code))
+            const newFound = system(() => placesJs.registrationOfCode(third.code))
+            // a correction of the attendee: the next code is another revision's
+            const corrected = as(users.manager, E + "correct#Registration", {
+                registrationId: place.registrationId,
+                expectedRevision: entityRevision(place.registrationId),
+                attendeeName: "Code Holder",
+                reason: "Spelling"
+            })
+            const fourth = show()
+            const thirdAfter = system(() => placesJs.registrationOfCode(third.code))
+            const staffView = as(users.manager, E + "get#Registration", {registrationId: place.registrationId})
+            const offer = row("mantle.work.registration.EventRegistrationPolicy", {
+                registrationPolicyId: ids.code.registrationPolicyId
+            })
+            return {
+                first,
+                second,
+                stored,
+                actions,
+                found,
+                foundTyped,
+                thirdAfter,
+                reader,
+                stale,
+                reissued,
+                third,
+                oldFound,
+                newFound,
+                corrected,
+                fourth,
+                staffView,
+                offer
+            }
+        },
+        then(r) {
+            !!r.first?.code && r.first.code == r.second.code && r.first.code.startsWith("EV") && r.first.code.length == 26
+            r.stored.credentialRevision == 1 && r.stored.credentialDigest != r.first.code
+            !JSON.stringify(r.stored).includes(r.first.code) && !JSON.stringify(r.actions).includes(r.first.code)
+            r.actions.filter(action => action.actionEnumId == "EraTicketShown").length == 2
+            r.found?.registrationId == r.stored.registrationId && r.foundTyped?.registrationId == r.stored.registrationId
+            code(r.reader) == "PERMISSION_DENIED"
+            code(r.stale) == "STALE_REVISION"
+            r.reissued.refusal == "" && r.reissued.credentialRevision == 2
+            r.third.code != r.first.code && r.oldFound == null && r.newFound?.registrationId == r.stored.registrationId
+            r.corrected.refusal == "" && r.fourth.code != r.third.code && r.thirdAfter == null
+            !!r.offer.entryCodeKey && !JSON.stringify(r.staffView).includes(String(r.offer.entryCodeKey))
+            r.staffView.canReissue == true
+        }
+    }
+)
+
+function entityRevisionOf(entityName, keys) {
+    return ec.resource
+        .script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
+        .ms(row(entityName, keys).lastUpdatedStamp)
+}
 
 function entityRevision(registrationId) {
     return ec.resource

@@ -8,7 +8,7 @@
 // - The registration's own messages (the receipt of a reservation in each state, the ticket of a confirmed place, a waitlist offer,
 //   a cancellation) are transactional, from the offer's transactional sending profile, under the registration's own authority:
 //   they carry no promotion. The receipt's link opens MyRegistration with a capability made at each attempt (its token only in the
-//   message); a confirmed place's ticket carries a new entry code (the earlier one revoked) and, for an online occurrence, the link
+//   message); a confirmed place's ticket carries its entry code (its current revision's, the same in every ticket) and, for an online occurrence, the link
 //   to join. A pending place (payment received, the order awaiting the organizer's approval) gets no ticket, code or link.
 // - The offer's scheduled notices (EventCommunicationSchedule): one delivery per registration, schedule and trigger (before the start,
 //   after the end, when the occurrence moves, when confirmed, when cancelled), with the schedule's Comms template; a promotional one

@@ -1,7 +1,9 @@
 // Orders stored from an external source (store#Order create and revise) and bulk part status changes
 // (mantle.order.OrderBulkServices). New spec, no Groovy original.
+// The seller is the spec's own internal organization, with no tax nexus and no organization above it (so no inherited tax
+// gateway): the orders stay untaxed whatever a component's demo data gives Ziziwork Retail (the BOSS demo's Utah nexus).
 const effectiveTime = Date.now()
-const vendorId = "ORG_ZIZI_RETAIL", facilityId = "ZIRET_WH"
+const vendorId = "OBULK_SELLER", facilityId = "ZIRET_WH"
 let orderId, partSeqId, firstItemSeqId, otherOrderId
 
 spec({
@@ -10,6 +12,11 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.user.setEffectiveTime(effectiveTime)
+        ec.artifactExecution.disableAuthz()
+        call("store#mantle.party.Party", { partyId: vendorId, partyTypeEnumId: "PtyOrganization", ownerPartyId: vendorId })
+        call("store#mantle.party.Organization", { partyId: vendorId, organizationName: "Order Bulk Seller" })
+        call("store#mantle.party.PartyRole", { partyId: vendorId, roleTypeId: "OrgInternal" })
+        ec.artifactExecution.enableAuthz()
     },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() { ec.artifactExecution.enableAuthz() },
@@ -134,7 +141,7 @@ feature("generate test orders: refused unless sure, then one random order of the
         const issued = () => issuances().count() - issuances().condition("productId", generatedProductId).count()
         const refused = errorOf("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1 })
         const before = ec.entity.find("mantle.order.OrderHeader").count(), otherIssuedBefore = issued()
-        call("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1, maxItems: 2, maxQuantity: 2, maxDaysPast: 1,
+        call("mantle.order.OrderTestServices.generate#TestOrders", { orderCount: 1, vendorPartyId: vendorId, maxItems: 2, maxQuantity: 2, maxDaysPast: 1,
                 productCategoryId: generatedCategoryId, ifSureSetToTrue: true })
         return { refused, before, after: ec.entity.find("mantle.order.OrderHeader").count(), otherIssuedBefore, otherIssuedAfter: issued() }
     },

@@ -1,5 +1,8 @@
 // Port of OrderToCashBasicFlow.groovy: sales order, reservation, shipment, invoice and payment, business customer order,
 // credit memo, overpayment and refund, inventory reservation/issuance tests with cancelled shipments, displace reservation.
+// the BOSS demo's Utah nexus of Retail (impl-marketing follow-up 1) is suspended for this spec: its figures are Mantle's own, untaxed
+const demoTax = ec.resource.script("component://mr-mantle/test/order/DemoTaxNexus.js")
+let retailNexus = null
 const effectiveTime = Date.now()
 let cartOrderId = null, cartOrderPartSeqId
 let inventoryOrderId = null
@@ -19,7 +22,9 @@ spec({
     setupSpec() {
         // set an effective date so data check works, etc
         ec.user.setEffectiveTime(effectiveTime)
+        retailNexus = demoTax.suspend()
     },
+    cleanupSpec() { demoTax.restore(retailNexus) },
     setup() { ec.artifactExecution.disableAuthz() },
     cleanup() { ec.artifactExecution.enableAuthz() },
 })
