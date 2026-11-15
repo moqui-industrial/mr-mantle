@@ -34,6 +34,8 @@
 //   answer to a question its rules hide) answers what to fix. The
 //   subscription choice is separate: a public request of the publication's list for the address typed beside it, with its own
 //   verification message (as Subscribe's), after the answer is kept and never inferred from an answer.
+// - P13: a lead form's page shows its rule's notice; its answer, once kept, is captured and handed to Sales after the request commits,
+//   apart from the answer (MarketingLeads.js), with values only from the publication, the rule and Marketing's own verification.
 // - P14: get#Page (the Page page): a landing page of the site's marketing mount, the site page services' published version in its
 //   window as clean HTML, in parts between the components it embeds by id (a list offered on the site, a form publication), each of
 //   which the page renders through its own operation; a draft, withdrawn or unknown page the same NotFound.
@@ -557,6 +559,8 @@ const forms = () => ec.resource.script("component://mr-mantle/service/mantle/mar
 const publications = () => ec.resource.script("component://mr-mantle/service/mantle/party/FormPublication.js")
 const PUBLICATION = "mantle.party.FormPublication"
 const FORM_RECEIPT = "Thank you. Your answer is recorded."
+// P13: a lead form's rule, its notice and the capture of its answers (MarketingLeads.js)
+const leads = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingLeads.js")
 // The open Marketing publications of a site for its organization (readiness).
 const openFormsOf = (siteId, organizationPartyId) =>
     rows(PUBLICATION, {siteId, organizationPartyId}).filter(
@@ -632,7 +636,9 @@ function getForm(p) {
             answered,
             fields: answered || needsAccount ? [] : publications().pageFields(row.formId),
             subscription:
-                offer && !answered ? {name: offer.list.contactListName || "", consentText: topicView(offer).consentText} : null
+                offer && !answered ? {name: offer.list.contactListName || "", consentText: topicView(offer).consentText} : null,
+            // P13: a lead form's notice of the follow-up (its current rule's words)
+            notice: row.purposeEnumId === "FppLead" && !answered ? leads().noticeOf(row.publicationId) : null
         },
         receipt: answered ? formReceipt(row).receipt : null
     }
@@ -748,6 +754,24 @@ function applySubmissionEffects(row, formSubmissionId, organizationPartyId, p) {
                 String(error?.message || error).split("\n")[0]
         )
         ec.message.clearErrors()
+    }
+    // P13: a lead form's answer is captured and handed to Sales after it commits, on a service worker in a transaction of its own
+    // (MarketingLeads.js capture#FormSubmission), never as part of the answer; the capture job takes up one this misses
+    if (row.purposeEnumId === "FppLead") {
+        try {
+            leads().captureAfterCommit(formSubmissionId)
+            notes.push("lead: handed to the capture")
+        } catch (error) {
+            failed = true
+            notes.push("lead capture failed")
+            ec.logger.error(
+                "Form submission " +
+                    formSubmissionId +
+                    ": its lead capture was not queued: " +
+                    String(error?.message || error).split("\n")[0]
+            )
+            ec.message.clearErrors()
+        }
     }
     try {
         publications().recordEffects(formSubmissionId, failed, notes.join("; "))
