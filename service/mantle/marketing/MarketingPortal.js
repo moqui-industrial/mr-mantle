@@ -39,6 +39,10 @@
 // - P14: get#Page (the Page page): a landing page of the site's marketing mount, the site page services' published version in its
 //   window as clean HTML, in parts between the components it embeds by id (a list offered on the site, a form publication), each of
 //   which the page renders through its own operation; a draft, withdrawn or unknown page the same NotFound.
+// - P16: get#Event (the Event page and a landing page's event component): a published registration offer of the organization on this
+//   site for an occurrence still to come (mantle.work EventRegistrations.js publicView: the title, description, dates in the offer's
+//   zone, where or online, ticket prices and advisory availability, terms); a draft, closed, past or another site's offer, or a
+//   cancelled event, the same NotFound. Read only; no attendee, room, budget, campaign or call link is in the answer.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const audiences = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAudiences.js").audience
 const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -597,7 +601,9 @@ function publicationOfPage(p, organizationPartyId) {
         !forms().PUBLICATION_PURPOSES.includes(row.purposeEnumId) ||
         row.organizationPartyId !== organizationPartyId ||
         row.siteId !== p.siteId ||
-        publications().stateOf(row) !== "open"
+        publications().stateOf(row) !== "open" ||
+        // P16 review: an event offer's registration questions are answered with a registration (P17), never on this page alone
+        row.contextEntityName === "mantle.work.registration.EventRegistrationPolicy"
     )
         unavailable()
     const form = one("moqui.screen.form.DbForm", {formId: row.formId})
@@ -791,7 +797,7 @@ const sitePages = () => ec.resource.script("component://mr-mantle/service/mantle
 const routePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,5}$/
 // An embedded component: a paragraph of its own naming a list offered on the site or a form publication by its id, "[[subscribe
 // ID]]" or "[[form ID]]" in the page's text (no expression, no markup); at most five a page, the rest left out.
-const embedPattern = /<p>\s*\[\[(subscribe|form)\s+([A-Za-z0-9_-]{1,40})\]\]\s*<\/p>/g
+const embedPattern = /<p>\s*\[\[(subscribe|form|event)\s+([A-Za-z0-9_-]{1,40})\]\]\s*<\/p>/g
 const embedLimit = 5
 // The site's marketing mount row (its appMountId), the one served.
 const marketingMountOf = siteId =>
@@ -809,7 +815,11 @@ function pageParts(body) {
         if (match.index > at) parts.push({kind: "html", html: body.slice(at, match.index)})
         if (embeds++ < embedLimit)
             parts.push(
-                match[1] === "subscribe" ? {kind: "subscribe", contactListId: match[2]} : {kind: "form", publicationId: match[2]}
+                match[1] === "subscribe"
+                    ? {kind: "subscribe", contactListId: match[2]}
+                    : match[1] === "event"
+                      ? {kind: "event", registrationPolicyId: match[2]}
+                      : {kind: "form", publicationId: match[2]}
             )
         at = match.index + match[0].length
     }
@@ -852,6 +862,15 @@ function getPage(p) {
         }
     }
 }
+// ===== P16: get#Event (a published registration offer: the Event page and a landing page's event component) =====
+const registrations = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrations.js")
+function getEvent(p) {
+    const organizationPartyId = served(p.siteId)
+    const view = registrations().publicView(p.registrationPolicyId, p.siteId, organizationPartyId)
+    if (!view) unavailable()
+    return {event: view}
+}
+
 // The landing pages live on a site's marketing mount now (readiness).
 const livePagesOf = siteId => {
     const mount = marketingMountOf(siteId)
@@ -872,10 +891,16 @@ function appReadiness(p) {
     return {
         checks: [
             {name: "organization", ready: organization},
-            // P12: a list offered or a form publication open on the site; P14: or a landing page published there
+            // P12: a list offered or a form publication open on the site; P14: or a landing page published there; P16: or an
+            // event's registration offer
             {
-                name: "published list, form or page",
-                ready: offers.length > 0 || (organization && (openFormsOf(p.siteId, p.targetId) > 0 || livePagesOf(p.siteId) > 0))
+                name: "published list, form, page or event",
+                ready:
+                    offers.length > 0 ||
+                    (organization &&
+                        (openFormsOf(p.siteId, p.targetId) > 0 ||
+                            livePagesOf(p.siteId) > 0 ||
+                            registrations().liveOffersOf(p.siteId, p.targetId) > 0))
             },
             {name: "transactional sending profile", ready: organization && !!profileFor(p.targetId)},
             {
@@ -1011,7 +1036,8 @@ const operations = {
     fileCheckout,
     getForm,
     submitForm,
-    getPage
+    getPage,
+    getEvent
 }
 const internalOperations = new Set(["appReadiness", "buildVerification", "attemptVerification", "fileCheckout"])
 ;({

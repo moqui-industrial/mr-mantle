@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.work.EventRegistrationServices (E, IronStone Marketing design §14.2; design §9; impl-marketing P16, P17): an event's
+    registration setup over EventRegistrations.js: the organization that offers it and its campaign link, one offer per occurrence
+    (window, seats, hold, waitlist, terms, site, an optional store), its ticket types, questions and notices, and publish#Registration
+    with its readiness. Each service checks MARKETING_EVENT_MANAGE (a write) or a Marketing read and the event's organization itself;
+    the event stays the calendar's (mantle.work.EventServices, under the calendar's own rules). P17 adds the registrations, their
+    payment and their notices; P18 check-in. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== Marketing P16: events and registration setup ===== -->
+    <service verb="find" noun="Events" allow-remote="false" read-only="true">
+        <description>The registration events of the caller's organizations (an organization's, or a campaign's when
+            marketingCampaignId names one of them, RECORD_UNAVAILABLE otherwise), by text (name or place), the first occurrence's date
+            range and the offers' state (ErpDraft, ErpPublished or none), soonest first, a page at a time: each with its organization,
+            when in its zone, where, campaigns, offers, the confirmed, held and waitlisted places against the seats, and its state.
+            Any Marketing reader (PERMISSION_DENIED for a caller who reads nothing of Marketing); canCreate for an events manager.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="term"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="statusId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="eventList" type="List"/>
+            <parameter name="eventListCount" type="Integer"/>
+            <parameter name="eventListPageIndex" type="Integer"/>
+            <parameter name="eventListPageSize" type="Integer"/>
+            <parameter name="eventListPageMaxIndex" type="Integer"/>
+            <parameter name="eventListPageRangeLow" type="Integer"/>
+            <parameter name="eventListPageRangeHigh" type="Integer"/>
+            <parameter name="canCreate" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('findEvents', context)"/>
+            <set field="eventList" from="out.eventList"/>
+            <set field="eventListCount" from="out.eventListCount"/>
+            <set field="eventListPageIndex" from="out.eventListPageIndex"/>
+            <set field="eventListPageSize" from="out.eventListPageSize"/>
+            <set field="eventListPageMaxIndex" from="out.eventListPageMaxIndex"/>
+            <set field="eventListPageRangeLow" from="out.eventListPageRangeLow"/>
+            <set field="eventListPageRangeHigh" from="out.eventListPageRangeHigh"/>
+            <set field="canCreate" from="out.canCreate"/>
+        </actions>
+    </service>
+    <service verb="get" noun="EventSetup" allow-remote="false" read-only="true">
+        <description>One registration event for RegistrationSetup and its tabs: the event (when, where, online or not, repeating,
+            campaigns, places against seats), each offer with its window, seats and places taken, hold, waitlist, terms, site, store,
+            ticket types (each priced by its source, never an amount of its own), questions, notices, readiness checks and public
+            address once published, the occurrences still to come with no offer, and what the caller may do (canManage:
+            MARKETING_EVENT_MANAGE; canEditEvent: the calendar's own rule). Any Marketing reader of the event's organization; another
+            organization's event is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="event" type="Map"/>
+            <parameter name="offers" type="List"/>
+            <parameter name="occurrences" type="List"/>
+            <parameter name="canManage" type="Boolean"/>
+            <parameter name="canEditEvent" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('getEventSetup', context)"/>
+            <set field="event" from="out.event"/>
+            <set field="offers" from="out.offers"/>
+            <set field="occurrences" from="out.occurrences"/>
+            <set field="canManage" from="out.canManage"/>
+            <set field="canEditEvent" from="out.canEditEvent"/>
+        </actions>
+    </service>
+    <service verb="store" noun="RegistrationEvent" allow-remote="false">
+        <description>Offers registration for a calendar event (a WetEvent) by an internal organization of the caller's scope, once:
+            an events manager (MARKETING_EVENT_MANAGE) who may edit the event (its organizer or an editor of its calendar,
+            EVENT_EDIT_REQUIRED otherwise); the same organization again changes nothing, another is ORGANIZATION_FIXED. With
+            marketingCampaignId, the event's link to an open campaign of that organization (CampaignAssociation CakEvent, made
+            once) through mantle.marketing.CampaignServices.store#CampaignAssociation, a change of the campaign: the caller also
+            holds MARKETING_CAMPAIGN_EDIT (CAMPAIGN_EDIT_REQUIRED otherwise). Called after mantle.work.EventServices.create#Event
+            by NewEvent.</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="marketingCampaignId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="campaignAssociationId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('storeRegistrationEvent', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="organizationPartyId" from="out.organizationPartyId"/>
+            <set field="campaignAssociationId" from="out.campaignAssociationId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="store" noun="RegistrationPolicy" allow-remote="false">
+        <description>A registration offer for one occurrence of a registration event (new: workEffortId and, for a series,
+            occurrenceStart, the start its rule gives the occurrence; OCCURRENCE_REQUIRED, OCCURRENCE_UNAVAILABLE, OCCURRENCE_PAST,
+            OFFER_EXISTS) or a change of one at the revision read (registrationPolicyId, expectedRevision): its public title and
+            description, the zone its times are shown in, the site (an enabled Marketing mount of the organization), an optional
+            store of the organization (a store order; storeless by default), the window (WINDOW_INVALID), the seats (never fewer than
+            the places held or confirmed now: CAPACITY_BELOW_TAKEN), the hold in minutes, the waitlist, the terms and cancellation
+            terms (a change after publication raises termsRevision) and the notices' sending profile. A closed offer is not changed
+            (POLICY_CLOSED). MARKETING_EVENT_MANAGE in the event's organization.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="workEffortId"/>
+            <parameter name="occurrenceStart" type="Timestamp"/>
+            <parameter name="publicTitle"/>
+            <parameter name="publicDescription"/>
+            <parameter name="timeZone"/>
+            <parameter name="siteId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="opensDate" type="Timestamp"/>
+            <parameter name="closesDate" type="Timestamp"/>
+            <parameter name="totalSeats"/>
+            <parameter name="holdMinutes"/>
+            <parameter name="waitlistEnabled"/>
+            <parameter name="waitlistLimit"/>
+            <parameter name="termsText"/>
+            <parameter name="cancellationTerms"/>
+            <parameter name="sendingProfileId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('storeRegistrationPolicy', context)"/>
+            <set field="registrationPolicyId" from="out.registrationPolicyId"/>
+            <set field="changed" from="out.changed"/>
+        </actions>
+    </service>
+    <service verb="store" noun="TicketType" allow-remote="false">
+        <description>A ticket type of an offer (new: registrationPolicyId) or a change at the revision read (ticketTypeId,
+            expectedRevision), or its end (action end): its name, price source (EtpFree, or EtpProduct with a ticket product the
+            organization sells, not kept in inventory, linked to the event by WorkEffortProduct; no amount is kept), its places
+            within the offer's seats (never fewer than its places held or confirmed: CAPACITY_BELOW_TAKEN), its sales dates and the
+            places one order may take (1 to 50). A ticket type with places taken keeps its product. MARKETING_EVENT_MANAGE in the
+            event's organization.</description>
+        <in-parameters>
+            <parameter name="ticketTypeId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="action"/>
+            <parameter name="ticketName"/>
+            <parameter name="priceSourceEnumId"/>
+            <parameter name="productId"/>
+            <parameter name="capacity"/>
+            <parameter name="salesFromDate" type="Timestamp"/>
+            <parameter name="salesThruDate" type="Timestamp"/>
+            <parameter name="perOrderLimit"/>
+            <parameter name="sequenceNum"/>
+        </in-parameters>
+        <out-parameters><parameter name="ticketTypeId"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('storeTicketType', context)"/>
+            <set field="ticketTypeId" from="out.ticketTypeId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="RegistrationForm" allow-remote="false">
+        <description>An offer's registration questions at its revision read: a published registration form (purpose
+            DbfpRegistration) of the organization (FORM_INVALID, FORM_NOT_PUBLISHED), kept as the offer's publication of purpose
+            registration (Commons' FormPublication: anonymous, on the offer's site, open while the offer is; a new form closes the
+            earlier one, an empty formId ends them), whom they are for (ErqAttendee, ErqBuyer) and the consent text a registrant
+            accepts with them (a change after publication raises termsRevision). MARKETING_EVENT_MANAGE in the event's organization.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="formId"/>
+            <parameter name="questionScopeEnumId"/>
+            <parameter name="consentText"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="formPublicationId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('storeRegistrationForm', context)"/>
+            <set field="registrationPolicyId" from="out.registrationPolicyId"/>
+            <set field="formPublicationId" from="out.formPublicationId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CommunicationSchedule" allow-remote="false">
+        <description>A notice of an offer (new: registrationPolicyId) or a change at the revision read (scheduleId,
+            expectedRevision), or its end (action end): its trigger (confirmed, before the start, after the end, changed, cancelled)
+            and offset in minutes, an email template of the organization in use, whom it goes to and its kind (transactional under
+            the registration's authority, or promotional, which needs the recipient's promotional consent; a promotional template is
+            never a transactional notice). Sent by P17's job, once per registration, through the delivery ledger.
+            MARKETING_EVENT_MANAGE in the event's organization.</description>
+        <in-parameters>
+            <parameter name="scheduleId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="action"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="offsetMinutes"/>
+            <parameter name="messageTemplateId"/>
+            <parameter name="recipientScopeEnumId"/>
+            <parameter name="purposeEnumId"/>
+        </in-parameters>
+        <out-parameters><parameter name="scheduleId"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('storeCommunicationSchedule', context)"/>
+            <set field="scheduleId" from="out.scheduleId"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="Registration" allow-remote="false">
+        <description>Publishes a draft offer at its revision read when it is ready (NOT_READY naming each missing check): an
+            occurrence still to come of an event not cancelled, seats, a ticket type, each paid ticket priced in the organization's
+            currency, a window that closes after it opens and by the occurrence's end, a published site whose Marketing mount serves
+            the organization, a ready transactional sending profile for the notices, a payment gateway of the organization (or of
+            the offer's store) when a ticket has a price, and the questions' form published when it has questions. Its question
+            publication opens with it. Answers the PASS Event page's address. MARKETING_EVENT_MANAGE in the event's
+            organization.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId" required="true"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="statusId"/>
+            <parameter name="publicUrl"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('publishRegistration', context)"/>
+            <set field="registrationPolicyId" from="out.registrationPolicyId"/>
+            <set field="statusId" from="out.statusId"/>
+            <set field="publicUrl" from="out.publicUrl"/>
+        </actions>
+    </service>
+    <service verb="close" noun="Registration" allow-remote="false">
+        <description>Closes an offer at its revision read (with a reason): its page is no longer available and its question
+            publication closes; the places taken stay. Once only. MARKETING_EVENT_MANAGE in the event's organization.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="statusId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('closeRegistration', context)"/>
+            <set field="registrationPolicyId" from="out.registrationPolicyId"/>
+            <set field="statusId" from="out.statusId"/>
+        </actions>
+    </service>
+    <service verb="add" noun="EventVideoCall" allow-remote="false">
+        <description>An online event's call (design §9 EventDetail "Add video call", L7): a call link of the framework (lobby,
+            video, lasting past its offers' last occurrence) as the event's join address (WorkEffort.infoUrl), once (CALL_EXISTS).
+            An events manager of the event's organization who may edit the event. Registrants receive the link with their
+            confirmation (P17); the public page says the event is online and never shows it.</description>
+        <in-parameters><parameter name="workEffortId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+            <parameter name="joinUrl"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrations.js').execute('addEventVideoCall', context)"/>
+            <set field="workEffortId" from="out.workEffortId"/>
+            <set field="joinUrl" from="out.joinUrl"/>
+        </actions>
+    </service>
+</services>

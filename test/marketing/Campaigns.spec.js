@@ -286,9 +286,10 @@ feature("the organization's successor is mirrored to organizationPartyId; a link
             associationKindEnumId: "CakList",
             sourceId: prefix + "_MBX_A"
         })
+        // a page is linked as campaign content (P14), never by association; an event is a registration event's (P16)
         const event = as(users.author, C + "store#CampaignAssociation", {
             marketingCampaignId: id,
-            associationKindEnumId: "CakEvent",
+            associationKindEnumId: "CakPage",
             sourceId: "X"
         })
         const back = as(users.author, C + "store#CampaignParty", {

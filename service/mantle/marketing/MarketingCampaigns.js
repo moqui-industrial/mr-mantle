@@ -471,8 +471,9 @@ function storeParty(p) {
 
 // ===== store#CampaignAssociation =====
 // Each kind of record a campaign links to, with the organization it belongs to: a list (not a mailbox) and a segment by their
-// owner, a store promotion by its store's organization, a form publication by its own; an event (P16) and a page (P14) once their
-// organization is kept (KIND_UNAVAILABLE until then).
+// owner, a store promotion by its store's organization, a form publication by its own, an event (P16) by the organization that offers
+// its registration (mantle.work.registration.RegistrationEvent, impl-marketing F107); a page stays KIND_UNAVAILABLE (a landing page is
+// linked as campaign content, P14, F107).
 const associationKinds = {
     CakList: {
         name: "List",
@@ -504,6 +505,11 @@ const associationKinds = {
             const publication = one("mantle.party.FormPublication", {publicationId: sourceId})
             return publication ? {owner: publication.organizationPartyId, label: publication.publicationId} : null
         }
+    },
+    CakEvent: {
+        name: "Event",
+        organization: sourceId =>
+            ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrations.js").organizationOfEvent(sourceId)
     }
 }
 function storeAssociation(p) {
