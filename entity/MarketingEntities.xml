@@ -1933,4 +1933,16 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="lastError" type="text-medium"/>
     </entity>
     <!-- ===== end of Marketing P20 ===== -->
+
+    <!-- ===== Marketing follow-up 4: a remote PASS checkout's visitor key (impl-marketing §4 Nov 15) ===== -->
+    <!-- The digest of the frontend's first-party visitor key a Shop checkout kept with its order (ShopCheckout.js freeze, cleared at
+        placement when no longer allowed), the same digest MarketingTrackingEvent.visitorKeyHash keeps, so record#OrderAttribution
+        finds the events of a visitor whose checkout went through a remote frontend (no local visit). Kept only where an event would
+        have kept the key (the seller's MarketingPolicy visitorKeys, or the customer allowing tracking with the seller), never for a
+        customer who withdrew tracking; the raw key is never stored. -->
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="marketingVisitorKeyHash" type="text-medium"><description>The digest of the checkout's visitor key (Marketing
+            attribution)</description></field>
+    </extend-entity>
+    <!-- ===== end of Marketing follow-up 4 ===== -->
 </entities>

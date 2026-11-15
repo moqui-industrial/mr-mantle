@@ -3,7 +3,9 @@
 // placed it (a Shop checkout by its visit and the visitor key that visit carried, a Sales acceptance by its source opportunity, a direct
 // order by its customer as a consenting recipient, a ticket); an expired link's event, an automated fetch, a recipient who does not
 // allow tracking and an unknown identity attribute nothing; a purchase order is never attributed; an order the SECA's call missed is
-// decided once by the job; a later link edit changes no decision, and a staff correction is a successor with its reason.
+// decided once by the job; a later link edit changes no decision, and a staff correction is a successor with its reason. Follow-up 4:
+// a checkout keeps a visitor key only as its digest and only where allowed (never for a customer who withdrew tracking, never a
+// malformed key), and an order with no local visit is attributed by that digest.
 // Standalone: spec-local organizations, people, campaigns, links, events and orders.
 // Run: ./moq test mr-mantle --spec Attribution
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
@@ -354,5 +356,74 @@ feature("a later link edit changes no decision; a staff correction is a successo
         const next = r.chain.find(link => link.outcomeLinkId == r.corrected.outcomeLinkId)
         next.basisEnumId == "MobStaff" && next.reason == "The poster drove it" && next.decidedByUserId == users.admin
         next.marketingCampaignId == ids.spring && next.thruDate == null
+    }
+})
+
+feature("follow-up 4: a checkout's visitor key is kept as its digest only where allowed, and the order is attributed by it", {
+    when() {
+        const tracking = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
+        const key = "Fu4VisitorKey_0123456789abcd"
+        const r = {key}
+        // the digest the events keep (P15's recordEvent) for the same key
+        r.eventDigest = String(ec.resource.digestText("mkt-visitor:" + key, "sha256"))
+        system(() => {
+            const keep = (customer, organization) => tracking.orderVisitorKeyHash(key, customer, organization)
+            // A keeps no visitor keys by policy: Ann allows tracking with A, Ben does not, a guest has no consent, Eve withdrew it
+            r.before = {ann: keep(prefix + "_ANN", orgA), ben: keep(prefix + "_BEN", orgA), guest: keep(null, orgA)}
+            r.malformed = [
+                tracking.orderVisitorKeyHash("short", prefix + "_ANN", orgA),
+                tracking.orderVisitorKeyHash("not a key; drop table", prefix + "_ANN", orgA),
+                tracking.orderVisitorKeyHash("x".repeat(65), prefix + "_ANN", orgA)
+            ]
+            // A's policy now keeps visitor keys: anyone but a customer who withdrew tracking with A
+            make("mantle.marketing.campaign.MarketingPolicy", {
+                marketingPolicyId: prefix + "_POLICY",
+                organizationPartyId: orgA,
+                fromDate: ago(1),
+                visitorKeys: "Y"
+            })
+            r.policy = {ben: keep(prefix + "_BEN", orgA), guest: keep(null, orgA), eve: keep(prefix + "_EVE", orgA)}
+            run("update#mantle.marketing.campaign.MarketingPolicy", {marketingPolicyId: prefix + "_POLICY", thruDate: ago(0.001)})
+            // a remote frontend's visitor: a click of L1 by the key (no local visit), then an order by a customer who is no recipient,
+            // placed with no visit and the key's digest; Eve's order with the same digest stays unattributed (she withdrew tracking)
+            event("FU4", {
+                trackingCodeId: prefix + "_L1",
+                marketingCampaignId: ids.spring,
+                eventKindEnumId: "MteClick",
+                visitorKeyHash: r.eventDigest,
+                eventDate: ago(1)
+            })
+            ids.remote = order("REMOTE", {customer: prefix + "_DEE"})
+            ids.remoteEve = order("REMOTEEVE", {customer: prefix + "_EVE"})
+            ids.remoteOther = order("REMOTEOTHER", {customer: prefix + "_DEE"})
+            for (const [orderId, digest] of [
+                [ids.remote, r.eventDigest],
+                [ids.remoteEve, r.eventDigest],
+                [ids.remoteOther, tracking.visitorKeyHash("Fu4AnotherVisitor_0123456789")]
+            ])
+                run("update#mantle.order.OrderHeader", {orderId, marketingVisitorKeyHash: digest})
+        })
+        for (const name of ["remote", "remoteEve", "remoteOther"]) {
+            placed(ids[name])
+            r[name] = current(ids[name])
+        }
+        r.native = rows("mantle.marketing.tracking.TrackingCodeOrder", {orderId: ids.remote})
+        return r
+    },
+    then(r) {
+        // the digest is the events' digest, never the raw key; kept for a consenting customer only while A's policy is off
+        r.before.ann == r.eventDigest && r.before.ann != r.key
+        r.before.ben == null && r.before.guest == null
+        // a key not of the cookie's form is dropped
+        r.malformed.every(value => value == null)
+        // with A's policy on: a guest and a customer without consent too, never a customer who withdrew tracking
+        r.policy.ben == r.eventDigest && r.policy.guest == r.eventDigest
+        r.policy.eve == null
+        // the order with no visit is attributed by the key's digest it kept; a withdrawn customer's and an unknown key's are not
+        r.remote.length == 1 && r.remote[0].basisEnumId == "MobTrackingEvent"
+        r.remote[0].trackingEventId == prefix + "_EV_FU4" && r.remote[0].marketingCampaignId == ids.spring
+        r.native.length == 1 && r.native[0].trackingCodeId == prefix + "_L1"
+        r.remoteEve.length == 1 && r.remoteEve[0].basisEnumId == "MobNone"
+        r.remoteOther.length == 1 && r.remoteOther[0].basisEnumId == "MobNone"
     }
 })

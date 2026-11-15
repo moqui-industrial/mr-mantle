@@ -35,6 +35,11 @@
  *   saying what it is and is not; the submit keeps what was checked and the placement records it, granted for a verified
  *   account, else pending until the receipt's link or a verified sign-in confirms it. Never a prerequisite: the receipt and
  *   the order's notices are transactional whatever is chosen.
+ * - The visitor key (Marketing follow-up 4): a frontend may send its first-party visitor key with the submit; only its digest is
+ *   kept with the order (OrderHeader.marketingVisitorKeyHash), and only where Marketing would keep the key on an event
+ *   (MarketingTracking.js orderVisitorKeyHash: the seller's policy or the customer's tracking consent, never a customer who
+ *   withdrew it), read again at placement, so Marketing's attribution of an order placed through a remote frontend finds the
+ *   visitor's tracking events. The key is not part of the submit's identity and is never a reason to refuse it.
  * - Subscriptions (Shop P7; ShopSubscriptions.js): a checkout begun for a recurring offer needs a signed-in verified account
  *   and, for an automatic offer, the buyer's consent to the renewal charges at submit; the freeze records the consent with
  *   what was shown and keeps the card, which renews off-session.
@@ -49,6 +54,7 @@ const externalAccess = () => ec.resource.script("component://mr-mantle/service/m
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
 const storeTopics = () => ec.resource.script("component://mr-mantle/service/mantle/public/StoreTopics.js")
 const subscriptions = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopSubscriptions.js")
+const marketingTracking = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
 const {find, one, rows, ms} = lib
 const C = "mantle.order.StoreCheckout"
 const A = "mantle.order.StoreCartAccess"
@@ -999,7 +1005,8 @@ function submitCheckout(p) {
             : null,
         quoteNeeded: physical(cart.row.orderId),
         returnKeyDigest: digest(returnKey),
-        optIns: storeTopics().chosenFrom(checkout, askedOptIns)
+        optIns: storeTopics().chosenFrom(checkout, askedOptIns),
+        visitorKeyHash: visitorKeyHashOf(p.visitorKey, checkout, cart.part)
     })
     if (frozen.error) raise(frozen)
     // another submit froze it first (two tabs, a double click): its attempt again, without this request's key, whose digest
@@ -1020,6 +1027,23 @@ function submitCheckout(p) {
     }
     const result = refreshAttempt(shop, checkout.checkoutId, "none")
     return remember(replay, checkout, view(reload(reached), Object.assign({returnKey}, result)))
+}
+
+// The digest of a frontend's visitor key the order may keep (Marketing follow-up 4), or null: a malformed key, a seller whose policy
+// keeps no keys for a customer who has not allowed tracking, or a customer who withdrew it. A failure keeps nothing.
+function visitorKeyHashOf(visitorKey, checkout, part) {
+    if (!text(visitorKey) || !part) return null
+    try {
+        return marketingTracking().orderVisitorKeyHash(
+            visitorKey,
+            part.customerPartyId || checkout.customerPartyId || null,
+            part.vendorPartyId
+        )
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.warn("Checkout " + checkout.checkoutId + " visitor key not kept: " + String(error.message).split("\n")[0])
+        return null
+    }
 }
 
 // ===== the steps (run#Step, each in its own transaction) =====
@@ -1148,6 +1172,9 @@ function freeze(p) {
         optInsJson: JSON.stringify({chosen: Array.from(p.optIns || [])}),
         ...recurring.values
     }
+    // Marketing follow-up 4: the visitor key's digest (where Marketing may keep it), committed with the freeze, before place#Order
+    if ((order.marketingVisitorKeyHash || null) !== (p.visitorKeyHash || null))
+        call("update#mantle.order.OrderHeader", {orderId: order.orderId, marketingVisitorKeyHash: p.visitorKeyHash || null})
     if (due.compare(0) <= 0) {
         // nothing due: no gateway, placement next
         call("update#" + C, Object.assign(values, {statusId: "ScoPlacementPending", paymentId: null}))
@@ -1257,6 +1284,7 @@ function placeStep(p) {
     if (!placedStatuses.includes(order.statusId)) {
         if (!checkout.placementIntentDate)
             call("update#" + C, {checkoutId: checkout.checkoutId, placementIntentDate: ec.user.nowTimestamp})
+        keptVisitorKey(order)
         attempts().asAttempt(checkout.paymentId, () => call("mantle.order.OrderServices.place#Order", {orderId: order.orderId}))
     }
     call("update#" + C, {
@@ -1285,6 +1313,20 @@ function placeStep(p) {
         }
     }
     return {statusId: "ScoCompleted"}
+}
+// Marketing follow-up 4: the visitor key's digest kept at the freeze stays only while it may (the customer may have withdrawn tracking
+// or the seller's policy changed since the submit), in the placement's transaction before place#Order.
+function keptVisitorKey(order) {
+    if (!order.marketingVisitorKeyHash) return
+    const part = partOf(order.orderId)
+    let keep = false
+    try {
+        keep = !!part && marketingTracking().visitorKeyAllowed(part.customerPartyId || null, part.vendorPartyId)
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.warn("Order " + order.orderId + " visitor key not checked: " + String(error.message).split("\n")[0])
+    }
+    if (!keep) call("update#mantle.order.OrderHeader", {orderId: order.orderId, marketingVisitorKeyHash: null})
 }
 // The checkout's opt-ins recorded (StoreTopics.js); a failure is logged and never stops the placement.
 function recordOptIns(checkout) {

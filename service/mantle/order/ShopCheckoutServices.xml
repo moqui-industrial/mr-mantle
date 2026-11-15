@@ -117,7 +117,7 @@
         </actions>
     </service>
     <service verb="submit" noun="Checkout" transaction="cache" authenticate="anonymous-all" allow-remote="false">
-        <description>submitCheckout: a ready checkout at the revision (expectedRevision) and terms version (termsVersion, acceptTerms) the shopper saw is frozen under the order's lock and committed with its promised payment and payment attempt, then authorized through the store's hosted gateway; a change found at the freeze is REVIEW_REQUIRED (Conflict) with the change kept for the shopper, a submitted checkout answers its attempt again (one order, one payment), and nothing due skips the gateway. The return key is in the first answer only.</description>
+        <description>submitCheckout: a ready checkout at the revision (expectedRevision) and terms version (termsVersion, acceptTerms) the shopper saw is frozen under the order's lock and committed with its promised payment and payment attempt, then authorized through the store's hosted gateway; a change found at the freeze is REVIEW_REQUIRED (Conflict) with the change kept for the shopper, a submitted checkout answers its attempt again (one order, one payment), and nothing due skips the gateway. The return key is in the first answer only. A frontend's first-party visitor key (visitorKey, Marketing follow-up 4) is kept with the order only as its digest, and only where Marketing may keep it (MarketingTracking.js orderVisitorKeyHash); a malformed key is dropped.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
         </in-parameters>

@@ -527,6 +527,37 @@ function trackingAllowed(partyId, contactMechId, organizationPartyId) {
     )
     return eligibility().purposeState(consents, "PcpTracking", contactMechId || null, organizationPartyId).granted
 }
+// Whether a party has withdrawn tracking (PcpTracking) with the organization: their latest records first, as trackingAllowed reads
+// them.
+function trackingWithdrawn(partyId, organizationPartyId) {
+    if (!partyId) return false
+    const consents = rows("mantle.party.PartyConsent", {partyId}).sort(
+        (a, b) =>
+            (ms(b.consentDate) ?? 0) - (ms(a.consentDate) ?? 0) ||
+            String(b.partyConsentId).localeCompare(String(a.partyConsentId))
+    )
+    return eligibility().purposeState(consents, "PcpTracking", null, organizationPartyId).withdrawn
+}
+// The digest kept for a visitor key (events' and orders' visitorKeyHash); the raw key is never stored.
+const visitorKeyHash = visitorKey => digest("mkt-visitor:" + visitorKey)
+// Follow-up 4: whether a visitor key may be kept for an order of the seller: where an event would have kept it (the seller's
+// MarketingPolicy visitorKeys Y, or the customer allowing tracking with the seller), never for a customer who has withdrawn tracking
+// with the seller.
+function visitorKeyAllowed(customerPartyId, organizationPartyId) {
+    if (!organizationPartyId) return false
+    if (customerPartyId && trackingWithdrawn(customerPartyId, organizationPartyId)) return false
+    return (
+        policyOf(organizationPartyId)?.visitorKeys === "Y" ||
+        (!!customerPartyId && trackingAllowed(customerPartyId, null, organizationPartyId))
+    )
+}
+// The digest a checkout keeps with its order for a frontend's visitor key where it may (visitorKeyAllowed); a key not of the cookie's
+// form is dropped. The digest, or null.
+function orderVisitorKeyHash(visitorKey, customerPartyId, organizationPartyId) {
+    const key = text(visitorKey)
+    if (!visitorKeyPattern.test(key) || !visitorKeyAllowed(customerPartyId, organizationPartyId)) return null
+    return visitorKeyHash(key)
+}
 
 // ===== the public operations (PASS's web scripts) =====
 const accountScript = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js")
@@ -642,7 +673,7 @@ function recordEvent({link, organizationPartyId, siteId, eventKindEnumId, automa
         siteId,
         eventKindEnumId,
         automated: automated ? "Y" : null,
-        visitorKeyHash: visitorKey ? digest("mkt-visitor:" + visitorKey) : null,
+        visitorKeyHash: visitorKey ? visitorKeyHash(visitorKey) : null,
         campaignRecipientId: recipient?.campaignRecipientId || null,
         campaignSendId: recipient?.campaignSendId || null,
         visitId,
@@ -826,6 +857,10 @@ const publicOperations = new Set(["resolvePublic", "recordPublic"])
     recipientClicks,
     uniqueClickers,
     trackingAllowed,
+    trackingWithdrawn,
+    visitorKeyHash,
+    visitorKeyAllowed,
+    orderVisitorKeyHash,
     publicUrlOf,
     destinationOf,
     // each operation checks the caller's scope and permission (the public ones the site, the link and their limits) and reads and
