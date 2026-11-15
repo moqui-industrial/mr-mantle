@@ -1338,9 +1338,11 @@ feature("a ticket payment's visitor key: its digest kept only where allowed, rea
             r.afterAgain = kept(paid.reference)
             r.result = returned(siteA, paid.token)
             r.placed = row("mantle.order.OrderHeader", {orderId: reservationOf(paid.reference).orderId})
-            r.attribution = rows("mantle.marketing.tracking.MarketingOutcomeLink", {orderId: r.placed.orderId}).filter(
-                link => !link.thruDate
-            )
+            // the decision is the placement SECA's (tx-commit), run on a service worker once the placement commits: read until
+            // it is there (follow-up 8: read at once, a loaded run found none yet)
+            const decided = () =>
+                rows("mantle.marketing.tracking.MarketingOutcomeLink", {orderId: r.placed.orderId}).filter(link => !link.thruDate)
+            r.attribution = waitFor(() => decided().length > 0) ? decided() : []
             // a key not of the cookie's form: dropped, the payment started
             const bad = reservationDone("vk-bad@mkrg.example.test")
             r.badStart = payWith(bad.token, "not a key; drop table")
