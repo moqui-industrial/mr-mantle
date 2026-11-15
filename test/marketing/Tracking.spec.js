@@ -410,13 +410,19 @@ feature("a disabled link answers its safe destination whatever the request; an e
             })
         )
         const ended = visitor("resolve#TrackingLink", {siteId: siteA, code: "MktrEnded01"})
-        return {disabled, resolved, badSafe, ended}
+        // a disabled or ended link counts nothing
+        const before = events(ids.own).length + events(prefix + "_ENDED").length
+        const disabledClick = visitor("record#TrackingEvent", {siteId: siteA, code: ownCode, kind: "click"})
+        const endedClick = visitor("record#TrackingEvent", {siteId: siteA, code: "MktrEnded01", kind: "click"})
+        const added = events(ids.own).length + events(prefix + "_ENDED").length - before
+        return {disabled, resolved, badSafe, ended, disabledClick, endedClick, added}
     },
     then(r) {
         r.disabled.refusal == ""
         r.resolved.destination == "https://" + hostA + "/marketing" && r.resolved.available == false
         code(r.badSafe) == "DESTINATION_NOT_REGISTERED"
         r.ended.destination == null && r.ended.available == false
+        r.disabledClick.recorded == false && r.endedClick.recorded == false && r.added == 0
     }
 })
 
@@ -426,7 +432,9 @@ feature("a send's message: personalized links and a pixel for a recipient who al
         const ann = row("mantle.marketing.campaign.CampaignRecipient", {campaignRecipientId: prefix + "_R_ANN"})
         const ben = row("mantle.marketing.campaign.CampaignRecipient", {campaignRecipientId: prefix + "_R_BEN"})
         const link = "https://" + hostA + "/trk/" + siteA + "/" + ids.pageCode
-        const body = '<p><a href="' + link + '">Spring</a></p>'
+        // the same code on a host the site does not have: left as written, never given the token
+        const foreign = "https://elsewhere.example.test/trk/" + siteA + "/" + ids.pageCode
+        const body = '<p><a href="' + link + '">Spring</a> <a href="' + foreign + '">Mirror</a></p>'
         const text = "Spring: " + link + "\n"
         const profile = {trackingPolicyEnumId: "MtrConsented"}
         const forAnn = system(() => tracking.messageTracking(send, ann, profile, body, text))
@@ -438,6 +446,18 @@ feature("a send's message: personalized links and a pixel for a recipient who al
         const annClick = visitor("record#TrackingEvent", {siteId: siteA, code: ids.pageCode, token, kind: "click"})
         const annOpen = visitor("record#TrackingEvent", {siteId: siteA, token, kind: "open"})
         const forged = visitor("record#TrackingEvent", {siteId: siteA, code: ids.pageCode, token: "x".repeat(40), kind: "click"})
+        // an expired token names no one, though Ann still allows tracking
+        const expireToken = expireDate =>
+            system(() =>
+                ec.service
+                    .sync()
+                    .name("update#mantle.marketing.tracking.MarketingTrackingToken")
+                    .parameters({tokenHash: tokens[0].tokenHash, expireDate})
+                    .call()
+            )
+        expireToken(new Date(Date.now() - 1000))
+        const expiredClick = visitor("record#TrackingEvent", {siteId: siteA, code: ids.pageCode, token, kind: "click"})
+        expireToken(tokens[0].expireDate)
         // Ann withdraws tracking: her token names her no more
         system(() =>
             make("mantle.party.PartyConsent", {
@@ -451,33 +471,46 @@ feature("a send's message: personalized links and a pixel for a recipient who al
         )
         const afterWithdrawal = visitor("record#TrackingEvent", {siteId: siteA, code: ids.pageCode, token, kind: "click"})
         // the token expired: the link still works, as an anonymous click
-        system(() =>
-            ec.service
-                .sync()
-                .name("update#mantle.marketing.tracking.MarketingTrackingToken")
-                .parameters({tokenHash: tokens[0].tokenHash, expireDate: new Date(Date.now() - 1000)})
-                .call()
-        )
+        expireToken(new Date(Date.now() - 1000))
         const expired = visitor("resolve#TrackingLink", {siteId: siteA, code: ids.pageCode, token})
         const named = rows("mantle.marketing.tracking.MarketingTrackingEvent", {campaignRecipientId: prefix + "_R_ANN"})
         const clicks = tracking.recipientClicks([prefix + "_R_ANN", prefix + "_R_BEN"])
-        return {forAnn, forBen, noPolicy, token, tokens, annClick, annOpen, forged, afterWithdrawal, expired, named, clicks, link}
+        return {
+            forAnn,
+            forBen,
+            noPolicy,
+            token,
+            tokens,
+            annClick,
+            annOpen,
+            forged,
+            expiredClick,
+            afterWithdrawal,
+            expired,
+            named,
+            clicks,
+            link,
+            foreign
+        }
     },
     then(r) {
         r.forAnn.tracked == true && r.token.length >= 32
         r.forAnn.body.includes(r.link + "?token=" + r.token) && r.forAnn.bodyText.includes(r.link + "?token=" + r.token)
         r.forAnn.body.includes("/trk-o/" + siteA + "?token=" + r.token)
+        r.forAnn.body.includes('href="' + r.foreign + '"') && !r.forAnn.body.includes(r.foreign + "?token=")
         // the token's digest alone is kept, for ninety days
         r.tokens.length == 1 && r.tokens[0].tokenHash != r.token && !JSON.stringify(r.tokens[0]).includes(r.token)
         entityLib.ms(r.tokens[0].expireDate) - entityLib.ms(r.tokens[0].createdDate) == 90 * 86400000
         // no token, no pixel: the direct destination, the &amp; escaped in the HTML
-        r.forBen.tracked == false && !r.forBen.body.includes("/trk") && !r.forBen.bodyText.includes("/trk")
+        r.forBen.tracked == false && !r.forBen.body.includes(r.link) && !r.forBen.body.includes("/trk-o/")
+        !r.forBen.bodyText.includes("/trk")
         r.forBen.body.includes("https://" + hostA + "/marketing/pages/spring?utm_source=poster&amp;utm_medium=qr")
         r.forBen.bodyText.includes("https://" + hostA + "/marketing/pages/spring?utm_source=poster&utm_medium=qr")
         r.noPolicy.tracked == false && !r.noPolicy.body.includes("token=")
         r.annClick.recorded == true &&
             r.annOpen.recorded == true &&
             r.forged.recorded == true &&
+            r.expiredClick.recorded == true &&
             r.afterWithdrawal.recorded == true
         r.named.length == 2 && r.named.every(event => event.campaignSendId == prefix + "_SEND")
         r.expired.destination.startsWith("https://" + hostA + "/marketing/pages/spring") && r.expired.visitorKeys == true

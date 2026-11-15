@@ -434,9 +434,13 @@ feature(
                 organizationPartyId: orgA,
                 selfApprovalAllowed: "Y"
             })
+            // P15 review: the test addresses and tracking hosts are store#MarketingPolicy's parameters (P8 had testAddresses on
+            // store#CampaignBudget, so Campaign defaults dropped them)
             const second = as(users.configurer, C + "store#MarketingPolicy", {
                 organizationPartyId: orgA,
                 currencyUomId: "EUR",
+                testAddresses: "tester@mkc.example.test",
+                trackingDomains: "Partner.Example.test",
                 expectedPolicyId: first.marketingPolicyId
             })
             const policy = as(users.configurer, C + "get#MarketingPolicy", {organizationPartyId: orgA})
@@ -494,6 +498,7 @@ feature(
             first.refusal == "" && stale.refusal.includes("STALE_REVISION")
             preview.refusal == "" && preview.findings.some(found => found.kind == "selfApproval")
             second.refusal == "" && policy.policy.currencyUomId == "EUR" && policy.history.length == 2
+            policy.policy.testAddresses == "tester@mkc.example.test" && policy.policy.trackingDomains == "partner.example.test"
             policy.history.filter(found => found.thruDateText).length == 1
             authorPolicy.refusal.includes("PERMISSION_DENIED")
             vocabulary.refusal == "" && taken.refusal.includes("VALUE_TAKEN") && badEnum.refusal.includes("VALUE_INVALID")

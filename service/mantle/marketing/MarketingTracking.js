@@ -583,9 +583,9 @@ function resolvePublic(p) {
     }
 }
 // recordTrackingEvent: one observation of the site (kind click, visit, fetch or visitFetch with the link's code, the last two a known
-// automated fetch of the link or of a page carrying it; open or fetch with a personalized token and no code: a send's pixel), with the visitor's key where it may be kept and the recipient where they allow
-// tracking. Over the client's limit for the code or the site's, an unknown code or token, or anything else unserved: nothing kept,
-// the same answer.
+// automated fetch of the link or of a page carrying it; open or fetch with a personalized token and no code: a send's pixel), with
+// the visitor's key where it may be kept and the recipient where they allow tracking. Over the client's limit for the code or the
+// site's, an unknown code or token, a link that is not current, or anything else unserved: nothing kept, the same answer.
 function recordPublic(p) {
     const kind = text(p.kind)
     if (!["click", "open", "visit", "fetch", "visitFetch"].includes(kind)) unavailable()
@@ -601,7 +601,8 @@ function recordPublic(p) {
         organizationPartyId = null
     if (!blank(p.code)) {
         link = linkOfSite(site.siteId, p.code)
-        if (!link) return nothing
+        // a disabled, ended or not yet started link counts nothing (its visitor gets the safe destination or the neutral page)
+        if (!link || !linkCurrent(link)) return nothing
         organizationPartyId = link.organizationPartyId
     } else {
         // a pixel: the site's Marketing mount names the organization, and a token is required
@@ -666,7 +667,7 @@ function localVisitId() {
 }
 
 // ===== a send's message (MarketingDispatch.js build#CampaignDelivery) =====
-const linkPattern = /https:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?\/trk\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9]{8,24})(?![A-Za-z0-9?])/g
+const linkPattern = /https:\/\/([A-Za-z0-9.-]+)(?::\d{1,5})?\/trk\/([A-Za-z0-9_-]{1,40})\/([A-Za-z0-9]{8,24})(?![A-Za-z0-9?])/g
 const encodeHtml = value =>
     String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 // The body and text of one attempt's message with its tracking: a recipient who allows tracking, under a profile that tracks
@@ -678,7 +679,7 @@ function messageTracking(row, recipient, profile, body, bodyText) {
     for (const source of [body || "", bodyText || ""]) {
         linkPattern.lastIndex = 0
         let match
-        while ((match = linkPattern.exec(source)) !== null) codes.add(match[2])
+        while ((match = linkPattern.exec(source)) !== null) codes.add(match[3])
     }
     const links = new Map()
     if (codes.size)
@@ -706,12 +707,24 @@ function messageTracking(row, recipient, profile, body, bodyText) {
             expireDate: new Date(nowMs() + limits.tokenDays * DAY)
         })
     }
+    // a link's address only on a live host of its own site: a token never rides to a host the author typed
+    const hostsOfSite = new Map()
+    const siteHost = (siteId, host) => {
+        if (!hostsOfSite.has(siteId))
+            hostsOfSite.set(
+                siteId,
+                Array.from(find(SITE_HOST, {siteId}).list())
+                    .filter(row => row.hostKindEnumId !== "PshkPreview")
+                    .map(row => String(row.hostname).toLowerCase())
+            )
+        return hostsOfSite.get(siteId).includes(String(host).toLowerCase())
+    }
     const rewrite = (source, html) => {
         if (!source || !links.size) return source
         linkPattern.lastIndex = 0
-        return source.replace(linkPattern, (url, siteId, code) => {
+        return source.replace(linkPattern, (url, host, siteId, code) => {
             const link = links.get(code)
-            if (!link || link.siteId !== siteId) return url
+            if (!link || link.siteId !== siteId || !siteHost(siteId, host)) return url
             if (token) return url + (html ? "?token=" : "?token=") + token
             const direct = linkCurrent(link) ? withUtm(baseDestination(link), link) : null
             if (!direct) return url
