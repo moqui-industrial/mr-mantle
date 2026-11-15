@@ -27,11 +27,19 @@
 //   percentage decided at its cancellation: the accepted terms' rule, 100 for a place never confirmed, or staff's), each with an
 //   operation key of the registration, and shown pending until the provider's result; a failed one is Accounting's to finish
 //   (ErfFailed), never retried blind.
+// - The visitor key (Marketing follow-up 5): Register's payment start may carry the frontend's first-party visitor key, as Shop's
+//   submit does since follow-up 4; only its digest is kept with the ticket order (OrderHeader.marketingVisitorKeyHash), and only
+//   where Marketing would keep the key on an event (MarketingTracking.js checkoutVisitorKeyHash: the seller's policy or the buyer's
+//   tracking consent, never a buyer who withdrew it, a key not of the cookie's form dropped), read again in the placement's
+//   transaction before place#Order (keepOrderVisitorKey), so Marketing's attribution of a ticket order paid through a remote frontend
+//   finds the visitor's events. The key is not part of the start's identity (a repeat answers the same attempt and changes nothing)
+//   and never a reason to refuse it.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const places = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js")
 const setup = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrations.js")
 const attempts = () => ec.resource.script("component://mr-mantle/service/mantle/account/PaymentAttempts.js")
 const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+const marketingTracking = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
 const {find, one, rows, call, denied, ms} = lib
 
 const POLICY = "mantle.work.registration.EventRegistrationPolicy"
@@ -244,7 +252,7 @@ const quoteText = quote => (quote?.currencyUomId ? moneyText(quote.subtotal, quo
 // ===== start#RegistrationPayment =====
 // The payment of a completed reservation's held places (the caller checked who asks): its order and promised payment made once and
 // committed with the attempt, then the provider asked. {paymentState, provider (redirectUrl or form), returnKey once}.
-function startPayment(reservationId, expectedPriceKey = null) {
+function startPayment(reservationId, expectedPriceKey = null, visitorKey = null) {
     let reservation = one(RESERVATION, {reservationId})
     const existing = reservation.paymentId ? one(P, {paymentId: reservation.paymentId}) : null
     if (existing) {
@@ -255,6 +263,15 @@ function startPayment(reservationId, expectedPriceKey = null) {
         }
     }
     const returnKey = ec.user.randomString(40).replace(/[^A-Za-z0-9_-]/g, "")
+    // follow-up 5: the digest of the frontend's visitor key the order may keep (read before the step's transaction), or null
+    const visitorKeyHash = blank(visitorKey)
+        ? null
+        : marketingTracking().checkoutVisitorKeyHash(
+              visitorKey,
+              reservation.buyerPartyId,
+              one(POLICY, {registrationPolicyId: reservation.registrationPolicyId})?.organizationPartyId,
+              "Registration " + reservationId
+          )
     const frozen = step("Registration payment " + reservationId, () => {
         const {policy} = places().lockOffer(reservation.registrationPolicyId)
         const current = find(RESERVATION, {reservationId}).forUpdate(true).one()
@@ -287,6 +304,9 @@ function startPayment(reservationId, expectedPriceKey = null) {
         }
         const order = orderOf(current, policy, held)
         if (order.total.compare(dec(0)) <= 0) denied("NOT_DUE", "Nothing is due")
+        // follow-up 5: the visitor key's digest (where Marketing may keep it) committed with the order and payment, before place#Order
+        if ((one("mantle.order.OrderHeader", {orderId: order.orderId}).marketingVisitorKeyHash || null) !== visitorKeyHash)
+            call("update#mantle.order.OrderHeader", {orderId: order.orderId, marketingVisitorKeyHash: visitorKeyHash})
         const paymentId = call("mantle.order.OrderServices.add#OrderPartPayment", {
             orderId: order.orderId,
             orderPartSeqId: order.orderPartSeqId,
@@ -487,6 +507,8 @@ function place(reservationId) {
     if (!rows(REGISTRATION, {paymentId: reservation.paymentId}).some(row => row.statusId === "EvrPending")) return {}
     if (Number(reservation.placementTries || 0) >= limits.placementTries) return {}
     const placed = step("Registration order placement " + reservation.orderId, () => {
+        // follow-up 5: the visitor key's digest kept at the payment's start stays only while it may
+        marketingTracking().keepOrderVisitorKey(reservation.orderId)
         attempts().asAttempt(reservation.paymentId, () =>
             call("mantle.order.OrderServices.place#Order", {orderId: reservation.orderId})
         )

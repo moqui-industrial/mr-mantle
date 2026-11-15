@@ -1124,7 +1124,8 @@ function startRegistrationPayment(p) {
     // the price the page showed (registrationView's priceKey): a change since is refused with the new amount (P17 review)
     const priceKey = String(p.priceKey || "")
     if (!/^[A-Za-z0-9]{8,64}$/.test(priceKey)) fail("Unprocessable", "Reload the page and try again")
-    const out = asPage(() => payments().startPayment(reservation.reservationId, priceKey))
+    // follow-up 5: the frontend's visitor key, whose digest the ticket order keeps only where Marketing allows it
+    const out = asPage(() => payments().startPayment(reservation.reservationId, priceKey, p.visitorKey))
     delete out.returnKey
     return {
         registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via),

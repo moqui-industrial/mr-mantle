@@ -1030,20 +1030,16 @@ function submitCheckout(p) {
 }
 
 // The digest of a frontend's visitor key the order may keep (Marketing follow-up 4), or null: a malformed key, a seller whose policy
-// keeps no keys for a customer who has not allowed tracking, or a customer who withdrew it. A failure keeps nothing.
+// keeps no keys for a customer who has not allowed tracking, or a customer who withdrew it. A failure keeps nothing
+// (MarketingTracking.js checkoutVisitorKeyHash, shared with a ticket's payment start since follow-up 5).
 function visitorKeyHashOf(visitorKey, checkout, part) {
     if (!text(visitorKey) || !part) return null
-    try {
-        return marketingTracking().orderVisitorKeyHash(
-            visitorKey,
-            part.customerPartyId || checkout.customerPartyId || null,
-            part.vendorPartyId
-        )
-    } catch (error) {
-        ec.message.clearErrors()
-        ec.logger.warn("Checkout " + checkout.checkoutId + " visitor key not kept: " + String(error.message).split("\n")[0])
-        return null
-    }
+    return marketingTracking().checkoutVisitorKeyHash(
+        visitorKey,
+        part.customerPartyId || checkout.customerPartyId || null,
+        part.vendorPartyId,
+        "Checkout " + checkout.checkoutId
+    )
 }
 
 // ===== the steps (run#Step, each in its own transaction) =====
@@ -1315,18 +1311,10 @@ function placeStep(p) {
     return {statusId: "ScoCompleted"}
 }
 // Marketing follow-up 4: the visitor key's digest kept at the freeze stays only while it may (the customer may have withdrawn tracking
-// or the seller's policy changed since the submit), in the placement's transaction before place#Order.
+// or the seller's policy changed since the submit), in the placement's transaction before place#Order (MarketingTracking.js
+// keepOrderVisitorKey, shared with a ticket order's placement since follow-up 5).
 function keptVisitorKey(order) {
-    if (!order.marketingVisitorKeyHash) return
-    const part = partOf(order.orderId)
-    let keep = false
-    try {
-        keep = !!part && marketingTracking().visitorKeyAllowed(part.customerPartyId || null, part.vendorPartyId)
-    } catch (error) {
-        ec.message.clearErrors()
-        ec.logger.warn("Order " + order.orderId + " visitor key not checked: " + String(error.message).split("\n")[0])
-    }
-    if (!keep) call("update#mantle.order.OrderHeader", {orderId: order.orderId, marketingVisitorKeyHash: null})
+    if (order.marketingVisitorKeyHash) marketingTracking().keepOrderVisitorKey(order.orderId)
 }
 // The checkout's opt-ins recorded (StoreTopics.js); a failure is logged and never stops the placement.
 function recordOptIns(checkout) {

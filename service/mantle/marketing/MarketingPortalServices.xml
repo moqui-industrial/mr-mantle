@@ -162,7 +162,10 @@ along with this software (see the LICENSE.md file). If not, see
             promised payment made once and authorized with the attempt's operation key, answered as the provider's page or form; a
             repeat answers the same attempt (no second charge or seat). priceKey is the key of the amount the page showed
             (getRegistration's priceKey): a price changed since is refused (PRICE_CHANGED, with the new amount) and nothing is
-            charged. The browser's return never confirms anything.</description>
+            charged. The browser's return never confirms anything. visitorKey (follow-up 5): the frontend's first-party Marketing
+            visitor key, of the cookie's form or dropped, kept only as its digest with the ticket order where Marketing may keep it
+            (the seller's policy or the buyer's tracking consent, never a buyer who withdrew it), read again before place#Order;
+            never part of the start's identity nor a reason to refuse it.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

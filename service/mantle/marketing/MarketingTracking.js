@@ -558,6 +558,35 @@ function orderVisitorKeyHash(visitorKey, customerPartyId, organizationPartyId) {
     if (!visitorKeyPattern.test(key) || !visitorKeyAllowed(customerPartyId, organizationPartyId)) return null
     return visitorKeyHash(key)
 }
+// The digest a checkout's submit keeps with its order (orderVisitorKeyHash) that never fails the submit: a failure of the consent or
+// policy read keeps nothing and is logged under the label (never the key). Shop's submit#Checkout and a ticket's
+// start#RegistrationPayment (follow-up 5).
+function checkoutVisitorKeyHash(visitorKey, customerPartyId, organizationPartyId, label) {
+    if (blank(visitorKey) || !organizationPartyId) return null
+    try {
+        return orderVisitorKeyHash(visitorKey, customerPartyId || null, organizationPartyId)
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.warn(label + " visitor key not kept: " + String(error?.message || error).split("\n")[0])
+        return null
+    }
+}
+// The visitor key's digest an order kept stays only while it may (visitorKeyAllowed for its first part's customer and vendor: the
+// customer may have withdrawn tracking or the seller's policy changed since the submit), cleared otherwise and when it cannot be
+// read (fail closed); called in the placement's transaction before place#Order (Shop's placeStep, a ticket order's placement).
+function keepOrderVisitorKey(orderId) {
+    const order = orderId ? one("mantle.order.OrderHeader", {orderId}) : null
+    if (!order?.marketingVisitorKeyHash) return
+    let keep = false
+    try {
+        const part = Array.from(find("mantle.order.OrderPart", {orderId}).orderBy("orderPartSeqId").limit(1).list())[0]
+        keep = !!part && visitorKeyAllowed(part.customerPartyId || null, part.vendorPartyId)
+    } catch (error) {
+        ec.message.clearErrors()
+        ec.logger.warn("Order " + orderId + " visitor key not checked: " + String(error?.message || error).split("\n")[0])
+    }
+    if (!keep) call("update#mantle.order.OrderHeader", {orderId, marketingVisitorKeyHash: null})
+}
 
 // ===== the public operations (PASS's web scripts) =====
 const accountScript = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js")
@@ -861,6 +890,8 @@ const publicOperations = new Set(["resolvePublic", "recordPublic"])
     visitorKeyHash,
     visitorKeyAllowed,
     orderVisitorKeyHash,
+    checkoutVisitorKeyHash,
+    keepOrderVisitorKey,
     publicUrlOf,
     destinationOf,
     // each operation checks the caller's scope and permission (the public ones the site, the link and their limits) and reads and
