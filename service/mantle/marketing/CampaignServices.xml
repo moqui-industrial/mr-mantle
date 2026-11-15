@@ -157,7 +157,6 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="estimatedCost"/>
             <parameter name="costUomId"/>
             <parameter name="explanation"/>
-            <parameter name="testAddresses"><description>P8: the addresses a send's test may go to, a line each, at most ten</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="marketingCampaignId"/>
@@ -487,6 +486,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="statisticsRetentionDays" type="Integer"/>
             <parameter name="explanation"/>
             <parameter name="testAddresses"><description>P8: the addresses a send's test may go to, a line each, at most ten</description></parameter>
+            <parameter name="trackingDomains"><description>P15: the external hosts a tracking link may lead to, a line each, at most twenty</description></parameter>
+            <parameter name="visitorKeys"><description>P15: whether public tracking sets a visitor key (Y), off by default</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="findings" type="List"/>
@@ -501,7 +502,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="MarketingPolicy" allow-remote="false">
-        <description>A new MarketingPolicy for an organization from now, ending the one in effect (named as read: expectedPolicyId, empty for the first; STALE_REVISION otherwise): its currency, the one-person-team flag (selfApprovalAllowed, off by default), whether a manager is required, the audience limit, frequency cap and retention days, its explanation, and the test allowlist of a send's test message (P8: at most ten addresses, VALUE_INVALID). Refuses as preview#MarketingPolicy.</description>
+        <description>A new MarketingPolicy for an organization from now, ending the one in effect (named as read: expectedPolicyId, empty for the first; STALE_REVISION otherwise): its currency, the one-person-team flag (selfApprovalAllowed, off by default), whether a manager is required, the audience limit, frequency cap and retention days, its explanation, the test allowlist of a send's test message (P8: at most ten addresses, VALUE_INVALID), and its tracking settings (P15: the external hosts a tracking link may lead to, at most twenty host names, VALUE_INVALID; whether public tracking sets a visitor key). Refuses as preview#MarketingPolicy.</description>
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="currencyUomId"/>
@@ -513,6 +514,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recipientRetentionDays" type="Integer"/>
             <parameter name="statisticsRetentionDays" type="Integer"/>
             <parameter name="explanation"/>
+            <parameter name="testAddresses"><description>P8: the addresses a send's test may go to, a line each, at most ten</description></parameter>
+            <parameter name="trackingDomains"><description>P15: the external hosts a tracking link may lead to, a line each, at most twenty</description></parameter>
+            <parameter name="visitorKeys"><description>P15: whether public tracking sets a visitor key (Y), off by default</description></parameter>
             <parameter name="expectedPolicyId"/>
         </in-parameters>
         <out-parameters>

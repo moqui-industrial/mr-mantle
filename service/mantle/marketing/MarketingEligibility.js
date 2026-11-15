@@ -630,6 +630,8 @@ const operations = {previewAudience, classifyRecipients}
 ;({
     buckets,
     reasonTexts,
+    // P15: a purpose's state from a party's consents (tracking consent when an event comes, MarketingTracking.js)
+    purposeState,
     classify,
     classifyPeople,
     evaluateSend,

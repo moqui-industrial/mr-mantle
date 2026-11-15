@@ -72,6 +72,9 @@ const TOKEN_WRITES = [
     // IronStone Marketing P12: a form's answer (anonymous for a public publication: PASS's request key, its limits and the neutral
     // receipt bound it; an invitation's link with input.token)
     'submitMarketingForm',
+    // IronStone Marketing P15: a tracking event of the redirect, the pixel or a page carrying a code (anonymous: the authority's limits
+    // per client and code and per site bound it, and its answer is the same; a personalized link's or pixel's input.token)
+    'recordTrackingEvent',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)

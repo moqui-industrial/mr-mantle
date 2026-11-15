@@ -719,6 +719,9 @@ feature(
                 pageText: "# Spring\n\nTwenty percent off.\n"
             })
             const binding = page(created.sitePageId)
+            // P15's review feature works this landing page
+            state.landingPageId = created.sitePageId
+            state.mktAuthor = author
             const wikiPage = one("moqui.resource.wiki.WikiPage", {wikiPageId: binding.wikiPageId})
             const orgSpace = one("mantle.marketing.content.MarketingPageSpace", {organizationPartyId: orgA})
             const space = one("moqui.resource.wiki.WikiSpace", {wikiSpaceId: wikiPage.wikiSpaceId})
@@ -775,6 +778,111 @@ feature(
             r.authorList.pages[0].canPublish == true
             !r.designerList.pages.some(p => p.sitePageId == r.created.sitePageId)
             r.designerList.pages.some(p => p.sitePageId == state.pageId)
+        }
+    }
+)
+
+// IronStone Marketing P15 (impl-marketing §4 Nov 14): a landing page's optional review. An editor asks at the text version, an approver
+// of the organization is told and approves it (not whoever saved it or asked); a later save leaves the approval at its version; a
+// reader cannot ask; publishing never waits for a review.
+feature(
+    "a landing page's review: an author asks, an approver approves the version, a new save is not reviewed, publishing never waits",
+    {
+        when() {
+            const C = "mantle.marketing.CampaignServices."
+            const R = "mantle.marketing.MarketingContentServices.get#PageReview"
+            const author = state.mktAuthor
+            const sitePageId = state.landingPageId
+            const approver = system(() => {
+                const id = user("mktapprover", orgA, ["MARKETING_VIEW", "MARKETING_APPROVE"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            // an editor who also approves: asking makes the request theirs, so they do not decide it
+            const editor = system(() => {
+                const id = user("mkteditor", orgA, ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT", "MARKETING_APPROVE"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            const reader = system(() => {
+                const id = user("mktreader", orgA, ["MARKETING_VIEW"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            const before = run(author, R, {sitePageId})
+            const revision = before.review.revision
+            const readerAsks = run(reader, C + "request#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision
+            })
+            const asked = run(editor, C + "request#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                reason: "Ready for the sale"
+            })
+            const notices = one("moqui.security.user.NotificationMessage", {topic: "MarketingPageReview", recordId: sitePageId})
+            const own = run(editor, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "approve"
+            })
+            const forApprover = run(approver, R, {sitePageId})
+            const approved = run(approver, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "approve"
+            })
+            const after = run(author, R, {sitePageId})
+            const decision = one("mantle.marketing.campaign.MarketingDecision", {
+                marketingDecisionId: approved.marketingDecisionId
+            })
+            const saved = run(author, T + "store#SitePage", {sitePageId, pageText: "# Spring\n\nThirty percent off.\n"})
+            const changed = run(author, R, {sitePageId})
+            const stale = run(approver, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "refuse",
+                reason: "Old"
+            })
+            const published = publish(author, sitePageId, {versionName: saved.versionName})
+            return {
+                before,
+                readerAsks,
+                asked,
+                notices,
+                own,
+                forApprover,
+                approved,
+                after,
+                decision,
+                saved,
+                changed,
+                stale,
+                published,
+                revision
+            }
+        },
+        then(r) {
+            r.before.error == "" &&
+                r.before.review.stateText.startsWith("Not reviewed at version") &&
+                r.before.capabilities.canRequest == true
+            code(r.readerAsks) == "PERMISSION_DENIED"
+            r.asked.error == "" && r.asked.notifiedCount == 1 && r.notices != null
+            code(r.own) == "SELF_APPROVAL"
+            r.forApprover.capabilities.canDecide == true && r.forApprover.review.pending == true
+            r.approved.error == "" &&
+                r.after.review.approved == true &&
+                r.after.review.stateText.startsWith("Approved at version")
+            r.decision.targetVersionName == r.after.review.versionName && r.decision.targetKindEnumId == "MdtPage"
+            r.saved.error == "" && r.changed.review.revision == r.revision + 1 && r.changed.review.approved == false
+            r.changed.review.stateText.startsWith("Not reviewed at version") && r.changed.capabilities.canRequest == true
+            code(r.stale) == "STALE_REVISION"
+            r.published.error == "" && r.published.result.state == "published"
         }
     }
 )

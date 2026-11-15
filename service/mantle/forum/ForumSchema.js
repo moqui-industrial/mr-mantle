@@ -1769,4 +1769,15 @@
         service: 'mantle.marketing.MarketingPortalServices.get#Page',
         fields: ['siteId', 'routePath', 'locale'],
     },
+    // IronStone Marketing P15 (impl-marketing P15; design-marketing §8 "Capture on the authority", §13.1): the tracking redirect's and
+    // pixel's two operations (mr-pass script/TrackingRedirect.js and TrackingPixel.js), never a page's form; the destination comes from
+    // the authority alone
+    resolveTrackingLink: {
+        service: 'mantle.marketing.TrackingServices.resolve#TrackingLink',
+        fields: ['siteId', 'code', 'token'],
+    },
+    recordTrackingEvent: {
+        service: 'mantle.marketing.TrackingServices.record#TrackingEvent',
+        fields: ['siteId', 'code', 'token', 'visitorKey', 'kind'],
+    },
 })

@@ -1346,6 +1346,110 @@ along with this software (see the LICENSE.md file). If not, see
     </view-entity>
     <!-- ===== end of Marketing P14 ===== -->
 
+    <!-- ===== Marketing P15: tracking links and capture (impl-marketing P15, F31, F87; design-marketing §8 TrackingLinks,
+        TrackingLinkDetail, "Capture on the authority", §14.1, §18) ===== -->
+    <!-- A campaign's tracking link (design §14.1 TrackingCode, extended; mantle.marketing.TrackingServices store#TrackingLink): its
+        organization (the campaign's), the site its public URL is on (/trk/{siteId}/{publicCode} at the site's canonical host, the
+        public code random and unique, never the id), the typed UTM source, medium and content (the organization's vocabulary codes),
+        and its registered destination: a landing page of the organization's Marketing mount (sitePageId) or an https URL (the native
+        redirectUrl) on a host of a site that serves the organization or on the privileged external allowlist (MarketingPolicy
+        trackingDomains). A disabled or ended link answers its safe destination (safeUrl, checked the same way) or a neutral page;
+        nothing of a request ever names where a link goes. -->
+    <extend-entity entity-name="TrackingCode" package="mantle.marketing.tracking">
+        <field name="organizationPartyId" type="id"><description>The campaign's organization</description></field>
+        <field name="siteId" type="id" enable-audit-log="update"><description>The site the public URL is on</description></field>
+        <field name="publicCode" type="text-short"><description>The code of the public URL, random and unique</description></field>
+        <field name="destinationKindEnumId" type="id" enable-audit-log="update"/>
+        <field name="sitePageId" type="id" enable-audit-log="update"><description>For a landing page: the page of the organization's
+            Marketing mount</description></field>
+        <field name="safeUrl" type="text-long" enable-audit-log="update"><description>Where a disabled or ended link goes (else a
+            neutral page)</description></field>
+        <field name="utmSource" type="text-short" enable-audit-log="update"/>
+        <field name="utmMedium" type="text-short" enable-audit-log="update"/>
+        <field name="utmContent" type="text-short" enable-audit-log="update"/>
+        <field name="disabled" type="text-indicator" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one-nofk" title="Organization" related="mantle.party.Party">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.public.PublicSitePage"/>
+        <relationship type="one" title="TrackingDestinationKind" related="moqui.basic.Enumeration">
+            <key-map field-name="destinationKindEnumId"/></relationship>
+        <index name="TRK_CODE_PUBLIC" unique="true"><index-field name="publicCode"/></index>
+        <index name="TRK_CODE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Tracking Destination Kind" enumTypeId="TrackingDestinationKind"/>
+            <moqui.basic.Enumeration description="Landing page" enumId="TdkSitePage" enumTypeId="TrackingDestinationKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Web address" enumId="TdkUrl" enumTypeId="TrackingDestinationKind" sequenceNum="2"/>
+        </seed-data>
+    </extend-entity>
+    <!-- An observation captured on the authority (design §8 "Capture on the authority", §14.1 MarketingTrackingEvent;
+        TrackingServices record#TrackingEvent): the link, its organization and campaign, the site, the kind (a click of the link, an
+        open by a send's pixel, a visit of a page carrying the code, or a known automated fetch: a link scanner, a prefetch), the
+        digest of the visitor's opaque first-party key (never the key, never a party id; none without the site's visitor keys or with
+        the browser's do-not-track), and the recipient only for a send's personalized link or pixel of a recipient who allows tracking
+        (PcpTracking). A fetch is an observation, never a conversion, a consent or a submission. TrackingCodeVisit is written beside it
+        when the request has a local visit. -->
+    <entity entity-name="MarketingTrackingEvent" package="mantle.marketing.tracking" cache="never">
+        <field name="trackingEventId" type="id" is-pk="true"/>
+        <field name="trackingCodeId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="siteId" type="id"/>
+        <field name="eventKindEnumId" type="id"/>
+        <field name="automated" type="text-indicator"/>
+        <field name="visitorKeyHash" type="text-medium"><description>The digest of the visitor's opaque key</description></field>
+        <field name="campaignRecipientId" type="id"><description>Only for a recipient who allows tracking</description></field>
+        <field name="campaignSendId" type="id"/>
+        <field name="visitId" type="id"/>
+        <field name="eventDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" title="TrackingEventKind" related="moqui.basic.Enumeration">
+            <key-map field-name="eventKindEnumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.CampaignRecipient"/>
+        <index name="MKT_TRK_EVT_CODE"><index-field name="trackingCodeId"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_SITE"><index-field name="siteId"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_RCPT"><index-field name="campaignRecipientId"/></index>
+        <index name="MKT_TRK_EVT_SEND"><index-field name="campaignSendId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Tracking Event Kind" enumTypeId="TrackingEventKind"/>
+            <moqui.basic.Enumeration description="Click" enumId="MteClick" enumTypeId="TrackingEventKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Open" enumId="MteOpen" enumTypeId="TrackingEventKind" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Page visit" enumId="MteVisit" enumTypeId="TrackingEventKind" sequenceNum="3"/>
+        </seed-data>
+    </entity>
+    <!-- A send recipient's personalized link token (design §8: opaque, server lookup, expiring): made at each attempt of the
+        delivery of a recipient who allows tracking (PcpTracking) under a sending profile that tracks them, for that message's tracking
+        links and pixel; only the digest is kept. The token rides in a link's token query parameter, which the request log redacts. -->
+    <entity entity-name="MarketingTrackingToken" package="mantle.marketing.tracking" cache="never">
+        <field name="tokenHash" type="text-medium" is-pk="true"/>
+        <field name="campaignRecipientId" type="id"/>
+        <field name="campaignSendId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="expireDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignRecipient"/>
+        <index name="MKT_TRK_TOK_RCPT"><index-field name="campaignRecipientId"/></index>
+    </entity>
+    <!-- The organization's tracking settings (design §8, §12 CampaignDefaults): the privileged external allowlist a tracking link's
+        destination may name beside the hosts of the organization's own sites, and whether its public tracking sets a visitor key
+        (a first-party cookie; off by default, and never for a browser that asks not to be tracked). -->
+    <extend-entity entity-name="MarketingPolicy" package="mantle.marketing.campaign">
+        <field name="trackingDomains" type="text-long" enable-audit-log="true"><description>External hosts a tracking link may lead
+            to, one a line (a host or a parent domain), at most twenty</description></field>
+        <field name="visitorKeys" type="text-indicator" enable-audit-log="true"><description>Whether public tracking sets a visitor
+            key (Y), off by default</description></field>
+    </extend-entity>
+    <!-- A landing page's optional review (impl-marketing §4 Nov 14, P15): a MarketingDecision of the page kind names the wiki version
+        it reviewed; publishing stays the content grant's act with or without one. -->
+    <extend-entity entity-name="MarketingDecision" package="mantle.marketing.campaign">
+        <field name="targetVersionName" type="text-short"><description>A page's text version reviewed</description></field>
+        <seed-data>
+            <moqui.basic.Enumeration description="Landing page" enumId="MdtPage" enumTypeId="MarketingDecisionTarget" sequenceNum="4"/>
+        </seed-data>
+    </extend-entity>
+    <!-- ===== end of Marketing P15 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->

@@ -401,8 +401,11 @@ function compare(observations) {
     if (leaders.length > 1) return {decided: false, leaderVariantId: null, reasonText: "A tie: the variants measure the same"}
     return {decided: true, leaderVariantId: leaders[0].variantId, reasonText: "Leading on the measure (no claim of significance)"}
 }
-// Unique clicks of a variant's accepted, tracking-enabled sample: recorded by tracking (P15); not available until then.
-const observedOf = () => null
+// Unique clicks of a variant's tracking-enabled sample: the recipients with a non-automated click of a personalized link (P15).
+const observedOf = (variant, tracked) =>
+    ec.resource
+        .script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
+        .uniqueClickers(tracked.map(recipient => recipient.campaignRecipientId))
 // The deliveries of recipients (ids of the ledger), counted: {accepted, delivered, failed, suppressed}.
 function deliveryTotals(deliveryIds) {
     const totals = {accepted: 0, delivered: 0, failed: 0, suppressed: 0}
@@ -438,6 +441,7 @@ function resultsOf(row, experiment, variants) {
         const totals = deliveryTotals(recipients.map(recipient => recipient.messageDeliveryId).filter(Boolean))
         const trackedTotals = deliveryTotals(tracked.map(recipient => recipient.messageDeliveryId).filter(Boolean))
         const assigned = recipients.length
+        const uniqueClicks = observedOf(variant, tracked)
         return {
             campaignExperimentVariantId: variant.campaignExperimentVariantId,
             variantLabel: variant.variantLabel,
@@ -454,8 +458,8 @@ function resultsOf(row, experiment, variants) {
             coverageText: assigned
                 ? tracked.length + " of " + assigned + " (" + Math.round((tracked.length * 100) / assigned) + "%)"
                 : "",
-            uniqueClicks: observedOf(variant, tracked),
-            clicksText: "Not available",
+            uniqueClicks,
+            clicksText: String(uniqueClicks),
             conversionsText: "Not available",
             denominatorText: trackedTotals.accepted + " accepted with tracking",
             winner: experiment.winnerVariantId === variant.campaignExperimentVariantId

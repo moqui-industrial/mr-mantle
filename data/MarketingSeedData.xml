@@ -172,4 +172,19 @@ along with this software (see the LICENSE.md file). If not, see
             viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
             accessEnumIds="FpaAnonymous,FpaAccount" formNoun="form" fieldAudienceEnumId="CfaCustomer"/>
     <!-- ===== end of Marketing P12 ===== -->
+
+    <!-- ===== Marketing P15: tracking links and capture; a landing page's optional review (impl-marketing P15, §4 Nov 14) ===== -->
+    <!-- A landing page's review (MarketingApprovals.js, the page kind): asked by a content author of the page, sent to the holders of
+        MARKETING_APPROVE who work for the mount's organization, decided at the text version the notice names; publishing stays the
+        content grant's act with or without it. The BOSS link is Marketing's setup. -->
+    <moqui.security.user.NotificationTopic topic="MarketingPageReview" inboxEnumId="NinNotifications"
+            description="Marketing landing page to review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Review landing page ${targetName}"/>
+    <moqui.server.TopicRegistration topic="MarketingPageReview" ownerApp="Marketing" purpose="A landing page waiting for the user's review"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="43"/>
+    <!-- ===== end of Marketing P15 ===== -->
 </entity-facade-xml>
