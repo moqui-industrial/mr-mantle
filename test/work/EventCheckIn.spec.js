@@ -5,9 +5,10 @@
 // override a pending place with a reason that changes neither its state nor its payment, never a waitlisted one; a reader and another
 // organization's events manager are refused; at a door tablet (a registered device fixed to the offer, its display account holding
 // MARKETING_CHECKIN in the organization) a code checks in and the attendee shows as a first name and initial, a lookup by name is
-// refused and another occurrence is unavailable; MARKETING_CHECKIN outside a device is refused. Standalone: spec-local organizations,
-// users, people, events, offers and registrations, a display account, a route group admitting the spec's own screen
-// (EventCheckInSpecScreen.xml) and a device registered and redeemed for it. Artifact authorization is off: the rules are the services'.
+// refused and another occurrence is unavailable, even with an events manager's permissions given to its display account;
+// MARKETING_CHECKIN outside a device is refused. Standalone: spec-local organizations, users, people, events, offers and registrations,
+// a display account, a route group admitting the spec's own screen (EventCheckInSpecScreen.xml) and a device registered and redeemed
+// for it. Artifact authorization is off: the rules are the services'.
 // Run: ./moq test mr-mantle --spec EventCheckIn
 const lib = ec.resource.script("component://mr-mantle/test/marketing/MarketingSpecLib.js")
 const {make, row, rows, system, organization, user, as, run} = lib
@@ -87,6 +88,26 @@ function place(name, of, statusId = null) {
     if (statusId) ec.entity.find(R).condition("registrationId", registrationId).disableAuthz().updateAll({statusId})
     ids[name] = registrationId
     return registrationId
+}
+// the door tablet's display group given an events manager's permissions while fn runs (a misassigned bundle), then taken back
+function promoted(fn) {
+    const grant = ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"]
+    system(() =>
+        grant.forEach(userPermissionId =>
+            make("moqui.security.UserGroupPermission", {userGroupId: state.display, userPermissionId, fromDate: 0})
+        )
+    )
+    try {
+        return fn()
+    } finally {
+        system(() =>
+            ec.entity
+                .find("moqui.security.UserGroupPermission")
+                .condition("userGroupId", state.display)
+                .condition("userPermissionId", "in", grant)
+                .deleteAll()
+        )
+    }
 }
 const attendances = registrationId => rows(ATTENDANCE, {registrationId})
 const actions = registrationId =>
@@ -343,7 +364,14 @@ feature("at the door tablet a code checks in with the attendee as a first name a
             byId: atDoor("checkIn", {registrationId: ids.Ivy, reason: "Tablet"}),
             otherOccurrence: atDoor("checkIn", {askOffer: ids.other.registrationPolicyId, entryCode: codes.Eve}),
             wrongEvent: atDoor("checkIn", {entryCode: codes.Eve}),
-            finn: attendances(ids.Finn)
+            finn: attendances(ids.Finn),
+            // a display account wrongly given an events manager's permissions is still the tablet at its device
+            promoted: promoted(() => ({
+                lookup: atDoor("preview", {term: "ivy"}),
+                byId: atDoor("checkIn", {registrationId: ids.Ivy, reason: "Tablet"}),
+                pending: atDoor("checkIn", {registrationId: ids.Cleo, reason: "Tablet", override: true}),
+                resolved: atDoor("resolve", {entryCode: codes.Finn})
+            }))
         }
     },
     then(r) {
@@ -357,5 +385,8 @@ feature("at the door tablet a code checks in with the attendee as a first name a
         code(r.byId) == "PERMISSION_DENIED"
         code(r.otherOccurrence) == "RECORD_UNAVAILABLE"
         code(r.wrongEvent) == "WRONG_EVENT"
+        code(r.promoted.lookup) == "PERMISSION_DENIED" && code(r.promoted.byId) == "PERMISSION_DENIED"
+        code(r.promoted.pending) == "PERMISSION_DENIED"
+        r.promoted.resolved.error == "" && r.promoted.resolved.matches[0].label.startsWith("Finn D.")
     }
 })

@@ -84,17 +84,21 @@ function displayOrganizations() {
 }
 const unavailable = id => denied("RECORD_UNAVAILABLE", "Registration offer " + (id || "") + " is not available")
 // The caller at an offer's door: {policy, staff: true, userScope} for an events manager of its organization, {policy, device} for its
-// door tablet; anyone else refused (the offer missing, another organization's or another tablet's alike).
+// door tablet; anyone else refused (the offer missing, another organization's or another tablet's alike). A shared device's request is
+// always the tablet's, whatever its display account holds: a display account given an events manager's group is still no staff door
+// (no search, no check-in without a code, no override, the attendee's name never in full).
 function doorOf(registrationPolicyId) {
     const policy = blank(registrationPolicyId) ? null : one(POLICY, {registrationPolicyId: text(registrationPolicyId)})
-    const userScope = marketingAccess.scope()
-    if (userScope.capabilities.eventManage) {
-        if (!policy || !marketingAccess.covers(userScope, policy.organizationPartyId)) unavailable(registrationPolicyId)
-        return {policy, staff: true, userScope}
+    const at = currentDevice()
+    if (!at) {
+        const userScope = marketingAccess.scope()
+        if (userScope.capabilities.eventManage) {
+            if (!policy || !marketingAccess.covers(userScope, policy.organizationPartyId)) unavailable(registrationPolicyId)
+            return {policy, staff: true, userScope}
+        }
     }
     if (!ec.user.hasPermission("MARKETING_CHECKIN"))
         denied("PERMISSION_DENIED", "Check-in is for events managers and the event's door tablet")
-    const at = currentDevice()
     if (!at || !ec.user.userId || at.device.displayUserId !== ec.user.userId)
         denied("DEVICE_REQUIRED", "Check-in without an events manager's sign-in is only at a registered door tablet")
     if (
