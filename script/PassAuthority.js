@@ -288,28 +288,13 @@ function asSystem(work) {
         if (!was) ec.artifactExecution.enableAuthz()
     }
 }
-/* The kind of the current user's unexpired login key `key`: device (an installed app's: a UserLoginKey with a deviceName,
-   as /sso/appToken and a REST login with deviceName make it), token (an access token: a description), session (any other,
-   getLoginKey's), scoped (create#UserScopedKey's), or null when it is no such key of the current user. A key is found by
-   its stored form, the SHA-256 the conf's default login-key encrypt-hash-type gives: scripts are not told the conf's
-   type, so under another one no key is found and the request is refused (the framework is to tell the kind of the key
-   a request's header login used). */
+/* The kind of login key the request's header login used, as the framework tells it (ec.user.loginKeyKind): device (an
+   installed app's: a UserLoginKey with a deviceName, as /sso/appToken and a REST login with deviceName make it), token
+   (an access token: a description) or session (getLoginKey's); null for any other login, and when the request names no
+   key. A scoped key (create#UserScopedKey's) never reaches here: only its one service's login takes it. */
 function keyKind(key) {
-    const userId = ec.user.userId
-    if (!key || !userId) return null
-    const row = asSystem(() =>
-        ec.entity
-            .find('moqui.security.UserLoginKey')
-            .condition({ loginKey: ec.resource.digestText(String(key), 'sha256') })
-            .one(),
-    )
-    if (!row || row.userId !== userId) return null
-    if (row.thruDate && ec.user.timestampMillis(row.thruDate) <= Date.now()) return null
-    // a scoped key opens its one service alone (the LLM gateway's): a device name does not make it an app's
-    if (row.scope) return 'scoped'
-    if (row.deviceName) return 'device'
-    if (row.description) return 'token'
-    return 'session'
+    if (!key || !ec.user.userId) return null
+    return ec.user.loginKeyKind || null
 }
 const callService = (name, input) =>
     ec.service.sync().throwOnError(true).name(name).parameters({ input }).call()

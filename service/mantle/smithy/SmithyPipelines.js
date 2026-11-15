@@ -1089,6 +1089,8 @@ kit => {
         } catch (error) {
             result = null
         }
+        // the target's problems are its own words, a Maintainer's to read, as the engine gives errorText
+        if (result && typeof result === "object" && r.rank < RANK.SmrMaintainer) delete result.problems
         return {
             deploymentId: d.deploymentId,
             environmentId: d.environmentId || null,
@@ -1235,8 +1237,9 @@ kit => {
         const r = viewed(p)
         writer(p.siteId)
         const {deployment} = deploymentOf(r, p)
-        // a Developer cancels their own, a Maintainer any
+        // a Developer cancels their own, a Maintainer any; not in an archived repository (as the page's canCancel)
         core.requireRole(r, mine(deployment) ? "SmrDeveloper" : "SmrMaintainer")
+        if (r.git.archivedDate) archived()
         if (!cancellable(deployment)) fail("Conflict", "The deployment has begun or ended")
         const out = deployMove("cancel#GitDeployment", {deploymentId: deployment.deploymentId})
         return {state: out.statusId || null}

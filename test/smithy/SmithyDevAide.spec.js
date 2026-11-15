@@ -15,9 +15,12 @@ const ids = {}
 const keys = {}
 const hook = (verb, parameters) => lib.run("mantle.smithy.SmithyGitServices." + verb, parameters)
 // A request to the PASS REST as the servlet API gives it to PassApi.js, with a login key in the api_key header as the Dev
-// AIDE sends it, by the key's account (the framework logged it in by the key): the status and the JSON answer.
+// AIDE sends it, signed in by that key as the framework's header login does (so ec.user.loginKeyKind tells its kind; a
+// key that does not sign in leaves nobody signed in): the status and the JSON answer.
 function rest(key, method, path, parameters = {}) {
-    return lib.as("SDA_DEV", () => {
+    return lib.as(null, () => {
+        if (key) ec.user.loginUserKey(key)
+        ec.message.clearErrors()
         const request = {
             requestURI: REST + "/" + path,
             method,
@@ -199,8 +202,8 @@ feature("an installed app's key calls the Dev AIDE's operations as its account a
                 operationId: "sda-review-1"
             }),
             issues: rest(keys.device, "GET", "issues", {repositoryId: ids.repositoryId}),
-            // keys that are no app's: expired, another account's, a session's, a scoped one; and a session a header
-            // login made, with no key
+            // keys that are no app's: expired, a session's, a scoped one (which only its service's login takes); and a
+            // session a header login made, with no key. Another account's app key acts as that account
             expired: rest(keys.expired, "GET", "merge-requests", {repositoryId: ids.repositoryId}),
             others: rest(keys.others, "GET", "merge-requests", {repositoryId: ids.repositoryId}),
             session: rest(keys.session, "GET", "merge-requests", {repositoryId: ids.repositoryId}),
@@ -222,7 +225,8 @@ feature("an installed app's key calls the Dev AIDE's operations as its account a
         // past the key's rule (this repository's issues are off: Not Found, as to any caller)
         issues.status == 404
         expired.status == 403
-        others.status == 403
+        // the key's own account, which reads this public repository's merge requests
+        others.status == 200
         session.status == 403
         scoped.status == 403
         headerSession.error.status == 403

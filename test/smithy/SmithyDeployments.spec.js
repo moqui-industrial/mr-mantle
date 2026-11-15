@@ -149,11 +149,18 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
             environmentId: stored.environmentId,
             token: "short-token-0123456789"
         })
+        const manyTypes = op("SDP_MAINT", "storeCiEnvironment", {
+            environmentId: stored.environmentId,
+            dataTypes: Array.from({length: 21}, (_, k) => "type" + k).join(",")
+        })
+        const badType = op("SDP_MAINT", "storeCiEnvironment", {environmentId: stored.environmentId, dataTypes: "seed;demo"})
         const unapproved = op("SDP_MAINT", "storeCiEnvironment", {name: "preview", allowedRefs: "main", operationId: "sdp-env-2"})
         const byMaintainer = op("SDP_MAINT", "findCiEnvironments").environmentList
         op("SDP_MAINT", "deleteCiEnvironment", {environmentId: unapproved.environmentId})
         return {
             shortToken,
+            manyTypes,
+            badType,
             byMaintainer,
             developer,
             stored,
@@ -179,10 +186,15 @@ feature("an environment is a Maintainer's: its token is write-only, in no list a
         listedText,
         reporter,
         shortToken,
+        manyTypes,
+        badType,
         byMaintainer
     }) {
         shortToken.kind == "Unprocessable"
-        shortToken.message.includes("32 characters")
+        // Smithy's own refusals, by their field, before the engine's
+        shortToken.message.startsWith("token:")
+        manyTypes.message.startsWith("dataTypes must be")
+        badType.message.startsWith("dataTypes must be")
         // the target's address is the engine's to give: a Maintainer's, not a Developer's
         listed.environmentList[0].targetUrl == null
         byMaintainer.find(env => env.name == "demo").targetUrl == "https://deploy.sdp.example.com"
@@ -318,7 +330,21 @@ feature("a Developer cancels their own deployment, a Maintainer any; another Dev
         settled(ready)
         lib.set("moqui.resource.GitDeployment", {deploymentId: ready}, {statusId: "deploying"})
         const readyView = op("SDP_OWNER", "getDeployment", {deploymentId: ready}).capabilities
+        // in an archived repository nothing is cancelled, as the page offers no Cancel there
+        lib.set("moqui.resource.GitRepository", {repositoryId: ids.repositoryId}, {archivedDate: ec.user.nowTimestamp})
+        const archivedView = op("SDP_OWNER", "getDeployment", {deploymentId: ready}).capabilities
+        const archivedCancel = op("SDP_OWNER", "cancelDeploy", {deploymentId: ready})
+        lib.set("moqui.resource.GitRepository", {repositoryId: ids.repositoryId}, {archivedDate: null})
         const readyCancel = op("SDP_OWNER", "cancelDeploy", {deploymentId: ready})
+        // the target's answer: its problems (its own words) are a Maintainer's to read
+        lib.set(
+            "moqui.resource.GitDeployment",
+            {deploymentId: mine.deploymentId},
+            {
+                deployResult: JSON.stringify({status: "deployed", component: "code", problems: ["/srv/moqui/secret path"]})
+            }
+        )
+        const resultFor = username => op(username, "getDeployment", {deploymentId: mine.deploymentId}).deployment.result
         return {
             notTheirs,
             own,
@@ -331,10 +357,21 @@ feature("a Developer cancels their own deployment, a Maintainer any; another Dev
             made,
             madeAfter,
             readyView,
-            readyCancel
+            readyCancel,
+            archivedView,
+            archivedCancel,
+            developerResult: resultFor("SDP_DEV"),
+            maintainerResult: resultFor("SDP_MAINT")
         }
     },
-    then({notTheirs, own, anyByMaintainer, ended, run, counted, retried, mine, made, madeAfter, readyView, readyCancel}) {
+    then(out) {
+        const {notTheirs, own, anyByMaintainer, ended, run, counted, retried, mine, made, madeAfter, readyView, readyCancel} = out
+        out.archivedView.canCancel == false
+        out.archivedCancel.kind == "Conflict"
+        out.archivedCancel.reason == "repositoryArchived"
+        out.developerResult.status == "deployed"
+        !("problems" in out.developerResult)
+        out.maintainerResult.problems == ["/srv/moqui/secret path"]
         // a deploy run counts in the day's runs as a manual one
         counted == 1
         retried.deploymentId == mine.deploymentId
