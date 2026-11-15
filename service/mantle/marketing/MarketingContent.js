@@ -125,6 +125,12 @@ function requireSpaceWrite(wikiSpaceId) {
     if (!found.canView) denied("RECORD_UNAVAILABLE", "Space " + (wikiSpaceId || "") + " is not available")
     if (!found.canUpdate) denied("SPACE_WRITE_DENIED", "You may not change pages of the space " + wikiSpaceId)
 }
+// A write of a post (its metadata, its categories) or a new post made from a page: the space's write right and the page's own (a
+// page restricted on its own is changed only by a user it admits; P14 review R2).
+function requirePageWrite(page) {
+    requireSpaceWrite(page.wikiSpaceId)
+    if (!pageAccess(page.wikiPageId).canUpdate) denied("SPACE_WRITE_DENIED", "You may not change the page " + page.pagePath)
+}
 function publicBlogLink(space, blog) {
     const base = text(space?.publicBlogUrl)
     return /^https:\/\/[^\s"'<>]+$/i.test(base) ? base.replace(/\/+$/, "") + "/" + encodeURIComponent(blog.wikiBlogId) : null
@@ -615,6 +621,7 @@ function storePost(p) {
             const page = one(WIKI_PAGE, {wikiPageId: text(p.wikiPageId)})
             if (!page || page.wikiSpaceId !== wikiSpaceId || !pageAccess(page.wikiPageId).canView)
                 denied("RECORD_UNAVAILABLE", "Page " + text(p.wikiPageId) + " is not a page of the space")
+            requirePageWrite(page)
             parameters.wikiPageId = page.wikiPageId
         } else if (!blank(p.blogText)) parameters.blogText = String(p.blogText)
         else denied("BODY_REQUIRED", "Write the post's text, or choose a page of the space")
@@ -628,7 +635,7 @@ function storePost(p) {
         return {wikiBlogId: out.wikiBlogId, created: true}
     }
     const {blog, page} = postOf(text(p.wikiBlogId))
-    requireSpaceWrite(page.wikiSpaceId)
+    requirePageWrite(page)
     if (!blank(p.expectedLastUpdatedStamp) && ms(p.expectedLastUpdatedStamp) !== ms(blog.lastUpdatedStamp))
         denied("REVISION_STALE", "Changed by someone else since it was read; reload")
     if (fields.title === "") denied("TITLE_REQUIRED", "Give the post a title")
@@ -646,7 +653,7 @@ function storePost(p) {
 function categoryWrite(p) {
     editScope()
     const {blog, page} = postOf(text(p.wikiBlogId))
-    requireSpaceWrite(page.wikiSpaceId)
+    requirePageWrite(page)
     const category = blank(p.wikiPageCategoryId) ? null : one(PAGE_CATEGORY, {wikiPageCategoryId: text(p.wikiPageCategoryId)})
     if (!category) denied("CATEGORY_UNKNOWN", "Choose a category")
     return {
@@ -721,31 +728,44 @@ function createContentSend(p) {
 }
 
 // ===== newsletter assembly (prepare#Send, MarketingSends.js) =====
-// The approved posts of a category as of a time: a publish date reached and a published page version, newest first, at most ten;
-// POSTS_NONE when there is none. {posts, html, text} for the prepared body.
+// The approved public posts of a category as of a time: a publish date reached and a published page version, in a space and on a
+// page with no view restriction (a private space's post never reaches a recipient by its category: Marketing cannot publish a
+// private space by linking it, design §8 Knowledge; P14 review R1), newest first, at most ten; POSTS_NONE when there is none.
+// {posts, html, text} for the prepared body.
 function postsFor(wikiPageCategoryId, asOf) {
     const at = ms(asOf)
     const ids = Array.from(find(BLOG_CATEGORY, {wikiPageCategoryId}).limit(limits.categoryPosts).list()).map(
         row => row.wikiBlogId
     )
-    const posts = ids.length
-        ? Array.from(
-              find(BLOG_VIEW)
-                  .condition("wikiBlogId", "in", ids)
-                  .condition("publishedVersionName", "is-not-null", null)
-                  .condition("publishDate", "less-equals", asOf)
-                  .orderBy("-publishDate")
-                  .limit(limits.posts)
-                  .list()
-          ).filter(row => ms(row.publishDate) <= at)
+    const factory = ec.entity.conditionFactory
+    const privateSpaces = ids.length
+        ? Array.from(find(SPACE).condition("restrictView", "Y").selectField("wikiSpaceId").list()).map(row => row.wikiSpaceId)
+        : []
+    let query = ids.length
+        ? find(BLOG_VIEW)
+              .condition("wikiBlogId", "in", ids)
+              .condition("publishedVersionName", "is-not-null", null)
+              .condition("publishDate", "less-equals", asOf)
+              .condition(
+                  factory.makeCondition(
+                      [
+                          factory.makeCondition("restrictView", "is-null", null),
+                          factory.makeCondition("restrictView", "not-equals", "Y")
+                      ],
+                      "or"
+                  )
+              )
+        : null
+    if (query && privateSpaces.length) query = query.condition("wikiSpaceId", "not-in", privateSpaces)
+    const posts = query
+        ? Array.from(query.orderBy("-publishDate").limit(limits.posts).list()).filter(row => ms(row.publishDate) <= at)
         : []
     if (!posts.length)
-        denied("POSTS_NONE", "The newsletter's blog category has no approved post yet: publish a post's page version first")
-    const views = posts.map(post => {
-        const space = one(SPACE, {wikiSpaceId: post.wikiSpaceId})
-        const restricted = space?.restrictView === "Y" || post.restrictView === "Y"
-        return {post, url: restricted ? null : publicBlogLink(space, post)}
-    })
+        denied(
+            "POSTS_NONE",
+            "The newsletter's blog category has no approved public post yet: publish a post's page version in a public space first"
+        )
+    const views = posts.map(post => ({post, url: publicBlogLink(one(SPACE, {wikiSpaceId: post.wikiSpaceId}), post)}))
     const html =
         '<div class="newsletter-posts">' +
         views

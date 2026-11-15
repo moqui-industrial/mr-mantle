@@ -84,6 +84,19 @@ spec({
         })
         if (hidden.refusal) throw new Error("hidden: " + hidden.refusal)
         ids.hidden = hidden.wikiBlogId
+        const locked = as(users.author, T + "store#BlogPost", {
+            wikiSpaceId: space,
+            title: "Locked page",
+            blogText: "<p>Only its own writers change it.</p>"
+        })
+        if (locked.refusal) throw new Error("locked: " + locked.refusal)
+        ids.locked = locked.wikiBlogId
+        // the page restricted on its own (restrictUpdate, no WikiPageUser for the author): the space's write right is not enough
+        system(() => {
+            const wikiPageId = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.locked}).wikiPageId
+            ids.lockedPage = wikiPageId
+            ec.service.sync().name("update#moqui.resource.wiki.WikiPage").parameters({wikiPageId, restrictUpdate: "Y"}).call()
+        })
     },
     cleanupSpec() {
         login("john.doe")
@@ -185,50 +198,86 @@ feature("a category write needs MARKETING_CONTENT_EDIT and write access to the p
     }
 })
 
-feature("a newsletter takes the category's approved posts at preparation and leaves their publication and sent date alone", {
+feature("a page restricted on its own: the space's writer neither changes its post, its categories, nor makes a post of it", {
     when() {
-        const blog = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.post})
-        const versionName = system(() => {
-            const version = ec.service
-                .sync()
-                .name(WIKI + "get#WikiPageHistory")
-                .parameters({wikiPageId: blog.wikiPageId})
-                .call().versionList[0].versionName
-            ec.service
-                .sync()
-                .name(WIKI + "set#PublishedVersion")
-                .parameters({wikiPageId: blog.wikiPageId, publishedVersionName: version})
-                .call()
-            return version
-        })
-        const drafted = as(users.author, T + "create#ContentSend", {
-            campaignContentId: ids.link,
-            contactListId: topic,
-            sendName: "Garden newsletter"
-        })
-        const send = row("mantle.marketing.campaign.CampaignSend", {campaignSendId: drafted.campaignSendId})
-        const prepared = as(users.author, D + "prepare#Send", {
-            campaignSendId: drafted.campaignSendId,
-            expectedRevision: entityLib.ms(send.lastUpdatedStamp)
-        })
-        const after = row("mantle.marketing.campaign.CampaignSend", {campaignSendId: drafted.campaignSendId})
-        const body = system(() => String(ec.resource.getLocationReference(after.preparedBodyLocation).getText()))
-        const posts = rows("mantle.marketing.campaign.CampaignSendPost", {campaignSendId: drafted.campaignSendId})
-        const blogAfter = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.post})
-        const page = row("moqui.resource.wiki.WikiPage", {wikiPageId: blog.wikiPageId})
-        const sent = row("moqui.resource.wiki.WikiBlogCategory", {wikiBlogId: ids.post, wikiPageCategoryId: category})
-        const distribution = as(users.author, T + "get#CampaignContent", {campaignContentId: ids.link}).distribution
-        return {after, versionName, drafted, send, prepared, body, posts, blog, blogAfter, page, sent, distribution}
+        return {
+            update: as(users.author, T + "store#BlogPost", {wikiBlogId: ids.locked, title: "Renamed"}),
+            category: as(users.author, T + "add#BlogCategory", {wikiBlogId: ids.locked, wikiPageCategoryId: category}),
+            fromPage: as(users.author, T + "store#BlogPost", {wikiSpaceId: space, wikiPageId: ids.lockedPage, title: "Copy"}),
+            title: row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.locked}).title
+        }
     },
     then(r) {
-        r.drafted.refusal == ""
-        r.send.postCategoryId == category && r.send.campaignContentId == ids.link
-        r.prepared.refusal == ""
-        r.body.includes("Pruning roses") && r.body.includes("When and how to prune.")
-        r.posts.length == 1 && r.posts[0].wikiBlogId == ids.post && r.posts[0].versionName == r.versionName
-        entityLib.ms(r.blogAfter.publishDate) == entityLib.ms(r.blog.publishDate)
-        r.page.publishedVersionName == r.versionName
-        r.sent.sentDate == null
-        r.distribution.some(d => d.campaignSendId == r.drafted.campaignSendId && d.versionText.startsWith("Version"))
+        code(r.update) == "SPACE_WRITE_DENIED" &&
+            code(r.category) == "SPACE_WRITE_DENIED" &&
+            code(r.fromPage) == "SPACE_WRITE_DENIED"
+        r.title == "Locked page"
     }
 })
+
+feature(
+    "a newsletter takes the category's approved public posts at preparation and leaves their publication and sent date alone",
+    {
+        when() {
+            const blog = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.post})
+            // the private space's post, published and in the category too, never reaches the newsletter (R1)
+            as(users.author, T + "add#BlogCategory", {wikiBlogId: ids.hidden, wikiPageCategoryId: category})
+            system(() => {
+                const wikiPageId = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.hidden}).wikiPageId
+                const version = ec.service
+                    .sync()
+                    .name(WIKI + "get#WikiPageHistory")
+                    .parameters({wikiPageId})
+                    .call().versionList[0].versionName
+                ec.service
+                    .sync()
+                    .name(WIKI + "set#PublishedVersion")
+                    .parameters({wikiPageId, publishedVersionName: version})
+                    .call()
+            })
+            const versionName = system(() => {
+                const version = ec.service
+                    .sync()
+                    .name(WIKI + "get#WikiPageHistory")
+                    .parameters({wikiPageId: blog.wikiPageId})
+                    .call().versionList[0].versionName
+                ec.service
+                    .sync()
+                    .name(WIKI + "set#PublishedVersion")
+                    .parameters({wikiPageId: blog.wikiPageId, publishedVersionName: version})
+                    .call()
+                return version
+            })
+            const drafted = as(users.author, T + "create#ContentSend", {
+                campaignContentId: ids.link,
+                contactListId: topic,
+                sendName: "Garden newsletter"
+            })
+            const send = row("mantle.marketing.campaign.CampaignSend", {campaignSendId: drafted.campaignSendId})
+            const prepared = as(users.author, D + "prepare#Send", {
+                campaignSendId: drafted.campaignSendId,
+                expectedRevision: entityLib.ms(send.lastUpdatedStamp)
+            })
+            const after = row("mantle.marketing.campaign.CampaignSend", {campaignSendId: drafted.campaignSendId})
+            const body = system(() => String(ec.resource.getLocationReference(after.preparedBodyLocation).getText()))
+            const posts = rows("mantle.marketing.campaign.CampaignSendPost", {campaignSendId: drafted.campaignSendId})
+            const blogAfter = row("moqui.resource.wiki.WikiBlog", {wikiBlogId: ids.post})
+            const page = row("moqui.resource.wiki.WikiPage", {wikiPageId: blog.wikiPageId})
+            const sent = row("moqui.resource.wiki.WikiBlogCategory", {wikiBlogId: ids.post, wikiPageCategoryId: category})
+            const distribution = as(users.author, T + "get#CampaignContent", {campaignContentId: ids.link}).distribution
+            return {after, versionName, drafted, send, prepared, body, posts, blog, blogAfter, page, sent, distribution}
+        },
+        then(r) {
+            r.drafted.refusal == ""
+            r.send.postCategoryId == category && r.send.campaignContentId == ids.link
+            r.prepared.refusal == ""
+            r.body.includes("Pruning roses") && r.body.includes("When and how to prune.")
+            !r.body.includes("Unannounced sale")
+            r.posts.length == 1 && r.posts[0].wikiBlogId == ids.post && r.posts[0].versionName == r.versionName
+            entityLib.ms(r.blogAfter.publishDate) == entityLib.ms(r.blog.publishDate)
+            r.page.publishedVersionName == r.versionName
+            r.sent.sentDate == null
+            r.distribution.some(d => d.campaignSendId == r.drafted.campaignSendId && d.versionText.startsWith("Version"))
+        }
+    }
+)
