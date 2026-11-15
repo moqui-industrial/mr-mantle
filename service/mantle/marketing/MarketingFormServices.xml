@@ -207,15 +207,21 @@ along with this software (see the LICENSE.md file). If not, see
             what a new one of that lead form offers, or with neither the lead form publications a new rule may route (not closed, none
             current): the rule's view, its publication, the form's questions to map, the organization's current sales teams and offered
             sources, its counts and recent captures (a Sales lead named only to a caller who opens it in Sales), and whether the caller
-            may change it.</description>
+            may change it. P18: with registrationPolicyId (and triggerEnumId, MltRegistered by default) an event offer's current rule of
+            that trigger or what a new one offers (offer in place of publication); with neither, also the event offers a new rule may
+            route (offerOptions).</description>
         <in-parameters>
             <parameter name="leadRuleId"/>
             <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="rule" type="Map"/>
             <parameter name="publication" type="Map"/>
+            <parameter name="offer" type="Map"/>
             <parameter name="publicationOptions" type="List"/>
+            <parameter name="offerOptions" type="List"/>
             <parameter name="choices" type="Map"/>
             <parameter name="handoffs" type="Map"/>
             <parameter name="captures" type="List"/>
@@ -234,10 +240,14 @@ along with this software (see the LICENSE.md file). If not, see
             the user's call of Nov 14, 2026), the Sales source (offered to the organization, SOURCE_INVALID), the questions mapped to the
             inquiry's name, organization, email and phone (at least one, MAPPING_REQUIRED) and to its notes, an optional condition on one
             answer (CONDITION_INVALID), each a customer-visible question of the form (FIELD_UNKNOWN), and the notice the page shows. A
-            closed lead form takes no new rule (PUBLICATION_CLOSED).</description>
+            closed lead form takes no new rule (PUBLICATION_CLOSED). P18: an event offer's rule (registrationPolicyId of the
+            organization, RECORD_UNAVAILABLE; triggerEnumId MltRegistered or MltAttended, one current rule each: RULE_EXISTS) takes the
+            team and source alone: each attendee's own name and address go to Sales, no answer.</description>
         <in-parameters>
             <parameter name="leadRuleId"/>
             <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
             <parameter name="expectedRevision"/>
             <parameter name="end" type="Boolean"/>
             <parameter name="ruleName"/>
@@ -264,10 +274,13 @@ along with this software (see the LICENSE.md file). If not, see
             for a reader of the rules: the publication's latest answer (or the one named) for an audience reader (MARKETING_AUDIENCE_VIEW),
             else an answer made of the questions; the mapped name, organization, email, phone, lead name and notes, whether the condition
             lets it through, the queue, the source, the campaign, verification, the duplicate policy and a capture already made of that
-            answer. Changes nothing and asks nothing of Sales.</description>
+            answer. Changes nothing and asks nothing of Sales. P18: an event offer's rule (or registrationPolicyId and triggerEnumId for
+            a new one) previews its latest registration taken (an audience reader's), else a sample.</description>
         <in-parameters>
             <parameter name="leadRuleId"/>
             <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
             <parameter name="formSubmissionId"/>
             <parameter name="dataSourceId"/>
             <parameter name="teamPartyId"/>
@@ -336,7 +349,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="run" noun="LeadCaptures" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.run">
         <description>The capture job (run_MarketingLeadCaptures; design §15.3 Capture handoff), as the system: each lead rule's accepted
-            answers of the last 30 days with no capture captured once, then the waiting captures and the failed ones whose time has come
+            answers of the last 30 days with no capture captured once (P18: each event offer rule's confirmed places or attendances
+            likewise), then the waiting captures and the failed ones whose time has come
             handed to Sales, each in a transaction of its own; one that fails is logged and the next goes on.</description>
         <in-parameters><parameter name="leadRuleId"/></in-parameters>
         <out-parameters>
@@ -361,6 +375,26 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('captureSubmission', context))</script>
+        </actions>
+    </service>
+    <service verb="capture" noun="EventRegistration" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.registration" operation-ref="registrationId">
+        <description>Internal (the capture job; P18), in a transaction of its own, as the system: a registration of an event offer's lead
+            rule (confirmed for a registered rule, checked in for an attended one) captured once (one capture per rule and registration)
+            and handed to Sales; a registration of another offer is left alone.</description>
+        <in-parameters>
+            <parameter name="leadRuleId" required="true"/>
+            <parameter name="registrationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="captured" type="Boolean"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="salesOpportunityId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('captureRegistration', context)"/>
+            <set field="captured" from="!!out.captured"/>
+            <set field="statusEnumId" from="out.statusEnumId || null"/>
+            <set field="salesOpportunityId" from="out.salesOpportunityId || null"/>
         </actions>
     </service>
     <service verb="hand" noun="LeadCapture" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.hand" operation-ref="leadCaptureId">

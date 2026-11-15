@@ -375,4 +375,49 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </entity>
     <!-- ===== end of Marketing P17 ===== -->
+
+    <!-- ===== Marketing P18: check-in (impl-marketing P18; design-marketing §9 CheckIn, RegistrationDetail's Attendance, §14.1) ===== -->
+    <entity entity-name="EventAttendance" package="mantle.work.registration" cache="never">
+        <description>The attendance fact of one registration (design §9 CheckIn): written once, at its first check-in, so a second scan or
+            a retry answers this first result. How it was admitted: by its entry code (at a door tablet or by staff), by staff who found
+            the attendee by name, with a reason, or by an events manager's override of a place not confirmed (a held or pending one),
+            with a reason, which changes neither its state nor its payment. The offer, event, organization and attendee are kept for
+            the attendance reports and the "attended" triggers of automations and lead rules (their cursor is checkInDate). Written only
+            by mantle.work.EventRegistrationServices checkIn#Registration (EventCheckIn.js); never changed or deleted.</description>
+        <field name="registrationId" type="id" is-pk="true"/>
+        <field name="registrationPolicyId" type="id"/>
+        <field name="workEffortId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="attendeePartyId" type="id"/>
+        <field name="ticketTypeId" type="id"/>
+        <field name="methodEnumId" type="id"/>
+        <field name="statusIdAtCheckIn" type="id"><description>The registration's state when it was admitted (an override's held or
+            pending place)</description></field>
+        <field name="credentialRevision" type="number-integer"><description>The entry code's revision presented (by code)</description></field>
+        <field name="reason" type="text-medium"/>
+        <field name="deviceId" type="id"><description>The shared device it was checked in at (a door tablet), else none</description></field>
+        <field name="checkInByUserId" type="id"/>
+        <field name="checkInDate" type="date-time"/>
+        <field name="operationKey" type="text-short"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistration" short-alias="registration"/>
+        <relationship type="one" related="mantle.work.registration.EventRegistrationPolicy" short-alias="policy"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort" short-alias="workEffort"/>
+        <relationship type="one" title="Attendee" related="mantle.party.Party" short-alias="attendee">
+            <key-map field-name="attendeePartyId" related="partyId"/></relationship>
+        <relationship type="one" title="EventAttendanceMethod" related="moqui.basic.Enumeration" short-alias="method">
+            <key-map field-name="methodEnumId"/></relationship>
+        <relationship type="one-nofk" title="CheckInBy" related="moqui.security.UserAccount" short-alias="checkInBy">
+            <key-map field-name="checkInByUserId" related="userId"/></relationship>
+        <index name="EVENT_ATTEND_POLICY"><index-field name="registrationPolicyId"/><index-field name="checkInDate"/></index>
+        <index name="EVENT_ATTEND_ORG"><index-field name="organizationPartyId"/><index-field name="checkInDate"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Event Attendance Method" enumTypeId="EventAttendanceMethod"/>
+            <moqui.basic.Enumeration description="Entry code" enumId="EamCode" enumTypeId="EventAttendanceMethod" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Found by name" enumId="EamLookup" enumTypeId="EventAttendanceMethod" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Manager's override" enumId="EamOverride" enumTypeId="EventAttendanceMethod" sequenceNum="3"/>
+            <!-- the registration's history (EventRegistrationAction) shows the check-in beside its other actions -->
+            <moqui.basic.Enumeration description="Checked in" enumId="EraCheckedIn" enumTypeId="EventRegistrationAction" sequenceNum="17"/>
+        </seed-data>
+    </entity>
+    <!-- ===== end of Marketing P18 ===== -->
 </entities>

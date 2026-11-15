@@ -681,7 +681,8 @@ along with this software (see the LICENSE.md file). If not, see
         <in-parameters>
             <parameter name="organizationPartyId" required="true"/>
             <parameter name="sourceKind" required="true"><description>formResponse, emailMessage, communicationEvent, chatMessage,
-                voicemail or staff (or the SalesLeadIntakeSource enumId)</description></parameter>
+                voicemail, staff, eventRegistration or eventAttendance (Marketing's event lead rules), or the SalesLeadIntakeSource
+                enumId</description></parameter>
             <parameter name="sourceId"><description>The source's identity (a form response, a mail's Message-ID, a communication
                 event, chatRoomId:eventSeq, a voicemail); a staff entry has none and needs operationKey</description></parameter>
             <parameter name="operationKey"/>

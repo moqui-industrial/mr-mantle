@@ -22,6 +22,12 @@
 //   others. Nothing here subscribes anyone or records a consent.
 // - The handoff counts (get#LeadHandoffs) are Marketing's own capture rows, for any Marketing reader (MARKETING_VIEW alone gives the
 //   counts and no pipeline, F66); a capture names its Sales lead only to a caller who can open that lead in Sales.
+// - P18 (the user's call, Nov 15): a rule's source may instead be an event registration offer (MlsRegistrationOffer, sourceId the
+//   offer, one occurrence's EventRegistrationPolicy of the organization) with the trigger "registered" (MltRegistered: each attendee's
+//   place confirmed) or "attended" (MltAttended: each attendance checked in at the door), one current rule per offer and trigger. Its
+//   capture is one per rule and registration (MlcsRegistration, MlcsAttendance), made by the capture job, and hands Sales the
+//   attendee's name and address (their own, else the reservation's when they are its buyer; never another attendee's), the offer, its
+//   occurrence and ticket in the notes, the registration's campaign, and verified never (a typed address identifies nobody).
 // Refusals carry reason codes (EntityLib.js denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
@@ -47,6 +53,12 @@ const TRIGGER_FORM = "MltFormSubmitted"
 const SOURCE_SUBMISSION = "MlcsFormSubmission"
 const LEAD_PURPOSE = "FppLead"
 const LEAD_FORM = "DbfpLead"
+// P18: an event offer's rules and captures
+const SOURCE_OFFER = "MlsRegistrationOffer"
+const OFFER_TRIGGERS = {MltRegistered: "MlcsRegistration", MltAttended: "MlcsAttendance"}
+const POLICY = "mantle.work.registration.EventRegistrationPolicy"
+const REGISTRATION = "mantle.work.registration.EventRegistration"
+const ATTENDANCE = "mantle.work.registration.EventAttendance"
 const statuses = {pending: "MlcPending", handedOff: "MlcHandedOff", skipped: "MlcSkipped", failed: "MlcFailed"}
 const statusColors = {MlcPending: "grey", MlcHandedOff: "positive", MlcSkipped: "grey", MlcFailed: "negative"}
 const limits = {
@@ -137,6 +149,31 @@ function ruleAt(publicationId, at = ec.user.nowTimestamp) {
         ).find(rule => lib.active(rule, at)) || null
     )
 }
+// P18: an event registration offer, else RECORD_UNAVAILABLE.
+function offerRow(registrationPolicyId) {
+    const row = blank(registrationPolicyId) ? null : one(POLICY, {registrationPolicyId: text(registrationPolicyId)})
+    if (!row) denied("RECORD_UNAVAILABLE", "Event offer " + (registrationPolicyId || "") + " is not available")
+    return row
+}
+const offerTriggerOf = value => {
+    const trigger = text(value) || "MltRegistered"
+    if (!Object.hasOwn(OFFER_TRIGGERS, trigger)) denied("VALUE_INVALID", "An event rule's trigger is registered or attended")
+    return trigger
+}
+// The rule of an offer and trigger in effect at a time (now by default), or null.
+function offerRuleAt(registrationPolicyId, triggerEnumId, at = ec.user.nowTimestamp) {
+    if (!registrationPolicyId) return null
+    return (
+        Array.from(
+            find(RULE, {sourceKindEnumId: SOURCE_OFFER, sourceId: registrationPolicyId, triggerEnumId})
+                .orderBy("-fromDate")
+                .limit(20)
+                .list()
+        ).find(rule => lib.active(rule, at)) || null
+    )
+}
+const offerText = row => (row ? row.publicTitle || row.registrationPolicyId : "")
+const offerWhen = row => (row?.occurrenceStart ? lib.dateText(row.occurrenceStart) : "")
 // A rule of the caller's scope, else RECORD_UNAVAILABLE.
 function ruleOf(userScope, leadRuleId) {
     const rule = blank(leadRuleId) ? null : one(RULE, {leadRuleId: text(leadRuleId)})
@@ -236,7 +273,9 @@ function getLeadHandoffs(p) {
 // A rule's view for the screens: its source, campaign, team, source, mapping, dates and state.
 function ruleView(rule, fieldTitles = null) {
     const titleOf = name => (name ? fieldTitles?.[name] || name : "")
-    const publication = one(PUBLICATION, {publicationId: rule.sourceId})
+    const offerRule = rule.sourceKindEnumId === SOURCE_OFFER
+    const publication = offerRule ? null : one(PUBLICATION, {publicationId: rule.sourceId})
+    const offer = offerRule ? one(POLICY, {registrationPolicyId: rule.sourceId}) : null
     const queue = queueOf(rule)
     const current = lib.active(rule)
     const ended = rule.thruDate != null && Number(ms(rule.thruDate)) <= nowMs()
@@ -245,10 +284,15 @@ function ruleView(rule, fieldTitles = null) {
         ruleName: rule.ruleName || "",
         organizationPartyId: rule.organizationPartyId,
         organizationName: partyName(rule.organizationPartyId),
-        publicationId: rule.sourceId,
-        publicationText: publication
-            ? publication.titleText || publication.description || publication.publicationId
-            : rule.sourceId,
+        offerRule,
+        publicationId: offerRule ? null : rule.sourceId,
+        registrationPolicyId: offerRule ? rule.sourceId : null,
+        triggerEnumId: rule.triggerEnumId,
+        publicationText: offerRule
+            ? offerText(offer) + " · " + enumText(rule.triggerEnumId).toLowerCase()
+            : publication
+              ? publication.titleText || publication.description || publication.publicationId
+              : rule.sourceId,
         publicationState: publication ? publications().stateOf(publication) : "",
         sourceKindText: enumText(rule.sourceKindEnumId),
         triggerText: enumText(rule.triggerEnumId),
@@ -272,12 +316,13 @@ function ruleView(rule, fieldTitles = null) {
         conditionFieldName: rule.conditionFieldName || null,
         conditionValue: rule.conditionValue || "",
         noticeText: rule.noticeText || "",
-        mappingText:
-            Object.entries(LEAD_FIELDS)
-                .filter(([field]) => rule[field])
-                .map(([field, words]) => L(words) + " ← " + titleOf(rule[field]))
-                .join(" · ") +
-            (rule.noteFieldNames ? " · " + L("Notes") + " ← " + listOf(rule.noteFieldNames).map(titleOf).join(", ") : ""),
+        mappingText: offerRule
+            ? L("Name and email ← the attendee; notes ← the event, its date and ticket")
+            : Object.entries(LEAD_FIELDS)
+                  .filter(([field]) => rule[field])
+                  .map(([field, words]) => L(words) + " ← " + titleOf(rule[field]))
+                  .join(" · ") +
+              (rule.noteFieldNames ? " · " + L("Notes") + " ← " + listOf(rule.noteFieldNames).map(titleOf).join(", ") : ""),
         conditionText: rule.conditionFieldName ? titleOf(rule.conditionFieldName) + " = " + (rule.conditionValue || "") : "",
         fromText: lib.dateText(rule.fromDate),
         thruText: lib.dateText(rule.thruDate),
@@ -357,7 +402,10 @@ function getLeadRule(p) {
         form = null
     if (!blank(p.leadRuleId)) {
         rule = ruleOf(userScope, p.leadRuleId)
+        if (rule.sourceKindEnumId === SOURCE_OFFER) return offerRuleDetail(userScope, rule, rule.sourceId, rule.triggerEnumId)
         ;({row: publication, form} = leadPublication(rule.sourceId))
+    } else if (!blank(p.registrationPolicyId)) {
+        return offerRuleDetail(userScope, null, p.registrationPolicyId, offerTriggerOf(p.triggerEnumId))
     } else if (!blank(p.publicationId)) {
         ;({row: publication, form} = leadPublication(p.publicationId))
         if (!marketingAccess.covers(userScope, publication.organizationPartyId))
@@ -365,7 +413,14 @@ function getLeadRule(p) {
         rule = ruleAt(publication.publicationId)
     }
     const canEdit = !!userScope.capabilities.contentEdit
-    if (!publication) return {rule: null, publication: null, publicationOptions: leadPublicationOptions(userScope), canEdit}
+    if (!publication)
+        return {
+            rule: null,
+            publication: null,
+            publicationOptions: leadPublicationOptions(userScope),
+            offerOptions: offerOptions(userScope),
+            canEdit
+        }
     const org = publication.organizationPartyId
     const fields = customerFields(form.formId, null, true)
     const titles = Object.fromEntries(fields.map(field => [field.fieldName, field.title]))
@@ -403,45 +458,67 @@ function getLeadRule(p) {
         canEdit: canEdit && (!rule || view.current) && publications().stateOf(publication) !== "closed"
     }
 }
-// store#LeadRule: a new rule of a lead form's publication (none current: RULE_EXISTS), a change of a current one (a new rule from now
-// replacing it, at the revision read), or its end (end), by a content author of the publication's organization.
-function storeLeadRule(p) {
-    const userScope = readScope()
-    marketingAccess.requireCapability(userScope, "contentEdit")
-    let previous = null
-    if (!blank(p.leadRuleId)) {
-        previous = find(RULE, {leadRuleId: text(p.leadRuleId)})
-            .forUpdate(true)
-            .one()
-        if (!previous || !marketingAccess.covers(userScope, previous.organizationPartyId))
-            denied("RECORD_UNAVAILABLE", "Lead rule " + p.leadRuleId + " is not available")
-        if (!lib.active(previous)) denied("RULE_ENDED", "The lead rule has ended; make a new one")
-        if (!blank(p.expectedRevision) && String(p.expectedRevision) !== revisionOf(previous))
-            denied("REVISION_CHANGED", "The lead rule changed since you read it (revision " + revisionOf(previous) + ")")
+// P18: the event offers of the scope a new rule may route (published or closed, not past for more than the collect window), newest
+// first.
+function offerOptions(userScope) {
+    const ids = marketingAccess.organizationIds(userScope)
+    return Array.from(
+        find(POLICY)
+            .condition("organizationPartyId", "in", ids.length ? ids : ["-"])
+            .condition("statusId", "in", ["ErpPublished", "ErpClosed"])
+            .condition("occurrenceEnd", "greater-equals", new Date(nowMs() - limits.collectDays * DAY))
+            .orderBy("-occurrenceStart")
+            .limit(limits.rows)
+            .list()
+    ).map(row => ({value: row.registrationPolicyId, label: [offerText(row), offerWhen(row)].filter(Boolean).join(" · ")}))
+}
+// The team and source choices of an organization for a rule's screen.
+function routingChoices(org, view) {
+    const settings = salesSettings()
+    const defaultTeamPartyId = defaultTeamOf(org)
+    return {
+        fieldOptions: [],
+        teamOptions: settings.teamsOf(org).map(team => ({value: team.teamPartyId, label: team.teamName})),
+        sourceOptions: settings.sourcesOffered(org).map(source => ({value: source.dataSourceId, label: source.description})),
+        canChooseTeam: teamChooser(org),
+        defaultTeamPartyId,
+        teamText: view
+            ? view.teamName
+            : defaultTeamPartyId
+              ? teamNameOf(defaultTeamPartyId) + " " + L("(Sales' default team)")
+              : L("Sales' default team (none set): a sales manager chooses the team")
     }
-    const {row: publication, form} = leadPublication(previous ? previous.sourceId : p.publicationId)
-    const org = publication.organizationPartyId
-    if (!marketingAccess.covers(userScope, org))
-        denied("RECORD_UNAVAILABLE", "Lead form publication " + (p.publicationId || "") + " is not available")
-    const now = ec.user.nowTimestamp
-    if (yes(p.end)) {
-        if (!previous) denied("RECORD_REQUIRED", "Name the lead rule to end")
-        call("update#" + RULE, {leadRuleId: previous.leadRuleId, thruDate: now, endedByUserId: ec.user.userId})
-        return {leadRuleId: previous.leadRuleId, created: false}
+}
+// get#LeadRule of an event offer's rule (or what a new one of the offer and trigger offers).
+function offerRuleDetail(userScope, rule, registrationPolicyId, triggerEnumId) {
+    const offer = offerRow(registrationPolicyId)
+    if (!marketingAccess.covers(userScope, offer.organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Event offer " + registrationPolicyId + " is not available")
+    if (!rule) rule = offerRuleAt(offer.registrationPolicyId, triggerEnumId)
+    const view = rule ? ruleView(rule) : null
+    const org = offer.organizationPartyId
+    return {
+        rule: view,
+        publication: null,
+        offer: {
+            registrationPolicyId: offer.registrationPolicyId,
+            offerText: offerText(offer),
+            whenText: offerWhen(offer),
+            triggerEnumId,
+            triggerText: enumText(triggerEnumId),
+            workEffortId: offer.workEffortId,
+            organizationPartyId: org,
+            organizationName: partyName(org)
+        },
+        choices: routingChoices(org, view),
+        handoffs: rule ? countsOf({leadRuleId: rule.leadRuleId}, null) : null,
+        captures: rule ? captureRows(userScope, {leadRuleId: rule.leadRuleId}, 50) : [],
+        canEdit: !!userScope.capabilities.contentEdit && (!rule || view.current)
     }
-    if (publications().stateOf(publication) === "closed") denied("PUBLICATION_CLOSED", "The lead form is closed")
-    if (!previous && ruleAt(publication.publicationId))
-        denied("RULE_EXISTS", "The lead form already has a current lead rule: change that one")
-    // the values: the previous rule's, with each one given (an empty one clears)
-    const values = {}
-    for (const name of RULE_FIELDS) {
-        const given = p[name] !== undefined && p[name] !== null
-        values[name] = given ? text(p[name]) : previous ? previous[name] || null : null
-    }
-    values.ruleName = limited(values.ruleName, limits.name)
-    values.noticeText = limited(values.noticeText, limits.notice)
-    // the team and the source: Sales' own, of the organization; a team other than the rule's own or Sales' default is a sales
-    // manager's choice (the user's call of Nov 14, 2026)
+}
+// The rule's team and source, checked against the organization: a team other than the rule's own or Sales' default is a sales
+// manager's choice (the user's call of Nov 14, 2026); the source one offered to the organization.
+function checkRouting(values, previous, org) {
     const defaultTeam = defaultTeamOf(org)
     if (
         values.teamPartyId &&
@@ -469,6 +546,88 @@ function storeLeadRule(p) {
             .some(row => row.dataSourceId === values.dataSourceId)
     )
         denied("SOURCE_INVALID", "Choose a lead source offered to the organization")
+}
+// store#LeadRule of an event offer (P18): a new rule of the offer and trigger (none current: RULE_EXISTS), a change of a current one
+// (a new rule from now replacing it, at the revision read), or its end.
+function storeOfferRule(userScope, previous, p) {
+    const offer = offerRow(previous ? previous.sourceId : p.registrationPolicyId)
+    const org = offer.organizationPartyId
+    if (!marketingAccess.covers(userScope, org))
+        denied("RECORD_UNAVAILABLE", "Event offer " + (p.registrationPolicyId || "") + " is not available")
+    const triggerEnumId = previous ? previous.triggerEnumId : offerTriggerOf(p.triggerEnumId)
+    const now = ec.user.nowTimestamp
+    if (yes(p.end)) {
+        if (!previous) denied("RECORD_REQUIRED", "Name the lead rule to end")
+        call("update#" + RULE, {leadRuleId: previous.leadRuleId, thruDate: now, endedByUserId: ec.user.userId})
+        return {leadRuleId: previous.leadRuleId, created: false}
+    }
+    if (!previous && offerRuleAt(offer.registrationPolicyId, triggerEnumId))
+        denied("RULE_EXISTS", "The event already has a current lead rule for this trigger: change that one")
+    const values = {}
+    for (const name of ["ruleName", "dataSourceId", "teamPartyId"]) {
+        const given = p[name] !== undefined && p[name] !== null
+        values[name] = given ? text(p[name]) : previous ? previous[name] || null : null
+    }
+    values.ruleName = limited(values.ruleName, limits.name)
+    checkRouting(values, previous, org)
+    if (previous) call("update#" + RULE, {leadRuleId: previous.leadRuleId, thruDate: now, endedByUserId: ec.user.userId})
+    const made = call(
+        "create#" + RULE,
+        Object.assign(values, {
+            organizationPartyId: org,
+            sourceKindEnumId: SOURCE_OFFER,
+            sourceId: offer.registrationPolicyId,
+            triggerEnumId,
+            fromDate: now,
+            createdDate: now,
+            createdByUserId: ec.user.userId,
+            replacesLeadRuleId: previous?.leadRuleId || null
+        })
+    )
+    return {leadRuleId: made.leadRuleId, created: !previous}
+}
+// store#LeadRule: a new rule of a lead form's publication (none current: RULE_EXISTS), a change of a current one (a new rule from now
+// replacing it, at the revision read), or its end (end), by a content author of the publication's organization.
+function storeLeadRule(p) {
+    const userScope = readScope()
+    marketingAccess.requireCapability(userScope, "contentEdit")
+    let previous = null
+    if (!blank(p.leadRuleId)) {
+        previous = find(RULE, {leadRuleId: text(p.leadRuleId)})
+            .forUpdate(true)
+            .one()
+        if (!previous || !marketingAccess.covers(userScope, previous.organizationPartyId))
+            denied("RECORD_UNAVAILABLE", "Lead rule " + p.leadRuleId + " is not available")
+        if (!lib.active(previous)) denied("RULE_ENDED", "The lead rule has ended; make a new one")
+        if (!blank(p.expectedRevision) && String(p.expectedRevision) !== revisionOf(previous))
+            denied("REVISION_CHANGED", "The lead rule changed since you read it (revision " + revisionOf(previous) + ")")
+    }
+    // P18: an event offer's rule
+    if (previous ? previous.sourceKindEnumId === SOURCE_OFFER : !blank(p.registrationPolicyId))
+        return storeOfferRule(userScope, previous, p)
+    const {row: publication, form} = leadPublication(previous ? previous.sourceId : p.publicationId)
+    const org = publication.organizationPartyId
+    if (!marketingAccess.covers(userScope, org))
+        denied("RECORD_UNAVAILABLE", "Lead form publication " + (p.publicationId || "") + " is not available")
+    const now = ec.user.nowTimestamp
+    if (yes(p.end)) {
+        if (!previous) denied("RECORD_REQUIRED", "Name the lead rule to end")
+        call("update#" + RULE, {leadRuleId: previous.leadRuleId, thruDate: now, endedByUserId: ec.user.userId})
+        return {leadRuleId: previous.leadRuleId, created: false}
+    }
+    if (publications().stateOf(publication) === "closed") denied("PUBLICATION_CLOSED", "The lead form is closed")
+    if (!previous && ruleAt(publication.publicationId))
+        denied("RULE_EXISTS", "The lead form already has a current lead rule: change that one")
+    // the values: the previous rule's, with each one given (an empty one clears)
+    const values = {}
+    for (const name of RULE_FIELDS) {
+        const given = p[name] !== undefined && p[name] !== null
+        values[name] = given ? text(p[name]) : previous ? previous[name] || null : null
+    }
+    values.ruleName = limited(values.ruleName, limits.name)
+    values.noticeText = limited(values.noticeText, limits.notice)
+    // the team and the source: Sales' own, of the organization
+    checkRouting(values, previous, org)
     // the mapping: the form's customer-visible fields only
     const known = new Set(customerFields(form.formId, null, true).map(field => field.fieldName))
     const notes = listOf(values.noteFieldNames)
@@ -586,6 +745,80 @@ function inquiryOf(rule, submission, publication, {sample = null, fields = null}
         }
     }
 }
+// P18: the address of a registration's attendee: their own current email, else the reservation's when they are its buyer.
+function attendeeEmail(registration) {
+    const own = Array.from(
+        find("mantle.party.contact.PartyContactMechInfo", {
+            partyId: registration.attendeePartyId,
+            contactMechTypeEnumId: "CmtEmailAddress"
+        })
+            .condition("thruDate", "is-null", null)
+            .orderBy("-fromDate")
+            .limit(1)
+            .list()
+    )[0]
+    if (own?.infoString) return String(own.infoString).trim().toLowerCase()
+    const reservation = registration.reservationId
+        ? one("mantle.work.registration.EventReservation", {reservationId: registration.reservationId})
+        : null
+    if (reservation?.emailContactMechId && reservation.buyerPartyId === registration.attendeePartyId) {
+        const mech = one("mantle.party.contact.ContactMech", {contactMechId: reservation.emailContactMechId})
+        if (mech?.infoString) return String(mech.infoString).trim().toLowerCase()
+    }
+    return null
+}
+// P18: the inquiry an event offer's capture hands to Sales, from Marketing's own records only: the attendee's name and address, the
+// offer, its occurrence and ticket in the notes, the registration's campaign. A registration that does not match its rule (another
+// offer or organization, never confirmed, not checked in for an attendance rule) is refused.
+function inquiryOfRegistration(rule, registration) {
+    const policy = registration ? one(POLICY, {registrationPolicyId: registration.registrationPolicyId}) : null
+    const attended = rule?.triggerEnumId === "MltAttended"
+    if (
+        !rule ||
+        rule.sourceKindEnumId !== SOURCE_OFFER ||
+        !policy ||
+        rule.sourceId !== policy.registrationPolicyId ||
+        rule.organizationPartyId !== policy.organizationPartyId ||
+        (attended ? !one(ATTENDANCE, {registrationId: registration.registrationId}) : registration.confirmedDate == null)
+    )
+        denied("SOURCE_MISMATCH", "The registration is not of the lead rule's event")
+    const problems = []
+    let email = attendeeEmail(registration)
+    if (email && (email.length > 254 || !emailPattern.test(email))) {
+        problems.push(L("the attendee's address is not an address"))
+        email = null
+    }
+    const name = limited(partyName(registration.attendeePartyId), limits.name)
+    const ticket = registration.ticketTypeId
+        ? one("mantle.work.registration.EventTicketType", {ticketTypeId: registration.ticketTypeId})
+        : null
+    const title = offerText(policy)
+    const notes = [
+        (attended ? L("Attended") : L("Registered for")) +
+            " " +
+            title +
+            (offerWhen(policy) ? " (" + offerWhen(policy) + ")" : ""),
+        ticket?.ticketName ? L("Ticket") + ": " + ticket.ticketName : null
+    ]
+        .filter(Boolean)
+        .join("\n")
+    return {
+        problems,
+        request: {
+            organizationPartyId: policy.organizationPartyId,
+            sourceKind: attended ? "eventAttendance" : "eventRegistration",
+            sourceId: registration.registrationId,
+            submittedName: name,
+            submittedEmail: email,
+            verified: false,
+            marketingCampaignId: registration.marketingCampaignId || null,
+            defaultDataSourceId: rule.dataSourceId || null,
+            teamPartyId: queueOf(rule),
+            opportunityName: limited([name || L("Attendee"), title].filter(Boolean).join(" · "), limits.name),
+            description: limited(notes, limits.notes)
+        }
+    }
+}
 // The next time a failed capture is tried: a wait doubling from five minutes up to a day, none after 30 days from its capture.
 function nextAttemptOf(capture, attemptCount) {
     if (nowMs() - Number(ms(capture.capturedDate) ?? nowMs()) > limits.retryDays * DAY) return null
@@ -613,9 +846,15 @@ function handCapture(p) {
         noteText = null
     try {
         const rule = one(RULE, {leadRuleId: capture.leadRuleId})
-        const submission = one(SUBMISSION, {formSubmissionId: capture.sourceId})
-        const publication = submission ? one(PUBLICATION, {publicationId: submission.publicationId}) : null
-        const inquiry = inquiryOf(rule, submission, publication)
+        let inquiry
+        if (Object.values(OFFER_TRIGGERS).includes(capture.sourceKindEnumId)) {
+            // P18: an event offer's registration or attendance
+            inquiry = inquiryOfRegistration(rule, one(REGISTRATION, {registrationId: capture.sourceId}))
+        } else {
+            const submission = one(SUBMISSION, {formSubmissionId: capture.sourceId})
+            const publication = submission ? one(PUBLICATION, {publicationId: submission.publicationId}) : null
+            inquiry = inquiryOf(rule, submission, publication)
+        }
         if (inquiry.skip) {
             capture.set("statusEnumId", statuses.skipped)
             capture.set("errorText", limited(inquiry.skip, limits.error))
@@ -684,6 +923,37 @@ function ensureCapture(rule, submission, publication) {
         capturedDate: ec.user.nowTimestamp
     })
     return {capture: one(CAPTURE, {leadCaptureId}), created: true}
+}
+// capture#EventRegistration (internal, its own transaction; the capture job, P18): one registration (confirmed, or checked in for an
+// attendance rule) captured by an event offer's rule, once, and handed to Sales. {captured, statusEnumId}.
+function captureRegistration(p) {
+    const rule = blank(p.leadRuleId) ? null : one(RULE, {leadRuleId: text(p.leadRuleId)})
+    const registration = blank(p.registrationId) ? null : one(REGISTRATION, {registrationId: text(p.registrationId)})
+    if (!rule || rule.sourceKindEnumId !== SOURCE_OFFER || !registration || registration.registrationPolicyId !== rule.sourceId)
+        return {captured: false}
+    const sourceKindEnumId = OFFER_TRIGGERS[rule.triggerEnumId]
+    let capture = one(CAPTURE, {leadRuleId: rule.leadRuleId, sourceKindEnumId, sourceId: registration.registrationId})
+    if (capture) {
+        if ([statuses.handedOff, statuses.skipped, statuses.failed].includes(capture.statusEnumId))
+            return {captured: false, statusEnumId: capture.statusEnumId}
+    } else {
+        const leadCaptureId = ec.entity.sequencedIdPrimary(CAPTURE, 0, 50)
+        call("create#" + CAPTURE, {
+            leadCaptureId,
+            leadRuleId: rule.leadRuleId,
+            organizationPartyId: rule.organizationPartyId,
+            sourceKindEnumId,
+            sourceId: registration.registrationId,
+            formResponseId: registration.formResponseId || null,
+            marketingCampaignId: registration.marketingCampaignId || null,
+            statusEnumId: statuses.pending,
+            operationKey: "mkt-lead:" + leadCaptureId,
+            attemptCount: 0,
+            capturedDate: ec.user.nowTimestamp
+        })
+        capture = one(CAPTURE, {leadCaptureId})
+    }
+    return Object.assign({captured: true}, handCapture({leadCaptureId: capture.leadCaptureId}))
 }
 // capture#FormSubmission (internal, its own transaction; after a lead form's answer commits, and the capture job): the submission
 // captured by the rule in effect when it was submitted, once, and handed to Sales. {captured, statusEnumId}.
@@ -779,6 +1049,72 @@ function runLeadCaptures(p) {
             }
         } catch (error) {
             ec.logger.error("Lead rule " + rule.leadRuleId + ": its answers were not read: " + firstLine(error?.message))
+        }
+    }
+    // P18: each event offer's rule: its confirmed places (registered) or attendances (attended) since the rule began, within the
+    // window, with no capture yet
+    let offerRules = find(RULE, {sourceKindEnumId: SOURCE_OFFER})
+        .condition(
+            ec.entity.conditionFactory.makeCondition(
+                [
+                    ec.entity.conditionFactory.makeCondition("thruDate", "is-null", null),
+                    ec.entity.conditionFactory.makeCondition("thruDate", "greater-equals", since)
+                ],
+                "or"
+            )
+        )
+        .orderBy("fromDate")
+        .limit(limits.rulesPerRun)
+    if (!blank(p.leadRuleId)) offerRules = offerRules.condition("leadRuleId", text(p.leadRuleId))
+    for (const rule of Array.from(offerRules.list())) {
+        try {
+            const attended = rule.triggerEnumId === "MltAttended"
+            const dateField = attended ? "checkInDate" : "confirmedDate"
+            const from = new Date(Math.max(Number(ms(rule.fromDate) ?? 0), Number(ms(since))))
+            let attempted = 0
+            for (let page = 0; page < limits.pagesPerRule && attempted < limits.submissionsPerRule; page++) {
+                let query = find(attended ? ATTENDANCE : REGISTRATION, {registrationPolicyId: rule.sourceId})
+                    .condition(dateField, "greater-equals", from)
+                    .orderBy([dateField, "registrationId"])
+                    .offset(page * limits.submissionsPerRule)
+                    .limit(limits.submissionsPerRule)
+                if (!attended) query = query.condition("statusId", "EvrConfirmed")
+                if (rule.thruDate != null) query = query.condition(dateField, "less", rule.thruDate)
+                const found = Array.from(query.list())
+                if (!found.length) break
+                const captured = new Set(
+                    Array.from(
+                        find(CAPTURE, {leadRuleId: rule.leadRuleId, sourceKindEnumId: OFFER_TRIGGERS[rule.triggerEnumId]})
+                            .condition(
+                                "sourceId",
+                                "in",
+                                found.map(row => row.registrationId)
+                            )
+                            .selectField("sourceId")
+                            .list()
+                    ).map(row => row.sourceId)
+                )
+                for (const row of found.filter(row => !captured.has(row.registrationId))) {
+                    if (attempted >= limits.submissionsPerRule) break
+                    attempted++
+                    try {
+                        const out = apart(SERVICES + "capture#EventRegistration", {
+                            leadRuleId: rule.leadRuleId,
+                            registrationId: row.registrationId
+                        })
+                        if (out.captured) totals.captured++
+                        tally(out.statusEnumId)
+                    } catch (error) {
+                        totals.failed++
+                        ec.logger.error(
+                            "Event registration " + row.registrationId + " not captured: " + firstLine(error?.message)
+                        )
+                    }
+                }
+                if (found.length < limits.submissionsPerRule) break
+            }
+        } catch (error) {
+            ec.logger.error("Lead rule " + rule.leadRuleId + ": its registrations were not read: " + firstLine(error?.message))
         }
     }
     const factory = ec.entity.conditionFactory
@@ -922,6 +1258,8 @@ function previewLeadRule(p) {
     const userScope = ruleScope()
     let rule = null
     if (!blank(p.leadRuleId)) rule = ruleOf(userScope, p.leadRuleId)
+    if (rule ? rule.sourceKindEnumId === SOURCE_OFFER : !blank(p.registrationPolicyId))
+        return previewOfferRule(userScope, rule, p)
     const {row: publication, form} = leadPublication(rule ? rule.sourceId : p.publicationId)
     if (!marketingAccess.covers(userScope, publication.organizationPartyId))
         denied("RECORD_UNAVAILABLE", "Lead form publication " + (p.publicationId || "") + " is not available")
@@ -1009,6 +1347,91 @@ function previewLeadRule(p) {
         }
     }
 }
+// P18: what an event offer's rule (saved, or the values given for a new one) would hand to Sales: for an audience reader the latest
+// registration it takes (confirmed, or checked in), else a sample made of words. Changes nothing.
+function previewOfferRule(userScope, rule, p) {
+    const offer = offerRow(rule ? rule.sourceId : p.registrationPolicyId)
+    if (!marketingAccess.covers(userScope, offer.organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Event offer " + (p.registrationPolicyId || "") + " is not available")
+    const triggerEnumId = rule ? rule.triggerEnumId : offerTriggerOf(p.triggerEnumId)
+    const draft = Object.assign({}, rule ? lib.map(rule) : {}, {
+        sourceKindEnumId: SOURCE_OFFER,
+        sourceId: offer.registrationPolicyId,
+        triggerEnumId,
+        organizationPartyId: offer.organizationPartyId
+    })
+    for (const name of ["dataSourceId", "teamPartyId"]) if (p[name] !== undefined && p[name] !== null) draft[name] = text(p[name])
+    const attended = triggerEnumId === "MltAttended"
+    let registration = null
+    if (userScope.capabilities.audienceRead) {
+        const latest = Array.from(
+            (attended
+                ? find(ATTENDANCE, {registrationPolicyId: offer.registrationPolicyId}).orderBy("-checkInDate")
+                : find(REGISTRATION, {registrationPolicyId: offer.registrationPolicyId, statusId: "EvrConfirmed"}).orderBy(
+                      "-confirmedDate"
+                  )
+            )
+                .limit(1)
+                .list()
+        )[0]
+        registration = latest ? one(REGISTRATION, {registrationId: latest.registrationId}) : null
+    }
+    const reasons = []
+    let request
+    if (registration) request = inquiryOfRegistration(draft, registration).request
+    else {
+        reasons.push(L("A sample: no registration yet, or the attendees are an audience reader's"))
+        request = {
+            submittedName: "[" + L("The attendee's name") + "]",
+            submittedEmail: "[" + L("The attendee's address") + "]",
+            opportunityName: "[" + L("The attendee's name") + "] · " + offerText(offer),
+            description: (attended ? L("Attended") : L("Registered for")) + " " + offerText(offer)
+        }
+    }
+    const queue = queueOf(draft)
+    const team = queue ? salesSettings().teamRow(queue) : null
+    if (!team) reasons.push(L("No sales team is chosen: Sales refuses the handoff"))
+    const capture =
+        rule && registration
+            ? one(CAPTURE, {
+                  leadRuleId: rule.leadRuleId,
+                  sourceKindEnumId: OFFER_TRIGGERS[triggerEnumId],
+                  sourceId: registration.registrationId
+              })
+            : null
+    const shown = value => (value == null ? "" : String(value))
+    return {
+        preview: {
+            sampleText: registration
+                ? L(attended ? "The attendance of" : "The registration of") +
+                  " " +
+                  lib.dateText(
+                      attended
+                          ? one(ATTENDANCE, {registrationId: registration.registrationId})?.checkInDate
+                          : registration.confirmedDate
+                  )
+                : L("A sample registration"),
+            values: [
+                {label: L("Name"), valueText: shown(request.submittedName)},
+                {label: L("Email"), valueText: shown(request.submittedEmail)},
+                {label: L("Lead"), valueText: shown(request.opportunityName)},
+                {label: L("Notes"), valueText: shown(request.description)}
+            ],
+            handedOff: true,
+            queueText: team ? team.teamName : "",
+            sourceText: draft.dataSourceId
+                ? (one("moqui.basic.DataSource", {dataSourceId: draft.dataSourceId})?.description || draft.dataSourceId) +
+                  " " +
+                  L("(unless the organization's UTM map names another)")
+                : L("The organization's UTM map, else none"),
+            campaignText: campaignName(registration?.marketingCampaignId),
+            verifiedText: L("Unverified"),
+            duplicateText: L("An open lead of the organization with the same email takes this inquiry as Sales' review item"),
+            captureText: capture ? enumText(capture.statusEnumId) + (capture.errorText ? ": " + capture.errorText : "") : "",
+            reasons
+        }
+    }
+}
 // ===== for the other modules =====
 // The notice a lead form's page shows (its current rule's), or null.
 function noticeOf(publicationId) {
@@ -1036,6 +1459,7 @@ const operations = {
     processLeadCaptures,
     runLeadCaptures,
     captureSubmission,
+    captureRegistration,
     handCapture
 }
 ;({

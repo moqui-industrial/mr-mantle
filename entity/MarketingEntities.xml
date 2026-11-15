@@ -1836,4 +1836,27 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration description="URL Parameter" enumId="TKCDSRC_URL_PARAM" enumTypeId="TrackingCodeSource"/>
         </seed-data>
     </entity>
+
+    <!-- ===== Marketing P18: the registration triggers (impl-marketing P18, §4 Nov 15; design-marketing §6 triggers, §10 LeadRules) ===== -->
+    <!-- The registration and attendance triggers of an automation (P11's triggers, design §6): an attendee's place confirmed on the offer
+        (AtrRegistered, read by a cursor over EventRegistration.confirmedDate) or checked in at its door (AtrAttended, over
+        EventAttendance.checkInDate), each filed once per registration; the offer (one occurrence's EventRegistrationPolicy) is one of
+        the automation's organization. A lead rule names the same offer as its source (MarketingLeadRule sourceKindEnumId
+        MlsRegistrationOffer, sourceId the offer) with the trigger MltRegistered or MltAttended, capturing
+        MlcsRegistration or MlcsAttendance (the enumerations below). -->
+    <extend-entity entity-name="MarketingAutomation" package="mantle.marketing.automation">
+        <field name="registrationPolicyId" type="id" enable-audit-log="update"/>
+        <relationship type="one-nofk" title="RegistrationPolicy" related="mantle.work.registration.EventRegistrationPolicy">
+            <key-map field-name="registrationPolicyId"/></relationship>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="AtrRegistered" description="Registered for an event" sequenceNum="7" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="AtrAttended" description="Attended an event" sequenceNum="8" enumTypeId="AutomationTrigger"/>
+            <moqui.basic.Enumeration enumId="MlsRegistrationOffer" description="Event registration offer" sequenceNum="2" enumTypeId="MarketingLeadSourceKind"/>
+            <moqui.basic.Enumeration enumId="MltRegistered" description="Registered for the event" sequenceNum="2" enumTypeId="MarketingLeadTrigger"/>
+            <moqui.basic.Enumeration enumId="MltAttended" description="Attended the event" sequenceNum="3" enumTypeId="MarketingLeadTrigger"/>
+            <moqui.basic.Enumeration enumId="MlcsRegistration" description="Event registration" sequenceNum="2" enumTypeId="MarketingLeadCaptureSource"/>
+            <moqui.basic.Enumeration enumId="MlcsAttendance" description="Event attendance" sequenceNum="3" enumTypeId="MarketingLeadCaptureSource"/>
+        </seed-data>
+    </extend-entity>
+    <!-- ===== end of Marketing P18 ===== -->
 </entities>

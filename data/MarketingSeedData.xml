@@ -200,4 +200,13 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- a ticket order (EventRegistrationPayments.js): the native sales order of a paid registration -->
     <moqui.basic.Enumeration enumId="OrpEventRegistration" description="Event registration" sequenceNum="10" enumTypeId="OrderPurpose"/>
     <!-- ===== end of Marketing P17 ===== -->
+
+    <!-- ===== Marketing P18: check-in (impl-marketing P18, §4 Nov 13, §5 Q7; F83) ===== -->
+    <!-- A door tablet's permission: mantle.work.EventRegistrationServices preview#CheckIn, resolve#EntryCode and checkIn#Registration
+        accept it beside MARKETING_EVENT_MANAGE only in a registered shared device's request whose route group fixes registrationPolicyId
+        to the offer and whose display account (the request's user) belongs to the offer's organization; anywhere else it opens nothing.
+        Meant for a display group alone (as People's PEOPLE_KIOSK_PUNCH): the app's setup gives it to its door tablet group. -->
+    <moqui.security.UserPermission userPermissionId="MARKETING_CHECKIN" description="Marketing Check-in (an event's door tablet checks in entry codes)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MARKETING_CHECKIN" fromDate="0"/>
+    <!-- ===== end of Marketing P18 ===== -->
 </entity-facade-xml>
