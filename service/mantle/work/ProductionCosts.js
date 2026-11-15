@@ -465,6 +465,7 @@ function get(p) {
             requestedByUserId: run.productionCostReviewByUserId || null,
             revision: run.productionCostReviewRevision == null ? null : Number(run.productionCostReviewRevision),
             accountingDate: run.productionCostAccountingDate || null,
+            accountingDateText: run.productionCostAccountingDate ? lib.calendarDateText(run.productionCostAccountingDate) : "",
             note: run.productionCostReviewNote || null,
             canRequest: canReview && !block,
             blockCode: block?.code || null,

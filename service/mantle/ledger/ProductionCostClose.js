@@ -1012,6 +1012,7 @@ function closeOf(p) {
                 basisQuantity: text(row.basisQuantity),
                 adjustment: row.adjustment === "Y",
                 accountingDate: row.accountingDate || null,
+                accountingDateText: row.accountingDate ? entityLib.calendarDateText(row.accountingDate) : "",
                 description: row.description || null
             }
             if (financial)

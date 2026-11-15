@@ -243,10 +243,14 @@ feature("a revision keeps the approved numbers: the budget reads as of either re
             audit,
             asApproved: row(report({budgetId, revisionSeqId: "000"}), spreadAccount),
             asRevised: row(report({budgetId}), spreadAccount),
-            contents: rows("mantle.other.budget.BudgetContent", {budgetId}).length
+            contents: rows("mantle.other.budget.BudgetContent", {budgetId}).length,
+            // the history's When (ACC-UI-016)
+            revisedTexts: Array.from(latest.revisionList || []).map(row => row.dateRevisedText)
         }
     },
-    then({reader, unbalanced, noReason, revised, stale, before, after, audit, asApproved, asRevised, contents}) {
+    then({reader, unbalanced, noReason, revised, stale, before, after, audit, asApproved, asRevised, contents, revisedTexts}) {
+        revisedTexts.length == 2
+        revisedTexts.every(text => /\d{4}-\d{2}-\d{2}/.test(text))
         reader.includes("PERMISSION_DENIED")
         unbalanced.includes("BUDGET_DISTRIBUTION")
         noReason.includes("CHANGE_REASON_REQUIRED")

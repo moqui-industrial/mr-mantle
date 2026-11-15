@@ -139,7 +139,10 @@ function amounts(p) {
         organizationPartyId: scope.organizationPartyId,
         revisionSeqId: revision?.revisionSeqId ?? null,
         revisionDate: revision?.dateRevised ?? null,
-        revisionList: revisions(p.budgetId).map(policy.display),
+        // dateRevised is neither a Date nor a Stamp field, so display() gives it no text: the history's When (ACC-UI-016)
+        revisionList: revisions(p.budgetId).map(row =>
+            Object.assign(policy.display(row), {dateRevisedText: row.dateRevised ? policy.dateText(row.dateRevised) : ""})
+        ),
         itemList: items.map(policy.display),
         subTimePeriodList: subPeriods(scope.budget).map(policy.display)
     }

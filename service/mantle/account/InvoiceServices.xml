@@ -3630,6 +3630,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentRows" type="List"/>
             <parameter name="sourceRows" type="List"/>
             <parameter name="shipmentRows" type="List"/>
+            <parameter name="submittedOrderId" type="String"><description>The purchase order a supplier named when it submitted this
+                bill from a public page (SupplierBillSubmission), whether or not its lines are linked to the order's.</description></parameter>
             <parameter name="budgetRows" type="List"/>
             <parameter name="budgetAvailable" type="Boolean"/>
             <parameter name="budgetUnavailableReason"/>
@@ -3679,6 +3681,13 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentRows" limit="500" disable-authz="true">
                 <econdition field-name="invoiceId"/></entity-find>
             <set field="sourceRows" from="Array.from(orderSourceList).concat(Array.from(shipmentRows))"/>
+            <!-- a bill a supplier sent from its order's page names the order there only (ACC-UI-019) -->
+            <entity-find entity-name="mantle.account.invoice.SupplierBillSubmission" list="submissionRows" limit="1"
+                    disable-authz="true">
+                <econdition field-name="invoiceId"/>
+                <econdition field-name="orderId" operator="is-not-null"/>
+            </entity-find>
+            <set field="submittedOrderId" from="submissionRows[0]?.orderId ?? null"/>
             <set field="ledgerRows" from="[]"/>
             <if condition="capabilities.canReadLedger">
                 <entity-find entity-name="mantle.ledger.transaction.AcctgTrans" list="ledgerRows" limit="500"
