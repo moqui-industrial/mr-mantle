@@ -112,9 +112,24 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getPage', input)"/>
         </actions>
     </service>
+    <!-- P16: the Event page (design-marketing §13 Event; impl-marketing P16) -->
+    <service verb="get" noun="Event" authenticate="anonymous-all" allow-remote="false" read-only="true">
+        <description>getMarketingEvent: a published registration offer (registrationPolicyId) of the organization the site's marketing
+            mount serves, on that site, for an occurrence still to come of an event not cancelled (mantle.work EventRegistrations.js
+            publicView): its title and description, the occurrence's dates in the offer's zone, where (or that it is online, never the
+            call link), each ticket's price from its product (or free) and advisory availability, whether registration is open, and
+            the terms. A site without the mount, a draft, closed, past or another site's or organization's offer and an unknown id
+            answer the same NotFound. No attendee, room, budget or campaign is in the answer. Read only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getEvent', input)"/>
+        </actions>
+    </service>
     <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
         <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
-            offered there or a form publication open there (P12) or a landing page published there (P14), a ready transactional sending profile of the organization (a promotional one never sends a verification), a
+            offered there or a form publication open there (P12) or a landing page published there (P14) or an event's registration offer
+            published there (P16), a ready transactional sending profile of the organization (a promotional one never sends a verification), a
             published confirmation template on each offered list, and
             the site's canonical host.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>

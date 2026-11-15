@@ -1780,4 +1780,9 @@
         service: 'mantle.marketing.TrackingServices.record#TrackingEvent',
         fields: ['siteId', 'code', 'token', 'visitorKey', 'kind'],
     },
+    // IronStone Marketing P16 (impl-marketing P16; design-marketing §13 Event): a published event registration offer, read only
+    getMarketingEvent: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Event',
+        fields: ['siteId', 'registrationPolicyId'],
+    },
 })

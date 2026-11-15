@@ -317,6 +317,8 @@
     // IronStone Marketing P15: the tracking redirect's link read and its event (an anonymous write the authority's limits bound)
     ['GET', 'marketing/tracking/link', 'resolveTrackingLink'],
     ['POST', 'marketing/tracking/event', 'recordTrackingEvent'],
+    // IronStone Marketing P16: a published event registration offer (read only)
+    ['GET', 'marketing/event', 'getMarketingEvent'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],
