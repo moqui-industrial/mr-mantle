@@ -1,0 +1,224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingReportServices (R, IronStone Marketing design §14.2; design §11, §15.3; impl-marketing P20): Marketing's
+    reports, its visits metric, Commerce's conversions, the row filter of its datasets, Insights' attention counts and the reporting and
+    retention jobs, over MarketingReports.js. Each checks its caller's permission and organization itself (aggregates only, an order's
+    own row only for its readers), and nothing past a limit is cut silently (TOO_MANY_RECORDS). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="ReportCatalog" allow-remote="false" read-only="true">
+        <description>Marketing's reports for the app root Marketing (REPORTS_UNAVAILABLE under another), to a report reader (MARKETING_REPORT_VIEW; PERMISSION_DENIED otherwise): each with its entryId (Insights' catalog entry), title, description, path and parameters. Insights' catalogue service for Marketing's entries.</description>
+        <in-parameters>
+            <parameter name="appRoot"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="reports" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('reportCatalog', context))</script></actions>
+    </service>
+    <service verb="get" noun="CampaignPerformance" allow-remote="false" read-only="true">
+        <description>Campaign performance (design §11): for a report reader of the organization (or of every organization of their scope; ORGANIZATION_DENIED outside it), each campaign whose window meets the period (or the one named, with its descendants once each when includeChildren): budget, estimate and actual cost in its currency, accepted promotional deliveries and the people reached once, visits (a visitor key once), leads created and qualified, confirmed registrations, and its attributed orders' value, invoiced, returns and net by currency (never added across currencies); ROI only with an actual cost and net revenue in that same currency, else unavailable with why; numSent and qualifiedLeadCount as summarized by the aggregation job with their time. Past 200 campaigns TOO_MANY_RECORDS.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="includeChildren"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignRows" type="List"/>
+            <parameter name="aggregation" type="Map"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="basis"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('campaignPerformance', context))</script></actions>
+    </service>
+    <service verb="get" noun="DeliveryAnalysis" allow-remote="false" read-only="true">
+        <description>Delivery analysis (design §11): the sends released in the period (an automation's send by its recipients handed off in it), of a campaign, a sending profile or a channel, or the one send named, each recipient once: prepared, handed off, skipped, held, cancelled; accepted, pending, failed, uncertain and suppressed (the ledger); delivered, bounced and complaints (receipts); accepted recipients who allowed tracking, unique opens and clicks, automated fetches apart, and conversions (orders attributed to a recipient's tracked event); each rate over its own denominator (delivery over accepted with the receipt coverage; opens and clicks over the tracked accepted; no open rate for text), null when empty; an experiment's variants beside. Past 200 sends or 50,000 recipients TOO_MANY_RECORDS.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="campaignSendId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="channelEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="sendRows" type="List"/>
+            <parameter name="variantRows" type="List"/>
+            <parameter name="totals" type="Map"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="basis"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('deliveryAnalysis', context))</script></actions>
+    </service>
+    <service verb="get" noun="AudienceGrowth" allow-remote="false" read-only="true">
+        <description>Audience growth (design §11): each Marketing list of the organizations (never a mailbox), or the one named, from its evidenced consent records: opening and closing subscribers, grants (a list merge's apart, a movement), withdrawals, expired unconfirmed requests, pending requests and the members accepted now; the opt-out reasons recipients gave with their share; the people reached once across the lists; and the suppressions in force (a measure apart). Past 200 lists or 50,000 consent records of a list TOO_MANY_RECORDS.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="contactListId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="listRows" type="List"/>
+            <parameter name="reasonRows" type="List"/>
+            <parameter name="reachCount" type="Integer"/>
+            <parameter name="suppressedCount" type="Integer"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="basis"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('audienceGrowth', context))</script></actions>
+    </service>
+    <service verb="get" noun="Attribution" allow-remote="false" read-only="true">
+        <description>Attribution (design §11): the placed sales orders of the period by their primary campaign (unattributed apart), each once, with value, invoiced, returns and net by currency, and the leads by their primary campaign at capture; an order's own row (its decision, basis, evidence time and amounts) only for a reader who may see the order in Sales or Commerce, the others counted in hiddenCount (at most 200 rows). Past 5,000 orders TOO_MANY_RECORDS.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="includeChildren"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="summaryRows" type="List"/>
+            <parameter name="outcomeRows" type="List"/>
+            <parameter name="hiddenCount" type="Integer"/>
+            <parameter name="orderCount" type="Integer"/>
+            <parameter name="unattributedCount" type="Integer"/>
+            <parameter name="attribution" type="Map"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="basis"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('attribution', context))</script></actions>
+    </service>
+    <service verb="get" noun="TrackingLinkResults" allow-remote="false" read-only="true">
+        <description>The tracking links of a campaign or the one named, for a report reader of its organization: clicks, page visits, visitors (a key once), recipients who clicked, automated fetches apart, and the orders attributed to the link with their value by currency, in the period. Past 200 links TOO_MANY_RECORDS.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="trackingCodeId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="linkRows" type="List"/>
+            <parameter name="fromText"/>
+            <parameter name="thruText"/>
+            <parameter name="asOfDate" type="Timestamp"/>
+            <parameter name="asOfText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('trackingLinkResults', context))</script></actions>
+    </service>
+    <service verb="count" noun="Visits" allow-remote="false" read-only="true">
+        <description>Marketing.Visits: the organization's visits from fromDate until thruDate, the distinct visitor keys of its non-automated link clicks and page visits plus each such event with no key; of one campaign, or of the links whose UTM source (and medium) Sales' lead source map sends to dataSourceId now. A Marketing reader or a Sales report reader of the organization (ORGANIZATION_DENIED otherwise); a count only.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="dataSourceId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visitCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('countVisits', context))</script></actions>
+    </service>
+    <service verb="count" noun="SalesVisits" allow-remote="false" read-only="true">
+        <description>The visit step of Sales' PipelineAnalysis funnel (impl-sales P19's contract): count#Visits for the organization, period, campaign and lead source.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="dataSourceId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visitCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('countVisits', context))</script></actions>
+    </service>
+    <service verb="count" noun="StoreConversions" allow-remote="false" read-only="true">
+        <description>Commerce's Online sales (impl-commerce §7): the stores' orders placed from fromDate until thruDate and how many have a campaign as their primary attribution, with that value by currency; each store one of the caller's Commerce stores (RECORD_UNAVAILABLE otherwise).</description>
+        <in-parameters>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderCount" type="Integer"/>
+            <parameter name="attributedCount" type="Integer"/>
+            <parameter name="amounts" type="List"/>
+            <parameter name="amountsText"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('countStoreConversions', context))</script></actions>
+    </service>
+    <service verb="get" noun="ReportRowFilter" allow-remote="false" read-only="true">
+        <description>The report engine's row filter of Marketing's datasets (the ReportScopePolicy MantleMarketingScope): the rows whose organization field (rowFilterParameters organizationField, organizationPartyId by default) is an organization of the signed-in viewer's Marketing scope, for a report reader (MARKETING_REPORT_VIEW); nothing for anyone else; a userId of another user is refused.</description>
+        <in-parameters>
+            <parameter name="userId"/>
+            <parameter name="datasetId"/>
+            <parameter name="rowFilterParameters" type="Map"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="filter" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('reportRowFilter', context))</script></actions>
+    </service>
+    <service verb="get" noun="AttentionCounts" allow-remote="false" read-only="true">
+        <description>Insights' Marketing attention (counts only) for a Marketing reader of the organization or of their organizations: sends awaiting approval, failed and uncertain campaign deliveries of the last 30 days, and registrations held for the organizer or for review.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="counts" type="Map"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('attentionCounts', context))</script></actions>
+    </service>
+    <service verb="run" noun="MarketingAggregation" allow-remote="false" authenticate="anonymous-all" operation="marketing.report.aggregation.run">
+        <description>The reporting job (design §15.3): each campaign not closed, or closed in the last 30 days, the stalest first (at most 500 a run), has numSent (its sends' accepted promotional deliveries) and qualifiedLeadCount (its leads Sales qualified) recomputed whole with their time, each in a transaction of its own; one that fails is logged and the rest go on; the watermark aggregation keeps the run. Runs as the system.</description>
+        <in-parameters>
+            <parameter name="maxCampaigns" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="summarizedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('runMarketingAggregation', context))</script></actions>
+    </service>
+    <service verb="run" noun="MarketingRetention" allow-remote="false" authenticate="anonymous-all" operation="marketing.retention.run">
+        <description>Marketing's retention (design §15.3): the names and masked addresses of a purged audience import's rows cleared (their outcomes kept), unconfirmed public subscription requests past their expiry by seven days removed with their tokens (a confirmed or decided one kept), tracking events older than the organization's statisticsRetentionDays removed unless an attribution names them, and expired link tokens removed; at most maxPerKind (500) of each a run, each in a transaction of its own; one that fails is named in failedItems and the rest go on; the watermark retention keeps the run. Runs as the system.</description>
+        <in-parameters>
+            <parameter name="maxPerKind" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="removedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="failedItems" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingReports.js').execute('runMarketingRetention', context))</script></actions>
+    </service>
+</services>

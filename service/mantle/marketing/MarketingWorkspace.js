@@ -37,7 +37,9 @@ const routes = {
     // P9: the sends and a send's delivery
     sends: "marketingSends",
     send: "marketingSend",
-    delivery: "marketingDelivery"
+    delivery: "marketingDelivery",
+    // P20: the reports
+    reports: "marketingReports"
 }
 // ===== Marketing P9: the sends' cards, upcoming and attention rows =====
 const SEND = "mantle.marketing.campaign.CampaignSend"
@@ -213,6 +215,51 @@ const cardSources = [
             const seats = offers.reduce((sum, offer) => sum + Number(offer.totalSeats || 0), 0)
             return {value: taken + " / " + seats, linkPath: routes.events}
         }
+    },
+    // P20: the last 30 days' visits (a visitor key once, each keyless visit) and the orders a campaign is the primary attribution of,
+    // for a report reader (aggregates; the reports explain them)
+    {
+        key: "visits",
+        title: "Visits, last 30 days",
+        phase: "P20",
+        admits: context => !!context.userScope.capabilities.reportRead,
+        run: context => {
+            if (!context.organizationPartyIds.length) return {value: 0, linkPath: routes.reports}
+            const since = new Date(lib.ms(ec.user.nowTimestamp) - 30 * dayMs)
+            const base = () =>
+                find("mantle.marketing.tracking.MarketingTrackingEvent")
+                    .condition("organizationPartyId", "in", context.organizationPartyIds)
+                    .condition("eventKindEnumId", "in", ["MteClick", "MteVisit"])
+                    .condition("automated", "is-null", null)
+                    .condition("trackingCodeId", "is-not-null", null)
+                    .condition("eventDate", "greater-equals", since)
+            const keyed = Array.from(
+                base()
+                    .condition("visitorKeyHash", "is-not-null", null)
+                    .selectField("visitorKeyHash")
+                    .distinct(true)
+                    .limit(100000)
+                    .list()
+            ).length
+            return {value: keyed + base().condition("visitorKeyHash", "is-null", null).count(), linkPath: routes.reports}
+        }
+    },
+    {
+        key: "attributedOrders",
+        title: "Orders from campaigns, last 30 days",
+        phase: "P20",
+        admits: context => !!context.userScope.capabilities.reportRead,
+        run: context => ({
+            value: context.organizationPartyIds.length
+                ? find("mantle.marketing.tracking.MarketingOutcomeLink")
+                      .condition("organizationPartyId", "in", context.organizationPartyIds)
+                      .condition("thruDate", "is-null", null)
+                      .condition("marketingCampaignId", "is-not-null", null)
+                      .condition("placedDate", "greater-equals", new Date(lib.ms(ec.user.nowTimestamp) - 30 * dayMs))
+                      .count()
+                : 0,
+            linkPath: routes.reports
+        })
     },
     // P3: the subscription requests of the last seven days for the organizations' lists (a count, no person)
     {

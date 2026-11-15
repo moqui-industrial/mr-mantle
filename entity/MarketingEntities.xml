@@ -1411,6 +1411,11 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="MKT_TRK_EVT_SITE"><index-field name="siteId"/><index-field name="eventDate"/></index>
         <index name="MKT_TRK_EVT_RCPT"><index-field name="campaignRecipientId"/></index>
         <index name="MKT_TRK_EVT_SEND"><index-field name="campaignSendId"/></index>
+        <!-- P20 review: the order attribution reads an order's events by its visit and by the visitor keys that visit carried, after
+            every placement; retention reads an organization's events by date -->
+        <index name="MKT_TRK_EVT_VISIT"><index-field name="visitId"/></index>
+        <index name="MKT_TRK_EVT_KEY"><index-field name="visitorKeyHash"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_ORG"><index-field name="organizationPartyId"/><index-field name="eventDate"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Tracking Event Kind" enumTypeId="TrackingEventKind"/>
             <moqui.basic.Enumeration description="Click" enumId="MteClick" enumTypeId="TrackingEventKind" sequenceNum="1"/>
@@ -1859,4 +1864,73 @@ along with this software (see the LICENSE.md file). If not, see
         </seed-data>
     </extend-entity>
     <!-- ===== end of Marketing P18 ===== -->
+
+    <!-- ===== Marketing P20: attribution, reports and retention (impl-marketing P20, §4 Nov 11; design-marketing §11 Attribution,
+        CampaignPerformance, §15.3 the attribution and reporting jobs, X10) ===== -->
+    <!-- The one primary campaign of a placed sales order (design §11 Attribution, X10; TrackingServices record#OrderAttribution): decided
+        once, after the placement commits, from the most recent eligible tracking event of the order's identity (its local visit and the
+        visitor key that visit carried, or its customer as a consenting recipient) within the link's trackable lifetime, else the
+        source opportunity's campaign, else none (an unattributed decision, so the retry job does not ask again); its evidence and
+        evidence time kept, so a later campaign or link edit rewrites nothing. A staff correction ends the decision in force (thruDate,
+        supersededByLinkId) and starts its successor with the reason (basis MobStaff). One decision in force an order. The native
+        TrackingCodeOrder row (one per order and type) is written beside a decision from a tracking event, never billable. -->
+    <entity entity-name="MarketingOutcomeLink" package="mantle.marketing.tracking" cache="never">
+        <field name="outcomeLinkId" type="id" is-pk="true"/>
+        <field name="outcomeKindEnumId" type="id"><description>MarketingOutcomeKind: a placed order (MokOrder)</description></field>
+        <field name="orderId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The seller (the order's first part's vendor)</description></field>
+        <field name="marketingCampaignId" type="id"><description>The primary campaign; empty for an unattributed order</description></field>
+        <field name="basisEnumId" type="id"><description>MarketingAttributionBasis: a tracking event, the source opportunity, a staff
+            correction or none</description></field>
+        <field name="trackingCodeId" type="id"/>
+        <field name="trackingEventId" type="id"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="evidenceDate" type="date-time"><description>When the evidence happened: the event, the opportunity's creation</description></field>
+        <field name="placedDate" type="date-time"/>
+        <field name="decidedDate" type="date-time"/>
+        <field name="decidedByUserId" type="id"><description>A staff correction's user; empty for the placement's decision</description></field>
+        <field name="reason" type="text-medium"><description>A staff correction's reason</description></field>
+        <field name="supersedesLinkId" type="id"/>
+        <field name="supersededByLinkId" type="id"/>
+        <field name="thruDate" type="date-time"><description>Ended by a successor decision</description></field>
+        <relationship type="one-nofk" related="mantle.order.OrderHeader"/>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one-nofk" related="mantle.marketing.tracking.TrackingCode"/>
+        <relationship type="one" title="MarketingOutcomeKind" related="moqui.basic.Enumeration">
+            <key-map field-name="outcomeKindEnumId"/></relationship>
+        <relationship type="one" title="MarketingAttributionBasis" related="moqui.basic.Enumeration">
+            <key-map field-name="basisEnumId"/></relationship>
+        <index name="MKT_OUTCOME_ORDER"><index-field name="orderId"/><index-field name="thruDate"/></index>
+        <index name="MKT_OUTCOME_CAMPAIGN"><index-field name="marketingCampaignId"/><index-field name="placedDate"/></index>
+        <index name="MKT_OUTCOME_ORG"><index-field name="organizationPartyId"/><index-field name="placedDate"/></index>
+        <index name="MKT_OUTCOME_EVENT"><index-field name="trackingEventId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing Outcome Kind" enumTypeId="MarketingOutcomeKind"/>
+            <moqui.basic.Enumeration description="Placed order" enumId="MokOrder" enumTypeId="MarketingOutcomeKind" sequenceNum="1"/>
+            <moqui.basic.EnumerationType description="Marketing Attribution Basis" enumTypeId="MarketingAttributionBasis"/>
+            <moqui.basic.Enumeration description="Tracking event" enumId="MobTrackingEvent" enumTypeId="MarketingAttributionBasis" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Source opportunity" enumId="MobOpportunity" enumTypeId="MarketingAttributionBasis" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Staff correction" enumId="MobStaff" enumTypeId="MarketingAttributionBasis" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="Unattributed" enumId="MobNone" enumTypeId="MarketingAttributionBasis" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+    <!-- A campaign's derived summaries (design §11 CampaignPerformance; the reporting job, §15.3): numSent (the native field: the
+        transport-accepted promotional recipient executions of its sends, never a test or a transactional receipt) and
+        qualifiedLeadCount (its leads Sales qualified, each once; not the legacy id-typed convertedLeads), with the time they were
+        computed. Rebuildable: the aggregation recomputes them whole. -->
+    <extend-entity entity-name="MarketingCampaign" package="mantle.marketing.campaign">
+        <field name="qualifiedLeadCount" type="number-integer"/>
+        <field name="summaryDate" type="date-time"><description>When numSent and qualifiedLeadCount were last computed</description></field>
+    </extend-entity>
+    <!-- The reporting jobs' watermarks (design §15.3 "Reporting and retention": incremental with a watermark and freshness): the last
+        time a job's run finished its due work, what it did and what failed, which the reports show as their freshness. -->
+    <entity entity-name="MarketingReportWatermark" package="mantle.marketing.tracking" cache="never">
+        <field name="watermarkKey" type="id" is-pk="true"/>
+        <field name="watermarkDate" type="date-time"><description>Everything changed before this is counted</description></field>
+        <field name="lastRunDate" type="date-time"/>
+        <field name="itemCount" type="number-integer"/>
+        <field name="failedCount" type="number-integer"/>
+        <field name="lastError" type="text-medium"/>
+    </entity>
+    <!-- ===== end of Marketing P20 ===== -->
 </entities>

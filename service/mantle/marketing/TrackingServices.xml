@@ -14,14 +14,33 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- mantle.marketing.TrackingServices (K, IronStone Marketing design §14.2; impl-marketing P11, §4): the order-placed handler of the
     Mantle SECA OrderPlacedRecordAttribution (MarketingTracking.secas.xml). P11 files the automation admission event; P20 adds the
-    attribution (record#OrderAttribution); P15 adds the tracking links and their capture. -->
+    attribution (record#OrderAttribution, MarketingAttribution.js); P15 adds the tracking links and their capture. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
     <service verb="handle" noun="OrderPlaced" authenticate="anonymous-all" allow-remote="false">
-        <description>Internal, the SECA OrderPlacedRecordAttribution's one handler (design §15.1), after an order's placement commits, in a transaction of its own: the order's admission event (order:orderId, the customer, the time placed) filed once for each active automation of its seller with the order-placed trigger, of the order's store or of every store; a failure of one automation is logged and the next goes on, and the placement never waits on it. Runs as the system. P20 adds the attribution.</description>
+        <description>Internal, the SECA OrderPlacedRecordAttribution's one handler (design §15.1), after an order's placement commits, in a transaction of its own: the order's admission event (order:orderId, the customer, the time placed) filed once for each active automation of its seller with the order-placed trigger, of the order's store or of every store; a failure of one automation is logged and the next goes on, and the placement never waits on it. P20: then the order's attribution (record#OrderAttribution) in a transaction of its own, so neither part's failure undoes the other or the placement; a failed attribution is logged and decided by the attribution job. Runs as the system.</description>
         <in-parameters><parameter name="orderId" required="true"/></in-parameters>
-        <out-parameters><parameter name="filedCount" type="Integer"/></out-parameters>
+        <out-parameters>
+            <parameter name="filedCount" type="Integer"/>
+            <parameter name="outcomeLinkId"/>
+        </out-parameters>
         <actions>
-            <set field="filedCount" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('orderPlaced', context).filedCount"/>
+            <script><![CDATA[
+                filedCount = 0
+                try {
+                    filedCount = ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('orderPlaced', context).filedCount
+                } catch (error) {
+                    ec.message.clearErrors()
+                    ec.logger.error('Order ' + orderId + ': its automation events were not filed: ' + String(error.message).split('\n')[0])
+                }
+                // P20: the attribution, apart (a probe: its own transaction and error frame)
+                outcomeLinkId = null
+                try {
+                    outcomeLinkId = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                        .probe('mantle.marketing.TrackingServices.record#OrderAttribution', {orderId}).outcomeLinkId || null
+                } catch (error) {
+                    ec.logger.error('Order ' + orderId + ': its attribution waits for the attribution job: ' + String(error.message).split('\n')[0])
+                }
+            ]]></script>
         </actions>
     </service>
     <!-- P15: the tracking links and their capture (impl-marketing P15; design §8 TrackingLinks, TrackingLinkDetail, "Capture on the
@@ -176,4 +195,76 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="siteCount" from="found.siteCount"/>
         </actions>
     </service>
+    <!-- ===== Marketing P20: the attribution of placed orders (impl-marketing P20, §4 Nov 11; design-marketing §11 Attribution, §15.3,
+        X10), over MarketingAttribution.js ===== -->
+    <service verb="record" noun="OrderAttribution" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (handle#OrderPlaced after the placement commits; the attribution job): the one attribution decision of a
+            placed sales order (MarketingOutcomeLink): the decision in force when there is one (a repeat answers it), else the most recent
+            eligible tracking event of the order's identity (its local visit and the visitor key that visit carried, or its customer as a
+            recipient who allows tracking now; a click or a page visit of a link of the seller, never an automated fetch or an open) within
+            the link's trackable lifetime (30 days when it names none), else the source opportunity's campaign, else unattributed; with
+            its evidence and evidence time, and TrackingCodeOrder beside a tracking event (never billable). An order that is not a placed
+            sales order gets none (attributable false). Runs as the system.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="attributable" type="Boolean"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="outcomeLinkId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="basisEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('recordOrderAttribution', context)"/>
+            <set field="attributable" from="!!found.attributable"/>
+            <set field="created" from="!!found.created"/>
+            <set field="outcomeLinkId" from="found.outcomeLinkId || null"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId || null"/>
+            <set field="basisEnumId" from="found.basisEnumId || null"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="OrderAttribution" allow-remote="false">
+        <description>A staff correction of an order's attribution: MARKETING_CONFIGURE in the order's seller organization
+            (PERMISSION_DENIED; an order of another organization or no placed sales order RECORD_UNAVAILABLE), the decision read
+            (expectedOutcomeLinkId; STALE_REVISION when another is in force), a campaign of the seller or none (CAMPAIGN_INVALID) and a
+            reason (REASON_REQUIRED). The decision in force is ended, never changed, and its successor records the user, the time and the
+            reason; the same campaign again changes nothing.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="expectedOutcomeLinkId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcomeLinkId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('correctOrderAttribution', context)"/>
+            <set field="outcomeLinkId" from="found.outcomeLinkId"/>
+            <set field="changed" from="!!found.changed"/>
+        </actions>
+    </service>
+    <service verb="run" noun="OrderAttributions" authenticate="anonymous-all" allow-remote="false" operation="marketing.attribution.run">
+        <description>The attribution job (design §15.3): the sales orders placed in the last days (30 by default) that have no decision,
+            at most 200 a run (maxOrders, fewer), each decided by record#OrderAttribution in a transaction of its own; an order that is not
+            a placed sales order (a purchase order, an internal customer's) is passed over and takes no place (skippedCount); one that
+            fails is logged by its order and the rest go on, and the run's time and counts are kept on the watermark "attribution". Runs
+            as the system.</description>
+        <in-parameters>
+            <parameter name="days" type="Integer"/>
+            <parameter name="maxOrders" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('runOrderAttributions', context)"/>
+            <set field="recordedCount" from="found.recordedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+            <set field="skippedCount" from="found.skippedCount"/>
+        </actions>
+    </service>
+    <!-- ===== end of Marketing P20 ===== -->
 </services>

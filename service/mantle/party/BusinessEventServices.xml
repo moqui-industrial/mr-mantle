@@ -19,8 +19,9 @@ along with this software (see the LICENSE.md file). If not, see
             create#Annotation, source business), so dashboards over business data show it as a marker on their time series.
             The owner of the event registers this call to run after its commit (BusinessEvents.js register): a price list
             published (PriceListPublished, mantle.product.PriceServices.publish#ProductPriceList), a store promotion with a
-            start date (PromotionStart, StorePromotionServices.store#Promotion) and a fiscal period closed (PeriodClosed,
-            mantle.ledger.CloseServices.close#Period). The marker is made from the record as it is stored, never from the
+            start date (PromotionStart, StorePromotionServices.store#Promotion), a fiscal period closed (PeriodClosed,
+            mantle.ledger.CloseServices.close#Period) and a campaign send released or its experiment's winner released (CampaignSent,
+            mantle.marketing.CampaignSendServices.release#Send and release#ExperimentWinner; impl-marketing P20, F85). The marker is made from the record as it is stored, never from the
             caller: its name, its time, its organization and the record's key, and no amount; an event whose record is not in
             that state (a list not published, a run not closed) or has no organization writes nothing. One event keeps one
             marker (its key). A failure is logged and answered as not recorded: the owner's change stays.</description>
