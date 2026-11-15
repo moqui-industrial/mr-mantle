@@ -24,4 +24,19 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="filedCount" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('orderPlaced', context).filedCount"/>
         </actions>
     </service>
+    <!-- P13: a campaign's tracking codes, the choices of Sales' lead forms (impl-marketing P13; P15 adds the tracking links and their
+        capture) -->
+    <service verb="find" noun="TrackingLinks" allow-remote="false" read-only="true">
+        <description>A campaign's tracking codes for a Marketing reader of its organization (RECORD_UNAVAILABLE otherwise; PERMISSION_DENIED
+            for a caller who reads nothing of Marketing), current ones unless includeEnded, at most 200: each one's id, label and whether it
+            is current. Sales' lead forms offer them as a lead's tracking code.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId" required="true"/>
+            <parameter name="includeEnded"/>
+        </in-parameters>
+        <out-parameters><parameter name="trackingLinkList" type="List"/></out-parameters>
+        <actions>
+            <set field="trackingLinkList" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('findTrackingLinks', context).trackingLinkList"/>
+        </actions>
+    </service>
 </services>

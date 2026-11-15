@@ -1126,6 +1126,132 @@ along with this software (see the LICENSE.md file). If not, see
     </extend-entity>
     <!-- ===== end of Marketing P12 ===== -->
 
+    <!-- ===== Marketing P13: leads and the Sales handoff (impl-marketing P13; design-marketing §10 Leads, LeadRules, §15.3 Capture
+        handoff; MKT-LEAD) ===== -->
+    <!-- A lead rule (design §10 LeadRules, §14.1 MarketingLeadRule): how the accepted answers of one source (a lead form's publication;
+        later an event's registration or attendance, P17) are handed to Sales' mantle.sales.OpportunityServices.store#LeadIntake: the
+        trigger, the Sales source a lead takes when the organization's UTM map has none (defaultDataSourceId), the team whose queue it
+        goes to, the published fields mapped to the inquiry's name, organization, email and phone and those entered in its notes (no
+        other answer reaches Sales), an optional condition on one answer, and the notice the visitor reads on the page. One current rule
+        per source: a change starts a new rule from now and ends the one it replaces (mantle.marketing.MarketingFormServices
+        store#LeadRule), so a capture keeps the rule it was made under. Ended, never deleted. -->
+    <entity entity-name="MarketingLeadRule" package="mantle.marketing.lead" cache="never">
+        <field name="leadRuleId" type="id" is-pk="true"/>
+        <field name="organizationPartyId" type="id" enable-audit-log="true"/>
+        <field name="ruleName" type="text-medium"/>
+        <field name="sourceKindEnumId" type="id"/>
+        <field name="sourceId" type="id"><description>The source record: a FormPublication of the lead purpose (MlsFormPublication)</description></field>
+        <field name="triggerEnumId" type="id"/>
+        <field name="marketingCampaignId" type="id"><description>The source's campaign when the rule was made (a lead takes the
+            publication's campaign at each handoff)</description></field>
+        <field name="dataSourceId" type="id" enable-audit-log="true"><description>The Sales lead source when the UTM map has none: one
+            offered to the organization</description></field>
+        <field name="teamPartyId" type="id" enable-audit-log="true"><description>The Sales team whose queue a lead goes to: a current
+            team of the organization</description></field>
+        <field name="nameFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="organizationFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="emailFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="phoneFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="noteFieldNames" type="text-medium" enable-audit-log="true"><description>The published fields whose answers go in
+            the lead's notes, comma separated</description></field>
+        <field name="conditionFieldName" type="text-short" enable-audit-log="true"/>
+        <field name="conditionValue" type="text-medium" enable-audit-log="true"><description>Hand off only when the condition field's
+            answer is (or, for a multiple choice, includes) this value</description></field>
+        <field name="noticeText" type="text-medium"><description>What the page tells the visitor about the follow-up (plain text, no
+            expression); not a consent to anything else</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdDate" type="date-time"/>
+        <field name="createdByUserId" type="id"/>
+        <field name="endedByUserId" type="id"/>
+        <field name="replacesLeadRuleId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
+            <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one" title="MarketingLeadSourceKind" related="moqui.basic.Enumeration" short-alias="sourceKind">
+            <key-map field-name="sourceKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="MarketingLeadTrigger" related="moqui.basic.Enumeration" short-alias="trigger">
+            <key-map field-name="triggerEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.MarketingCampaign" short-alias="campaign"/>
+        <relationship type="one-nofk" related="moqui.basic.DataSource" short-alias="dataSource"/>
+        <relationship type="one-nofk" title="Team" related="mantle.party.Party" short-alias="team">
+            <key-map field-name="teamPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="Replaces" related="mantle.marketing.lead.MarketingLeadRule" short-alias="replaces">
+            <key-map field-name="replacesLeadRuleId" related="leadRuleId"/></relationship>
+        <index name="MKT_LEAD_RULE_SRC"><index-field name="sourceKindEnumId"/><index-field name="sourceId"/></index>
+        <index name="MKT_LEAD_RULE_ORG"><index-field name="organizationPartyId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing lead source kind" enumTypeId="MarketingLeadSourceKind"/>
+            <moqui.basic.Enumeration enumId="MlsFormPublication" description="Lead form" sequenceNum="1" enumTypeId="MarketingLeadSourceKind"/>
+            <moqui.basic.EnumerationType description="Marketing lead trigger" enumTypeId="MarketingLeadTrigger"/>
+            <moqui.basic.Enumeration enumId="MltFormSubmitted" description="Form answered" sequenceNum="1" enumTypeId="MarketingLeadTrigger"/>
+        </seed-data>
+    </entity>
+    <!-- A lead capture (design §10 LeadRules, §14.1 MarketingLeadCapture, §15.3 Capture handoff): one per rule and source event (an
+        accepted form submission), made after the answer is kept and handed to Sales once under its own operation key (operationKey,
+        unique: a retry, the capture job's or an operator's ReprocessCapture, answers Sales' first result and never makes a second
+        lead). Its state: pending, handed off (the lead it made or joined, duplicate Y when it joined an open lead: Sales' review item),
+        skipped (the rule's condition not met) or failed (errorText: the reason code and words, never an answer; tried again at
+        nextAttemptDate). A failed handoff leaves the answer as it was; nothing here subscribes anyone. Written only by
+        MarketingFormServices (MarketingLeads.js). -->
+    <entity entity-name="MarketingLeadCapture" package="mantle.marketing.lead" cache="never">
+        <field name="leadCaptureId" type="id" is-pk="true"/>
+        <field name="leadRuleId" type="id"/>
+        <field name="organizationPartyId" type="id"/>
+        <field name="sourceKindEnumId" type="id"/>
+        <field name="sourceId" type="id"><description>The source event: a FormSubmission (MlcsFormSubmission)</description></field>
+        <field name="publicationId" type="id"/>
+        <field name="formResponseId" type="id"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="statusEnumId" type="id"/>
+        <field name="operationKey" type="text-short"/>
+        <field name="salesLeadIntakeId" type="id"/>
+        <field name="salesOpportunityId" type="id"/>
+        <field name="duplicate" type="text-indicator"/>
+        <field name="attemptCount" type="number-integer"/>
+        <field name="lastAttemptDate" type="date-time"/>
+        <field name="nextAttemptDate" type="date-time"/>
+        <field name="errorText" type="text-medium"/>
+        <field name="capturedDate" type="date-time"/>
+        <field name="handedOffDate" type="date-time"/>
+        <field name="reprocessedByUserId" type="id"/>
+        <field name="reprocessReason" type="text-medium"/>
+        <relationship type="one" related="mantle.marketing.lead.MarketingLeadRule" short-alias="rule"/>
+        <relationship type="one" title="MarketingLeadCaptureSource" related="moqui.basic.Enumeration" short-alias="sourceKind">
+            <key-map field-name="sourceKindEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="MarketingLeadCaptureStatus" related="moqui.basic.Enumeration" short-alias="status">
+            <key-map field-name="statusEnumId" related="enumId"/></relationship>
+        <relationship type="one-nofk" related="mantle.party.FormPublication" short-alias="publication">
+            <key-map field-name="publicationId"/></relationship>
+        <relationship type="one-nofk" related="mantle.sales.opportunity.SalesOpportunity" short-alias="opportunity"/>
+        <index name="MKT_LEAD_CAP_EVENT" unique="true"><index-field name="leadRuleId"/><index-field name="sourceKindEnumId"/>
+            <index-field name="sourceId"/></index>
+        <index name="MKT_LEAD_CAP_KEY" unique="true"><index-field name="operationKey"/></index>
+        <index name="MKT_LEAD_CAP_DUE"><index-field name="statusEnumId"/><index-field name="nextAttemptDate"/></index>
+        <index name="MKT_LEAD_CAP_CAMP"><index-field name="marketingCampaignId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Marketing lead capture source" enumTypeId="MarketingLeadCaptureSource"/>
+            <moqui.basic.Enumeration enumId="MlcsFormSubmission" description="Form answer" sequenceNum="1" enumTypeId="MarketingLeadCaptureSource"/>
+            <moqui.basic.EnumerationType description="Marketing lead capture status" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcPending" description="Waiting for Sales" sequenceNum="1" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcHandedOff" description="Handed to Sales" sequenceNum="2" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcSkipped" description="Not handed off (condition not met)" sequenceNum="3" enumTypeId="MarketingLeadCaptureStatus"/>
+            <moqui.basic.Enumeration enumId="MlcFailed" description="Handoff failed" sequenceNum="4" enumTypeId="MarketingLeadCaptureStatus"/>
+        </seed-data>
+    </entity>
+    <!-- The handoff counts (design §10 Leads: MARKETING_VIEW alone gives aggregate handoff counts, F66): captures counted by the fields
+        selected (a rule, a campaign, the state, a joined lead), for Marketing's own records, never Sales'. -->
+    <view-entity entity-name="MarketingLeadCaptureCount" package="mantle.marketing.lead">
+        <member-entity entity-alias="CAP" entity-name="mantle.marketing.lead.MarketingLeadCapture"/>
+        <alias name="leadRuleId" entity-alias="CAP"/>
+        <alias name="organizationPartyId" entity-alias="CAP"/>
+        <alias name="publicationId" entity-alias="CAP"/>
+        <alias name="marketingCampaignId" entity-alias="CAP"/>
+        <alias name="statusEnumId" entity-alias="CAP"/>
+        <alias name="duplicate" entity-alias="CAP"/>
+        <alias name="captureCount" entity-alias="CAP" field="leadCaptureId" function="count" type="number-integer"/>
+    </view-entity>
+    <!-- ===== end of Marketing P13 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
