@@ -44,7 +44,8 @@ feature("a group's segment and a repository's slug follow their rules, and a slu
 feature("a top-level group takes no word of Smithy's, base of an app, mount of the site, reserved path or group path", {
     when() {
         // Smithy's own word, an app's default base that this site does not mount, a mount of the site that is no app's
-        // base, a reserved path of PublicApps.js, the group that is there
+        // base, a reserved path of PublicApps.js, a servlet the default conf declares (the framework reserves each one's
+        // first segment: dashboard), the group that is there
         lib.make("mantle.public.PublicSiteApp", {
             siteId: SITE,
             appMountId: SITE + "_M",
@@ -53,12 +54,12 @@ feature("a top-level group takes no word of Smithy's, base of an app, mount of t
             enabled: "N"
         })
         return {
-            taken: ["explore", "billing", "people", "qapps", "smngroup"].map(name => group(name).reason),
+            taken: ["explore", "billing", "people", "qapps", "dashboard", "smngroup"].map(name => group(name).reason),
             free: group("smnfree")
         }
     },
     then({taken, free}) {
-        taken == ["nameTaken", "nameTaken", "nameTaken", "nameTaken", "nameTaken"]
+        taken == ["nameTaken", "nameTaken", "nameTaken", "nameTaken", "nameTaken", "nameTaken"]
         free.groupPath == "smnfree"
     }
 })
