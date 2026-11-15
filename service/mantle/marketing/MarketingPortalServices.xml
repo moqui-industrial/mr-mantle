@@ -169,6 +169,19 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('startRegistrationPayment', input)"/>
         </actions>
     </service>
+    <service verb="get" noun="RegistrationPaymentForm" authenticate="anonymous-all" allow-remote="false">
+        <description>getRegistrationPaymentForm (a bearer read as a POST, TOKEN_WRITES; the user's call, Nov 15): for a
+            reservation the capability reaches (or the signed-in buyer's own), its pending payment whose provider page takes a posted
+            form token (Authorize.Net Accept Hosted): the page's address and a fresh token, asked of the gateway on each call and
+            never kept, which Register's relay posts at once; only while its places are held (HOLD_EXPIRED otherwise). The return
+            key is made anew for the page's return address, which reads the state alone; the verified result decides. Anything else
+            the one NotFound.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getRegistrationPaymentForm', input)"/>
+        </actions>
+    </service>
     <service verb="get" noun="Registration" authenticate="anonymous-all" allow-remote="false">
         <description>getRegistration (a capability read as a POST, TOKEN_WRITES; or the provider's return by
             reference and key, which reads the state alone): the reservation's state with its payment looked up at the provider

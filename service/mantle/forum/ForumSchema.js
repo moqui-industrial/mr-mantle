@@ -1817,6 +1817,11 @@
         service: 'mantle.marketing.MarketingPortalServices.start#RegistrationPayment',
         fields: ['siteId', 'token', 'reservationId', 'priceKey', 'operationId'],
     },
+    // the user's call (Nov 15): the provider's posted form (Accept Hosted) of a pending payment, a fresh token for Register's relay
+    getRegistrationPaymentForm: {
+        service: 'mantle.marketing.MarketingPortalServices.get#RegistrationPaymentForm',
+        fields: ['siteId', 'token', 'reservationId', 'operationId'],
+    },
     getRegistration: {
         service: 'mantle.marketing.MarketingPortalServices.get#Registration',
         fields: [

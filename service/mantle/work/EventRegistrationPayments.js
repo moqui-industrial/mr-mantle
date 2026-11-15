@@ -352,6 +352,51 @@ function paymentView(reservationId, extra = {}) {
     )
 }
 
+// ===== the hosted form (Accept Hosted; the user's call, Nov 15) =====
+// The provider's page of a pending payment whose page takes a posted form token (Authorize.Net Accept Hosted): its address and a
+// fresh token, asked of the gateway on each call and never kept, for Register's relay to post at once (Shop's PaymentRelay, F37).
+// Only while every place it pays for is still held; the return key is made anew (the reservation keeps its digest), so the page
+// sends the payer back to the canonical return address, where the key reads the state alone and the verified result decides.
+function paymentForm(reservationId, merchantName) {
+    const reservation = one(RESERVATION, {reservationId})
+    const payment = reservation?.paymentId ? one(P, {paymentId: reservation.paymentId}) : null
+    if (!payment || attempts().stateOf(payment) !== "pending" || !attempts().providerAction(payment.paymentId)?.form)
+        denied("RECORD_UNAVAILABLE", "This payment page is not available")
+    const paid = rows(REGISTRATION, {paymentId: payment.paymentId})
+    if (!paid.length || paid.some(row => !places().holdLive(row)))
+        denied("HOLD_EXPIRED", "The hold on these places ended; start again")
+    const config = one("mantle.account.method.PaymentGatewayConfig", {paymentGatewayConfigId: payment.paymentGatewayConfigId})
+    const of = config
+        ? ec.resource.script("component://mr-mantle/service/mantle/product/StoreCheckout.js").gatewayCapabilities[
+              config.paymentGatewayTypeEnumId
+          ]
+        : null
+    const service = of ? of(config).hostedFormService : null
+    if (!service) denied("RECORD_UNAVAILABLE", "This payment page is not available")
+    const returnKey = ec.user.randomString(40).replace(/[^A-Za-z0-9_-]/g, "")
+    const keyed = step("Registration payment return key " + reservationId, () =>
+        call("update#" + RESERVATION, {reservationId, returnKeyDigest: ec.user.singleUseCodeHash(returnKey)})
+    )
+    if (keyed.error) denied("PROVIDER_UNAVAILABLE", "The payment page cannot be opened now; try again in a moment")
+    const back = returnUrl(reservation, returnKey)
+    let out = null
+    try {
+        out = attempts().asAttempt(payment.paymentId, () =>
+            lib.probe(service, {
+                paymentId: payment.paymentId,
+                returnUrl: back,
+                cancelUrl: back + "&cancelled=1",
+                merchantName: merchantName || null
+            })
+        )
+    } catch (error) {
+        ec.logger.warn("Registration payment " + payment.paymentId + " form: " + String(error?.message || error).split("\n")[0])
+    }
+    if (!out?.formUrl || !out.token || !/^https:\/\//.test(String(out.formUrl)))
+        denied("PROVIDER_UNAVAILABLE", "The payment page cannot be opened now; try again in a moment")
+    return {formUrl: String(out.formUrl), fields: {token: String(out.token)}}
+}
+
 // ===== the verified result =====
 // The attempt asked of its provider (page: at most every few seconds; job: when it is due; none: not at all), its outcome applied,
 // and the order placed once its places are pending; each step its own transaction.
@@ -605,6 +650,7 @@ function reconcile(p) {
     startPayment,
     quoteOf,
     quoteText,
+    paymentForm,
     paymentView,
     refresh,
     seatReviewed,

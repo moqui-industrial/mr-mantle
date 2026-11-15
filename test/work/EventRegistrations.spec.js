@@ -18,6 +18,10 @@ const orgA = prefix + "_ORG_A",
     orgB = prefix + "_ORG_B"
 const siteA = prefix + "_SITE_A",
     siteB = prefix + "_SITE_B"
+// the user's call (Nov 15): an organization whose gateway's page takes a posted form token (Accept Hosted's shape)
+const orgC = prefix + "_ORG_C",
+    siteC = prefix + "_SITE_C",
+    formGateway = prefix + "_FORM"
 const gateway = prefix + "_HOSTED"
 const users = {}
 const ids = {}
@@ -164,7 +168,7 @@ function offerFor(org, site, key, seats, tickets, extra = {}) {
     )
     return {workEffortId, registrationPolicyId, ticketTypeId: registrationPolicyId + "_T0"}
 }
-function siteFor(siteId, host, org) {
+function siteFor(siteId, host, org, gatewayId = gateway) {
     make("mantle.public.PublicSite", {
         siteId,
         name: "Registration site",
@@ -204,7 +208,7 @@ function siteFor(siteId, host, org) {
     })
     make("mantle.account.method.PaymentGatewayOrganization", {
         organizationPartyId: org,
-        paymentGatewayConfigId: gateway,
+        paymentGatewayConfigId: gatewayId,
         fromDate: 0,
         isEnabled: "Y"
     })
@@ -273,12 +277,26 @@ spec({
                 refundServiceName: T + "alwaysApprove#PaymentRefund",
                 detailsServiceName: T + "alwaysApprove#PaymentDetails"
             })
+            make("mantle.account.method.PaymentGatewayConfig", {
+                paymentGatewayConfigId: formGateway,
+                paymentGatewayTypeEnumId: "PgtTest",
+                description: "Registration posted-form test gateway",
+                authorizeServiceName: T + "hostedForm#PaymentAuthorization",
+                captureServiceName: T + "alwaysApprove#PaymentCapture",
+                releaseServiceName: T + "alwaysApprove#PaymentRelease",
+                refundServiceName: T + "alwaysApprove#PaymentRefund",
+                detailsServiceName: T + "alwaysApprove#PaymentDetails"
+            })
+            organization(orgC, "Registrations C")
+            make("mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: orgC, baseCurrencyUomId: "USD"})
+            siteFor(siteC, "mkrg-c.example.test", orgC, formGateway)
             siteFor(siteA, "mkrg-a.example.test", orgA)
             siteFor(siteB, "mkrg-b.example.test", orgB)
             for (const [productId, owner] of [
                 [prefix + "_SEAT_A", orgA],
                 [prefix + "_SEAT_B", orgB],
-                [prefix + "_SEAT_P", orgA]
+                [prefix + "_SEAT_P", orgA],
+                [prefix + "_SEAT_C", orgC]
             ]) {
                 make("mantle.product.Product", {
                     productId,
@@ -306,6 +324,7 @@ spec({
             ids.race = offerFor(orgA, siteA, "RACE", 2, [{priceSourceEnumId: "EtpFree"}])
             ids.group = offerFor(orgA, siteA, "GROUP", 2, [{priceSourceEnumId: "EtpFree"}])
             ids.price = offerFor(orgA, siteA, "PRICE", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_P"}])
+            ids.form = offerFor(orgC, siteC, "FORM", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_C"}])
             make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
             make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -714,6 +733,119 @@ feature("a price changed after the reservation is refused at the payment's start
         toDecimal(r.payment.amount).eq(toDecimal("53.00"))
     }
 })
+
+feature(
+    "a provider page that takes a posted form: a fresh token by the capability only, the return key reading the state alone",
+    {
+        when() {
+            const reserved = reserve(siteC, ids.form.registrationPolicyId, ids.form.ticketTypeId, 1, "form@mkrg.example.test")
+            complete(siteC, reserved.token, ["Form payer"])
+            const started = pay(siteC, reserved.token)
+            const form = visitor("get#RegistrationPaymentForm", {siteId: siteC, token: reserved.token, operationId: key()})
+            const again = visitor("get#RegistrationPaymentForm", {siteId: siteC, token: reserved.token, operationId: key()})
+            // where the page sends the payer back: Register's canonical address with the reservation and a fresh return key
+            const paymentId = reservationOf(reserved.reference).paymentId
+            const back = rows("mantle.account.method.PaymentGatewayResponse", {paymentId, transactionStatus: "HostedPending"})[0]
+                .reasonMessage
+            const returnKey = decodeURIComponent((/[?&]key=([^&]+)/.exec(back) || [])[1] || "")
+            const byKey = visitor("get#Registration", {siteId: siteC, reference: reserved.reference, key: returnKey})
+            const formByKey = visitor("get#RegistrationPaymentForm", {
+                siteId: siteC,
+                reference: reserved.reference,
+                key: returnKey
+            })
+            const otherSite = visitor("get#RegistrationPaymentForm", {siteId: siteA, token: reserved.token})
+            // the verified result confirms; the page is no longer offered
+            const result = returned(siteC, reserved.token)
+            const after = visitor("get#RegistrationPaymentForm", {siteId: siteC, token: reserved.token})
+            return {started, form, again, back, byKey, formByKey, otherSite, result, after}
+        },
+        then(r) {
+            r.started.payment.paymentState == "pending" && r.started.payment.provider.form == true
+            r.form.form.formUrl == "https://test.authorize.net/payment/payment"
+            String(r.form.form.fields.token).startsWith("TEST-TOKEN-")
+            String(r.again.form.fields.token) != String(r.form.form.fields.token)
+            String(r.back).startsWith("https://mkrg-c.example.test/marketing/Register?ref=")
+            r.byKey.registration.limited == true && r.byKey.registration.state == "held"
+            r.formByKey.kind == "NotFound" && r.otherSite.kind == "NotFound"
+            r.result.registration.state == "confirmed"
+            r.after.kind == "NotFound"
+        }
+    }
+)
+
+feature(
+    "a ticket order skips only the new-customer and address warnings: a Sales rule's warning still keeps it placed, its place pending",
+    {
+        when() {
+            // the user's call (Nov 15): the exemption is those two checks alone; a Sales order rule in effect still stops auto-approval
+            system(() =>
+                make("mantle.sales.policy.SalesApprovalPolicy", {
+                    salesApprovalPolicyId: prefix + "_RULE_A",
+                    organizationPartyId: orgA,
+                    purposeEnumId: "SapOrder",
+                    ruleTypeEnumId: "SarAmount",
+                    thresholdAmount: "10",
+                    currencyUomId: "USD",
+                    fromDate: new Date(Date.now() - 60000)
+                })
+            )
+            const reserved = as(users.manager, E + "reserve#Registration", {
+                registrationPolicyId: ids.paid.registrationPolicyId,
+                ticketTypeId: ids.paid.ticketTypeId,
+                quantity: 1,
+                buyerName: "Ruled buyer",
+                buyerEmail: "ruled@mkrg.example.test",
+                requestKey: key()
+            })
+            const completed = as(users.manager, E + "complete#Registration", {
+                reservationId: reserved.reservationId,
+                attendees: [{name: "Ruled buyer"}],
+                acceptTerms: true,
+                requestKey: key()
+            })
+            const started = as(users.manager, E + "start#RegistrationPayment", {reservationId: reserved.reservationId})
+            // the provider's result arrives (the job's lookup)
+            system(() =>
+                ec.service
+                    .sync()
+                    .name(E + "refresh#RegistrationPayment")
+                    .parameters({reservationId: reserved.reservationId})
+                    .disableAuthz()
+                    .call()
+            )
+            const orderId = reservationOf(reserved.reservationId).orderId
+            const warnings = system(() =>
+                Array.from(
+                    ec.service
+                        .sync()
+                        .name("mantle.order.OrderInfoServices.check#OrderPreApprove")
+                        .parameters({orderId})
+                        .disableAuthz()
+                        .call().approveWarnings || []
+                )
+            )
+            const order = row("mantle.order.OrderHeader", {orderId})
+            // the rule ended again, so later features' orders are not stopped by it
+            system(() =>
+                ec.service
+                    .sync()
+                    .name("update#mantle.sales.policy.SalesApprovalPolicy")
+                    .parameters({salesApprovalPolicyId: prefix + "_RULE_A", thruDate: new Date()})
+                    .disableAuthz()
+                    .call()
+            )
+            return {reserved, completed, started, warnings, order, states: states(reserved.reservationId)}
+        },
+        then(r) {
+            r.reserved.refusal == "" && r.completed.refusal == "" && r.started.refusal == ""
+            !r.order.productStoreId && r.order.orderPurposeEnumId == "OrpEventRegistration"
+            r.order.statusId == "OrderPlaced"
+            r.states == "EvrPending"
+            r.warnings.length == 1 && r.warnings[0].includes("Sales order approval needed")
+        }
+    }
+)
 
 feature("a cancelled order releases its places; a client's reservations past its limit are refused and hold no seat", {
     when() {

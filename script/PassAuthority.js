@@ -89,6 +89,8 @@ const TOKEN_WRITES = [
     'reserveRegistration',
     'completeRegistration',
     'startRegistrationPayment',
+    // the provider's posted form of a pending payment, by the capability (the user's call, Nov 15)
+    'getRegistrationPaymentForm',
     'getRegistration',
     'cancelRegistration',
 ]

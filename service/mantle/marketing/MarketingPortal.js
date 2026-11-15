@@ -1124,6 +1124,16 @@ function startRegistrationPayment(p) {
         payment: out
     }
 }
+// getRegistrationPaymentForm (the user's call, Nov 15): for a pending payment whose provider page takes a posted form token (Accept
+// Hosted), the page's address and a fresh token for Register's relay to post at once; by the capability or the buyer's account
+// only (never the return key), while its places are held. Nothing confirms from it: the provider's return reads the state and the
+// verified result decides.
+function getRegistrationPaymentForm(p) {
+    const {reservation, policy, via} = reach(p)
+    if (via === "return") unavailable()
+    const form = asPage(() => payments().paymentForm(reservation.reservationId, organizationName(policy.organizationPartyId)))
+    return {form}
+}
 // getRegistration: the reservation's state with its payment looked up (bounded) and its order placed once paid; showTicket (with a
 // fresh operationId) issues a new entry code for one confirmed place, answered once with its QR, revoking the earlier code.
 function getRegistration(p) {
@@ -1349,6 +1359,7 @@ const operations = {
     reserveRegistration,
     completeRegistration,
     startRegistrationPayment,
+    getRegistrationPaymentForm,
     getRegistration,
     cancelRegistration: cancelRegistrationPublic
 }

@@ -324,6 +324,8 @@
     ['POST', 'marketing/registration', 'reserveRegistration'],
     ['POST', 'marketing/registration/completion', 'completeRegistration'],
     ['POST', 'marketing/registration/payment', 'startRegistrationPayment'],
+    // the provider's posted form (Accept Hosted) of a pending payment: a fresh token for Register's relay (the user's call, Nov 15)
+    ['POST', 'marketing/registration/payment/form', 'getRegistrationPaymentForm'],
     ['POST', 'marketing/registration/view', 'getRegistration'],
     ['POST', 'marketing/registration/cancellation', 'cancelRegistration'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
