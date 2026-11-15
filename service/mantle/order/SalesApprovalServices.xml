@@ -26,7 +26,7 @@ along with this software (see the LICENSE.md file). If not, see
             replace the earlier ones (one per currency). previewOnly Y answers the changes and writes nothing. Needs SALES_CONFIGURE for
             an organization of the caller's sales scope (PERMISSION_DENIED, ORGANIZATION_DENIED); refuses no reason
             (REASON_REQUIRED), nothing changed (NO_CHANGE), a start before now or before the row it replaces (DATE_INVALID), a missing
-            or stale revision of the row it replaces (REVISION_REQUIRED, REVISION_CHANGED), a team of another organization (TEAM_INVALID), an unknown template (TEMPLATE_INVALID), a
+            or stale revision of the row it replaces (REVISION_REQUIRED, REVISION_CHANGED), a team of another organization (TEAM_INVALID), a default facility that is not a warehouse, store or plant of the organization (FACILITY_INVALID), an unknown template (TEMPLATE_INVALID), a
             day count that is not a positive whole number (VALUE_INVALID) and a threshold without its currency or twice in one
             (CURRENCY_INVALID, THRESHOLD_DUPLICATE).</description>
         <in-parameters>
@@ -45,6 +45,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="reminderDays"/>
             <parameter name="rfqAcknowledge"><description>Y: a request for quote made from mail is acknowledged to its sender (Sales P20
                 review)</description></parameter>
+            <parameter name="defaultFacilityId"><description>The facility a Sales order part ships from when it names none (follow-up
+                5): a warehouse, store or plant the organization owns</description></parameter>
             <parameter name="acceptanceThresholds" type="List"><description>Each a map: currencyUomId, thresholdAmount (empty to
                 remove it)</description></parameter>
             <parameter name="changeReason"/>

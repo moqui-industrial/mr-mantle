@@ -25,7 +25,8 @@ along with this software (see the LICENSE.md file). If not, see
             quote validity in days, the templates of the quote, the storeless confirmation and the reminder, the customer's response
             requirements, the approval setting (orderApprovalRequired: the seller's sales orders wait for a Sales approver, off by
             default, impl-sales §4), whether an accepted net-terms order is approved as the system while that setting is off, the
-            unverified lead intake retention and the reminder interval; the high-value acceptance thresholds per currency are
+            unverified lead intake retention, the reminder interval and the default shipping facility of a Sales order part (impl-sales
+            follow-up 5); the high-value acceptance thresholds per currency are
             SalesPolicyThreshold rows. One row is in effect at a time; a change publishes a successor from now or later and ends the
             row it replaces there (store#SalesPolicy). With no row in effect every default is the built behaviour.</description>
         <field name="salesPolicyId" type="id" is-pk="true"/>
@@ -51,10 +52,15 @@ along with this software (see the LICENSE.md file). If not, see
             whose lead never qualified is kept before purge#LeadIntakes blanks it (30 when empty)</description></field>
         <field name="reminderDays" type="number-integer" enable-audit-log="true"><description>Days after an issue a reminder is sent;
             empty sends none</description></field>
+        <field name="defaultFacilityId" type="id" enable-audit-log="true"><description>The facility of the organization a Sales
+            order part ships from (a quote, a direct order, a copy, a recurring order) when it names none: reservation and the
+            shipment's origin read it (impl-sales follow-up 5); empty leaves the part without one</description></field>
         <field name="changeReason" type="text-long" enable-audit-log="true"/>
         <field name="changedByUserId" type="id"/>
         <relationship type="one" title="Organization" related="mantle.party.Party" short-alias="organization">
             <key-map field-name="organizationPartyId" related="partyId"/></relationship>
+        <relationship type="one-nofk" title="DefaultFacility" related="mantle.facility.Facility" short-alias="defaultFacility">
+            <key-map field-name="defaultFacilityId" related="facilityId"/></relationship>
         <relationship type="one-nofk" title="DefaultTeam" related="mantle.party.Party" short-alias="defaultTeam">
             <key-map field-name="defaultTeamPartyId" related="partyId"/></relationship>
         <relationship type="many" related="mantle.sales.policy.SalesPolicyThreshold" short-alias="thresholds">

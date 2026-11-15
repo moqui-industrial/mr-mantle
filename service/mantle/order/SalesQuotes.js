@@ -379,6 +379,8 @@ function createQuote(p, kind = "quote") {
     const created = template
         ? templates().cloneForQuote(template, Object.assign({enteredByPartyId: userScope.partyId}, values))
         : call("mantle.order.OrderServices.create#Order", values)
+    // follow-up 5: the part ships from the seller's default facility (SalesPolicy.defaultFacilityId; none, no facility)
+    approvals().applyDefaultFacility(created.orderId)
     const assign = (partyId, roleTypeId) => {
         if (partyId && !one(PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId}))
             call("create#" + PART_PARTY, {orderId: created.orderId, orderPartSeqId: created.orderPartSeqId, partyId, roleTypeId})
@@ -796,6 +798,9 @@ function getQuote(p) {
             expired: thru != null && thru < now,
             otherPartyOrderId: part.otherPartyOrderId || "",
             postalContactMechId: part.postalContactMechId || null,
+            // follow-up 5: the facility the part ships from (update#SalesOrderFacility on a draft)
+            facilityId: part.facilityId || null,
+            facilityName: part.facilityId ? approvals().facilityName(part.facilityId) : "",
             addressText: addressText(part.postalContactMechId),
             productsText: moneyText(totals.products, currencyUomId),
             shippingText: moneyText(totals.shipping, currencyUomId),
