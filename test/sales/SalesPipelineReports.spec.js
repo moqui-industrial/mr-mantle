@@ -312,9 +312,9 @@ feature(
             found.conversion.convertedCount == 1
             found.conversion.disqualifiedCount == 1
             num(found.conversion.conversionPercent) == 50
-            // the visit step waits for Marketing: not available, never zero
+            // the visit step is Marketing's visits (impl-marketing P20, count#SalesVisits): none recorded for this organization
             found.funnelSteps[0].stepKey == "visits"
-            found.funnelSteps[0].count == null
+            found.funnelSteps[0].count == 0
             found.funnelSteps[2].count == 1
         }
     }

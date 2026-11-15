@@ -26,7 +26,8 @@
 //   selected with the winner's variant for the dispatch, which checks each again just before (consent, suppression, a withdrawal at the
 //   address, a changed address). One release: a second answers the first, whatever key it names.
 // - Results (get#Experiment): per variant the assigned, accepted and confirmed delivered counts from the ledger, the tracking-enabled
-//   share, and unique clicks and conversions "not available" until tracking (P15) and attribution (P20) record them; a test message
+//   share, unique clicks (P15: a tracked recipient's non-automated click) and conversions (P20: the orders whose primary attribution is
+//   a tracked recipient's own click or visit); the measure the experiment names decides what is compared; a test message
 //   (test#Send of a variant) is a delivery of its own source and counts nowhere.
 // Refusals carry reason codes (EntityLib.js denied).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -406,6 +407,32 @@ const observedOf = (variant, tracked) =>
     ec.resource
         .script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
         .uniqueClickers(tracked.map(recipient => recipient.campaignRecipientId))
+// P20: conversions of a variant's tracking-enabled sample: the orders whose decision in force is one of its recipients' own
+// non-automated clicks or page visits (MarketingOutcomeLink trackingEventId), each order once.
+function conversionsOf(tracked) {
+    const eventIds = []
+    for (const ids of slices(tracked.map(recipient => recipient.campaignRecipientId)))
+        for (const event of Array.from(
+            find("mantle.marketing.tracking.MarketingTrackingEvent")
+                .condition("campaignRecipientId", "in", ids)
+                .condition("eventKindEnumId", "in", ["MteClick", "MteVisit"])
+                .condition("automated", "is-null", null)
+                .selectField("trackingEventId")
+                .list()
+        ))
+            eventIds.push(event.trackingEventId)
+    const orders = new Set()
+    for (const ids of slices(eventIds))
+        for (const link of Array.from(
+            find("mantle.marketing.tracking.MarketingOutcomeLink")
+                .condition("trackingEventId", "in", ids)
+                .condition("thruDate", "is-null", null)
+                .selectField("orderId")
+                .list()
+        ))
+            orders.add(link.orderId)
+    return orders.size
+}
 // The deliveries of recipients (ids of the ledger), counted: {accepted, delivered, failed, suppressed}.
 function deliveryTotals(deliveryIds) {
     const totals = {accepted: 0, delivered: 0, failed: 0, suppressed: 0}
@@ -442,6 +469,7 @@ function resultsOf(row, experiment, variants) {
         const trackedTotals = deliveryTotals(tracked.map(recipient => recipient.messageDeliveryId).filter(Boolean))
         const assigned = recipients.length
         const uniqueClicks = observedOf(variant, tracked)
+        const conversions = conversionsOf(tracked)
         return {
             campaignExperimentVariantId: variant.campaignExperimentVariantId,
             variantLabel: variant.variantLabel,
@@ -460,7 +488,8 @@ function resultsOf(row, experiment, variants) {
                 : "",
             uniqueClicks,
             clicksText: String(uniqueClicks),
-            conversionsText: "Not available",
+            conversions,
+            conversionsText: String(conversions),
             denominatorText: trackedTotals.accepted + " accepted with tracking",
             winner: experiment.winnerVariantId === variant.campaignExperimentVariantId
         }
@@ -537,7 +566,7 @@ function getExperiment(p) {
     const decision = compare(
         results.variantRows.map(entry => ({
             variantId: entry.campaignExperimentVariantId,
-            observed: entry.uniqueClicks,
+            observed: experiment.measureEnumId === "MxmConversionRate" ? entry.conversions : entry.uniqueClicks,
             denominator: entry.trackedAcceptedCount
         }))
     )
@@ -803,6 +832,10 @@ function releaseWinner(p) {
             completedDate: null
         })
     d.dispatchAfterCommit(row.campaignSendId)
+    // P20 (F85): the winner's marker on Insights' business series, after the commit
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/BusinessEvents.js")
+        .register("CampaignSent", row.campaignSendId + ":winner")
     return {
         campaignSendId: row.campaignSendId,
         released: true,

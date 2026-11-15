@@ -209,4 +209,13 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.UserPermission userPermissionId="MARKETING_CHECKIN" description="Marketing Check-in (an event's door tablet checks in entry codes)"/>
     <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MARKETING_CHECKIN" fromDate="0"/>
     <!-- ===== end of Marketing P18 ===== -->
+
+    <!-- ===== Marketing P20: reports (impl-marketing P20; design-marketing §11, CX-OPS-REPORTS) ===== -->
+    <!-- The row filter of Marketing's datasets (mr-boss report/boss-marketing-deliveries.json and boss-marketing-audience.json): a report
+        reader's Marketing scope (MarketingReportServices get#ReportRowFilter), so the report engine calls it as its own reviewed code; a
+        dataset names its organization field (organizationField). -->
+    <moqui.basic.Enumeration enumId="MantleMarketingScope" enumTypeId="ReportScopePolicy"
+            enumCode="mantle.marketing.MarketingReportServices.get#ReportRowFilter" description="the viewer's Marketing report scope (the organizations of their Marketing scope, for a report reader)"
+            optionValue="organizationField"/>
+    <!-- ===== end of Marketing P20 ===== -->
 </entity-facade-xml>

@@ -329,6 +329,10 @@ function releaseSend(p) {
         dispatchNote: null
     })
     if (!later) dispatchAfterCommit(row.campaignSendId)
+    // P20 (F85): the campaign-sent marker on Insights' business series, after the commit (a failure never undoes the release)
+    ec.resource
+        .script("component://mr-mantle/service/mantle/party/BusinessEvents.js")
+        .register("CampaignSent", row.campaignSendId)
     return {
         campaignSendId: row.campaignSendId,
         released: true,
