@@ -1250,7 +1250,8 @@ function keepWatermark(watermarkKey, itemCount, failed, prefix) {
 //   row cleared, its outcome kept;
 // - an unconfirmed public subscription request past its expiry by the grace days: removed with its tokens; a confirmed or decided one
 //   is kept;
-// - tracking events older than the organization's statisticsRetentionDays (none without the setting);
+// - tracking events older than the organization's statisticsRetentionDays (none without the setting), and the visitor-key digest
+//   a checkout kept with an order of the organization placed before then (follow-up 4 review);
 // - personalized link tokens past their expiry.
 const retention = {graceDays: 7, perKind: 500}
 function eachOnItsOwn(items, label, action, outcome) {
@@ -1350,6 +1351,30 @@ function runMarketingRetention(p) {
             events.filter(id => !named.has(id)),
             id => "tracking event " + id,
             id => find(EVENT, {trackingEventId: id}).deleteAll(),
+            outcome
+        )
+        // follow-up 4 review: the visitor-key digest a checkout kept with an order of the organization, past the same retention
+        // (the events it would match are gone; a decision keeps the event it names), cleared
+        const keyed = Array.from(
+            find("mantle.order.OrderHeader")
+                .condition("marketingVisitorKeyHash", "is-not-null", null)
+                .condition("placedDate", "less", new Date(now - days * DAY))
+                .selectField("orderId")
+                .list()
+        ).map(order => order.orderId)
+        const orders = new Set()
+        for (const part of slices(keyed))
+            for (const orderPart of Array.from(
+                find("mantle.order.OrderPart", {vendorPartyId: policy.organizationPartyId})
+                    .condition("orderId", "in", part)
+                    .selectField("orderId")
+                    .list()
+            ))
+                if (orders.size < max) orders.add(orderPart.orderId)
+        eachOnItsOwn(
+            Array.from(orders),
+            orderId => "order " + orderId + " visitor key",
+            orderId => find("mantle.order.OrderHeader", {orderId}).updateAll({marketingVisitorKeyHash: null}),
             outcome
         )
     }

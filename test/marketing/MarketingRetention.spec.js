@@ -1,7 +1,8 @@
 // Marketing's retention (impl-marketing P20; design-marketing §15.3 "Reporting and retention"; MarketingReportServices
 // run#MarketingRetention): an unconfirmed public request past its expiry is removed once with its tokens and a confirmed one kept; a
 // purged import's rows lose their names and addresses and keep their outcomes; tracking events past the organization's statistics
-// retention are removed but one an attribution names; expired link tokens are removed; an item that cannot be removed is named and the
+// retention are removed but one an attribution names, and an order's visitor-key digest past it cleared (follow-up 4 review: a recent
+// order's and another organization's kept); expired link tokens are removed; an item that cannot be removed is named and the
 // rest done.
 // Standalone: spec-local organizations, people, a list, requests, an import, events, a decision and tokens.
 // Run: ./moq test mr-mantle --spec MarketingRetention
@@ -93,6 +94,23 @@ spec({
                 trackingEventId: prefix + "_EV_NAMED",
                 placedDate: ago(39)
             })
+            // follow-up 4 review: orders keeping a checkout's visitor-key digest: A's placed 40 days ago, A's 5 days ago, and another
+            // seller's 40 days ago (no policy of its own)
+            organization(prefix + "_ORG_B", "Retention B")
+            for (const [name, days, vendor] of [
+                ["OLD", 40, orgA],
+                ["NEW", 5, orgA],
+                ["B", 40, prefix + "_ORG_B"]
+            ]) {
+                make("mantle.order.OrderHeader", {
+                    orderId: prefix + "_VK_" + name,
+                    statusId: "OrderPlaced",
+                    placedDate: ago(days),
+                    entryDate: ago(days),
+                    marketingVisitorKeyHash: "digest-" + name
+                })
+                make("mantle.order.OrderPart", {orderId: prefix + "_VK_" + name, orderPartSeqId: "01", vendorPartyId: vendor})
+            }
             // link tokens: one expired, one current
             make("mantle.marketing.tracking.MarketingTrackingToken", {
                 tokenHash: prefix + "-expired",
@@ -134,6 +152,9 @@ feature(
                 recent: event("NEW"),
                 expired: row("mantle.marketing.tracking.MarketingTrackingToken", {tokenHash: prefix + "-expired"}),
                 current: row("mantle.marketing.tracking.MarketingTrackingToken", {tokenHash: prefix + "-current"}),
+                keyed: ["OLD", "NEW", "B"].map(
+                    name => row("mantle.order.OrderHeader", {orderId: prefix + "_VK_" + name}).marketingVisitorKeyHash
+                ),
                 watermark: row("mantle.marketing.tracking.MarketingReportWatermark", {watermarkKey: "retention"})
             }
         },
@@ -149,6 +170,8 @@ feature(
             // the old event removed, the one a decision names and the recent one kept
             r.old == null && r.named != null && r.recent != null
             r.expired == null && r.current != null
+            // A's old order loses its visitor-key digest; A's recent one and the other seller's keep theirs
+            r.keyed[0] == null && r.keyed[1] == "digest-NEW" && r.keyed[2] == "digest-B"
             // a run again removes nothing it removed: only the one that still fails
             r.second.removedCount == 0
             r.second.failedCount == r.first.failedCount
