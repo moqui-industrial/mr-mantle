@@ -98,9 +98,23 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('submitForm', input)"/>
         </actions>
     </service>
+    <!-- IronStone Marketing P14: a landing page of the marketing mount -->
+    <service verb="get" noun="Page" authenticate="anonymous-all" allow-remote="false" read-only="true">
+        <description>getMarketingPage: a landing page of the site's marketing mount at a route (routePath, locale), as a visitor reads
+            it: the site page services' get#SitePage (the binding's exact published wiki version in its window, its markdown as clean
+            HTML), its title and SEO, and its parts in order, clean HTML between the embedded components its text names ("[[subscribe
+            ID]]" or "[[form ID]]" on a line of its own, at most five), which the page renders through getMarketingPublication and
+            getMarketingForm, so only a list offered or a form open on this site shows. A site without the mount and a draft,
+            scheduled, withdrawn or unknown page answer the same NotFound. Read only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getPage', input)"/>
+        </actions>
+    </service>
     <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
         <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
-            offered there or a form publication open there (P12), a ready transactional sending profile of the organization (a promotional one never sends a verification), a
+            offered there or a form publication open there (P12) or a landing page published there (P14), a ready transactional sending profile of the organization (a promotional one never sends a verification), a
             published confirmation template on each offered list, and
             the site's canonical host.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>

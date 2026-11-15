@@ -36,6 +36,9 @@
 //   verification message (as Subscribe's), after the answer is kept and never inferred from an answer.
 // - P13: a lead form's page shows its rule's notice; its answer, once kept, is captured and handed to Sales after the request commits,
 //   apart from the answer (MarketingLeads.js), with values only from the publication, the rule and Marketing's own verification.
+// - P14: get#Page (the Page page): a landing page of the site's marketing mount, the site page services' published version in its
+//   window as clean HTML, in parts between the components it embeds by id (a list offered on the site, a form publication), each of
+//   which the page renders through its own operation; a draft, withdrawn or unknown page the same NotFound.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const audiences = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAudiences.js").audience
 const apps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -783,6 +786,82 @@ function applySubmissionEffects(row, formSubmissionId, organizationPartyId, p) {
     }
 }
 
+// ===== P14: get#Page (a landing page of the marketing mount) =====
+const sitePages = () => ec.resource.script("component://mr-mantle/service/mantle/public/SitePages.js")
+const routePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*){0,5}$/
+// An embedded component: a paragraph of its own naming a list offered on the site or a form publication by its id, "[[subscribe
+// ID]]" or "[[form ID]]" in the page's text (no expression, no markup); at most five a page, the rest left out.
+const embedPattern = /<p>\s*\[\[(subscribe|form)\s+([A-Za-z0-9_-]{1,40})\]\]\s*<\/p>/g
+const embedLimit = 5
+// The site's marketing mount row (its appMountId), the one served.
+const marketingMountOf = siteId =>
+    Array.from(find("mantle.public.PublicSiteApp", {siteId, app: "marketing", enabled: "Y"}).list())[0] || null
+// A page's parts in order: its clean HTML (the site page services' markdown, cleaned) between the embedded components it names. The
+// page renders each component through its own operation (getMarketingPublication, getMarketingForm), which answers only a list
+// offered or a form open on this site, so naming a draft or another organization's record shows nothing.
+function pageParts(body) {
+    const parts = []
+    let at = 0,
+        embeds = 0,
+        match
+    embedPattern.lastIndex = 0
+    while ((match = embedPattern.exec(body)) !== null) {
+        if (match.index > at) parts.push({kind: "html", html: body.slice(at, match.index)})
+        if (embeds++ < embedLimit)
+            parts.push(
+                match[1] === "subscribe" ? {kind: "subscribe", contactListId: match[2]} : {kind: "form", publicationId: match[2]}
+            )
+        at = match.index + match[0].length
+    }
+    if (at < body.length) parts.push({kind: "html", html: body.slice(at)})
+    return parts
+}
+// getPage: a published landing page of the site's marketing mount at a route, as a visitor reads it (the site page services'
+// get#SitePage: the binding's exact published version in its window); a draft, withdrawn, scheduled or unknown page, or a site
+// without the mount, the same NotFound.
+function getPage(p) {
+    served(p.siteId)
+    const mount = marketingMountOf(p.siteId)
+    const routePath = String(p.routePath || "").replace(/^\/+|\/+$/g, "")
+    if (!mount || !routePattern.test(routePath)) unavailable()
+    let found
+    try {
+        found = sitePages().execute("getSitePage", {
+            siteId: p.siteId,
+            appMountId: mount.appMountId,
+            routePath,
+            locale: text(p.locale)
+        })
+    } catch (error) {
+        ec.message.clearErrors()
+        unavailable()
+    }
+    const page = found.page
+    return {
+        page: {
+            sitePageId: page.sitePageId,
+            title: page.title || page.routePath,
+            seoTitle: page.seoTitle || null,
+            description: page.seoDescription || null,
+            socialImageUrl: page.socialImageUrl || null,
+            locale: page.locale ? String(page.locale).replace(/_/g, "-") : null,
+            routePath: page.routePath,
+            url: page.url,
+            version: page.version,
+            parts: pageParts(String(page.body || ""))
+        }
+    }
+}
+// The landing pages live on a site's marketing mount now (readiness).
+const livePagesOf = siteId => {
+    const mount = marketingMountOf(siteId)
+    if (!mount) return 0
+    const at = nowMs()
+    return rows("mantle.public.PublicSitePage", {siteId, appMountId: mount.appMountId}).filter(
+        row => !!row.versionName && (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
+    ).length
+}
+
 // ===== check#MarketingAppReadiness =====
 // The Marketing app's checks of a site (PublicApps.js): its target an internal organization, a list offered there (a mount with
 // no published record is named), a ready transactional sending profile, a published confirmation template on each offered list, and the
@@ -793,8 +872,11 @@ function appReadiness(p) {
     return {
         checks: [
             {name: "organization", ready: organization},
-            // P12: a list offered or a form publication open on the site
-            {name: "published list or form", ready: offers.length > 0 || (organization && openFormsOf(p.siteId, p.targetId) > 0)},
+            // P12: a list offered or a form publication open on the site; P14: or a landing page published there
+            {
+                name: "published list, form or page",
+                ready: offers.length > 0 || (organization && (openFormsOf(p.siteId, p.targetId) > 0 || livePagesOf(p.siteId) > 0))
+            },
             {name: "transactional sending profile", ready: organization && !!profileFor(p.targetId)},
             {
                 name: "confirmation template",
@@ -928,7 +1010,8 @@ const operations = {
     attemptVerification,
     fileCheckout,
     getForm,
-    submitForm
+    submitForm,
+    getPage
 }
 const internalOperations = new Set(["appReadiness", "buildVerification", "attemptVerification", "fileCheckout"])
 ;({

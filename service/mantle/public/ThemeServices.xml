@@ -246,9 +246,12 @@
         <description>Commerce's pages of the sites of the user's stores (or one site): title, mount, route, locale, policy role,
             template, SEO, the published and scheduled versions, window, state and a failed scheduled publication; by title
             or route ignoring case, locale, role and state (draft, published, withdrawn, scheduled, failed), a page at a
-            time. With sitePageId that page alone, with the menus that link to it. COMMERCE_VIEW and the site's store.</description>
+            time. With sitePageId that page alone, with the menus that link to it. COMMERCE_VIEW and the site's store. With app
+            marketing (IronStone Marketing P14) the storeless landing pages of the sites whose marketing mount targets an organization
+            of the user's Marketing scope, for a Marketing reader; a page with sitePageId is read in its own mount's app.</description>
         <in-parameters>
             <parameter name="sitePageId"/>
+            <parameter name="app"><description>shop (the default) or marketing</description></parameter>
             <parameter name="siteId"/>
             <parameter name="term"/>
             <parameter name="locale"/>
@@ -285,9 +288,13 @@
             versionNote; with baseVersionName a page saved since by someone else answers conflict). Saving never publishes.
             Refuses a taken route (ROUTE_TAKEN) or role (ROLE_TAKEN), a Forum role (ROLE_RESERVED), a stale stamp or publication revision
             (REVISION_STALE), a store page space without restrictUpdate (SPACE_NOT_RESTRICTED) and values out of shape
-            (VALUE_INVALID, SCHEME_REFUSED). COMMERCE_THEME_EDIT and the site's store.</description>
+            (VALUE_INVALID, SCHEME_REFUSED). COMMERCE_THEME_EDIT and the site's store. A landing page of a site's marketing mount
+            (IronStone Marketing P14; a new one with app marketing) MARKETING_CONTENT_EDIT and the mount's organization, its text a page
+            of the organization's page space, no template or policy role (TEMPLATE_UNKNOWN, ROLE_RESERVED); a page's app is its
+            mount's, so a Commerce designer cannot edit a landing page nor a Marketing author a store's.</description>
         <in-parameters>
             <parameter name="sitePageId"/>
+            <parameter name="app"><description>A new page's app: shop (the default) or marketing</description></parameter>
             <parameter name="siteId"/>
             <parameter name="appMountId"/>
             <parameter name="title"/>

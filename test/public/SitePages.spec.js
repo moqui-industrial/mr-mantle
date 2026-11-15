@@ -681,3 +681,100 @@ feature(
         }
     }
 )
+
+// IronStone Marketing P14 (impl-marketing F23): the storeless marketing mount. A landing page is a page of the site's marketing
+// mount, worked through the mount's organization with MARKETING_CONTENT_EDIT, its text in the organization's page space; a page
+// of another organization's mount is refused, a Commerce designer cannot edit it and a Marketing author cannot edit a Shop's page.
+feature(
+    "a Marketing author drafts and publishes a storeless landing page on the site's marketing mount; the two apps' pages stay apart",
+    {
+        when() {
+            const marketer = (kind, organizationPartyId) =>
+                system(() => {
+                    const id = user(kind, organizationPartyId, ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT"])
+                    call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                    return id
+                })
+            const author = marketer("mktauthor", orgA)
+            const otherAuthor = marketer("mktother", orgB)
+            system(() => {
+                for (const [siteId, target] of [
+                    [ids.site, orgA],
+                    [ids.otherSite, orgB]
+                ])
+                    make("mantle.public.PublicSiteApp", {
+                        siteId,
+                        appMountId: "marketing",
+                        app: "marketing",
+                        pathPrefix: "/marketing",
+                        enabled: "Y",
+                        targetId: target
+                    })
+            })
+            const created = run(author, T + "store#SitePage", {
+                app: "marketing",
+                siteId: ids.site,
+                title: "Spring sale",
+                routePath: "spring",
+                pageText: "# Spring\n\nTwenty percent off.\n"
+            })
+            const binding = page(created.sitePageId)
+            const wikiPage = one("moqui.resource.wiki.WikiPage", {wikiPageId: binding.wikiPageId})
+            const orgSpace = one("mantle.marketing.content.MarketingPageSpace", {organizationPartyId: orgA})
+            const space = one("moqui.resource.wiki.WikiSpace", {wikiSpaceId: wikiPage.wikiSpaceId})
+            const template = run(author, T + "store#SitePage", {sitePageId: created.sitePageId, templateKey: "page.landing"})
+            const otherMount = run(otherAuthor, T + "store#SitePage", {
+                app: "marketing",
+                siteId: ids.site,
+                title: "Mine",
+                routePath: "mine"
+            })
+            const otherEdit = run(otherAuthor, T + "store#SitePage", {sitePageId: created.sitePageId, title: "Changed"})
+            const designerEdit = run(users.lead, T + "store#SitePage", {sitePageId: created.sitePageId, title: "Changed"})
+            const authorShop = run(author, T + "store#SitePage", {sitePageId: state.pageId, title: "Changed"})
+            const draft = live({appMountId: "marketing", routePath: "spring"})
+            const published = publish(author, created.sitePageId, {versionName: created.versionName})
+            const designerPublish = publish(users.lead, created.sitePageId, {versionName: created.versionName})
+            const read = live({appMountId: "marketing", routePath: "spring"})
+            const authorList = run(author, T + "find#SitePages", {app: "marketing"})
+            const designerList = run(users.lead, T + "find#SitePages", {siteId: ids.site})
+            return {
+                created,
+                binding,
+                orgSpace,
+                space,
+                template,
+                otherMount,
+                otherEdit,
+                designerEdit,
+                authorShop,
+                draft,
+                published,
+                designerPublish,
+                read,
+                authorList,
+                designerList
+            }
+        },
+        then(r) {
+            r.created.error == ""
+            r.binding.appMountId == "marketing"
+            r.orgSpace.wikiSpaceId == r.space.wikiSpaceId
+            r.space.restrictUpdate == "Y"
+            code(r.template) == "TEMPLATE_UNKNOWN"
+            code(r.otherMount) == "RECORD_UNAVAILABLE"
+            code(r.otherEdit) == "RECORD_UNAVAILABLE"
+            code(r.designerEdit) == "RECORD_UNAVAILABLE"
+            code(r.authorShop) == "RECORD_UNAVAILABLE"
+            code(r.draft) == "NOT_FOUND"
+            r.published.result.state == "published"
+            code(r.designerPublish) == "RECORD_UNAVAILABLE"
+            r.read.result.page.body.includes("Twenty percent off")
+            r.read.result.page.url == "/marketing/pages/spring"
+            r.authorList.pages.map(p => p.sitePageId).join() == r.created.sitePageId
+            r.authorList.pages[0].canPublish == true
+            !r.designerList.pages.some(p => p.sitePageId == r.created.sitePageId)
+            r.designerList.pages.some(p => p.sitePageId == state.pageId)
+        }
+    }
+)

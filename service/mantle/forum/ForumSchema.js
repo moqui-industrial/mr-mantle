@@ -1763,4 +1763,10 @@
             'operationId',
         ],
     },
+    // IronStone Marketing P14 (impl-marketing P14; design-marketing §8 LandingPages, §13.1): a landing page of the marketing mount,
+    // read only
+    getMarketingPage: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Page',
+        fields: ['siteId', 'routePath', 'locale'],
+    },
 })

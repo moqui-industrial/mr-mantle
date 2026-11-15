@@ -238,7 +238,8 @@
       <parameter name="result" type="Map"/>
     </out-parameters>
     <actions>
-      <!-- a Commerce page (a sitePageId) is SitePages.js's, by permission and store; the Forum's role pages Forum.js's -->
+      <!-- a Commerce page (a sitePageId) is SitePages.js's, by permission and store (a Marketing landing page, P14, by
+          MARKETING_CONTENT_EDIT and the mount's organization); the Forum's role pages Forum.js's -->
       <script>result=ec.resource.script(input?.sitePageId ? 'component://mr-mantle/service/mantle/public/SitePages.js' : 'component://mr-mantle/service/mantle/forum/Forum.js').execute('publishSitePage',input || {})</script>
     </actions>
   </service>

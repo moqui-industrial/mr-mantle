@@ -41,6 +41,8 @@ const {find, one, rows, denied, call, ms} = lib
 const dispatch = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingDispatch.js")
 // P10: a send's experiment (loaded when a send is prepared, read or tested, so it may load this module)
 const experiments = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingExperiments.js")
+// P14: newsletter assembly, a blog category's approved posts (loaded when a send naming a category is prepared)
+const contents = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingContent.js")
 
 const SEND = "mantle.marketing.campaign.CampaignSend"
 const RECIPIENT = "mantle.marketing.campaign.CampaignRecipient"
@@ -913,6 +915,8 @@ function prepareSend(p) {
     const topic = topicFor(row.contactListId, org)
     const audience = audienceOf(row)
     const asOf = ec.user.nowTimestamp
+    // P14 (design §8 ContentDetail): a send naming a blog category takes its approved posts as of now (POSTS_NONE without one)
+    const posts = row.postCategoryId ? contents().postsFor(row.postCategoryId, asOf) : null
     const evaluated = evaluateAudience(userScope, row, {topic, asOf, pageSize: p.pageSize})
     if (!blank(p.resultDigest) && text(p.resultDigest) !== evaluated.resultDigest)
         denied(
@@ -964,8 +968,15 @@ function prepareSend(p) {
                 .setSequencedIdPrimary()
         })
     )
-    // the content kept as a resource of its own: what a later read returns, whatever changes after
-    const files = writeFiles(row.campaignSendId, "prepared-r" + revision, content.body, content.bodyText)
+    // the content kept as a resource of its own: what a later read returns, whatever changes after (P14: with the posts it took, each
+    // recorded with the page version it read)
+    const files = writeFiles(
+        row.campaignSendId,
+        "prepared-r" + revision,
+        content.body + (posts ? posts.html : ""),
+        posts && content.bodyText ? content.bodyText + "\n\n" + posts.text : content.bodyText
+    )
+    if (posts) contents().recordPosts(row.campaignSendId, revision, posts, asOf)
     // P9 (P8 review F200): the attachments copied with it, so a campaign's file its editor changes after approval never reaches a
     // message
     const preparedAttachments = copyAttachments(row.campaignSendId, files.bodyLocation)
