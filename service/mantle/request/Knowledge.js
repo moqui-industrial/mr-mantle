@@ -799,13 +799,19 @@ function articleFromCase(p) {
     const removed = {}
     for (const row of titleOut.removed.concat(bodyOut.removed)) removed[row.kind] = (removed[row.kind] || 0) + row.count
     const removedList = Object.entries(removed).map(([kind, count]) => ({kind, count}))
-    // a page name has letters, digits, spaces and . , ' - _ : ( ) ! ? only (update#WikiPage)
-    const pageName = titleOut.text
-        .replace(/[^\w.\-,':()!? ]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-        .substring(0, 100)
-    if (!pageName) denied("TITLE_REQUIRED", "The article needs a title")
+    // a page name (update#WikiPage): in NFC, letters, digits and combining marks (after a letter or digit) of any script,
+    // spaces and . , ' - _ : ( ) ! ? only; at most 100 characters and 240 bytes in UTF-8, by whole characters
+    const nameChars = Array.from(
+        titleOut.text
+            .normalize("NFC")
+            .replace(/[^\p{L}\p{M}\p{Nd}_.\-,':()!? ]+/gu, " ")
+            .replace(/(^|[^\p{L}\p{M}\p{Nd}])\p{M}+/gu, "$1")
+            .replace(/\s+/g, " ")
+            .trim()
+    ).slice(0, 100)
+    while (encodeURIComponent(nameChars.join("")).replace(/%[0-9A-F]{2}/g, "_").length > 240) nameChars.pop()
+    const pageName = nameChars.join("").trim()
+    if (!pageName || pageName === "." || pageName === "..") denied("TITLE_REQUIRED", "The article needs a title")
     if (preview) return {pageName, text: bodyOut.text, removedList, wikiSpaceId}
     const parentPath = source.draftParentPath || ""
     const pagePath = (parentPath ? parentPath + "/" : "") + pageName
