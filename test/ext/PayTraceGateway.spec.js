@@ -6,7 +6,9 @@
 // with their totals, rejected enhanced data recorded and sent again without a second charge, and the Protect.js browser
 // endpoints. No card number, token or secret reaches a gateway response, a payment method or a card record. New spec, no
 // Groovy original.
-const vendorId = "ORG_ZIZI_RETAIL"
+// the seller is the spec's own internal organization, with no tax nexus and no organization above it (so no inherited tax
+// gateway retaxes its storeless order and deletes the tax lines it is written with)
+const vendorId = "PT_SPEC_SELLER"
 const P = "mantle.account.PaymentServices."
 const T = "mantle.ext.account.gateway.PayTraceServices."
 const BASE = "https://api.sandbox.paytrace.com"
@@ -17,16 +19,13 @@ let customerId, productId, addressId
 let tokenCount = 0
 const tokensSent = []
 
-// the BOSS demo's Utah nexus of Retail (impl-marketing follow-up 1) and the LOCAL gateway it inherits from ORG_ZIZI_CORP (Marketing P17
-// review) are suspended for this spec: its storeless order keeps the tax lines it is written with
-const demoTax = ec.resource.script("component://mr-mantle/test/order/DemoTaxNexus.js")
-let retailNexus = null
-
 spec({
     setupSpec() {
         login("john.doe")
-        retailNexus = demoTax.suspend({gateway: true})
         ec.artifactExecution.disableAuthz()
+        call("store#mantle.party.Party", {partyId: vendorId, partyTypeEnumId: "PtyOrganization", ownerPartyId: vendorId})
+        call("store#mantle.party.Organization", {partyId: vendorId, organizationName: "PayTrace Spec Seller"})
+        call("store#mantle.party.PartyRole", {partyId: vendorId, roleTypeId: "OrgInternal"})
         call("create#moqui.service.message.SystemMessageRemote", {
             systemMessageRemoteId: "PT_SPEC",
             description: "PayTrace spec sandbox",
@@ -100,7 +99,6 @@ spec({
         ec.artifactExecution.enableAuthz()
     },
     cleanupSpec() {
-        demoTax.restore(retailNexus)
         // the spec's payments stay in the database: with no endpoint their gateway sends nothing when a later spec's
         // poll job asks for their details, as the fixtures are off then
         ec.artifactExecution.disableAuthz()
