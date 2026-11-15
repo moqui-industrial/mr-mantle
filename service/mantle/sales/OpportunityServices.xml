@@ -256,7 +256,10 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="recurringAmount"/>
             <parameter name="recurringPlanEnumId"/>
             <parameter name="dataSourceId"/>
-            <parameter name="marketingCampaignId"/>
+            <parameter name="marketingCampaignId"><description>A campaign of the deal's organization (another organization's is
+                CAMPAIGN_INVALID, impl-marketing P13)</description></parameter>
+            <parameter name="trackingCodeId"><description>A tracking code of the deal's campaign (TRACKING_INVALID; with no campaign, the
+                code's): kept as a SalesOpportunityTracking row, added and never removed (impl-marketing P13)</description></parameter>
         </in-parameters>
     </service>
     <service verb="find" noun="Opportunities" allow-remote="false" read-only="true">

@@ -201,6 +201,15 @@ function readinessOf(row) {
             ready: !!row.siteId && sitesOf(row.organizationPartyId).some(site => site.value === row.siteId)
         }
     ]
+    // P13: a lead form's answers go to Sales by its lead rule (MarketingLeads.js): one is current before it opens
+    if (row.purposeEnumId === "FppLead")
+        checks.push({
+            name: "leadRule",
+            label: L("A lead rule hands its answers to a sales team"),
+            ready: ec.resource
+                .script("component://mr-mantle/service/mantle/marketing/MarketingLeads.js")
+                .routed(row.publicationId)
+        })
     if (row.accessEnumId === "FpaInvited")
         checks.push({
             name: "campaign",
