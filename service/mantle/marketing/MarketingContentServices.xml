@@ -217,4 +217,25 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="campaignSendId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('createContentSend', context).campaignSendId"/>
         </actions>
     </service>
+    <!-- P15 (impl-marketing §4 Nov 14): a landing page's optional review; asked and decided through CampaignServices
+        request#MarketingApproval and decide#MarketingApproval with targetKind page -->
+    <service verb="get" noun="PageReview" allow-remote="false" read-only="true">
+        <description>A landing page's review (a page of a Marketing mount of the caller's organizations, RECORD_UNAVAILABLE otherwise; any
+            Marketing reader): its state at the current text version (approved, asked, refused or not reviewed; the version is the count
+            of the text's saved versions), the decisions newest first, and whether the caller may ask for a review (MARKETING_CONTENT_EDIT,
+            none pending or approved at this version) or decide it (MARKETING_APPROVE, a request pending, not the caller's own text or
+            request). A review publishes nothing: publish#SitePage stays the content grant's act with or without one.</description>
+        <in-parameters><parameter name="sitePageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="review" type="Map"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('pageReview', context)"/>
+            <set field="review" from="found.review"/>
+            <set field="decisions" from="found.decisions"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
 </services>

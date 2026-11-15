@@ -383,7 +383,7 @@ feature(
                     : mails[address].length == 1 &&
                       mails[address][0].startsWith(variant == ids.variantB ? "Last call," : "News for")
             )
-            shown.variantList.every(v => v.assignedCount == 2 && v.acceptedCount == 2 && v.clicksText == "Not available")
+            shown.variantList.every(v => v.assignedCount == 2 && v.acceptedCount == 2 && v.clicksText == "0")
             shown.remainder.heldCount == 6
             shown.decision.decided == false && shown.experiment.winnerVariantId == null
             shown.capabilities.canChoose == false

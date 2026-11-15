@@ -802,7 +802,106 @@ function recordPosts(campaignSendId, preparedRevision, assembled, asOf) {
     )
 }
 
+// ===== a landing page's optional review (impl-marketing §4 Nov 14, P15) =====
+// The page kind of Marketing's approvals (MarketingApprovals.js targetKinds.page): a landing page of a Marketing mount, its
+// organization the mount's, its revision the count of its text's saved versions (WikiPageHistory), so a save after a request makes
+// the request stale; its author whoever saved the current version. A review publishes nothing: publish#SitePage stays the content
+// grant's act with or without one.
+const HISTORY = "moqui.resource.wiki.WikiPageHistory"
+const pageHistory = row =>
+    row?.wikiPageId
+        ? Array.from(
+              find(HISTORY, {wikiPageId: row.wikiPageId})
+                  .condition("versionName", "is-not-null", null)
+                  .orderBy("-historySeqId")
+                  .list()
+          )
+        : []
+const pageKind = {
+    read: (sitePageId, lock) => {
+        let query = sitePageId ? find(SITE_PAGE, {sitePageId}) : null
+        if (query && lock) query = query.forUpdate(true)
+        const page = query ? query.one() : null
+        const mount = page?.appMountId ? one(SITE_APP, {siteId: page.siteId, appMountId: page.appMountId}) : null
+        if (!page || !mount || mount.app !== "marketing" || !mount.targetId) return null
+        return {
+            sitePageId: page.sitePageId,
+            siteId: page.siteId,
+            title: page.title || page.routePath || page.sitePageId,
+            routePath: page.routePath,
+            wikiPageId: page.wikiPageId,
+            publishedVersionName: page.versionName || null,
+            organizationPartyId: mount.targetId
+        }
+    },
+    revision: row => pageHistory(row).length,
+    versionName: row => pageHistory(row)[0]?.versionName || null,
+    authors: row => [pageHistory(row)[0]?.userId].filter(Boolean),
+    requestable: row => {
+        if (!pageHistory(row).length) denied("NOT_READY", "Landing page " + row.sitePageId + " has no saved text to review")
+    }
+}
+// get#PageReview: a landing page's review for a Marketing reader of its mount's organization: its state at the current text version
+// (approved, asked, refused or not reviewed), the decisions, and whether the caller may ask (MARKETING_CONTENT_EDIT, none pending) or
+// decide (MARKETING_APPROVE, not their own text or request unless the one-person-team flag admits it).
+function pageReview(p) {
+    const userScope = readScope()
+    const approvals = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingApprovals.js")
+    const kind = approvals.targetKinds.page
+    const row = blank(p.sitePageId) ? null : pageKind.read(text(p.sitePageId))
+    if (!row || !marketingAccess.covers(userScope, row.organizationPartyId))
+        denied("RECORD_UNAVAILABLE", "Landing page " + text(p.sitePageId) + " is not available")
+    const revision = pageKind.revision(row)
+    const versionName = pageKind.versionName(row)
+    const short = name => (name == null ? "" : String(name).length > 12 ? String(name).slice(0, 10) : String(name))
+    const pending = revision ? approvals.pendingRequest(kind, row.sitePageId, revision) : null
+    const approved = revision ? approvals.currentApproval("page", row.sitePageId, revision) : null
+    const decisions = approvals.decisionRows(kind, row.sitePageId, null).slice(0, 20)
+    const latest = decisions.find(entry => Number(entry.targetRevision) === revision && !entry.superseded) || null
+    const authorIds = pageKind.authors(row).concat([pending?.decidedByUserId].filter(Boolean))
+    const own = authorIds.includes(ec.user.userId)
+    const caps = userScope.capabilities
+    const stateText = approved
+        ? "Approved at version " + short(versionName)
+        : pending
+          ? "Review asked at version " + short(versionName)
+          : latest?.decisionEnumId === "MddRefused"
+            ? "Refused at version " + short(versionName) + (latest.reason ? ": " + latest.reason : "")
+            : revision
+              ? "Not reviewed at version " + short(versionName)
+              : "No text saved yet"
+    return {
+        review: {
+            sitePageId: row.sitePageId,
+            title: row.title,
+            revision,
+            versionName,
+            versionShort: short(versionName),
+            stateText,
+            stateColor: approved
+                ? "positive"
+                : pending
+                  ? "warning"
+                  : latest?.decisionEnumId === "MddRefused"
+                    ? "negative"
+                    : "grey-8",
+            pending: !!pending,
+            approved: !!approved,
+            publishedIsReviewed: !!approved && row.publishedVersionName === versionName
+        },
+        decisions,
+        capabilities: {
+            canRequest: !!caps.contentEdit && revision > 0 && !pending && !approved,
+            canDecide:
+                !!caps.approve &&
+                !!pending &&
+                (!own || approvals.selfApprovalAdmits(approvals.policyOf(row.organizationPartyId), "page", null))
+        }
+    }
+}
+
 const operations = {
+    pageReview,
     findContent,
     getContent,
     storeContent,
@@ -817,6 +916,7 @@ const operations = {
     kinds,
     postsFor,
     recordPosts,
+    pageKind,
     // each operation checks the caller's Marketing scope and permission (and the wiki's own rule for a post), and reads and writes
     // with artifact authorization off
     execute(op, parameters) {

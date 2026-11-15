@@ -40,7 +40,6 @@ const SUBMISSION = "mantle.party.FormSubmission"
 const INVITATION = "mantle.party.FormInvitation"
 const FORM = "moqui.screen.form.DbForm"
 const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
-const TRACKING = "mantle.marketing.tracking.TrackingCode"
 const SERVICES = "mantle.marketing.MarketingFormServices."
 const INTAKE_SERVICE = "mantle.sales.OpportunityServices.store#LeadIntake"
 const SOURCE_PUBLICATION = "MlsFormPublication"
@@ -1027,25 +1026,6 @@ function captureAfterCommit(formSubmissionId) {
         .registerOnCommit()
 }
 
-// ===== the tracking codes of a campaign (Sales' lead forms; P15 adds the tracking links) =====
-// find#TrackingLinks: a campaign's tracking codes for a Marketing reader of its organization (current ones unless includeEnded).
-function findTrackingLinks(p) {
-    const userScope = readScope()
-    const campaign = blank(p.marketingCampaignId) ? null : one(CAMPAIGN, {marketingCampaignId: text(p.marketingCampaignId)})
-    if (!campaign || !marketingAccess.covers(userScope, campaign.organizationPartyId))
-        denied("RECORD_UNAVAILABLE", "Campaign " + (p.marketingCampaignId || "") + " is not available")
-    const codes = Array.from(
-        find(TRACKING, {marketingCampaignId: campaign.marketingCampaignId}).orderBy("trackingCodeId").limit(limits.rows).list()
-    ).filter(row => yes(p.includeEnded) || lib.active(row))
-    return {
-        trackingLinkList: codes.map(row => ({
-            trackingCodeId: row.trackingCodeId,
-            label: row.description || row.trackingCodeId,
-            current: lib.active(row)
-        }))
-    }
-}
-
 const operations = {
     findLeadRules,
     getLeadRule,
@@ -1056,8 +1036,7 @@ const operations = {
     processLeadCaptures,
     runLeadCaptures,
     captureSubmission,
-    handCapture,
-    findTrackingLinks
+    handCapture
 }
 ;({
     noticeOf,

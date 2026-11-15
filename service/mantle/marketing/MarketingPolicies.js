@@ -23,7 +23,7 @@ const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
 const text = value => (value == null ? "" : String(value).trim())
 const blank = value => value == null || value === ""
 // The policy's settings: indicators and whole numbers of at least zero.
-const indicatorFields = ["selfApprovalAllowed", "managerRequired"]
+const indicatorFields = ["selfApprovalAllowed", "managerRequired", "visitorKeys"]
 const countFields = [
     "audienceLimit",
     "frequencyCapCount",
@@ -53,6 +53,8 @@ const policyRow = row =>
               statisticsRetentionDays: row.statisticsRetentionDays,
               explanation: row.explanation || "",
               testAddresses: row.testAddresses || "",
+              trackingDomains: row.trackingDomains || "",
+              visitorKeys: row.visitorKeys === "Y" ? "Y" : "N",
               fromDateText: lib.dateText(row.fromDate),
               thruDateText: lib.dateText(row.thruDate)
           }
@@ -89,9 +91,25 @@ function settingsOf(p) {
         if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(address) || address.length > 254)
             denied("VALUE_INVALID", "The test list takes addresses only: " + address.slice(0, 60))
     values.testAddresses = addresses.length ? addresses.join("\n") : null
+    // P15: the external hosts a tracking link may lead to (the privileged allowlist), a line a host name, at most trackingDomainLimit
+    const domains = Array.from(
+        new Set(
+            String(p.trackingDomains || "")
+                .split(/[\s,;]+/)
+                .map(domain => domain.trim().toLowerCase().replace(/\.$/, ""))
+                .filter(Boolean)
+        )
+    )
+    if (domains.length > trackingDomainLimit)
+        denied("VALUE_INVALID", "The tracking list holds at most " + trackingDomainLimit + " host names")
+    for (const domain of domains)
+        if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(domain))
+            denied("VALUE_INVALID", "The tracking list takes host names only: " + domain.slice(0, 60))
+    values.trackingDomains = domains.length ? domains.join("\n") : null
     return values
 }
 const testAddressLimit = 10
+const trackingDomainLimit = 20
 
 // ===== get#MarketingPolicy =====
 function get(p) {

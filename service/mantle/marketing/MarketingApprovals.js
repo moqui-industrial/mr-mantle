@@ -3,8 +3,8 @@
 // revision of its target it was asked at, a material change of the target supersedes the earlier revision's requests and
 // decisions, and the author never decides their own draft but under the one-person team's flag.
 //
-// - A target is a campaign (P2), a send (P8) or an automation (P11): targetKinds below says how each is read, its revision, its
-//   author, its organization, its recipients and what an approval or a refusal does to it.
+// - A target is a campaign (P2), a send (P8), an automation (P11) or a landing page's optional review (P15): targetKinds below says
+//   how each is read, its revision, its author, its organization, its recipients and what an approval or a refusal does to it.
 // - request: the author asks for approval at the target's current revision (APPROVAL_PENDING when one is pending at it); the
 //   holders of MARKETING_APPROVE who work for its organization are told (the kind's topic), the author left out where they may
 //   not decide. A failure to notify is logged and the request stays.
@@ -156,11 +156,35 @@ const targetKinds = {
         approved: row => automationKind().approved(row),
         refused: row => automationKind().refused(row),
         linkFields: row => ({marketingAutomationId: row.marketingAutomationId})
+    },
+    // P15 (§4 Nov 14): a landing page's optional review (PublicSitePage of a Marketing mount), its rules in MarketingContent.js
+    // pageKind: asked by a content author at the page's text version (the count of its saved versions), decided by an approver who did
+    // not save that version or ask; it publishes nothing and stops nothing (publish#SitePage stays the content grant's act), and has no
+    // recipient count, so it is never self-approved
+    page: {
+        name: "Landing page",
+        enumId: "MdtPage",
+        topic: "MarketingPageReview",
+        entity: "mantle.public.PublicSitePage",
+        editCapability: "contentEdit",
+        read: (targetId, lock) => pageKind().read(targetId, lock),
+        revision: row => pageKind().revision(row),
+        versionName: row => pageKind().versionName(row),
+        organization: row => row.organizationPartyId,
+        authors: row => pageKind().authors(row),
+        label: row => row.title || row.sitePageId,
+        recipientCount: () => null,
+        requestable: row => pageKind().requestable(row),
+        problems: () => [],
+        approved: () => {},
+        refused: () => {},
+        linkFields: row => ({sitePageId: row.sitePageId})
     }
 }
 const sendKind = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingSends.js").sendKind
 const automationKind = () =>
     ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAutomations.js").automationKind
+const pageKind = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingContent.js").pageKind
 const kindOf = kindKey => {
     if (!Object.hasOwn(targetKinds, kindKey)) denied("KIND_UNAVAILABLE", "Approval of " + kindKey + " is not available")
     return targetKinds[kindKey]
@@ -286,7 +310,7 @@ function request(p) {
     const kindKey = text(p.targetKind) || "campaign"
     const kind = kindOf(kindKey)
     // the author's: the edit permission of the kind (P2: a campaign; P8 a send and P11 an automation, both an author's sends)
-    marketingAccess.requireCapability(userScope, kindKey === "campaign" ? "campaignEdit" : "sendEdit")
+    marketingAccess.requireCapability(userScope, kind.editCapability || (kindKey === "campaign" ? "campaignEdit" : "sendEdit"))
     const targetId = text(p.targetId)
     const {row} = targetOf(userScope, kindKey, targetId, true)
     kind.requestable(row)
@@ -304,6 +328,7 @@ function request(p) {
         targetRevision: revision,
         organizationPartyId: kind.organization(row),
         decisionEnumId: "MddRequested",
+        targetVersionName: kind.versionName ? kind.versionName(row) : null,
         recipientCount: kind.recipientCount(row),
         marketingPolicyId: policy?.marketingPolicyId || null,
         policyFromDate: policy?.fromDate || null,
@@ -365,6 +390,7 @@ function decide(p) {
         organizationPartyId: kind.organization(row),
         decisionEnumId: decision === "approve" ? "MddApproved" : "MddRefused",
         requestDecisionId: pending.marketingDecisionId,
+        targetVersionName: kind.versionName ? kind.versionName(row) : null,
         selfApproval: own ? "Y" : "N",
         recipientCount,
         marketingPolicyId: policy?.marketingPolicyId || null,

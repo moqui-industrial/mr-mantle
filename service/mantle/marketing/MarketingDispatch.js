@@ -1037,6 +1037,14 @@ function getRecipient(p) {
           }))
         : []
     const caps = userScope.capabilities
+    // P15: the recipient's clicks of the message's tracking links, recorded only while they allow tracking
+    const clicks =
+        recipient.tracked === "Y"
+            ? ec.resource
+                  .script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
+                  .recipientClicks([recipient.campaignRecipientId])
+                  .get(recipient.campaignRecipientId)
+            : null
     return {
         recipient: Object.assign(shown, {
             campaignSendId: row.campaignSendId,
@@ -1046,6 +1054,16 @@ function getRecipient(p) {
             selectedDateText: lib.dateText(recipient.selectedDate),
             preparedRevision: Number(recipient.preparedRevision || 0),
             tracked: recipient.tracked === "Y",
+            clicksText:
+                recipient.tracked !== "Y"
+                    ? ""
+                    : clicks
+                      ? "Clicked " +
+                        clicks.clicks +
+                        (clicks.clicks === 1 ? " time" : " times") +
+                        ", first " +
+                        lib.dateText(clicks.firstDate)
+                      : "No click recorded",
             skipReasonCode: recipient.skipReasonCode || null,
             consentText: delivery
                 ? consent.transactional
@@ -1282,7 +1300,12 @@ function buildDelivery(p) {
     const url = link.unsubscribeUrl
     const topicName = one(LIST, {contactListId: row.contactListId})?.contactListName || "this list"
     const encode = value => WebUtilities.encodeHtml(String(value == null ? "" : value))
-    let body = rendered.body || ""
+    // P15: the message's tracking links with the attempt's personalized token and a pixel for a recipient who allows tracking under
+    // a profile that tracks consenting recipients; each link's direct destination and no pixel for anyone else
+    const tracking = ec.resource
+        .script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
+        .messageTracking(row, recipient, profile, rendered.body || "", rendered.bodyText || "")
+    let body = tracking.body || ""
     if (rendered.preheader)
         body =
             '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">' + encode(rendered.preheader) + "</div>" + body
@@ -1302,7 +1325,7 @@ function buildDelivery(p) {
             '. <a href="' +
             encode(url) +
             '">Unsubscribe</a></p>'
-    let bodyText = rendered.bodyText || ""
+    let bodyText = tracking.bodyText || ""
     if (survey?.url && bodyText) bodyText += "\n\n" + ec.l10n.localize("Answer the survey") + ": " + survey.url + "\n"
     if (bodyText && !bodyText.includes(url))
         bodyText += "\n\n--\nYou receive this email because you subscribed to " + topicName + ". Unsubscribe: " + url + "\n"
