@@ -3,7 +3,8 @@
 // internal articles flagged and a restricted page left out, a customer-visible surface with neither drafts nor internal
 // articles; the published article by its exact published version; the public link refusing a draft and an internal article;
 // feedback recorded and reviewed in a batch that names each failure, making one task and leaving the article unchanged; a
-// suggested edit's task; an article drafted from a case, redacted, unpublished and linked, refusing an internal note.
+// suggested edit's task; an article drafted from a case, redacted, unpublished and linked, refusing an internal note, its
+// page named in letters of any script with their combining marks, in NFC.
 // Standalone: spec-local organizations, customer, case, wiki spaces, groups and users, artifact authorization disabled (the
 // rules are the services' own checks and the wiki's). Run: ./moq test mr-mantle --spec SupportKnowledge
 const prefix = "KNS"
@@ -466,7 +467,12 @@ feature("an article from a case: redacted, unpublished, in the source's draft sp
             staffEmail: create(state.author, {title: "Costs", communicationEventIds: [state.staffEmail], preview: true}),
             byAgent: create(state.agent, {title: "By an agent", body: "text"}),
             otherOrganization: create(state.otherAdmin, {title: "Theirs", body: "text"}),
-            notDraftSpace: create(state.author, {title: "Elsewhere", body: "text", wikiSpaceId: "KNSINT"})
+            notDraftSpace: create(state.author, {title: "Elsewhere", body: "text", wikiSpaceId: "KNSINT"}),
+            // the title's letters of any script and their combining marks are kept, in NFC, and a decomposed title is
+            // its composed twin's page
+            marks: create(state.author, {title: "\u0301हिन्दी / cafe\u0301 [ภาษาไทย]", body: "text", preview: true}),
+            composed: create(state.author, {title: "Café pairing", body: "text"}),
+            decomposed: create(state.author, {title: "Cafe\u0301 pairing", body: "text"})
         }
     },
     then(r) {
@@ -491,6 +497,9 @@ feature("an article from a case: redacted, unpublished, in the source's draft sp
         code(r.byAgent) == "PERMISSION_DENIED"
         code(r.otherOrganization) == "RECORD_UNAVAILABLE"
         code(r.notDraftSpace) == "SPACE_UNAVAILABLE"
+        r.marks.error == "" && r.marks.pageName == "हिन्दी café ภาษาไทย"
+        r.composed.error == "" && r.composed.pagePath == "drafts/Café pairing"
+        code(r.decomposed) == "PAGE_EXISTS"
     }
 })
 
