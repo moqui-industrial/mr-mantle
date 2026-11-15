@@ -218,4 +218,14 @@ along with this software (see the LICENSE.md file). If not, see
             enumCode="mantle.marketing.MarketingReportServices.get#ReportRowFilter" description="the viewer's Marketing report scope (the organizations of their Marketing scope, for a report reader)"
             optionValue="organizationField"/>
     <!-- ===== end of Marketing P20 ===== -->
+
+    <!-- ===== Marketing P21: the campaign calendar (impl-marketing P21, F71; design-marketing §3 Calendar, §1.3 CX-SYNC) ===== -->
+    <!-- "Campaign calendar", a projected CalDAV collection (mantle.work.CalendarDavServices, impl-people P12's kind:
+        collectionId projected-MarketingCampaigns, read only, a device write refused), answered by its owner service as the user:
+        the campaign windows, scheduled sends, automation milestones, publication dates and events of their organizations, for a
+        holder of MARKETING_VIEW -->
+    <mantle.work.calendar.CalendarProjection projectionId="MarketingCampaigns" title="Campaign calendar"
+            description="The campaign windows, scheduled sends, automation milestones, publication dates and events of your organizations"
+            sequenceNum="30" ownerServiceName="mantle.marketing.MarketingWorkspaceServices.get#CampaignCalendar"/>
+    <!-- ===== end of Marketing P21 ===== -->
 </entity-facade-xml>

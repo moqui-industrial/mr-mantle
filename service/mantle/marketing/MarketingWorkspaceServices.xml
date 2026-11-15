@@ -152,4 +152,89 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- ===== end of Marketing P19 ===== -->
+
+    <!-- ===== Marketing P21: the calendar, its projected collection and Today (design §3 Calendar, §1.3 CX-SYNC, §14.3; F71) ===== -->
+    <service verb="get" noun="CalendarItems" allow-remote="false" read-only="true">
+        <description>The campaign schedule of the organization named or each of the caller's from start to end (days yyyy-MM-dd in the
+            user's time zone, at most 400; MarketingCalendar.js): campaign windows, scheduled sends, automation milestones (for a reader
+            of automations), approved publication dates (a campaign's blog post with a published page, its landing page live or
+            scheduled) and the events Marketing offers (a registration event of an organization of the scope or an event linked to one
+            of its campaigns, each instance in the range). Each item: kind (campaign, send, automation, publication or event), key,
+            title, stateText, recordKind, recordId, recordParameter, route (a route key), organizationPartyId, allDay, startText and
+            endText (an all-day item's first day and the day after its last; a timed one's wall-clock times), startMillis and
+            endMillis (a timed one), and for an event workEffortId, seriesWorkEffortId, recurring and instanceStart. Only an event is
+            ever moved, through the calendar's own update#EventOccurrence; the rest is read only. Each source on its own: one that
+            fails is named in failedSources and the others answer. No recipient, address or token. Refuses a caller who reads nothing
+            of Marketing (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED) and a range that is not two
+            days in order (DATES_INVALID).</description>
+        <implements service="mantle.marketing.MarketingWorkspaceServices.define#ScopeParameters"/>
+        <in-parameters>
+            <parameter name="start" required="true"/>
+            <parameter name="end" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="items" type="List"/>
+            <parameter name="failedSources" type="List"/>
+            <parameter name="startDay"/>
+            <parameter name="endDay"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCalendar.js').execute('calendarItems', context)"/>
+            <set field="items" from="found.items"/>
+            <set field="failedSources" from="found.failedSources"/>
+            <set field="startDay" from="found.startDay"/>
+            <set field="endDay" from="found.endDay"/>
+        </actions>
+    </service>
+    <service verb="check" noun="CalendarEvent" allow-remote="false" read-only="true">
+        <description>Whether an event is one the caller's campaign calendar holds (a registration event of an organization of the
+            scope, or an event linked to one of its campaigns), the one kind of item the calendar moves (through the calendar's own
+            update#EventOccurrence, which decides who may change it). Refuses anything else, a send among them, as not available
+            (RECORD_UNAVAILABLE), and a caller who reads nothing of Marketing (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="workEffortId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="workEffortId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCalendar.js').execute('checkCalendarEvent', context)"/>
+            <set field="workEffortId" from="found.workEffortId"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CampaignCalendar" allow-remote="false" read-only="true">
+        <description>The "Campaign calendar", a projected CalDAV collection (MarketingSeedData.xml's CalendarProjection
+            MarketingCampaigns; the projected kind of mantle.work.CalendarDavServices, read only: a device write is refused): admitted
+            for a holder of MARKETING_VIEW; without checkOnly the items of get#CalendarItems for the organizations of the caller's
+            scope from start through end (epoch millis; 30 days back to 180 ahead when none) as the ICalendar tool's event maps, each
+            titled by its kind and name with its state. No recipient, address or token.</description>
+        <implements service="mantle.work.CalendarDavServices.define#ProjectionOwner"/>
+        <actions>
+            <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCalendar.js').execute('campaignCalendar', context)"/>
+            <set field="admitted" from="answer.admitted"/>
+            <set field="eventList" from="answer.eventList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="TodayItems" allow-remote="false" read-only="true">
+        <description>Marketing's part of the user's Today, for the organizations of their scope: the sends due by the end of today or
+            sending (an author, approver or dispatcher), the approvals awaiting a decision (an approver), the sends released in the
+            last 30 days with a failed or uncertain delivery (a dispatcher; counts) and the offers still to come with registrations
+            waiting for the organizer (an events manager; a count per offer), each with sourceKey, kind, title, dueDate, recordKind,
+            recordId, recordParameter, recordEntity, recordName and its place as a route key (route). Each source on its own: one that
+            fails is named in failedSources and the others answer. None for a user who reads nothing of Marketing; no recipient,
+            attendee, address or token.</description>
+        <in-parameters>
+            <parameter name="thruDate" type="Timestamp"><description>The end of the day (the start of tomorrow when none)</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="items" type="List"/>
+            <parameter name="failedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCalendar.js').execute('today', context)"/>
+            <set field="items" from="found.items"/>
+            <set field="failedSources" from="found.failedSources"/>
+        </actions>
+    </service>
+    <!-- ===== end of Marketing P21 ===== -->
 </services>
