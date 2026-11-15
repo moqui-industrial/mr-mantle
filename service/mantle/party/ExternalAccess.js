@@ -148,6 +148,24 @@ const records = {
             return {organizationPartyId: invitation.organizationPartyId, partyId: invitation.partyId}
         }
     },
+    // impl-marketing P17 (F80; design-marketing §13 Registration): an event reservation's places, reached by its buyer: the scopes
+    // RegistrationView (MyRegistration) and RegistrationCancel (CancelRegistration), issued only by the registration services (a
+    // reservation's receipt, MarketingPortal.js reserve), never by a user, and opening the organization's Marketing mount; the
+    // buyer's own verified account reaches it by the self relationship. A capability reads its own reservation alone.
+    EventRegistration: {
+        permissions: ["MARKETING_EVENT_MANAGE"],
+        scopes: ["RegistrationView", "RegistrationCancel"],
+        page: {app: "marketing", path: "/Registration?token="},
+        self: true,
+        resolve(recordId) {
+            const reservation = recordId ? one("mantle.work.registration.EventReservation", {reservationId: recordId}) : null
+            const policy = reservation
+                ? one("mantle.work.registration.EventRegistrationPolicy", {registrationPolicyId: reservation.registrationPolicyId})
+                : null
+            if (!policy || !internal(policy.organizationPartyId) || !reservation.buyerPartyId) return null
+            return {organizationPartyId: policy.organizationPartyId, partyId: reservation.buyerPartyId}
+        }
+    },
     // a customer's sales order (mr-pass impl-shop P5, X6, F16): the customer-direction kind of a placed order of an internal
     // organization (its sales part's vendor) to an outside customer: OrderView, the guest's order link a Shop checkout
     // issues at its confirmation; Download (P6) and RenewalAction (P7) follow. The customer's own verified account reaches

@@ -871,6 +871,304 @@ function getEvent(p) {
     return {event: view}
 }
 
+// ===== P17: Register and Registration (reserve, complete, pay, read and cancel a registration) =====
+const placesOf = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js")
+const payments = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPayments.js")
+const access = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+const RESERVATION = "mantle.work.registration.EventReservation"
+const REG_POLICY = "mantle.work.registration.EventRegistrationPolicy"
+const regLimits = {client: 10, site: 500, address: 5, payloadChars: 65536}
+// A refusal of the registration services answered as the page's kind: what the visitor can fix (a value, the hold, the places
+// left, changed terms) with its own words; anything about another record the one NotFound.
+function asPage(work) {
+    try {
+        return work()
+    } catch (error) {
+        if (error?.moquiErrorKind) throw error
+        const code = lib.reasonCode(error)
+        const words = String(error?.message || error)
+            .split("\n")[0]
+            .replace(/^(?:Error: )+/, "")
+            .replace(/^[A-Z][A-Z0-9_]+(\[[A-Za-z0-9_ ]+\])?: /, "")
+        ec.message.clearErrors()
+        const field = /^VALUE_INVALID\[([A-Za-z0-9_ ]+)\]/.exec(String(error?.message || "").replace(/^(?:Error: )+/, ""))?.[1]
+        if (code === "VALUE_INVALID")
+            fail("Unprocessable", "VALUE_INVALID" + (field ? "[" + field.replace(/ /g, "") + "]" : "") + ": " + words)
+        if (["HOLD_EXPIRED", "CAPACITY_UNAVAILABLE", "TERMS_CHANGED", "ORDER_PLACED"].includes(code))
+            fail("Conflict", code + ": " + words)
+        if (["NOT_DUE", "NOT_COMPLETED", "FORM_VALUES_INVALID"].includes(code)) fail("Unprocessable", code + ": " + words)
+        if (code === "FIELD_HIDDEN")
+            fail("Unprocessable", "Leave unanswered the questions that do not apply to your other answers")
+        if (["OPERATION_CONFLICT", "REQUEST_KEY_INVALID", "REQUEST_KEY_REUSED", "FIELD_UNKNOWN", "VALUE_TOO_LONG"].includes(code))
+            fail("Unprocessable", "Reload the page and try again")
+        if (["PROVIDER_UNAVAILABLE", "TAX_UNAVAILABLE"].includes(code)) fail("Unavailable", words)
+        if (["OFFER_UNAVAILABLE", "PUBLICATION_CLOSED", "RECORD_UNAVAILABLE"].includes(code)) unavailable()
+        throw error
+    }
+}
+const jsonOf = value =>
+    typeof value === "string" ? (value.length > regLimits.payloadChars ? null : lib.json(value, null)) : (value ?? null)
+// The reservation a page reaches (scope RegistrationView or RegistrationCancel): by its capability's token, by the signed-in buyer's
+// own verified account (the self relationship), or for the provider's return by its reference and key, which read its state alone;
+// on this site, of the organization the site serves. {reservation, policy, via}. Anything else the one NotFound.
+function reach(p, scope = "RegistrationView") {
+    const organizationPartyId = served(p.siteId)
+    let reservationId = null,
+        via = null
+    if (!blank(p.token)) {
+        try {
+            reservationId = access().check({token: p.token, scope, recordType: "EventRegistration", organizationPartyId}).recordId
+        } catch (error) {
+            if (error?.moquiErrorKind !== "NotFound") throw error
+            unavailable()
+        }
+        via = "token"
+    } else if (!blank(p.reference) && !blank(p.key)) {
+        throttleLookup()
+        const row = one(RESERVATION, {reservationId: text(p.reference)})
+        if (!row || !row.returnKeyDigest || row.returnKeyDigest !== ec.user.singleUseCodeHash(String(p.key))) unavailable()
+        reservationId = row.reservationId
+        via = "return"
+    } else if (!blank(p.reservationId) && ec.user.userAccount) {
+        try {
+            reservationId = access().check({
+                recordType: "EventRegistration",
+                recordId: text(p.reservationId),
+                scope,
+                organizationPartyId
+            }).recordId
+        } catch (error) {
+            if (error?.moquiErrorKind !== "NotFound") throw error
+            unavailable()
+        }
+        via = "account"
+    } else unavailable()
+    const reservation = one(RESERVATION, {reservationId})
+    const policy = reservation ? one(REG_POLICY, {registrationPolicyId: reservation.registrationPolicyId}) : null
+    if (!policy || policy.siteId !== p.siteId || policy.organizationPartyId !== organizationPartyId) unavailable()
+    return {reservation, policy, via, organizationPartyId}
+}
+// A reservation's view for Register and Registration: the event's public facts, its state, each place (attendee, ticket, state), the
+// payment and refunds, the terms accepted, what may be done; the questions while it is not completed. Never another attendee's
+// answers, an entry code (shown only by showTicket), the order's lines or anything internal. A return's view is its state alone.
+function registrationView(reservation, policy, via, extra = {}) {
+    const P = placesOf()
+    const facts = registrations().publicFacts(policy)
+    const state = P.stateOfReservation(reservation, policy)
+    const base = {
+        reference: reservation.reservationId,
+        title: facts.title,
+        whenText: facts.whenText,
+        state: state.state,
+        stateText: L(
+            {
+                confirmed: "Confirmed",
+                pending: "Payment received, awaiting the organizer's confirmation",
+                held: state.completed ? "Held: payment due" : "Held: complete your registration",
+                waitlisted: "On the waitlist",
+                review: "Payment received after the hold ended: the organizer will refund it or offer a place",
+                cancelled: "Cancelled",
+                expired: "The hold ended"
+            }[state.state] || state.state
+        ),
+        payment: payments().paymentView(reservation.reservationId)
+    }
+    if (via === "return") return Object.assign(base, {limited: true}, extra)
+    const all = P.placesOf(reservation.reservationId)
+    const workEffort = one("mantle.work.effort.WorkEffort", {workEffortId: policy.workEffortId})
+    const confirmedAny = all.some(row => row.statusId === "EvrConfirmed")
+    const publication = !state.completed ? P.questionsOf(policy) : null
+    const occurrenceStarted = (facts.startMs ?? Infinity) <= nowMs()
+    const terms =
+        reservation.termsRevision != null
+            ? one("mantle.work.registration.EventRegistrationTerms", {
+                  registrationPolicyId: policy.registrationPolicyId,
+                  termsRevision: Number(reservation.termsRevision)
+              })
+            : null
+    return Object.assign(
+        base,
+        {
+            limited: false,
+            organizationName: organizationName(policy.organizationPartyId),
+            where: facts.where,
+            completed: state.completed,
+            paymentDue: state.paymentDue,
+            holdEndsText:
+                state.holdEndsMs != null && Number.isFinite(state.holdEndsMs) ? lib.dateText(new Date(state.holdEndsMs)) : "",
+            places: all.map(row => ({
+                registrationId: row.registrationId,
+                attendeeName: row.attendeePartyId ? P.partyName(row.attendeePartyId) : "",
+                ticketName: P.ticketName(row.ticketTypeId),
+                statusId: row.statusId,
+                stateText: L(P.stateTexts[row.statusId] || row.statusId),
+                canShowCode: row.statusId === "EvrConfirmed",
+                refundText: row.refundStatusEnumId
+                    ? L(
+                          {
+                              ErfRequested: "Refund requested",
+                              ErfPending: "Refund pending",
+                              ErfRefunded: "Refunded",
+                              ErfFailed: "Refund pending with the organizer",
+                              ErfNone: "Nothing to refund"
+                          }[row.refundStatusEnumId] || ""
+                      )
+                    : ""
+            })),
+            // the link to join goes to confirmed registrants only, never to a pending or waitlisted place
+            joinUrl: confirmedAny && workEffort?.infoUrl ? workEffort.infoUrl : null,
+            canCancel: !occurrenceStarted && all.some(row => P.LIVE_STATES.includes(row.statusId)),
+            cancellationTerms: (terms ? terms.cancellationTerms : policy.cancellationTerms) || "",
+            termsAccepted: terms ? terms.termsText || "" : "",
+            // while it is not completed: the terms to accept and the questions (each attendee's or the buyer's once)
+            terms: !state.completed ? policy.termsText || "" : "",
+            consentText: !state.completed ? policy.consentText || "" : "",
+            termsRevision: Number(policy.termsRevision || 0),
+            needsTerms: !state.completed && P.hasTerms(policy),
+            questionScope: policy.questionScopeEnumId === "ErqBuyer" ? "buyer" : "attendee",
+            fields: publication ? publications().pageFields(publication.formId) : []
+        },
+        extra
+    )
+}
+// reserveRegistration: places asked of a published, open offer on this site for a buyer (a name and an address), held or waitlisted
+// together, or refused when there are not enough; PASS's request key answers a repeat with the first. A request past the client's,
+// site's or address's limit is refused alike and holds nothing. The reservation's capability (view and cancel) is answered once.
+function reserveRegistration(p) {
+    const organizationPartyId = served(p.siteId)
+    const offer = registrations().publicView(p.registrationPolicyId, p.siteId, organizationPartyId)
+    if (!offer || !offer.registrationOpen) unavailable()
+    const operationId = String(p.operationId || "")
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(operationId)) fail("Unprocessable", "Reload the page and try again")
+    const buyer = asPage(() => placesOf().personInput({name: p.buyerName, email: p.buyerEmail}, "buyer", true))
+    const policyId = String(p.registrationPolicyId)
+    const earlier = one(RESERVATION, {registrationPolicyId: policyId, requestKey: operationId})
+    if (!earlier) {
+        if (
+            !allowed("mkt-reg-client:" + requester(), regLimits.client, MINUTES_10) ||
+            !allowed("mkt-reg-site:" + p.siteId, regLimits.site, HOUR) ||
+            !allowed("mkt-reg-address:" + addressKey(buyer.address), regLimits.address, HOUR)
+        )
+            fail("Tarpit", "RATE_LIMITED: Too many registrations from here. Wait a few minutes and try again.")
+    }
+    const lines = jsonOf(p.lines)
+    if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
+    const party = earlier
+        ? {partyId: earlier.buyerPartyId, contactMechId: earlier.emailContactMechId}
+        : apart("Error making the buyer", () => subscriberOf(buyer.address, buyer.name))
+    const out = asPage(() =>
+        placesOf().reserve({
+            registrationPolicyId: policyId,
+            lines,
+            buyer: Object.assign({}, party, {name: buyer.name}),
+            requestKey: operationId,
+            sourceEnumId: "ErsPublic",
+            siteId: p.siteId
+        })
+    )
+    const reservation = one(RESERVATION, {reservationId: out.reservationId})
+    const policy = one(REG_POLICY, {registrationPolicyId: policyId})
+    // the capability once, to the request that made the reservation (a repeat gets none: the first page keeps it)
+    const made = out.replay
+        ? null
+        : access().create({
+              recordType: "EventRegistration",
+              recordId: reservation.reservationId,
+              scopes: ["RegistrationView", "RegistrationCancel"],
+              validDays: 366
+          })
+    return {
+        registration: registrationView(reservation, policy, "token", {buyerName: buyer.name}),
+        token: made ? made.token : null,
+        replay: out.replay
+    }
+}
+// completeRegistration: the attendees, the answers and the terms of a reservation the capability reaches.
+function completeRegistration(p) {
+    const {reservation, policy, via} = reach(p)
+    if (via === "return") unavailable()
+    const attendees = jsonOf(p.attendees)
+    const answers = jsonOf(p.answers)
+    if ((p.attendees != null && !Array.isArray(attendees)) || (p.answers != null && !Array.isArray(answers)))
+        fail("Unprocessable", "Reload the page and try again")
+    asPage(() =>
+        placesOf().complete(reservation, {
+            attendees: attendees || [],
+            answers: answers || [],
+            acceptTerms: yes(p.acceptTerms),
+            termsRevision: p.termsRevision,
+            requestKey: p.operationId
+        })
+    )
+    return {registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via)}
+}
+// startRegistrationPayment: the hosted payment step for a completed reservation's held places (the provider's page or form); a
+// repeat answers the same attempt, never a second charge or seat.
+function startRegistrationPayment(p) {
+    const {reservation, policy, via} = reach(p)
+    if (via === "return") unavailable()
+    const out = asPage(() => payments().startPayment(reservation.reservationId))
+    delete out.returnKey
+    return {
+        registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via),
+        payment: out
+    }
+}
+// getRegistration: the reservation's state with its payment looked up (bounded) and its order placed once paid; showTicket (with a
+// fresh operationId) issues a new entry code for one confirmed place, answered once with its QR, revoking the earlier code.
+function getRegistration(p) {
+    const {reservation, policy, via} = reach(p)
+    if (reservation.paymentId) payments().refresh(reservation.reservationId, yes(p.returned) ? "return" : "page")
+    const fresh = one(RESERVATION, {reservationId: reservation.reservationId})
+    let ticket = null
+    if (!blank(p.showTicket) && via !== "return") {
+        const operationId = String(p.operationId || "")
+        if (!/^[A-Za-z0-9_-]{8,64}$/.test(operationId)) fail("Unprocessable", "Reload the page and try again")
+        const row = one("mantle.work.registration.EventRegistration", {registrationId: text(p.showTicket)})
+        if (!row || row.reservationId !== fresh.reservationId || row.statusId !== "EvrConfirmed") unavailable()
+        if (
+            find("mantle.work.registration.EventRegistrationAction", {
+                registrationId: row.registrationId,
+                operationKey: operationId
+            }).count()
+        )
+            fail("Unprocessable", "Reload the page to show the code again")
+        const issued = placesOf().issueCode(row.registrationId, "EraTicketShown", operationId)
+        if (issued)
+            ticket = {
+                registrationId: row.registrationId,
+                code: issued.code,
+                qrSvg: ec.resource.barcodeSvg("QR", issued.code, {moduleWidth: 1.2}) || ""
+            }
+    }
+    return {registration: registrationView(fresh, policy, via, ticket ? {ticket} : {})}
+}
+// cancelRegistration: the buyer's cancellation of the reservation's live places (or the ones named) before the occurrence starts,
+// confirmed and with PASS's request key; each seat released once, a paid place's refund handed to Accounting and shown pending.
+function cancelRegistrationPublic(p) {
+    const {reservation, policy, via} = reach(p, "RegistrationCancel")
+    if (via === "return") unavailable()
+    const operationId = String(p.operationId || "")
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(operationId)) fail("Unprocessable", "Reload the page and try again")
+    if (!yes(p.confirm)) fail("Unprocessable", "VALUE_INVALID[confirm]: Confirm that you want to cancel")
+    const facts = registrations().publicFacts(policy)
+    if ((facts.startMs ?? Infinity) <= nowMs())
+        fail("Conflict", "CANCELLATION_CLOSED: The event has started; contact the organizer")
+    const named = listOf(p.registrationIds)
+    const live = placesOf()
+        .placesOf(reservation.reservationId)
+        .filter(row => placesOf().LIVE_STATES.includes(row.statusId) && (!named.length || named.includes(row.registrationId)))
+    const reason = String(p.reason || "")
+        .trim()
+        .slice(0, 200)
+    if (live.length)
+        placesOf().cancelPlaces(
+            live.map(row => row.registrationId),
+            "Cancelled by the buyer" + (reason ? ": " + reason : "")
+        )
+    return {registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via)}
+}
+
 // The landing pages live on a site's marketing mount now (readiness).
 const livePagesOf = siteId => {
     const mount = marketingMountOf(siteId)
@@ -1037,11 +1335,17 @@ const operations = {
     getForm,
     submitForm,
     getPage,
-    getEvent
+    getEvent,
+    reserveRegistration,
+    completeRegistration,
+    startRegistrationPayment,
+    getRegistration,
+    cancelRegistration: cancelRegistrationPublic
 }
 const internalOperations = new Set(["appReadiness", "buildVerification", "attemptVerification", "fileCheckout"])
 ;({
     served,
+    subscriberOf,
     offersOf,
     preferencesContext,
     changeTopics,

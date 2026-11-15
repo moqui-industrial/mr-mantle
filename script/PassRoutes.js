@@ -319,6 +319,13 @@
     ['POST', 'marketing/tracking/event', 'recordTrackingEvent'],
     // IronStone Marketing P16: a published event registration offer (read only)
     ['GET', 'marketing/event', 'getMarketingEvent'],
+    // IronStone Marketing P17: a registration's reservation (an anonymous write PASS's request key and the limits bound) and its
+    // completion, payment, read (a capability read, a POST) and cancellation by its capability or the provider's return key
+    ['POST', 'marketing/registration', 'reserveRegistration'],
+    ['POST', 'marketing/registration/completion', 'completeRegistration'],
+    ['POST', 'marketing/registration/payment', 'startRegistrationPayment'],
+    ['POST', 'marketing/registration/view', 'getRegistration'],
+    ['POST', 'marketing/registration/cancellation', 'cancelRegistration'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],

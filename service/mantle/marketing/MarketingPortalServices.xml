@@ -126,6 +126,72 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getEvent', input)"/>
         </actions>
     </service>
+    <!-- P17: Register and Registration (design-marketing §13 Register, Registration; impl-marketing P17) -->
+    <service verb="reserve" noun="Registration" authenticate="anonymous-all" allow-remote="false">
+        <description>reserveRegistration (an anonymous write: PASS's request key and the limits bound it): places on a
+            published offer of the organization the site serves, open now (registrationPolicyId; lines, a JSON list of ticketTypeId
+            and quantity; buyerName and buyerEmail, the buyer a party made or matched by the address without saying which; operationId),
+            all held together under the offer's and its tickets' locks or, when they do not fit and the waitlist has room, all
+            waitlisted (CAPACITY_UNAVAILABLE otherwise). A request past the client's (10 in ten minutes), site's (500 an hour) or
+            address's (5 an hour) limit is refused alike (RATE_LIMITED) and holds nothing; a repeat of the request key answers the
+            first, the same key with other choices is refused. Answers the reservation's view and, to the request that made it,
+            once, its capability's token (RegistrationView and RegistrationCancel); an unknown, draft, closed or past offer the one
+            NotFound.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('reserveRegistration', input)"/>
+        </actions>
+    </service>
+    <service verb="complete" noun="Registration" authenticate="anonymous-all" allow-remote="false">
+        <description>completeRegistration (a bearer write, TOKEN_WRITES): for the reservation the capability
+            reaches (or the signed-in buyer's own), its attendees (a JSON list of name and optional email, in its places' order), the
+            answers to the offer's questions (a JSON list of maps, one per attendee or one for the buyer, through Commons'
+            accept#Submission on the offer's own publication) and the terms accepted at the revision read (TERMS_CHANGED otherwise),
+            while its places are held (HOLD_EXPIRED otherwise) or waitlisted; a reservation with nothing to pay is confirmed. The
+            same operationId answers the first.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('completeRegistration', input)"/>
+        </actions>
+    </service>
+    <service verb="start" noun="RegistrationPayment" authenticate="anonymous-all" allow-remote="false">
+        <description>startRegistrationPayment (a bearer write, TOKEN_WRITES): the hosted payment step of a
+            completed reservation's held places through E's thin wrapper over Accounting's coordinator: the ticket order and its
+            promised payment made once and authorized with the attempt's operation key, answered as the provider's page or form; a
+            repeat answers the same attempt (no second charge or seat). The browser's return never confirms anything.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('startRegistrationPayment', input)"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Registration" authenticate="anonymous-all" allow-remote="false">
+        <description>getRegistration (a capability read as a POST, TOKEN_WRITES; or the provider's return by
+            reference and key, which reads the state alone): the reservation's state with its payment looked up at the provider
+            (bounded) and its order placed once paid: the event's public facts, each place's attendee name, ticket and state, the
+            payment and any refund pending, the terms accepted, whether it may be cancelled, the link to join for a confirmed place
+            only, and while not completed the terms and questions. With showTicket and a fresh operationId, a confirmed place's new
+            entry code and its QR, once, revoking the earlier code. Never another attendee's answers or anything internal; an unknown
+            or expired capability, another site's reservation and a bad key the one NotFound.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('getRegistration', input)"/>
+        </actions>
+    </service>
+    <service verb="cancel" noun="Registration" authenticate="anonymous-all" allow-remote="false">
+        <description>cancelRegistration (a bearer write, TOKEN_WRITES; scope RegistrationCancel): the buyer's
+            confirmed cancellation of the reservation's live places (or the ones named) before the occurrence starts
+            (CANCELLATION_CLOSED after), with PASS's request key: each seat released once, its entry code revoked, a paid place's
+            refund handed to Accounting and shown pending until the provider's result, then the waitlist offered.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPortal.js').execute('cancelRegistration', input)"/>
+        </actions>
+    </service>
     <service verb="check" noun="MarketingAppReadiness" authenticate="anonymous-all" allow-remote="false">
         <description>The Marketing app's readiness checks for a site (PublicApps.js): its target an internal organization, a list
             offered there or a form publication open there (P12) or a landing page published there (P14) or an event's registration offer

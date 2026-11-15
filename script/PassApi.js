@@ -75,6 +75,13 @@ const TOKEN_WRITES = [
     // IronStone Marketing P15: a tracking event of the redirect, the pixel or a page carrying a code (anonymous: the authority's limits
     // per client and code and per site bound it, and its answer is the same; a personalized link's or pixel's input.token)
     'recordTrackingEvent',
+    // IronStone Marketing P17: a registration's reservation (anonymous: PASS's request key and the authority's limits bound it) and
+    // its completion, payment, read and cancellation by its capability (input.token) or the provider's return (input.key)
+    'reserveRegistration',
+    'completeRegistration',
+    'startRegistrationPayment',
+    'getRegistration',
+    'cancelRegistration',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)
