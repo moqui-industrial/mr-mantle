@@ -894,7 +894,7 @@ function asPage(work) {
         const field = /^VALUE_INVALID\[([A-Za-z0-9_ ]+)\]/.exec(String(error?.message || "").replace(/^(?:Error: )+/, ""))?.[1]
         if (code === "VALUE_INVALID")
             fail("Unprocessable", "VALUE_INVALID" + (field ? "[" + field.replace(/ /g, "") + "]" : "") + ": " + words)
-        if (["HOLD_EXPIRED", "CAPACITY_UNAVAILABLE", "TERMS_CHANGED", "ORDER_PLACED"].includes(code))
+        if (["HOLD_EXPIRED", "CAPACITY_UNAVAILABLE", "TERMS_CHANGED", "ORDER_PLACED", "PRICE_CHANGED"].includes(code))
             fail("Conflict", code + ": " + words)
         if (["NOT_DUE", "NOT_COMPLETED", "FORM_VALUES_INVALID"].includes(code)) fail("Unprocessable", code + ": " + words)
         if (code === "FIELD_HIDDEN")
@@ -994,6 +994,13 @@ function registrationView(reservation, policy, via, extra = {}) {
             where: facts.where,
             completed: state.completed,
             paymentDue: state.paymentDue,
+            // what is due before Pay (the tickets' prices now, before tax) and its key, which Pay sends back (P17 review)
+            ...(state.paymentDue
+                ? (() => {
+                      const quote = payments().quoteOf(reservation.reservationId, policy)
+                      return {amountDueText: payments().quoteText(quote), priceKey: quote ? quote.priceKey : ""}
+                  })()
+                : {amountDueText: "", priceKey: ""}),
             holdEndsText:
                 state.holdEndsMs != null && Number.isFinite(state.holdEndsMs) ? lib.dateText(new Date(state.holdEndsMs)) : "",
             places: all.map(row => ({
@@ -1107,7 +1114,10 @@ function completeRegistration(p) {
 function startRegistrationPayment(p) {
     const {reservation, policy, via} = reach(p)
     if (via === "return") unavailable()
-    const out = asPage(() => payments().startPayment(reservation.reservationId))
+    // the price the page showed (registrationView's priceKey): a change since is refused with the new amount (P17 review)
+    const priceKey = String(p.priceKey || "")
+    if (!/^[A-Za-z0-9]{8,64}$/.test(priceKey)) fail("Unprocessable", "Reload the page and try again")
+    const out = asPage(() => payments().startPayment(reservation.reservationId, priceKey))
     delete out.returnKey
     return {
         registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via),

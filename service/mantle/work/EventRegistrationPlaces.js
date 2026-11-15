@@ -16,7 +16,8 @@
 //   cancellation cancels it (handle#OrderStatus, a SECA on the order's status); a payment that succeeds after the hold ended takes
 //   no seat (review). A cancellation releases the place once (its state changes once under the lock), revokes its entry code and
 //   hands a paid place's refund to Accounting (EventRegistrationPayments.js), shown pending until the provider's result; then the
-//   first waiting place that fits is offered (FIFO by its waitlist time, then id) with a hold of its own.
+//   first waiting reservation that fits is offered whole (FIFO by its waitlist time, then id; none split, none passed) with a hold
+//   of its own, or confirmed at once when it is completed and free.
 // - The entry code is never kept: its digest and revision are; a new code (a ticket notice, Show my entry code, a correction)
 //   revokes the earlier one. A substitution names the new attendee with a reason and revokes the old attendee's code.
 // - Staff services ask MARKETING_EVENT_MANAGE in the offer's organization (another organization's registration answers as a missing
@@ -490,8 +491,11 @@ function cancelPlaces(registrationIds, reason, operationKey = null) {
     }
     return cancelled
 }
-// The first waiting places that fit, offered in waitlist order with a hold of their own (the offer's hold minutes), each its
-// notice; a place too large for what is free waits and the next is not skipped past it.
+// The first waiting reservations that fit, offered in waitlist order with a hold of their own (the offer's hold minutes), each its
+// notice. A reservation's waiting places are offered together, as they were reserved together and one payment pays for them (P17
+// review: a reservation split by the waitlist could pay for its first places only and never for the rest); one too large for what is
+// free waits and no later one passes it. A completed reservation with nothing to pay is confirmed at once (no one is left to confirm
+// a free place it already answered for).
 function offerWaitlist(registrationPolicyId) {
     const {policy, tickets} = lockOffer(registrationPolicyId)
     if (!policy || policy.statusId !== "ErpPublished") return {offered: 0}
@@ -506,24 +510,37 @@ function offerWaitlist(registrationPolicyId) {
             .limit(200)
             .list()
     )
-    const offered = []
+    const groups = new Map()
     for (const row of waiting) {
+        const groupKey = row.reservationId || row.registrationId
+        groups.set(groupKey, [...(groups.get(groupKey) || []), row])
+    }
+    const offered = []
+    let confirmed = 0
+    for (const group of groups.values()) {
+        if (group.some(row => !byId.get(row.ticketTypeId) || !lib.active(byId.get(row.ticketTypeId)))) continue
         const seatsLeft = Number(policy.totalSeats || 0) - setup().seatsTaken(registrationPolicyId)
-        if (seatsLeft < 1) break
-        const ticket = byId.get(row.ticketTypeId)
-        if (!ticket || !lib.active(ticket)) continue
-        if (
-            ticket.capacity != null &&
-            Number(ticket.capacity) - setup().seatsTaken(registrationPolicyId, ticket.ticketTypeId) < 1
-        )
-            break
-        move(row, "EvrHeld", "EraOffered", {
-            holdExpireDate: new Date(nowMs() + Number(policy.holdMinutes || 15) * MINUTE)
+        if (seatsLeft < group.length) break
+        const perTicket = {}
+        for (const row of group) perTicket[row.ticketTypeId] = (perTicket[row.ticketTypeId] || 0) + 1
+        const ticketsFit = Object.entries(perTicket).every(([ticketTypeId, count]) => {
+            const ticket = byId.get(ticketTypeId)
+            return (
+                ticket.capacity == null ||
+                Number(ticket.capacity) - setup().seatsTaken(registrationPolicyId, ticketTypeId) >= count
+            )
         })
-        offered.push(row.registrationId)
+        if (!ticketsFit) break
+        const holdExpireDate = new Date(nowMs() + Number(policy.holdMinutes || 15) * MINUTE)
+        for (const row of group) move(row, "EvrHeld", "EraOffered", {holdExpireDate})
+        const reservation = group[0].reservationId ? one(RESERVATION, {reservationId: group[0].reservationId}) : null
+        const ids = group.map(row => row.registrationId)
+        if (reservation?.completedDate && !group.some(row => paidOf(row, policy)))
+            confirmed += confirmPlaces(ids, "A place from the waitlist").length
+        else offered.push(...ids)
     }
     for (const registrationId of offered) notices().afterCommit("offered", registrationId)
-    return {offered: offered.length}
+    return {offered: offered.length + confirmed}
 }
 // The holds that ended, expired once each (their seat is already free to the count), then each offer's waitlist offered.
 function expireHolds(p) {
@@ -597,7 +614,13 @@ function handleOrderStatus(p) {
     if (!places.length) return {}
     if (p.statusId === "OrderApproved") {
         lockOffer(places[0].registrationPolicyId)
-        const ids = places.filter(row => ["EvrPending", "EvrHeld"].includes(row.statusId)).map(row => row.registrationId)
+        // a place whose payment was applied (pending); a held one only while its hold lasts and its payment is received (P17
+        // review: an approval never seats an unpaid place or one whose hold ended)
+        const ids = places
+            .filter(
+                row => row.statusId === "EvrPending" || (row.statusId === "EvrHeld" && holdLive(row) && payments().paidFor(row))
+            )
+            .map(row => row.registrationId)
         return {confirmed: confirmPlaces(ids, "The order was approved").length}
     }
     if (["OrderCancelled", "OrderRejected"].includes(p.statusId)) {

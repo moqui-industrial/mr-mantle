@@ -347,7 +347,9 @@ function buildDelivery(p) {
         const issued = places().issueCode(row.registrationId)
         if (issued) lines.push({label: L("Entry code"), text: issued.code})
         if (facts.online && facts.workEffort.infoUrl) lines.push({label: L("Join online"), url: facts.workEffort.infoUrl})
-        if (reservation) {
+        // the link to MyRegistration is the reservation's (view and cancel every place, show any place's code): the buyer's only, never
+        // another attendee's, who gets their own ticket and code here (P17 review)
+        if (reservation && delivery.recipientPartyId === reservation.buyerPartyId) {
             const link = registrationLink(reservation)
             if (link) lines.push({label: L("Your registration"), url: link})
         }

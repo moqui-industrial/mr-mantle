@@ -160,7 +160,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>startRegistrationPayment (a bearer write, TOKEN_WRITES): the hosted payment step of a
             completed reservation's held places through E's thin wrapper over Accounting's coordinator: the ticket order and its
             promised payment made once and authorized with the attempt's operation key, answered as the provider's page or form; a
-            repeat answers the same attempt (no second charge or seat). The browser's return never confirms anything.</description>
+            repeat answers the same attempt (no second charge or seat). priceKey is the key of the amount the page showed
+            (getRegistration's priceKey): a price changed since is refused (PRICE_CHANGED, with the new amount) and nothing is
+            charged. The browser's return never confirms anything.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

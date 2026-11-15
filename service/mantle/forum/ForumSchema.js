@@ -1815,7 +1815,7 @@
     },
     startRegistrationPayment: {
         service: 'mantle.marketing.MarketingPortalServices.start#RegistrationPayment',
-        fields: ['siteId', 'token', 'reservationId', 'operationId'],
+        fields: ['siteId', 'token', 'reservationId', 'priceKey', 'operationId'],
     },
     getRegistration: {
         service: 'mantle.marketing.MarketingPortalServices.get#Registration',

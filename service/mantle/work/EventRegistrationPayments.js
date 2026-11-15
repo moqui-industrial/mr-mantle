@@ -192,10 +192,43 @@ const returnUrl = (reservation, returnKey) =>
         "/Register?ref=" + encodeURIComponent(reservation.reservationId) + "&key=" + encodeURIComponent(returnKey) + "&returned=1"
     )
 
+// The price of a reservation's held places now (the tickets' own prices, before tax): {subtotal, currencyUomId, priceKey}, or null
+// when one cannot be priced. The payment step shows it before Pay and sends its key back, so a price changed since the visitor
+// reserved (or since the page was shown) is refused with the new amount rather than charged unseen (P17 review; Shop's checkout
+// reviews a changed price the same way).
+function quoteOf(reservationId, policy) {
+    const held = places()
+        .placesOf(reservationId)
+        .filter(row => row.statusId === "EvrHeld")
+    let subtotal = dec(0),
+        currencyUomId = null
+    const parts = []
+    for (const row of held) {
+        const price = setup().priceOf(one(TICKET, {ticketTypeId: row.ticketTypeId}), policy)
+        if (!price.priced) return null
+        if (price.free) {
+            parts.push(row.registrationId + ":free")
+            continue
+        }
+        subtotal = subtotal.add(dec(price.price))
+        currencyUomId = price.priceUomId
+        parts.push(row.registrationId + ":" + dec(price.price).setScale(4, "HALF_UP").toString() + ":" + price.priceUomId)
+    }
+    return {
+        subtotal,
+        currencyUomId,
+        priceKey: lib
+            .hash({reservationId, parts})
+            .replace(/[^A-Za-z0-9]/g, "")
+            .slice(0, 40)
+    }
+}
+const quoteText = quote => (quote?.currencyUomId ? moneyText(quote.subtotal, quote.currencyUomId) : "")
+
 // ===== start#RegistrationPayment =====
 // The payment of a completed reservation's held places (the caller checked who asks): its order and promised payment made once and
 // committed with the attempt, then the provider asked. {paymentState, provider (redirectUrl or form), returnKey once}.
-function startPayment(reservationId) {
+function startPayment(reservationId, expectedPriceKey = null) {
     let reservation = one(RESERVATION, {reservationId})
     const existing = reservation.paymentId ? one(P, {paymentId: reservation.paymentId}) : null
     if (existing) {
@@ -218,6 +251,17 @@ function startPayment(reservationId) {
         if (!held.length || held.some(row => !places().holdLive(row)))
             denied("HOLD_EXPIRED", "The hold on these places ended; start again")
         if (!held.some(row => places().paidOf(row, policy))) denied("NOT_DUE", "Nothing is due")
+        // the price the payer was shown: a change since is shown again, never charged unseen
+        if (expectedPriceKey != null) {
+            const quote = quoteOf(reservationId, policy)
+            if (!quote || quote.priceKey !== String(expectedPriceKey))
+                denied(
+                    "PRICE_CHANGED",
+                    "The price of these places changed" +
+                        (quote ? " to " + quoteText(quote) + " before tax" : "") +
+                        "; review it and pay again"
+                )
+        }
         const gateway = setup().gatewayOf(policy)
         if (!gateway) denied("PROVIDER_UNAVAILABLE", "Payment is not available for this event now")
         // an earlier payment declined or cancelled is ended; the new one replaces it
@@ -559,6 +603,8 @@ function reconcile(p) {
     paymentText,
     shareOf,
     startPayment,
+    quoteOf,
+    quoteText,
     paymentView,
     refresh,
     seatReviewed,

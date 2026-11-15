@@ -73,7 +73,14 @@ const complete = (siteId, token, attendees) =>
         termsRevision: 0,
         operationId: key()
     })
-const pay = (siteId, token) => visitor("start#RegistrationPayment", {siteId, token, operationId: key()})
+// Pay as the page does: with the key of the amount the payment step showed (getRegistration's priceKey)
+const pay = (siteId, token) =>
+    visitor("start#RegistrationPayment", {
+        siteId,
+        token,
+        priceKey: visitor("get#Registration", {siteId, token}).registration?.priceKey,
+        operationId: key()
+    })
 // the provider's return: the payment looked up at once and applied
 const returned = (siteId, token) => visitor("get#Registration", {siteId, token, returned: "true"})
 const hold = (reservationId, minutesFromNow) =>
@@ -270,7 +277,8 @@ spec({
             siteFor(siteB, "mkrg-b.example.test", orgB)
             for (const [productId, owner] of [
                 [prefix + "_SEAT_A", orgA],
-                [prefix + "_SEAT_B", orgB]
+                [prefix + "_SEAT_B", orgB],
+                [prefix + "_SEAT_P", orgA]
             ]) {
                 make("mantle.product.Product", {
                     productId,
@@ -294,6 +302,12 @@ spec({
             ids.approval = offerFor(orgB, siteB, "APPROVAL", 1, [
                 {priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_B"}
             ])
+            // P17 review: the race for the last seats, the waitlist offered by reservation, a price changed before the payment
+            ids.race = offerFor(orgA, siteA, "RACE", 2, [{priceSourceEnumId: "EtpFree"}])
+            ids.group = offerFor(orgA, siteA, "GROUP", 2, [{priceSourceEnumId: "EtpFree"}])
+            ids.price = offerFor(orgA, siteA, "PRICE", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_P"}])
+            make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
+            make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
             users.reader = user(prefix, "reader", [orgA], ["MARKETING_VIEW"])
             users.managerB = user(prefix, "managerB", [orgB], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -526,6 +540,180 @@ feature(
         }
     }
 )
+
+feature("six requests at once for the last two seats: two held, the rest waitlisted, never more seats than the offer has", {
+    when() {
+        const results = parallel(
+            6,
+            (thread, args) => {
+                login("john.doe")
+                ec.artifactExecution.disableAuthz()
+                let out = null
+                try {
+                    ec.transaction.runRequireNew(null, "Race " + thread, () => {
+                        out = ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js").reserve({
+                            registrationPolicyId: args.offer,
+                            lines: [{ticketTypeId: args.ticket, quantity: 1}],
+                            buyer: {partyId: args.buyer, contactMechId: null, name: "Racer"},
+                            requestKey: args.prefix + "race" + thread + "x" + args.stamp,
+                            sourceEnumId: "ErsPublic",
+                            siteId: args.site
+                        })
+                    })
+                } catch (error) {
+                    out = {refused: String(error?.message || error).split("\n")[0]}
+                }
+                ec.message.clearErrors()
+                return {waitlisted: !!out?.waitlisted, refused: out?.refused || ""}
+            },
+            {
+                offer: ids.race.registrationPolicyId,
+                ticket: ids.race.ticketTypeId,
+                buyer: prefix + "_RACER",
+                prefix,
+                site: siteA,
+                stamp: Date.now()
+            },
+            {transaction: false}
+        )
+        const all = rows(R, {registrationPolicyId: ids.race.registrationPolicyId})
+        return {
+            results,
+            held: all.filter(place => place.statusId === "EvrHeld").length,
+            waitlisted: all.filter(place => place.statusId === "EvrWaitlisted").length
+        }
+    },
+    then(r) {
+        r.results.every(result => result.refused == "")
+        r.held == 2
+        r.waitlisted == 4
+        r.results.filter(result => !result.waitlisted).length == 2
+    }
+})
+
+feature("the waitlist is offered a reservation at a time: none split, none passed; a completed free one confirms at once", {
+    when() {
+        const enter = (name, quantity) =>
+            as(users.manager, E + "reserve#Registration", {
+                registrationPolicyId: ids.group.registrationPolicyId,
+                lines: [{ticketTypeId: ids.group.ticketTypeId, quantity}],
+                buyerName: name,
+                buyerEmail: name.toLowerCase().replace(/ /g, ".") + "@mkrg.example.test",
+                requestKey: key()
+            })
+        const first = enter("Group first", 2)
+        const pair = enter("Group pair", 2)
+        const single = enter("Group single", 1)
+        // the waiting pair answers for both its attendees while waiting (a staff entry may), the second with an address of their own
+        const completedPair = as(users.manager, E + "complete#Registration", {
+            reservationId: pair.reservationId,
+            attendees: [{name: "Pair buyer"}, {name: "Pair guest", email: "pair.guest@mkrg.example.test"}],
+            acceptTerms: true,
+            requestKey: key()
+        })
+        const cancelOne = id => {
+            const read = as(users.manager, E + "get#Registration", {registrationId: id})
+            return as(users.manager, E + "cancel#Registration", {
+                registrationId: id,
+                expectedRevision: read.registration.revision,
+                reason: "Spec"
+            })
+        }
+        // one seat comes free: the pair does not fit and the single one behind it does not pass it
+        cancelOne(first.registrationIds[0])
+        runHolds()
+        const afterOne = {pair: states(pair.reservationId), single: states(single.reservationId)}
+        // the second seat: the pair is offered together and, completed and free, confirmed
+        cancelOne(first.registrationIds[1])
+        runHolds()
+        const afterTwo = {pair: states(pair.reservationId), single: states(single.reservationId)}
+        return {first, pair, single, completedPair, afterOne, afterTwo}
+    },
+    then(r) {
+        r.first.refusal == "" && r.first.state == "held"
+        r.pair.refusal == "" && r.pair.state == "waitlisted"
+        r.single.refusal == "" && r.single.state == "waitlisted"
+        r.completedPair.refusal == ""
+        r.afterOne.pair == "EvrWaitlisted,EvrWaitlisted" && r.afterOne.single == "EvrWaitlisted"
+        r.afterTwo.pair == "EvrConfirmed,EvrConfirmed" && r.afterTwo.single == "EvrWaitlisted"
+    }
+})
+
+feature("a ticket's link to the reservation goes to its buyer only, never to another attendee", {
+    when() {
+        const pair = rows("mantle.work.registration.EventReservation", {
+            registrationPolicyId: ids.group.registrationPolicyId
+        }).find(
+            reservation => places(reservation.reservationId).length == 2 && places(reservation.reservationId)[1].attendeePartyId
+        )
+        const [own, guest] = places(pair.reservationId)
+        const body = place =>
+            system(() => {
+                const delivery = rows("mantle.party.MessageDelivery", {eventKey: "evreg-ticket:" + place.registrationId})[0]
+                if (!delivery) return {missing: true}
+                return ec.service
+                    .sync()
+                    .name(E + "build#RegistrationDelivery")
+                    .parameters({deliveryId: delivery.deliveryId})
+                    .disableAuthz()
+                    .call()
+            })
+        return {own: body(own), guest: body(guest), buyer: pair.buyerPartyId, guestParty: guest.attendeePartyId}
+    },
+    then(r) {
+        r.guestParty != r.buyer
+        !r.own.missing && !r.guest.missing
+        String(r.own.bodyText).includes("Entry code") && String(r.guest.bodyText).includes("Entry code")
+        String(r.own.bodyText).includes("Registration?token=")
+        !String(r.guest.bodyText).includes("token=")
+    }
+})
+
+feature("a price changed after the reservation is refused at the payment's start with the new amount, never charged unseen", {
+    when() {
+        const reserved = reserve(siteA, ids.price.registrationPolicyId, ids.price.ticketTypeId, 1, "price@mkrg.example.test")
+        complete(siteA, reserved.token, ["Price payer"])
+        const shown = visitor("get#Registration", {siteId: siteA, token: reserved.token}).registration
+        // the ticket product's price changes while the place is held
+        system(() => {
+            const price = rows("mantle.product.ProductPrice", {productId: prefix + "_SEAT_P"})[0]
+            ec.service
+                .sync()
+                .name("update#mantle.product.ProductPrice")
+                .parameters({productPriceId: price.productPriceId, price: "50.00"})
+                .disableAuthz()
+                .call()
+        })
+        const stale = visitor("start#RegistrationPayment", {
+            siteId: siteA,
+            token: reserved.token,
+            priceKey: shown.priceKey,
+            operationId: key()
+        })
+        const paymentsAfterStale = rows("mantle.account.payment.Payment", {
+            orderId: reservationOf(reserved.reference).orderId || "_NONE_"
+        }).length
+        const missingKey = visitor("start#RegistrationPayment", {siteId: siteA, token: reserved.token, operationId: key()})
+        const reshown = visitor("get#Registration", {siteId: siteA, token: reserved.token}).registration
+        const started = visitor("start#RegistrationPayment", {
+            siteId: siteA,
+            token: reserved.token,
+            priceKey: reshown.priceKey,
+            operationId: key()
+        })
+        const payment = row("mantle.account.payment.Payment", {paymentId: reservationOf(reserved.reference).paymentId})
+        return {shown, stale, paymentsAfterStale, missingKey, reshown, started, payment}
+    },
+    then(r) {
+        !!r.shown.priceKey && r.shown.amountDueText.includes("40")
+        r.stale.kind == "Conflict" && r.stale.message.includes("PRICE_CHANGED") && r.stale.message.includes("50")
+        r.paymentsAfterStale == 0
+        r.missingKey.kind == "Unprocessable"
+        r.reshown.priceKey != r.shown.priceKey && r.reshown.amountDueText.includes("50")
+        r.started.payment.paymentState == "pending"
+        toDecimal(r.payment.amount).eq(toDecimal("53.00"))
+    }
+})
 
 feature("a cancelled order releases its places; a client's reservations past its limit are refused and hold no seat", {
     when() {
