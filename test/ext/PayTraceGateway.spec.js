@@ -6,7 +6,9 @@
 // with their totals, rejected enhanced data recorded and sent again without a second charge, and the Protect.js browser
 // endpoints. No card number, token or secret reaches a gateway response, a payment method or a card record. New spec, no
 // Groovy original.
-const vendorId = "ORG_ZIZI_RETAIL"
+// the seller is the spec's own internal organization, with no tax nexus and no organization above it (so no inherited tax
+// gateway retaxes its storeless order and deletes the tax lines it is written with)
+const vendorId = "PT_SPEC_SELLER"
 const P = "mantle.account.PaymentServices."
 const T = "mantle.ext.account.gateway.PayTraceServices."
 const BASE = "https://api.sandbox.paytrace.com"
@@ -21,6 +23,9 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        call("store#mantle.party.Party", {partyId: vendorId, partyTypeEnumId: "PtyOrganization", ownerPartyId: vendorId})
+        call("store#mantle.party.Organization", {partyId: vendorId, organizationName: "PayTrace Spec Seller"})
+        call("store#mantle.party.PartyRole", {partyId: vendorId, roleTypeId: "OrgInternal"})
         call("create#moqui.service.message.SystemMessageRemote", {
             systemMessageRemoteId: "PT_SPEC",
             description: "PayTrace spec sandbox",

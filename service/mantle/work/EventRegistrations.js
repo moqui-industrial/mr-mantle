@@ -84,6 +84,46 @@ function wholeOf(value, code, label, min, max) {
     return number
 }
 const timeOf = value => (blank(value) ? null : ms(value))
+
+// ===== the cancellation rule (follow-up 1; §4 Nov 15, the user's call) =====
+// An offer's (or an accepted terms revision's) cancellation rule: online cancellation until deadlineHours before the start (null:
+// until the start), refundPercent of a confirmed place's price and tax refunded then (null: 100), and after the deadline either
+// no online cancellation or, with lateAllowed, one with no refund. {deadlineHours, refundPercent, lateAllowed}
+function cancelRuleOf(source) {
+    return {
+        deadlineHours: source?.cancelDeadlineHours == null ? null : Number(source.cancelDeadlineHours),
+        refundPercent: source?.refundPercent == null ? 100 : Number(toDecimal(source.refundPercent).toString()),
+        lateAllowed: source?.lateCancelAllowed === "Y"
+    }
+}
+const hasCancelRule = source =>
+    source?.cancelDeadlineHours != null || source?.refundPercent != null || source?.lateCancelAllowed === "Y"
+const percentText = value => String(Number(value))
+// The rule in words, as Register, Event and Registration show it and the accepted terms keep it.
+function cancelRuleText(source) {
+    const rule = cancelRuleOf(source)
+    const hours = rule.deadlineHours
+    const until =
+        hours == null || hours === 0
+            ? L("until the event starts")
+            : hours % 24 === 0
+              ? L("up to") + " " + hours / 24 + " " + L(hours === 24 ? "day" : "days") + " " + L("before the event starts")
+              : L("up to") + " " + hours + " " + L(hours === 1 ? "hour" : "hours") + " " + L("before the event starts")
+    const refund =
+        rule.refundPercent >= 100
+            ? L("for a full refund")
+            : rule.refundPercent <= 0
+              ? L("with no refund")
+              : L("for a refund of") + " " + percentText(rule.refundPercent) + "% " + L("of the price")
+    const after =
+        hours == null || hours === 0
+            ? ""
+            : " " +
+              (rule.lateAllowed
+                  ? L("After that you may still cancel online, with no refund.")
+                  : L("After that, cancellation is not available online; contact the organizer."))
+    return L("You may cancel online") + " " + until + ", " + refund + "." + after
+}
 function zoneText(millis, zone, pattern = "yyyy-MM-dd HH:mm") {
     if (millis == null) return ""
     try {
@@ -555,6 +595,10 @@ function policyView(policy, workEffort, canManage) {
         waitlistLimit: policy.waitlistLimit,
         termsText: policy.termsText || "",
         cancellationTerms: policy.cancellationTerms || "",
+        cancelDeadlineHours: policy.cancelDeadlineHours,
+        refundPercent: policy.refundPercent == null ? null : Number(toDecimal(policy.refundPercent).toString()),
+        lateCancelAllowed: policy.lateCancelAllowed || "N",
+        cancelRuleText: cancelRuleText(policy),
         formPublicationId: policy.formPublicationId || "",
         formId: form?.formId || "",
         formName: dbForm ? dbForm.description || dbForm.formId : "",
@@ -670,6 +714,9 @@ function storeRegistrationEvent(p) {
 
 // ===== store#RegistrationPolicy =====
 const POLICY_FIELDS = ["publicTitle", "publicDescription", "termsText", "cancellationTerms", "timeZone"]
+// the fields of the terms a registrant accepts (with the consent text, storeRegistrationForm's): a change after publication raises
+// termsRevision; the cancellation rule among them (follow-up 1)
+const TERMS_FIELDS = ["termsText", "cancellationTerms", "cancelDeadlineHours", "refundPercent", "lateCancelAllowed"]
 function storeRegistrationPolicy(p) {
     const userScope = manageScope()
     let row = null,
@@ -752,6 +799,27 @@ function storeRegistrationPolicy(p) {
             limits.holdMinutes[1]
         )
     if (p.waitlistEnabled !== undefined && p.waitlistEnabled !== null) values.waitlistEnabled = yes(p.waitlistEnabled) ? "Y" : "N"
+    // the cancellation rule (follow-up 1): a deadline in hours before the start (empty: until the start), the refund's percentage
+    // (empty: 100) and whether a late cancellation is allowed without a refund
+    if (p.cancelDeadlineHours !== undefined && p.cancelDeadlineHours !== null)
+        values.cancelDeadlineHours = wholeOf(
+            p.cancelDeadlineHours,
+            "DEADLINE_INVALID",
+            "The cancellation deadline in hours",
+            0,
+            8760
+        )
+    if (p.refundPercent !== undefined && p.refundPercent !== null) {
+        if (blank(p.refundPercent)) values.refundPercent = null
+        else {
+            const percent = Number(String(p.refundPercent).trim())
+            if (!Number.isFinite(percent) || percent < 0 || percent > 100 || Math.round(percent * 100) !== percent * 100)
+                denied("REFUND_INVALID", "The refund is a percentage from 0 to 100, at most two decimals")
+            values.refundPercent = percent
+        }
+    }
+    if (p.lateCancelAllowed !== undefined && p.lateCancelAllowed !== null)
+        values.lateCancelAllowed = yes(p.lateCancelAllowed) ? "Y" : "N"
     if (p.waitlistLimit !== undefined && p.waitlistLimit !== null)
         values.waitlistLimit = wholeOf(p.waitlistLimit, "WAITLIST_INVALID", "The waitlist's places", 0, limits.seats)
     if (p.sendingProfileId !== undefined && p.sendingProfileId !== null) {
@@ -769,7 +837,7 @@ function storeRegistrationPolicy(p) {
         if (!changed.length) return {registrationPolicyId: row.registrationPolicyId, changed: false}
         values.policyRevision = Number(row.policyRevision || 1) + 1
         // the terms a registration accepts: a change after it was published is a new terms revision (P17 keeps it on each)
-        if (row.publishedDate && changed.some(name => name === "termsText" || name === "cancellationTerms"))
+        if (row.publishedDate && changed.some(name => TERMS_FIELDS.includes(name)))
             values.termsRevision = Number(row.termsRevision || 0) + 1
         call("update#" + POLICY, Object.assign({registrationPolicyId: row.registrationPolicyId}, values))
         // the questions are answered on the offer's site
@@ -1097,7 +1165,9 @@ function publishRegistration(p) {
         occurrenceEnd: new Date(occurrence.end),
         publishedDate: ec.user.nowTimestamp,
         publishedByUserId: ec.user.userId,
-        policyRevision: Number(policy.policyRevision || 1) + 1
+        policyRevision: Number(policy.policyRevision || 1) + 1,
+        // the secret its entry codes are derived from (follow-up 1), made here so a code's first issue need not change the offer
+        ...(policy.entryCodeKey ? {} : {entryCodeKey: ec.user.randomString(64)})
     })
     syncPublication(one(POLICY, {registrationPolicyId: policy.registrationPolicyId}), true)
     return {
@@ -1226,7 +1296,8 @@ function publicView(registrationPolicyId, siteId, organizationPartyId) {
               ? L("Registration opens") + " " + zoneText(opens, zone, dayPattern)
               : L("Registration has closed"),
         terms: policy.termsText || "",
-        cancellationTerms: policy.cancellationTerms || ""
+        cancellationTerms: policy.cancellationTerms || "",
+        cancelRule: cancelRuleText(policy)
     }
 }
 // An offer's public facts for its registration messages and pages (P17): its title, when in its zone, and where or online.
@@ -1270,6 +1341,9 @@ const operations = {
     readinessOf,
     publicView,
     publicFacts,
+    cancelRuleOf,
+    cancelRuleText,
+    hasCancelRule,
     profileOf,
     liveOffersOf,
     // the event's organization (CampaignAssociation CakEvent, MarketingCampaigns.js): {owner, label} or null
