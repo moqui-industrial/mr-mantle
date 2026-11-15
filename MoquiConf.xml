@@ -14,8 +14,8 @@
     </llm-facade>
     <!-- Smithy's quota for Git LFS (mr-pass plan/design-smithy.md §11 Quotas): asked before an upload is accepted; it
         returns at once for a repository with no SmithyRepository row -->
-    <!-- Smithy over the git host (design-smithy §9.1, §9.3, N-HOOKS): the status contexts agreement/ and ci/ are the
-        system's (the agreement check and the engine write them with authorization disabled, a user never); a merge
+    <!-- Smithy over the git host (design-smithy §9.1, §9.3, N-HOOKS): the status contexts agreement/, ci/ and deploy/ are
+        the system's (the agreement check and the engine, its runs and deployments, write them with authorization disabled, a user never); a merge
         request pushed for review, proposed on a page or opened from a fork starts hidden until Smithy's handler of its
         opened event has passed its text through the post gate (SmithyReviewServices.handle#MergeRequestEvent); and the
         answer to a push names the merge request's page under a root Smithy mount (a path: the host is the server's
@@ -32,7 +32,7 @@
             offer-service="mantle.smithy.SmithyGitServices.add#HostingOffer"
             agreement-check-service="mantle.smithy.SmithyGitServices.check#AuthorSigned"
             review-thread-service="mantle.work.GitServices.handle#GitReviewThread"
-            reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
+            reserved-status-contexts="agreement/,ci/,deploy/" review-start-hidden="true"
             merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
     <!-- Smithy decides whether a pipeline run may start, waits or is refused, its trust, owner and pool (design-smithy §10,
         DG5), and names the run's page for its statuses -->

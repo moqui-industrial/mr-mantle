@@ -435,6 +435,12 @@
     ['GET', 'smithy/repositories/{repositoryId}/ci-environments', 'findCiEnvironments'],
     ['POST', 'smithy/repositories/{repositoryId}/ci-environments', 'storeCiEnvironment'],
     ['DELETE', 'smithy/repositories/{repositoryId}/ci-environments/{environmentId}', 'deleteCiEnvironment'],
+    // Dogfood DG10: deployments
+    ['GET', 'smithy/repositories/{repositoryId}/deployments', 'findDeployments'],
+    ['GET', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}', 'getDeployment'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments', 'requestDeploy'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}/decide', 'decideDeploy'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}/cancel', 'cancelDeploy'],
     ['GET', 'smithy/pipeline-settings', 'getPipelineSettings'],
     ['PATCH', 'smithy/pipeline-settings', 'storePipelineSettings'],
     // Dogfood DG7: the site (design-smithy §15.8)

@@ -8,7 +8,8 @@
 // list from an address that is no account's is held and answered once, and posted as the account once the address is
 // verified, its sender's address kept no longer than its time; only the trusted gateway's Authentication-Results
 // authenticate a sender (RFC 8601: quoted strings, comments, the first result of a method); and mail the gateway marked as
-// spam is held for review, read only in the forum's own inbound account.
+// spam is held for review, read only in the forum's own inbound account; a reply by a member's reply address or by
+// In-Reply-To to a notice it was mailed is a post in that topic.
 // Spec-local site, category and accounts; the fixture is test/forum/fixtures/list.mbox. Regression suite: these are rules.
 // Run: ./moq test mr-mantle --spec MailingLists
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
@@ -651,5 +652,64 @@ feature("an archive goes only into a list, and a message over the byte cap is pa
         report == [2, 1]
         handle != "git"
         handle.startsWith("git-") == true
+    }
+})
+
+feature("a reply to a list's message, by its reply address or by In-Reply-To, is a post in that topic", {
+    when() {
+        const to = "dev@" + LISTS
+        const from = "mls_member@smithy.test"
+        const sent = (address, subject, text, more = {}) =>
+            lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                emailMessageId: null,
+                headers: {
+                    "delivered-to": address,
+                    "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
+                    "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                    ...more
+                },
+                fields: {from, subject, toList: [address]},
+                bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}]
+            }).result
+        lib.settled(SITE, "MLS_MEMBER")
+        const started = sent(to, "Replies by mail", "MLS-REPLY-ROOT")
+        const root = posts(ids.list).find(post => String(post.body).includes("MLS-REPLY-ROOT")).rootCommEventId
+        // the reply address a notice of the topic carries for this member
+        const address = sys(() => forum().replyAddress(SITE, root, ids.list, "MLS_MEMBER", root))
+        lib.settled(SITE, "MLS_MEMBER")
+        const byToken = sent(address, "Re: Replies by mail", "MLS-REPLY-TOKEN")
+        // a notice of the topic mailed to this member, its Message-ID the provider's, answered by In-Reply-To
+        const outboxId = lib.make("mantle.forum.ForumOutbox", {
+            siteId: SITE,
+            communicationEventId: root,
+            eventType: "post",
+            state: "done",
+            createdAt: ec.user.nowTimestamp
+        }).outboxId
+        lib.make("mantle.forum.ForumDelivery", {
+            outboxId,
+            siteId: SITE,
+            partyId: "MLS_MEMBER",
+            channel: "email",
+            state: "sent",
+            attempts: 1,
+            revision: 1,
+            providerId: "<mls-notice-1@mls.test>"
+        })
+        lib.settled(SITE, "MLS_MEMBER")
+        const byReference = sent(to, "Re: Replies by mail", "MLS-REPLY-REFERENCE", {"in-reply-to": "<mls-notice-1@mls.test>"})
+        const reply = marker => posts(ids.list).find(post => String(post.body).includes(marker))
+        return {started, byToken, byReference, root, viaToken: reply("MLS-REPLY-TOKEN"), viaReference: reply("MLS-REPLY-REFERENCE")}
+    },
+    then({started, byToken, byReference, root, viaToken, viaReference}) {
+        started.result == "posted"
+        byToken.result == "posted"
+        byReference.result == "posted"
+        root != null
+        viaToken.rootCommEventId == root
+        viaToken.communicationEventId != root
+        viaToken.fromPartyId == "MLS_MEMBER"
+        viaReference.rootCommEventId == root
+        viaReference.communicationEventId != root
     }
 })

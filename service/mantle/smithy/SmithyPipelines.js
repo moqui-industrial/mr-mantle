@@ -315,9 +315,9 @@ kit => {
                         : "Waiting for a Maintainer's approval: each new head of an outside contribution waits for one"
             }
         }
-        // the day's limit of the account's trust level: runs it asks for by hand, and its outside runs (counted last,
-        // once the run is otherwise going to be queued)
-        if (user.userId && (p.event === "manual" || !trusted)) {
+        // the day's limit of the account's trust level: runs it asks for by hand (a manual run, a deployment's), and its
+        // outside runs (counted last, once the run is otherwise going to be queued)
+        if (user.userId && (p.event === "manual" || p.event === "deploy" || !trusted)) {
             const counted = kit.forumScope.countPipelineRun({repositoryId: repo.repositoryId, userId: user.userId})
             if (!counted.allowed) return refuse("limitReached: " + (counted.message || "The day's pipeline runs are used up"))
         }
@@ -924,22 +924,77 @@ kit => {
         engineMove("delete#CiSecret", {repositoryId, secretId: p.secretId})
         return {deleted: true}
     }
+    // ===== environments and deployments (DG10; docs/interfaces/Pipelines.md "Deployments") =====
+    /* The engine's environment and deployment services, after Smithy's own check. Reads (find#CiEnvironments,
+       find#GitDeployments, get#GitDeployment) and the environment's writes are called as the caller, with authorization
+       on whatever the operation's: the engine's rights there are check#GitRepositoryAuthz's, which are Smithy's (view as
+       Smithy views; update a Developer's, delete a Maintainer's, each with a confirmed address), so the engine answers
+       each caller what it may read (a target's address, a deployment's raw error: a Maintainer's). {out, problem}. */
+    function asCaller(name, parameters) {
+        const wasDisabled = ec.artifactExecution.authzDisabled()
+        if (wasDisabled) ec.artifactExecution.enableAuthz()
+        try {
+            return engine(name, parameters)
+        } finally {
+            if (wasDisabled) ec.artifactExecution.disableAuthz()
+        }
+    }
+    /* A refusal of the engine as the operation's: Not Found, accessDenied for the engine's rights, Conflict for a state. */
+    function deployRefused(name, problem) {
+        ec.logger.warn("Smithy deployment call " + name + " refused: " + problem)
+        if (/not found|no such/i.test(problem)) missing()
+        if (/may not|not authorized|not an approver|approver|asked for it|requester/i.test(problem))
+            fail("Unauthorized", "accessDenied: " + problem.slice(0, 200))
+        if (/does not wait|has ended|has begun|ended|not the head|is not the head|moved/i.test(problem))
+            fail("Conflict", problem.slice(0, 200))
+        invalid(problem.slice(0, 200))
+    }
+    function asCallerMove(name, parameters) {
+        const {out, problem} = asCaller(name, parameters)
+        if (problem != null) deployRefused(name, problem)
+        return out
+    }
+    /* A deployment's move (decide, cancel; a request's is requestDeploy's own), after Smithy's checks (the role, the
+       requester, the state), with authorization disabled, in a transaction of its own: the engine moves a
+       deployment by a conditional statement in the database, which misses a row that a held transaction (the
+       operation's, under the transaction cache) still keeps, so a deployment just made would stay requested; and its
+       own right check, were it called as the caller, would run Mantle's check#GitRepositoryAuthz, an XML service whose
+       join turns holding on in that transaction too. The engine records the signed-in user as who asked, decided or
+       cancelled. */
+    function deployMove(name, parameters) {
+        const {out, problem} = ec.transaction.runRequireNew(null, "A Smithy deployment move failed", () => engine(name, parameters))
+        if (problem != null) deployRefused(name, problem)
+        return out
+    }
+    const PIPELINE_NAME = /^[A-Za-z0-9._-]{1,64}$/
+    /* An https or http address with a user part (user:password@) carries a credential: refused, as the engine will. */
+    const withUserInfo = url => /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/?#]*@/.test(text(url).trim()) && /^https?:/i.test(text(url).trim())
     methods.findCiEnvironments = p => {
         const r = viewed(p)
         requireRoleRead(r, "SmrDeveloper")
+        const {out, problem} = asCaller("find#CiEnvironments", {repositoryId: r.repo.repositoryId})
+        if (problem != null) missing()
         return {
-            environmentList: environmentsOf(r.repo.repositoryId).map(env => ({
+            environmentList: Array.from(out.environmentList || []).map(env => ({
                 environmentId: env.environmentId,
                 name: env.name,
+                // a target's addresses are the engine's to give: a Maintainer's
                 targetUrl: env.targetUrl || null,
+                cloneUrl: env.cloneUrl || null,
                 requiredPipeline: env.requiredPipeline || null,
                 approvalRequired: flag(env.approvalRequired),
+                // who waits for an approval: every deployment, or (the engine's rule) one of a branch no rule protects,
+                // which allowedRefs alone lets deploy
+                approvalFor: flag(env.approvalRequired) ? "every" : "unprotected",
+                dataTypes: env.dataTypes ? String(env.dataTypes).split(",").filter(name => name) : [],
                 allowedRefs: env.allowedRefs || null,
                 hasToken: flag(env.hasToken),
                 lastCommitId: env.lastCommitId || null,
+                lastDeploymentId: env.lastDeploymentId || null,
                 lastDeployAt: env.lastDeployDate || null
             })),
-            canChange: canWrite(r, RANK.SmrMaintainer)
+            canChange: canWrite(r, RANK.SmrMaintainer),
+            canDeploy: canWrite(r, RANK.SmrDeveloper) && r.repo.pipelinesEnabled === "Y"
         }
     }
     methods.storeCiEnvironment = p => {
@@ -952,8 +1007,8 @@ kit => {
         if (!ENVIRONMENT_NAME.test(text(name))) invalid("name must be letters, digits, '.', '-' and '_'")
         if (existing.some(env => env.environmentId !== editing?.environmentId && env.name === name))
             invalid("nameTaken: An environment of that name is there")
-        // which runs get its secrets: a protected ref's, a branch allowedRefs names (patterns separated by spaces), and with
-        // approvalRequired only an approved run. The target, its token and the required pipeline are DG10's (deployments)
+        // which runs get its secrets and which branches deploy to it: a protected ref's, and a branch allowedRefs names
+        // (patterns separated by spaces); with approvalRequired only an approved run, and an approver's decision
         const allowedRefs = given(p.allowedRefs)
             ? text(p.allowedRefs)
                   .trim()
@@ -967,19 +1022,51 @@ kit => {
         // environment's secrets to any branch a Developer pushes
         if (allowedRefs && allowedRefs.split(" ").some(ref => /^[*\/]*$/.test(ref.replace(/^refs\/(?:heads\/|tags\/)?/, ""))))
             invalid("allowedRefs must name branches or tags: a pattern of only wildcards takes every one")
-        const store = () =>
-            engineMove("store#CiEnvironment", {
+        // the deployment fields (DG10): an empty value clears one, a left-out one stays; the token is write-only, and
+        // left out or empty it stays (the engine clears no token: a new one replaces it). Smithy has no approver groups:
+        // an approval is any Maintainer's but the requester's, so approverGroupId is always cleared
+        if (given(p.approverGroupId) && p.approverGroupId !== "")
+            invalid("approverGroupId: Smithy has no approver groups; a Maintainer other than the requester approves")
+        const cleared = value => (value === "" ? null : text(value).trim())
+        const deployFields = {approverGroupId: null}
+        for (const field of ["targetUrl", "cloneUrl", "requiredPipeline"]) if (given(p[field])) deployFields[field] = cleared(p[field])
+        // the data types the target loads of the component's data files, signed in each attestation: names separated
+        // by commas or spaces; empty for the target's defaults
+        if (given(p.dataTypes)) {
+            const names = text(p.dataTypes)
+                .split(/[\s,]+/)
+                .filter(name => name)
+            if (names.length > 20 || !names.every(name => /^[A-Za-z0-9_-]{1,60}$/.test(name)))
+                invalid("dataTypes must be data type names separated by commas")
+            deployFields.dataTypes = names.length ? names.join(",") : null
+        }
+        if (deployFields.requiredPipeline && !PIPELINE_NAME.test(deployFields.requiredPipeline))
+            invalid("requiredPipeline names no pipeline")
+        if (deployFields.targetUrl && withUserInfo(deployFields.targetUrl))
+            invalid("targetUrl: An address with no user or password in it")
+        if (deployFields.cloneUrl && withUserInfo(deployFields.cloneUrl))
+            invalid("cloneUrl: An address with no user or password in it")
+        const token = given(p.token) && p.token !== "" ? String(p.token) : null
+        if (token != null && token.length < 32) invalid("token: The target's token is at least 32 characters")
+        const store = () => {
+            const out = asCallerMove("store#CiEnvironment", {
                 repositoryId,
                 environmentId: editing?.environmentId || null,
                 name,
                 ...(allowedRefs !== undefined ? {allowedRefs: allowedRefs || null} : {}),
-                ...(given(p.approvalRequired) && p.approvalRequired !== "" ? {approvalRequired: flag(p.approvalRequired)} : {})
+                ...(given(p.approvalRequired) && p.approvalRequired !== "" ? {approvalRequired: flag(p.approvalRequired)} : {}),
+                ...deployFields,
+                ...(token != null ? {token} : {})
             })
+            kit.maintainerAudit(p, "storeCiEnvironment", name)
+            return out
+        }
         if (editing) {
             store()
             return {environmentId: editing.environmentId}
         }
-        return receipt(p, "smithy.storeCiEnvironment", () => ({environmentId: store().environmentId || null}))
+        // the receipt keeps no trace of the token
+        return receipt({...p, token: null}, "smithy.storeCiEnvironment", () => ({environmentId: store().environmentId || null}))
     }
     methods.deleteCiEnvironment = p => {
         const r = maintainer(p)
@@ -987,9 +1074,223 @@ kit => {
         if (!environmentsOf(repositoryId).some(env => env.environmentId === p.environmentId)) missing()
         if (secretsOf(repositoryId).some(secret => secret.environmentId === p.environmentId))
             fail("Conflict", "A secret is scoped to this environment; delete it or move it first")
-        engineMove("delete#CiEnvironment", {repositoryId, environmentId: p.environmentId})
+        asCallerMove("delete#CiEnvironment", {repositoryId, environmentId: p.environmentId})
+        kit.maintainerAudit(p, "deleteCiEnvironment", p.environmentId)
         return {deleted: true}
     }
+    const DEPLOY_STATES = ["requested", "waiting-pipeline", "waiting-approval", "deploying", "deployed", "failed", "refused", "cancelled"]
+    const handleOfUser = (r, userId) =>
+        userId ? reviews().profileView(r.repo.siteId, reviews().partyOfUser(userId))?.handle || null : null
+    function deploymentView(r, d) {
+        const runNum = number(d.runNum)
+        let result = null
+        try {
+            result = d.deployResult ? JSON.parse(d.deployResult) : null
+        } catch (error) {
+            result = null
+        }
+        // the target's problems are its own words, a Maintainer's to read, as the engine gives errorText
+        if (result && typeof result === "object" && r.rank < RANK.SmrMaintainer) delete result.problems
+        return {
+            deploymentId: d.deploymentId,
+            environmentId: d.environmentId || null,
+            environment: d.environment || d.environmentName || null,
+            commitId: d.commitId || null,
+            refName: d.refName || null,
+            componentName: d.componentName || null,
+            state: d.statusId,
+            // it waits for an approver once its pipeline passes (its environment's rule, or a branch no rule protects)
+            approvalRequired: flag(d.approvalRequired),
+            runNum,
+            runPath: runNum ? runPath(r.repo, runNum, null) : null,
+            requestedBy: handleOfUser(r, d.requestedByUserId),
+            approvedBy: handleOfUser(r, d.approvedByUserId),
+            refusedBy: handleOfUser(r, d.refusedByUserId),
+            approvedAt: d.approvedDate || null,
+            result,
+            // what the engine gives the caller (a raw error is a Maintainer's)
+            message: d.errorText || null,
+            createdAt: d.createdDate || null,
+            startedAt: d.startedDate || null,
+            finishedAt: d.finishedDate || null
+        }
+    }
+    /* A deployment of the repository as the caller reads it: {deployment, canDecide, canCancel}, or Not Found. */
+    function deploymentOf(r, p) {
+        if (!text(p.deploymentId)) missing()
+        const {out, problem} = asCaller("get#GitDeployment", {deploymentId: text(p.deploymentId)})
+        if (problem != null || !out.deployment || out.deployment.repositoryId !== r.repo.repositoryId) missing()
+        return out
+    }
+    const mine = d => !!ec.user.userId && d.requestedByUserId === ec.user.userId
+    /* The states a deployment is cancelled in, as the engine cancels: before its deploy step begins. */
+    const cancellable = d =>
+        ["requested", "waiting-pipeline", "waiting-approval"].includes(d.statusId) || (d.statusId === "deploying" && !d.startedDate)
+    methods.findDeployments = p => {
+        const r = viewed(p)
+        requireRoleRead(r, "SmrDeveloper")
+        const limit = Math.min(Math.max(Number(p.limit || 20), 1), 100)
+        const pageIndex = Math.max(Number(p.pageIndex || 0), 0)
+        if (given(p.state) && p.state !== "" && !DEPLOY_STATES.includes(p.state)) invalid("state names no deployment state")
+        const {out, problem} = asCaller("find#GitDeployments", {
+            repositoryId: r.repo.repositoryId,
+            environment: text(p.environment) || null,
+            statusId: text(p.state) || null,
+            commitId: text(p.commitId) || null,
+            pageIndex,
+            pageSize: limit
+        })
+        if (problem != null) missing()
+        return {
+            deploymentList: Array.from(out.deploymentList || []).map(d => deploymentView(r, d)),
+            deploymentCount: number(out.deploymentCount) || 0,
+            pageIndex,
+            limit,
+            canDeploy: canWrite(r, RANK.SmrDeveloper) && r.repo.pipelinesEnabled === "Y"
+        }
+    }
+    methods.getDeployment = p => {
+        const r = viewed(p)
+        requireRoleRead(r, "SmrDeveloper")
+        const {deployment} = deploymentOf(r, p)
+        const own = mine(deployment)
+        return {
+            deployment: deploymentView(r, deployment),
+            // Smithy's own rules, as decideDeploy and cancelDeploy hold them: a Maintainer decides one waiting for approval,
+            // never the requester; a Developer cancels their own, a Maintainer any, before its deploy step begins
+            capabilities: {
+                canDecide: deployment.statusId === "waiting-approval" && !own && canWrite(r, RANK.SmrMaintainer),
+                canCancel: cancellable(deployment) && (canWrite(r, RANK.SmrMaintainer) || (own && canWrite(r, RANK.SmrDeveloper)))
+            }
+        }
+    }
+    methods.requestDeploy = p => {
+        const {r} = mover(p, "SmrDeveloper")
+        pipelinesOn(r)
+        const environment = text(p.environment)
+        const environmentId = text(p.environmentId)
+        if (!environment && !environmentId) invalid("environment is required")
+        if (environment && !ENVIRONMENT_NAME.test(environment)) invalid("environment names no environment")
+        // an environment of this repository only
+        if (environmentId && !environmentsOf(r.repo.repositoryId).some(env => env.environmentId === environmentId)) missing()
+        const commitId = text(p.commitId)
+        if (commitId && !/^[0-9a-f]{40}$/.test(commitId)) invalid("commitId is a full commit id")
+        requireMinutes(r)
+        return deployReceipt(p, "smithy.requestDeploy", () => {
+            const {out, problem} = engine("request#GitDeployment", {
+                repositoryId: r.repo.repositoryId,
+                ...(environmentId ? {environmentId} : {environment}),
+                refName: text(p.refName) || null,
+                commitId: commitId || null
+            })
+            if (problem != null) deployRefused("request#GitDeployment", problem)
+            const run = out.pipelineRunId ? one("moqui.resource.GitPipelineRun", {pipelineRunId: out.pipelineRunId}) : null
+            return {
+                deploymentId: out.deploymentId || null,
+                state: out.statusId || null,
+                message: out.message || null,
+                runNum: run ? Number(run.runNum) : null,
+                runPath: run ? runPath(r.repo, run.runNum, null) : null
+            }
+        })
+    }
+    /* receipt (ForumCore) for requestDeploy, with the deployment and the receipt row written in one transaction of
+       their own, so a retry finds either both or neither: the operation's receipt is read first (a retry answers what
+       the first call did), then, in a new transaction (why: deployMove), the engine's request, with authorization
+       disabled after Smithy's checks, and the receipt row. A racing retry's receipt makes the slower one roll back,
+       its deployment with it. */
+    function deployReceipt(p, action, work) {
+        const actorPartyId = forum.requireUser()
+        if (!/^[A-Za-z0-9_-]{8,64}$/.test(p.operationId || ""))
+            invalid("operationId must contain 8–64 letters, numbers, underscores or hyphens")
+        const key = {siteId: p.siteId, actorPartyId, operationId: p.operationId, action}
+        const payload = {...p}
+        delete payload.operationId
+        const payloadHash = forum.hash(JSON.stringify(Object.fromEntries(Object.entries(payload).sort(([a], [b]) => a.localeCompare(b)))))
+        const answer = row => {
+            if (row.payloadHash !== payloadHash) fail("Conflict", "Operation ID was used with different input")
+            return JSON.parse(row.resultJson)
+        }
+        const old = one("mantle.forum.ForumOperationReceipt", key)
+        if (old) return answer(old)
+        return ec.transaction.runRequireNew(null, "A Smithy deployment request failed", () => {
+            const result = work()
+            create("mantle.forum.ForumOperationReceipt", {...key, payloadHash, resultJson: JSON.stringify(result)})
+            return result
+        })
+    }
+    methods.decideDeploy = p => {
+        const {r} = mover(p, "SmrMaintainer")
+        const {deployment} = deploymentOf(r, p)
+        // the engine's approver for an environment with no approver group (Smithy names none) is a maintainer, the delete
+        // right, which check#GitRepositoryAuthz gives a Maintainer with a confirmed address: what mover checked
+        if (mine(deployment)) fail("Unauthorized", "accessDenied: Who asked for a deployment does not decide it")
+        if (!["approve", "refuse"].includes(p.decision)) invalid("decision is approve or refuse")
+        if (deployment.statusId !== "waiting-approval") fail("Conflict", "The deployment does not wait for approval")
+        // the reason is Smithy's audit's: the engine writes a refusal's reason into its error and the commit's status
+        const reason = text(p.reason).trim().slice(0, 1000)
+        kit.maintainerAudit(p, "decideDeploy", p.decision + " " + deployment.deploymentId + (reason ? ": " + reason : ""))
+        const out = deployMove("decide#GitDeployment", {deploymentId: deployment.deploymentId, decision: p.decision})
+        return {state: out.statusId || null}
+    }
+    methods.cancelDeploy = p => {
+        const r = viewed(p)
+        writer(p.siteId)
+        const {deployment} = deploymentOf(r, p)
+        // a Developer cancels their own, a Maintainer any; not in an archived repository (as the page's canCancel)
+        core.requireRole(r, mine(deployment) ? "SmrDeveloper" : "SmrMaintainer")
+        if (r.git.archivedDate) archived()
+        if (!cancellable(deployment)) fail("Conflict", "The deployment has begun or ended")
+        const out = deployMove("cancel#GitDeployment", {deploymentId: deployment.deploymentId})
+        return {state: out.statusId || null}
+    }
+    /* handle#DeploymentNotice: the engine told a deployment's requester that it waits for approval, and the approver
+       group when its environment names one; with none, the repository's Maintainers and Owners (other than the
+       requester) are told too, on the same topic, with the repository as the record (which the rule leaves alone). */
+    function deploymentNotice(p) {
+        const message = forum.json(p.messageJson, {})
+        if (message.statusId !== "waiting-approval") return {notified: 0}
+        const repositoryId = text(message.repositoryId || p.subTopic)
+        const repo = repositoryId ? one(M + "SmithyRepository", {repositoryId}) : null
+        // the row as it is now, not the notice's word: an end's notice may still say waiting-approval
+        const deployment = message.deploymentId
+            ? ec.entity
+                  .find("moqui.resource.GitDeployment")
+                  .condition("deploymentId", text(message.deploymentId))
+                  .useCache(false)
+                  .one()
+            : null
+        if (!repo || !deployment || deployment.repositoryId !== repositoryId || deployment.statusId !== "waiting-approval")
+            return {notified: 0}
+        const environment = deployment.environmentId
+            ? one("moqui.resource.GitCiEnvironment", {environmentId: deployment.environmentId})
+            : null
+        // an environment with an approver group (not one Smithy made: it names none) has its group told by the engine
+        if (!environment || environment.approverGroupId) return {notified: 0}
+        const userIds = core.maintainerUserIds(repositoryId, [deployment.requestedByUserId])
+        if (!userIds.length) return {notified: 0}
+        const where = repo.repositoryPath || repositoryId
+        const environmentName = deployment.environmentName || environment.name
+        ec.makeNotificationMessage()
+            .topic("GitDeployment")
+            .subTopic(repositoryId)
+            .userIds(userIds)
+            .record(M + "SmithyRepository", repositoryId)
+            .title("The deployment of " + where + " " + text(deployment.commitId).slice(0, 12) + " to " + environmentName + " waits for approval")
+            .message({
+                deploymentId: deployment.deploymentId,
+                repositoryId,
+                repositoryPath: repo.repositoryPath || null,
+                environment: environmentName,
+                commitId: deployment.commitId || null,
+                statusId: "waiting-approval"
+            })
+            .showAlert(true)
+            .persistOnSend(true)
+            .send()
+        return {notified: userIds.length}
+    }
+    kit.deploymentNotice = deploymentNotice
 
     // ===== pipeline settings: pools, approval, minutes (§11 Pipelines) =====
     /* The settings as a repository's or a group's Maintainer reads them: the pools an operator allowed the owner, the
