@@ -370,9 +370,22 @@ const upcomingSources = [
             }
         }
     },
-    {key: "events", title: "Events", phase: "P16"},
-    {key: "publications", title: "Publication dates", phase: "P14"}
+    // P21 review: the events Marketing offers and the approved publication dates of the next 60 days, the campaign calendar's own
+    // sources (MarketingCalendar.js), each opening its record
+    {
+        key: "events",
+        title: "Events",
+        phase: "P16",
+        run: context => ({rows: calendar().upcomingRows(context, "events", upcomingDays)})
+    },
+    {
+        key: "publications",
+        title: "Publication dates",
+        phase: "P14",
+        run: context => ({rows: calendar().upcomingRows(context, "publications", upcomingDays)})
+    }
 ]
+const calendar = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingCalendar.js")
 function upcoming(p) {
     const context = reader(p)
     const {answered, failedSources} = answerSources(upcomingSources, context, (source, found) => ({
