@@ -192,7 +192,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="store" noun="CampaignAssociation" allow-remote="false">
-        <description>A typed, dated link of an open campaign to a record of its own organization (design §14.1 CampaignAssociation): action add (CakList a list that is not a mailbox, CakSegment a segment, CakPromotion a store promotion, CakForm a form publication; an event and a page once their phases keep their organization, KIND_UNAVAILABLE) or end (campaignAssociationId); another organization's record answers as a missing one (RECORD_UNAVAILABLE); a current link of the same record answered again. Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope.</description>
+        <description>A typed, dated link of an open campaign to a record of its own organization (design §14.1 CampaignAssociation): action add (CakList a list that is not a mailbox, CakSegment a segment, CakPromotion a store promotion, CakForm a form publication; an event and a page once their phases keep their organization, KIND_UNAVAILABLE) or end (campaignAssociationId); another organization's record answers as a missing one (RECORD_UNAVAILABLE); a current link of the same record answered again. Needs MARKETING_CAMPAIGN_EDIT on a campaign of the scope; a store promotion's link, added or ended, also Commerce's COMMERCE_PROMOTION_EDIT with COMMERCE_VIEW and the store's scope (P19: PERMISSION_DENIED, RECORD_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="marketingCampaignId" required="true"/>
             <parameter name="action"/>
@@ -207,6 +207,23 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('storeAssociation', context)"/>
             <set field="campaignAssociationId" from="found.campaignAssociationId"/>
+        </actions>
+    </service>
+    <!-- P19: a record's campaign links (PromotionDetail's Campaigns section) -->
+    <service verb="find" noun="CampaignAssociations" allow-remote="false" read-only="true">
+        <description>The current campaign links of one record (associationKindEnumId and sourceId; P19: a store promotion on PromotionDetail): each campaign of the caller's Marketing scope that links it, with its name, state, purpose and since when, and whether the caller may end it (canEnd: the campaign's editor on an open campaign, with the kind's own guard, Commerce's promotion permission and store scope for a promotion); canLink, whether the caller may link one. A campaign of another organization is left out. Needs a Marketing read (PERMISSION_DENIED); an unknown kind KIND_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="associationKindEnumId" required="true"/>
+            <parameter name="sourceId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="links" type="List"/>
+            <parameter name="canLink" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingCampaigns.js').execute('findAssociations', context)"/>
+            <set field="links" from="found.links"/>
+            <set field="canLink" from="found.canLink"/>
         </actions>
     </service>
     <service verb="start" noun="Campaign" allow-remote="false">

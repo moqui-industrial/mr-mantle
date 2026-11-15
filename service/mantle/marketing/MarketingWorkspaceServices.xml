@@ -114,4 +114,42 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="checks" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingWorkspace.js').execute('readiness', context).checks"/>
         </actions>
     </service>
+
+    <!-- ===== Marketing P19: a party's engagement (design §10 Customer360 and ContactDetail, MKT-REPORT) ===== -->
+    <service verb="get" noun="Engagement" allow-remote="false" read-only="true">
+        <description>A party's engagement with the caller's organizations (Customer360's Engagement tab in Marketing's context;
+            MarketingEngagement.js): its campaigns (MARKETING_VIEW, each from a source below the caller may read), list and segment memberships, sends with their delivery,
+            observed opens and clicks only while the party allows tracking in the send's organization, and consent
+            (MARKETING_AUDIENCE_VIEW), form answers without their text (MARKETING_AUDIENCE_VIEW or MARKETING_REPORT_VIEW), event
+            registrations without order or payment (MARKETING_EVENT_MANAGE) and promotion use without the order (COMMERCE_VIEW and
+            Commerce's store scope). Each source answers only with its own permission: one without it is left out and named in
+            omittedSources, never answered as zero; each reads only the organizations of the caller's scope (or the one named), and
+            one that fails is named in failedSources while the others answer. Refuses a caller who reads nothing of Marketing
+            (PERMISSION_DENIED), an organization outside the scope (ORGANIZATION_DENIED) and a missing party or another user's
+            personal contact (RECORD_UNAVAILABLE).</description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="organizationPartyId"><description>One organization of the caller's scope; empty, each of them</description></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyId"/>
+            <parameter name="partyName"/>
+            <parameter name="merged" type="Map"><description>The party it was merged into, when it was</description></parameter>
+            <parameter name="organizationNames" type="List"/>
+            <parameter name="sources" type="List"><description>Each answered source: sourceKey, title, count and rows</description></parameter>
+            <parameter name="omittedSources" type="List"><description>The sources left out for want of their permission</description></parameter>
+            <parameter name="failedSources" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingEngagement.js').execute('getEngagement', context)"/>
+            <set field="partyId" from="found.partyId"/>
+            <set field="partyName" from="found.partyName"/>
+            <set field="merged" from="found.merged"/>
+            <set field="organizationNames" from="found.organizationNames"/>
+            <set field="sources" from="found.sources"/>
+            <set field="omittedSources" from="found.omittedSources"/>
+            <set field="failedSources" from="found.failedSources"/>
+        </actions>
+    </service>
+    <!-- ===== end of Marketing P19 ===== -->
 </services>

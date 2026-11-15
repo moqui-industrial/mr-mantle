@@ -398,6 +398,8 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.Enumeration enumId="PcsEmailLink" description="Email Link" sequenceNum="3" enumTypeId="PartyConsentSource"/>
             <moqui.basic.Enumeration enumId="PcsStaff" description="Staff" sequenceNum="4" enumTypeId="PartyConsentSource"/>
             <moqui.basic.Enumeration enumId="PcsApi" description="API" sequenceNum="5" enumTypeId="PartyConsentSource"/>
+            <!-- impl-marketing P19: a withdrawal kept for the kept party of a merge (mantle/marketing/MarketingPartyMerge.js) -->
+            <moqui.basic.Enumeration enumId="PcsMerge" description="Party merge" sequenceNum="6" enumTypeId="PartyConsentSource"/>
 
             <!-- Party Consent Status: each change is a new row, so there are no transitions -->
             <moqui.basic.StatusType description="Party Consent" statusTypeId="PartyConsent"/>
