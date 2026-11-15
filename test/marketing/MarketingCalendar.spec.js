@@ -143,6 +143,21 @@ feature("the Campaign calendar collection: listed for MARKETING_VIEW, the same i
     }
 })
 
+feature("Home's Upcoming answers its events and publication dates from the calendar's sources (P21 review)", {
+    when() {
+        return as(users.author, W + "get#Upcoming", {organizationPartyId: orgA})
+    },
+    then(upcoming) {
+        upcoming.refusal == "" && upcoming.failedSources.length == 0
+        Array.from(upcoming.sources).map(source => source.sourceKey + ":" + source.state) ==
+            ["campaignWindows:available", "sends:available", "events:available", "publications:available"]
+        Array.from(upcoming.rows).some(
+            row => row.recordId === ids.event && row.route === "marketingEvent" && row.title === "Calendar workshop"
+        )
+        !Array.from(upcoming.rows).some(row => String(row.title).includes("Calendar other"))
+    }
+})
+
 feature("Today names the sends due for an author of the organization; none for a reader without sends", {
     when() {
         const thruDate = new Date(Date.now() + 2 * 3600000)

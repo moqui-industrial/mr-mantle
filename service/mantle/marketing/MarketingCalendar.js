@@ -696,10 +696,37 @@ function today(p) {
     return {items, failedSources}
 }
 
+// ===== Home's Upcoming (MarketingWorkspace.js) =====
+// One calendar source's items from now through the next days, as Home's Upcoming rows (kind, title, date, state, record and route), for
+// a context of MarketingWorkspace's reader; a failure is thrown for Home to name the source (P21 review: Home's events and publication
+// dates had answered "Not available" since P1).
+function upcomingRows(context, key, days) {
+    const source = calendarSources.find(found => found.key === key)
+    if (!source) throw new Error("Unknown marketing calendar source " + key)
+    if (source.admits && !source.admits(context)) return []
+    const nowMs = ms(ec.user.nowTimestamp)
+    const today = dayOf(nowMs)
+    const kindText = {event: L("Event"), publication: L("Publication")}
+    return source
+        .run(context, rangeOf(today, addDays(today, days)))
+        .map(item => ({item, at: item.allDay ? startOfDay(item.startDay) : item.startMillis}))
+        .filter(({item, at}) => (item.allDay ? item.startDay >= today : at >= nowMs))
+        .map(({item, at}) => ({
+            kind: kindText[item.kind] || item.kind,
+            title: item.title,
+            date: new Date(at),
+            state: item.stateText || "",
+            recordId: item.recordId,
+            recordParameter: item.recordParameter,
+            route: item.route
+        }))
+}
+
 const operations = {calendarItems, checkCalendarEvent, campaignCalendar, today}
 ;({
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown marketing calendar operation " + op)
         return operations[op](parameters || {})
-    }
+    },
+    upcomingRows
 })
