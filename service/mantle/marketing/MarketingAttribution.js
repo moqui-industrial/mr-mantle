@@ -13,6 +13,9 @@
 //   first-party key, set only where the organization's policy or the recipient's consent allows it), and the customer as a send
 //   recipient who allows tracking (PcpTracking) now. Nothing is inferred across devices: an order with none of these is
 //   unattributed, unless its source opportunity (SalesOpportunityOrder) names a campaign of the seller.
+// - Tracking consent is read when deciding (P20 review): an event recorded for a recipient who no longer allows tracking is no
+//   evidence, whatever path finds it, and an order whose customer has withdrawn tracking with the seller is attributed by no tracking
+//   event at all (its source opportunity still counts).
 // - The decision keeps its evidence (the event, the link, the opportunity) and its evidence time: a later edit of a campaign or a link
 //   changes no decision. The native TrackingCodeOrder row (one per order and code type, its key) is written beside a decision from
 //   a tracking event, never billable: marketing credit implies no affiliate payment.
@@ -81,10 +84,24 @@ function eventsWhere(organizationPartyId, fromDate, placedDate, field, values) {
             found.push(event)
     return found
 }
+// Whether a party has withdrawn tracking (PcpTracking) with the organization: their latest records first, as MarketingTracking.js
+// trackingAllowed reads them.
+function trackingWithdrawn(partyId, organizationPartyId) {
+    const consents = rows("mantle.party.PartyConsent", {partyId}).sort(
+        (a, b) =>
+            (ms(b.consentDate) ?? 0) - (ms(a.consentDate) ?? 0) ||
+            String(b.partyConsentId).localeCompare(String(a.partyConsentId))
+    )
+    return ec.resource
+        .script("component://mr-mantle/service/mantle/marketing/MarketingEligibility.js")
+        .purposeState(consents, "PcpTracking", null, organizationPartyId).withdrawn
+}
 // The order's eligible tracking events: by its local visit and the keys that visit carried, and by its customer as a recipient who
-// allows tracking now. Each with its identity (visit, visitorKey, recipient).
+// allows tracking now; none for a customer who has withdrawn tracking, and never an event of a recipient who no longer allows it.
+// Each with its identity (visit, visitorKey, recipient).
 function identityEvents(order, part) {
     const organizationPartyId = part.vendorPartyId
+    if (part.customerPartyId && trackingWithdrawn(part.customerPartyId, organizationPartyId)) return []
     const placedDate = order.placedDate
     const fromDate = new Date(ms(placedDate) - limits.windowDays * DAY)
     const byId = new Map()
@@ -107,7 +124,22 @@ function identityEvents(order, part) {
         if (recipientIds.length)
             add(eventsWhere(organizationPartyId, fromDate, placedDate, "campaignRecipientId", recipientIds), "recipient")
     }
-    return Array.from(byId.values())
+    // an event recorded for a recipient counts only while that recipient's person allows tracking
+    const allowedOf = new Map()
+    const recipientAllows = campaignRecipientId => {
+        if (!allowedOf.has(campaignRecipientId)) {
+            const recipient = one(RECIPIENT, {campaignRecipientId})
+            allowedOf.set(
+                campaignRecipientId,
+                !!recipient?.partyId &&
+                    tracking().trackingAllowed(recipient.partyId, recipient.contactMechId || null, organizationPartyId)
+            )
+        }
+        return allowedOf.get(campaignRecipientId)
+    }
+    return Array.from(byId.values()).filter(
+        found => !found.event.campaignRecipientId || recipientAllows(found.event.campaignRecipientId)
+    )
 }
 // The link's lifetime in millis (its own days, else the default).
 function lifetimeOf(link) {
@@ -288,10 +320,21 @@ function runOrderAttributions(p) {
                 .list()
         ))
             decided.add(link.orderId)
-    const due = orderIds.filter(orderId => !decided.has(orderId)).slice(0, limits.retryDecide)
-    let recordedCount = 0
+    // only placed sales orders take a run's places: a purchase order or an internal customer's order is never decided, so it is
+    // passed over here rather than asked again each run in place of an order that is due (P20 review)
+    const maxOrders = Math.min(Math.max(Number(p.maxOrders) || limits.retryDecide, 1), limits.retryDecide)
+    let recordedCount = 0,
+        skippedCount = 0,
+        tried = 0
     const failed = []
-    for (const orderId of due) {
+    for (const orderId of orderIds) {
+        if (tried >= maxOrders) break
+        if (decided.has(orderId)) continue
+        if (!salesOrderOf(orderId)) {
+            skippedCount++
+            continue
+        }
+        tried++
         ec.message.pushErrors()
         try {
             const out = lib.probe("mantle.marketing.TrackingServices.record#OrderAttribution", {orderId})
@@ -316,7 +359,7 @@ function runOrderAttributions(p) {
     } catch (error) {
         ec.logger.error("The attribution job's watermark was not kept: " + error.message)
     }
-    return {recordedCount, failedCount: failed.length}
+    return {recordedCount, failedCount: failed.length, skippedCount}
 }
 
 const operations = {recordOrderAttribution, correctOrderAttribution, runOrderAttributions}

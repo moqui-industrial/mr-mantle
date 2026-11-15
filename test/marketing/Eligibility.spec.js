@@ -292,3 +292,31 @@ feature(
         }
     }
 )
+
+// P20 review (the user's call of Nov 15): Assist's aggregate-only audience tool
+feature("count#Audience answers the buckets and reasons alone, to an audience reader of the organization only", {
+    when() {
+        const parameters = {topicListId: topic, listIds: [topic, other]}
+        return {
+            counts: as(users.audience, Q + "count#Audience", parameters),
+            preview: as(users.audience, Q + "preview#Audience", Object.assign({pageSize: 50}, parameters)),
+            author: as(users.author, Q + "count#Audience", parameters),
+            reader: as(users.reader, Q + "count#Audience", parameters),
+            notTheirs: as(users.audienceB, Q + "count#Audience", {topicListId: topic})
+        }
+    },
+    then({counts, preview, author, reader, notTheirs}) {
+        counts.refusal == ""
+        bucketsOf(counts) == bucketsOf(preview)
+        counts.matchedCount == preview.matchedCount && counts.eligibleCount == 2 && counts.untrackedEligibleCount == 1
+        Array.from(counts.reasonList).reduce((sum, row) => sum + row.count, 0) == counts.matchedCount
+        // no row, name, address, party or digest anywhere in the answer
+        counts.recipientList == null && counts.resultDigest == null && counts.previewKey == null
+        !JSON.stringify(counts).includes("@eligibility.example")
+        !Object.values(party).some(partyId => JSON.stringify(counts).includes('"' + partyId + '"'))
+        // an author (send edit, no audience permission) and a report reader are refused; another organization's reader finds no list
+        author.refusal.includes("PERMISSION_DENIED")
+        reader.refusal.includes("PERMISSION_DENIED")
+        notTheirs.refusal.includes("RECORD_UNAVAILABLE")
+    }
+})

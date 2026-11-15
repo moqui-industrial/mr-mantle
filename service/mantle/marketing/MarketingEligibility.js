@@ -626,7 +626,30 @@ function evaluateSend(o) {
 // The digest of who is eligible: by the address's record, not its text (P5 review).
 const digestOf = eligibleRows => lib.hash(eligibleRows.map(row => [row.partyId, row.contactMechId, row.tracked]))
 
-const operations = {previewAudience, classifyRecipients}
+// ===== count#Audience (P20 review; the user's call of Nov 15: Assist's aggregate-only audience tool) =====
+// preview#Audience's counts alone, for an audience reader (MARKETING_AUDIENCE_VIEW) of the topic's organization: the matched,
+// membership, excluded and eligible counts, each bucket and reason with its count; never a name, an address, a party id, the rows or
+// the preview's digests. Counts are shown as they are: the reader may open the same people in Audience preview.
+function countAudience(p) {
+    const userScope = marketingAccess.scope()
+    if (!userScope.capabilities.anyRead || !userScope.capabilities.audienceRead)
+        denied("PERMISSION_DENIED", "Counting an audience needs Marketing's audience permission")
+    const found = previewAudience(Object.assign({}, p, {bucket: null, pageIndex: 0, pageSize: 1}))
+    return {
+        topic: found.topic,
+        channelText: found.channelText,
+        purposeText: found.purposeText,
+        asOfText: found.asOfText,
+        matchedCount: found.matchedCount,
+        membershipCount: found.membershipCount,
+        excludedCount: found.excludedCount,
+        eligibleCount: found.eligibleCount,
+        untrackedEligibleCount: found.untrackedEligibleCount,
+        bucketList: found.bucketList.map(entry => ({bucket: entry.bucket, label: entry.label, count: entry.count})),
+        reasonList: found.reasonList.map(entry => ({reasonCode: entry.reasonCode, reasonText: entry.reasonText, count: entry.count}))
+    }
+}
+const operations = {previewAudience, classifyRecipients, countAudience}
 ;({
     buckets,
     reasonTexts,

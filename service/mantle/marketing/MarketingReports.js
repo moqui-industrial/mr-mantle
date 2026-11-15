@@ -14,6 +14,10 @@
 //   the same one currency, else unavailable with its reason. Orders and order value are Sales' measures (Sales.Orders,
 //   Sales.OrderValue), invoiced revenue Accounting's (Accounting.InvoicedRevenue), read here for the attributed orders only, never
 //   redefined; returns reduce the invoiced net once.
+// - Small cells (P20 review): an amount of fewer than minimumCell orders (one currency's orders of a campaign, a link or the
+//   unattributed) is withheld, its order count kept, unless the reader may see each of those orders in Sales or Commerce; a report
+//   reader who can name a campaign's few recipients (an audience reader, a small send) would otherwise read one person's purchase.
+//   ROI over a withheld net is unavailable.
 // - A parent campaign with its children counts each descendant's sources once (the union of their ids).
 // - Nothing is cut silently: a report past its limit (campaigns, sends, recipients, lists, orders) is refused TOO_MANY_RECORDS, naming
 //   the count, so the reader narrows it.
@@ -51,7 +55,9 @@ const limits = {
     links: 200,
     distinct: 100000,
     organizations: 200,
-    rangeDays: 3660
+    rangeDays: 3660,
+    // the fewest orders an amount is shown for to a reader who may not see each of them
+    minimumCell: 3
 }
 const releasedStatuses = [
     "CsScheduled",
@@ -81,9 +87,16 @@ const moneyText = (value, currencyUomId) =>
     currencyUomId
         ? ec.l10n.formatCurrency(ec.l10n.roundCurrency(toDecimal(value ?? 0), currencyUomId), currencyUomId)
         : ec.l10n.format(toDecimal(value ?? 0), "#,##0.00")
-// "USD 120.00; EUR 50.00", never one total
+// "USD 120.00; EUR 50.00", never one total; a withheld small cell says so
+const withheldText = currencyUomId =>
+    (currencyUomId ? currencyUomId + " " : "") +
+    ec.l10n.localize("withheld (fewer than " + limits.minimumCell + " orders)")
 const amountsText = amounts =>
-    amounts.length ? amounts.map(row => moneyText(row.amount, row.currencyUomId)).join("; ") : ec.l10n.localize("None")
+    amounts.length
+        ? amounts
+              .map(row => (row.withheld ? withheldText(row.currencyUomId) : moneyText(row.amount, row.currencyUomId)))
+              .join("; ")
+        : ec.l10n.localize("None")
 function tooMany(count, limit, what) {
     if (count > limit)
         denied("TOO_MANY_RECORDS", count + " " + what + ", more than the " + limit + " a report reads: narrow the report")
@@ -184,8 +197,9 @@ function orderAmounts(orderIds) {
     }
     return found
 }
-// The amounts of some orders by currency: [{currencyUomId, orderCount, orderValue, invoiced, returned, net}].
-function byCurrency(orderIds, amounts) {
+// The amounts of some orders by currency: [{currencyUomId, orderCount, orderValue, invoiced, returned, net, withheld}]. With a
+// reader (orderReader()), a currency's amounts of fewer than minimumCell orders are withheld (null) unless the reader may see each.
+function byCurrency(orderIds, amounts, readable) {
     const groups = new Map()
     for (const orderId of orderIds) {
         const entry = amounts.get(orderId)
@@ -196,19 +210,29 @@ function byCurrency(orderIds, amounts) {
             orderCount: 0,
             orderValue: 0,
             invoiced: 0,
-            returned: 0
+            returned: 0,
+            orderIds: []
         }
         group.orderCount++
+        group.orderIds.push(orderId)
         group.orderValue += entry.grandTotal
         group.invoiced += entry.invoiced
         group.returned += entry.returned
         groups.set(key, group)
     }
     return Array.from(groups.values())
-        .map(group => Object.assign(group, {net: group.invoiced - group.returned}))
+        .map(group => {
+            const ids = group.orderIds
+            delete group.orderIds
+            Object.assign(group, {net: group.invoiced - group.returned, withheld: false})
+            if (readable && group.orderCount < limits.minimumCell && !ids.every(orderId => readable(orderId)))
+                Object.assign(group, {orderValue: null, invoiced: null, returned: null, net: null, withheld: true})
+            return group
+        })
         .sort((a, b) => String(a.currencyUomId).localeCompare(String(b.currencyUomId)))
 }
-const amountsOf = (groups, field) => groups.map(group => ({currencyUomId: group.currencyUomId, amount: group[field]}))
+const amountsOf = (groups, field) =>
+    groups.map(group => ({currencyUomId: group.currencyUomId, amount: group[field], withheld: !!group.withheld}))
 // The current decisions of the organizations' orders placed in the period, optionally of some campaigns or unattributed alone.
 function decisionsOf(organizationPartyIds, period, campaignIds) {
     let query = find(LINK)
@@ -290,6 +314,8 @@ function roiOf(cost, costUomId, groups) {
     if (cost == null || !costUomId) return {roiPercent: null, roiNote: ec.l10n.localize("No actual cost")}
     if (cost <= 0) return {roiPercent: null, roiNote: ec.l10n.localize("No actual cost")}
     if (!groups.length) return {roiPercent: null, roiNote: ec.l10n.localize("No invoiced revenue")}
+    if (groups.some(group => group.withheld))
+        return {roiPercent: null, roiNote: ec.l10n.localize("Too few orders to show")}
     if (groups.length > 1 || groups[0].currencyUomId !== costUomId)
         return {roiPercent: null, roiNote: ec.l10n.localize("Revenue in another currency than the cost")}
     return {roiPercent: Math.round(((groups[0].net - cost) / cost) * 1000) / 10, roiNote: null}
@@ -320,13 +346,14 @@ function campaignPerformance(p) {
         tooMany(query.count(), limits.campaigns, "campaigns")
         campaigns = Array.from(query.orderBy("campaignName").list())
     }
+    const readable = orderReader()
     const rowsOut = []
     for (const campaign of campaigns) {
         const ids = includeChildren ? familyOf(campaign) : [campaign.marketingCampaignId]
         const measures = campaignMeasures(ids, period)
         const decisions = decisionsOf([campaign.organizationPartyId], period, ids)
         const orderIds = decisions.map(row => row.orderId)
-        const groups = byCurrency(orderIds, orderAmounts(orderIds))
+        const groups = byCurrency(orderIds, orderAmounts(orderIds), readable)
         // the cost: the campaign's own, or with its children only when they share its currency
         let cost = campaign.actualCost == null ? null : num(campaign.actualCost)
         let costNote = null
@@ -817,8 +844,9 @@ function attribution(p) {
         group.push(decision.orderId)
         groups.set(key, group)
     }
+    const readable = orderReader()
     const summaryRows = Array.from(groups.entries()).map(([marketingCampaignId, orderIds]) => {
-        const currencies = byCurrency(orderIds, amounts)
+        const currencies = byCurrency(orderIds, amounts, readable)
         const campaign = campaigns.get(marketingCampaignId)
         return {
             marketingCampaignId: marketingCampaignId || null,
@@ -854,7 +882,6 @@ function attribution(p) {
     for (const row of summaryRows)
         Object.assign(row, leadCounts.get(row.marketingCampaignId) || {leadCount: 0, qualifiedCount: 0})
     // each order's own row only for a reader who may see the order (and, being here, its campaign); the rest counted
-    const readable = orderReader()
     const outcomeRows = []
     let hiddenCount = 0
     for (const decision of decisions) {
@@ -913,6 +940,7 @@ function trackingLinkResults(p) {
         tooMany(query.count(), limits.links, "tracking links")
         links = Array.from(query.orderBy("description").list())
     }
+    const readable = orderReader()
     const linkRows = links.map(link => {
         const base = () =>
             find(EVENT, {trackingCodeId: link.trackingCodeId})
@@ -928,7 +956,7 @@ function trackingLinkResults(p) {
                 .limit(limits.orders)
                 .list()
         ).map(row => row.orderId)
-        const currencies = byCurrency(decisions, orderAmounts(decisions))
+        const currencies = byCurrency(decisions, orderAmounts(decisions), readable)
         return {
             trackingCodeId: link.trackingCodeId,
             description: link.description || link.publicCode || link.trackingCodeId,

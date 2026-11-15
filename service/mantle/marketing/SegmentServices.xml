@@ -326,4 +326,32 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="untrackedEligible" from="found.untrackedEligible"/>
         </actions>
     </service>
+    <!-- ===== Marketing P20 review: Assist's aggregate-only audience tool (the user's call of Nov 15) ===== -->
+    <service verb="count" noun="Audience" allow-remote="false" read-only="true">
+        <description>An audience's counts alone (preview#Audience's buckets and reasons, for Assist's marketing_audience_counts): for a topic (topicListId) and its lists and segments as preview#Audience takes them, the matched, membership, excluded, eligible and untracked eligible counts, each bucket and each reason with its count. Never a name, an address, a party id or a row. Needs MARKETING_AUDIENCE_VIEW in a Marketing read (PERMISSION_DENIED) and the topic and every source of the reader's Marketing scope (RECORD_UNAVAILABLE); refuses as preview#Audience does otherwise. Counts are shown as they are (the reader may open the same people in Audience preview).</description>
+        <in-parameters>
+            <parameter name="topicListId" required="true"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="topic" type="Map"/>
+            <parameter name="channelText"/>
+            <parameter name="purposeText"/>
+            <parameter name="asOfText"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="membershipCount" type="Integer"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="eligibleCount" type="Integer"/>
+            <parameter name="untrackedEligibleCount" type="Integer"/>
+            <parameter name="bucketList" type="List"/>
+            <parameter name="reasonList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingEligibility.js').execute('countAudience', context))</script></actions>
+    </service>
 </services>

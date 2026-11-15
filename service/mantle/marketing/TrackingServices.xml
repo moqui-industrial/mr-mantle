@@ -246,17 +246,24 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="run" noun="OrderAttributions" authenticate="anonymous-all" allow-remote="false" operation="marketing.attribution.run">
         <description>The attribution job (design §15.3): the sales orders placed in the last days (30 by default) that have no decision,
-            at most 200 a run, each decided by record#OrderAttribution in a transaction of its own; one that fails is logged by its order
-            and the rest go on, and the run's time and counts are kept on the watermark "attribution". Runs as the system.</description>
-        <in-parameters><parameter name="days" type="Integer"/></in-parameters>
+            at most 200 a run (maxOrders, fewer), each decided by record#OrderAttribution in a transaction of its own; an order that is not
+            a placed sales order (a purchase order, an internal customer's) is passed over and takes no place (skippedCount); one that
+            fails is logged by its order and the rest go on, and the run's time and counts are kept on the watermark "attribution". Runs
+            as the system.</description>
+        <in-parameters>
+            <parameter name="days" type="Integer"/>
+            <parameter name="maxOrders" type="Integer"/>
+        </in-parameters>
         <out-parameters>
             <parameter name="recordedCount" type="Integer"/>
             <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
         </out-parameters>
         <actions>
             <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('runOrderAttributions', context)"/>
             <set field="recordedCount" from="found.recordedCount"/>
             <set field="failedCount" from="found.failedCount"/>
+            <set field="skippedCount" from="found.skippedCount"/>
         </actions>
     </service>
     <!-- ===== end of Marketing P20 ===== -->

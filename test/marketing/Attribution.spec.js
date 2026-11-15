@@ -57,7 +57,7 @@ spec({
             organization(orgB, "Attribution B")
             make("mantle.party.Party", {partyId: supplier, partyTypeEnumId: "PtyOrganization"})
             make("mantle.party.Organization", {partyId: supplier, organizationName: "A supplier"})
-            for (const name of ["ANN", "BEN", "CY", "DEE"]) {
+            for (const name of ["ANN", "BEN", "CY", "DEE", "EVE"]) {
                 make("mantle.party.Party", {partyId: prefix + "_" + name, partyTypeEnumId: "PtyPerson"})
                 make("mantle.party.Person", {partyId: prefix + "_" + name, firstName: name})
             }
@@ -70,12 +70,29 @@ spec({
                 consentDate: ago(30),
                 sourceEnumId: "PcsForm"
             })
+            // Eve allowed tracking with A and has withdrawn it since (P20 review)
+            make("mantle.party.PartyConsent", {
+                partyId: prefix + "_EVE",
+                purposeEnumId: "PcpTracking",
+                statusId: "PconGranted",
+                organizationPartyId: orgA,
+                consentDate: ago(30),
+                sourceEnumId: "PcsForm"
+            })
+            make("mantle.party.PartyConsent", {
+                partyId: prefix + "_EVE",
+                purposeEnumId: "PcpTracking",
+                statusId: "PconWithdrawn",
+                organizationPartyId: orgA,
+                consentDate: ago(0.5),
+                sourceEnumId: "PcsForm"
+            })
             users.author = user(prefix, "author", [orgA], ["MARKETING_VIEW", "MARKETING_CAMPAIGN_EDIT"])
             users.authorB = user(prefix, "authorB", [orgB], ["MARKETING_VIEW", "MARKETING_CAMPAIGN_EDIT"])
             users.admin = user(prefix, "admin", [orgA], ["MARKETING_VIEW", "MARKETING_CONFIGURE"])
             users.adminB = user(prefix, "adminB", [orgB], ["MARKETING_VIEW", "MARKETING_CONFIGURE"])
             users.analyst = user(prefix, "analyst", [orgA], ["MARKETING_REPORT_VIEW"])
-            for (const visitId of [prefix + "_V1", prefix + "_V2"]) make("moqui.server.Visit", {visitId, fromDate: ago(3)})
+            for (const visitId of [prefix + "_V1", prefix + "_V2", prefix + "_V3", prefix + "_V4"]) make("moqui.server.Visit", {visitId, fromDate: ago(3)})
         })
         ids.spring = campaign(users.author, orgA, {campaignName: "Spring"})
         ids.summer = campaign(users.author, orgA, {campaignName: "Summer"})
@@ -103,7 +120,7 @@ spec({
                 sendName: "Spring news",
                 channelEnumId: "MdcEmail"
             })
-            for (const name of ["ANN", "BEN"])
+            for (const name of ["ANN", "BEN", "EVE"])
                 make("mantle.marketing.campaign.CampaignRecipient", {
                     campaignRecipientId: prefix + "_R_" + name,
                     campaignSendId: prefix + "_SEND",
@@ -155,6 +172,26 @@ spec({
                 campaignSendId: prefix + "_SEND",
                 eventDate: ago(2)
             })
+            // Eve's click as a recipient, recorded while she allowed tracking, then the landing page in visit V3 (P20 review)
+            event("EVE", {
+                trackingCodeId: prefix + "_L1",
+                marketingCampaignId: ids.spring,
+                eventKindEnumId: "MteVisit",
+                campaignRecipientId: prefix + "_R_EVE",
+                campaignSendId: prefix + "_SEND",
+                visitId: prefix + "_V3",
+                eventDate: ago(2)
+            })
+            // Ben's earlier click (a recipient who does not allow tracking now) is also the landing page of visit V4, where Dee buys
+            event("BENV4", {
+                trackingCodeId: prefix + "_L1",
+                marketingCampaignId: ids.spring,
+                eventKindEnumId: "MteVisit",
+                campaignRecipientId: prefix + "_R_BEN",
+                campaignSendId: prefix + "_SEND",
+                visitId: prefix + "_V4",
+                eventDate: ago(2)
+            })
             // the ticket buyer's visit V2: a click of the one-day link five days ago, past its lifetime
             event("OLD", {
                 trackingCodeId: prefix + "_L3",
@@ -189,12 +226,16 @@ feature("one decision per placed order, whatever placed it; no inferred identity
             ids.refused = order("REFUSED", {customer: prefix + "_BEN"})
             ids.ticket = order("TICKET", {customer: prefix + "_CY", purpose: "OrpEventRegistration", visitId: prefix + "_V2"})
             ids.purchase = order("PURCHASE", {customer: orgA, vendor: supplier})
+            // P20 review: Eve withdrew tracking after her visit; Dee's visit V4 carries only Ben's event as a recipient
+            ids.withdrawn = order("WITHDRAWN", {customer: prefix + "_EVE", visitId: prefix + "_V3"})
+            ids.recipientVisit = order("BENVISIT", {customer: prefix + "_DEE", visitId: prefix + "_V4"})
         })
         r.shopFirst = placed(ids.shop)
         r.shopAgain = placed(ids.shop)
-        for (const key of ["quote", "direct", "refused", "ticket", "purchase"]) r[key] = placed(ids[key])
+        const keys = ["quote", "direct", "refused", "ticket", "purchase", "withdrawn", "recipientVisit"]
+        for (const key of keys) r[key] = placed(ids[key])
         r.decisions = {}
-        for (const key of ["shop", "quote", "direct", "refused", "ticket", "purchase"]) r.decisions[key] = current(ids[key])
+        for (const key of ["shop"].concat(keys)) r.decisions[key] = current(ids[key])
         r.shopCount = all(ids.shop).length
         r.native = rows("mantle.marketing.tracking.TrackingCodeOrder", {orderId: ids.shop})
         r.nativeQuote = rows("mantle.marketing.tracking.TrackingCodeOrder", {orderId: ids.quote}).length
@@ -226,16 +267,26 @@ feature("one decision per placed order, whatever placed it; no inferred identity
         r.decisions.ticket[0].basisEnumId == "MobNone"
         // a purchase order is not a sales order: no decision
         r.decisions.purchase.length == 0
+        // a customer who withdrew tracking is attributed by no tracking event, even her own visit's; an event of a recipient who does
+        // not allow tracking now is no evidence through a visit either
+        r.decisions.withdrawn.length == 1 && r.decisions.withdrawn[0].basisEnumId == "MobNone"
+        r.decisions.recipientVisit.length == 1 && r.decisions.recipientVisit[0].basisEnumId == "MobNone"
     }
 })
 
-feature("an order the placement's call missed is decided once by the job", {
+feature("an order the placement's call missed is decided once by the job; purchase orders take no place of a run", {
     when() {
         system(() => {
             ids.missed = order("MISSED", {customer: prefix + "_ANN"})
+            run("update#mantle.order.OrderHeader", {orderId: ids.missed, placedDate: new Date(Date.now() - 2000)})
+            // two purchase orders placed after it, read before it (the newest first): never decided, they pass over
+            for (const suffix of ["PO1", "PO2"]) {
+                order(suffix, {customer: orgA, vendor: supplier})
+                run("update#mantle.order.OrderHeader", {orderId: prefix + "_" + suffix, placedDate: new Date(Date.now() - 1000)})
+            }
         })
         const before = current(ids.missed).length
-        const first = system(() => run(K + "run#OrderAttributions", {}))
+        const first = system(() => run(K + "run#OrderAttributions", {maxOrders: 1}))
         const second = system(() => run(K + "run#OrderAttributions", {}))
         const watermark = row("mantle.marketing.tracking.MarketingReportWatermark", {watermarkKey: "attribution"})
         return {
@@ -249,7 +300,7 @@ feature("an order the placement's call missed is decided once by the job", {
     },
     then(r) {
         r.before == 0
-        r.first.recordedCount >= 1
+        r.first.recordedCount == 1 && r.first.skippedCount >= 2
         r.after.length == 1
         r.after[0].marketingCampaignId == ids.spring
         // a run again finds nothing left of it

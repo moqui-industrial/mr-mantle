@@ -296,18 +296,24 @@ feature(
 )
 
 feature(
-    "a parent counts its child once; ROI only with a cost and one currency; two currencies never summed; a refund reduces the net once",
+    "a parent counts its child once; ROI only with a cost and one currency; two currencies never summed; a refund reduces the net once; a small cell's amounts only for its orders' reader",
     {
         when() {
-            const out = as(
-                users.analyst,
-                R + "get#CampaignPerformance",
-                Object.assign({organizationPartyId: orgA, includeChildren: "true"}, period)
-            )
-            const rowOf = id => (out.campaignRows || []).find(found => found.marketingCampaignId == id) || {}
-            return {out, parent: rowOf(ids.parent), child: rowOf(ids.child), priced: rowOf(ids.priced)}
+            const performance = user =>
+                as(user, R + "get#CampaignPerformance", Object.assign({organizationPartyId: orgA, includeChildren: "true"}, period))
+            const out = performance(users.salesAnalyst)
+            const rowOf = (found, id) => (found.campaignRows || []).find(entry => entry.marketingCampaignId == id) || {}
+            const analyst = performance(users.analyst)
+            return {
+                out,
+                parent: rowOf(out, ids.parent),
+                child: rowOf(out, ids.child),
+                priced: rowOf(out, ids.priced),
+                analystPriced: rowOf(analyst, ids.priced),
+                analystChild: rowOf(analyst, ids.child)
+            }
         },
-        then({out, parent, child, priced}) {
+        then({out, parent, child, priced, analystPriced, analystChild}) {
             out.refusal == ""
             parent.includedCount == 2
             parent.acceptedCount == child.acceptedCount && child.acceptedCount == 2
@@ -324,6 +330,11 @@ feature(
             // 150 invoiced, 30 refunded: a net of 120 against a cost of 50
             priced.amounts[0].net == 120
             priced.roiPercent == 140
+            // the analyst reads no order: one order's amounts (a small cell) are withheld, its count kept, and ROI over it unavailable
+            analystPriced.orderCount == 1 && analystPriced.amounts[0].withheld == true && analystPriced.amounts[0].net == null
+            analystPriced.netText.includes("withheld") && !analystPriced.netText.includes("120")
+            analystPriced.roiPercent == null && analystPriced.roiText == "Too few orders to show"
+            analystChild.orderCount == 2 && analystChild.amounts.every(group => group.withheld)
         }
     }
 )
@@ -338,6 +349,9 @@ feature("attribution: each order once by campaign, unattributed apart; an order'
         analyst.refusal == ""
         analyst.orderCount == 4 && analyst.unattributedCount == 1
         analyst.summaryRows.find(found => found.marketingCampaignId == ids.child).orderCount == 2
+        // each currency's one order is a small cell: withheld from the analyst, shown to the Sales reader
+        analyst.summaryRows.find(found => found.marketingCampaignId == ids.child).orderValueText.includes("withheld")
+        sales.summaryRows.find(found => found.marketingCampaignId == ids.child).orderValueText.includes("100")
         analyst.summaryRows.find(found => found.marketingCampaignId == null).orderCount == 1
         // the analyst reads no order: counted, never named
         analyst.outcomeRows.length == 0 && analyst.hiddenCount == 4

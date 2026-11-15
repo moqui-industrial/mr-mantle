@@ -1411,6 +1411,11 @@ along with this software (see the LICENSE.md file). If not, see
         <index name="MKT_TRK_EVT_SITE"><index-field name="siteId"/><index-field name="eventDate"/></index>
         <index name="MKT_TRK_EVT_RCPT"><index-field name="campaignRecipientId"/></index>
         <index name="MKT_TRK_EVT_SEND"><index-field name="campaignSendId"/></index>
+        <!-- P20 review: the order attribution reads an order's events by its visit and by the visitor keys that visit carried, after
+            every placement; retention reads an organization's events by date -->
+        <index name="MKT_TRK_EVT_VISIT"><index-field name="visitId"/></index>
+        <index name="MKT_TRK_EVT_KEY"><index-field name="visitorKeyHash"/><index-field name="eventDate"/></index>
+        <index name="MKT_TRK_EVT_ORG"><index-field name="organizationPartyId"/><index-field name="eventDate"/></index>
         <seed-data>
             <moqui.basic.EnumerationType description="Tracking Event Kind" enumTypeId="TrackingEventKind"/>
             <moqui.basic.Enumeration description="Click" enumId="MteClick" enumTypeId="TrackingEventKind" sequenceNum="1"/>
