@@ -5,7 +5,9 @@
 // other organization's engagement shows; a source that fails is named in failedSources and the others still answer.
 //
 // The sources and what each asks:
-// - campaigns: the campaigns the party was sent, registered for or answered a form of (MARKETING_VIEW);
+// - campaigns: the campaigns the party was sent, registered for or answered a form of (MARKETING_VIEW), each from a source the
+//   caller may read (sends MARKETING_AUDIENCE_VIEW, registrations MARKETING_EVENT_MANAGE, form answers their readers'), so a
+//   campaign reader alone learns nothing of the person;
 // - memberships: the party's list memberships and explicit segment memberships (MARKETING_AUDIENCE_VIEW);
 // - sends: the sends the party was a recipient of, with the ledger delivery's state (MARKETING_AUDIENCE_VIEW);
 // - engagement: the opens and clicks observed on those sends, only while the party allows tracking (PcpTracking) in the send's
@@ -19,7 +21,8 @@
 //   COMMERCE_VIEW and its store scope, within the Marketing organizations);
 // - consent: the party's current consent by purpose and address for one organization (get#PartyConsentState) and its list
 //   statuses (MARKETING_AUDIENCE_VIEW).
-// A list or segment membership alone never grants a finance or Sales record: no order, invoice, payment or opportunity is read.
+// A list or segment membership alone never grants a finance or Sales record: no opportunity, invoice or payment is read, and the
+// promotion use reads the party's order items only for their promotion, code, date and discount (no order is answered).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const marketingAccess = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
 const tracking = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingTracking.js")
@@ -46,7 +49,14 @@ const newest = field => (a, b) => (lib.ms(b[field]) ?? 0) - (lib.ms(a[field]) ??
 // Each: its permission check (from the Marketing capabilities, or Commerce's for promotion use) and its read, given the context
 // {partyId, organizationPartyIds, covers}.
 const sources = [
-    {key: "campaigns", title: "Campaigns", allowed: caps => caps.view, read: campaigns},
+    // P19 review: a campaign is listed from the sources the caller may read (that a person was sent, registered or answered is
+    // person-level, MARKETING_AUDIENCE_VIEW's, MARKETING_EVENT_MANAGE's or a form reader's), so a campaign reader alone gets none
+    {
+        key: "campaigns",
+        title: "Campaigns",
+        allowed: caps => caps.view && (caps.audienceView || caps.eventManage || caps.reportView),
+        read: campaigns
+    },
     {key: "memberships", title: "Lists and segments", allowed: caps => caps.audienceView, read: memberships},
     {key: "sends", title: "Sends", allowed: caps => caps.audienceView, read: sends},
     {key: "engagement", title: "Opens and clicks", allowed: caps => caps.audienceView, read: engagement},
@@ -127,11 +137,14 @@ function campaigns(context) {
         if (!how.has(marketingCampaignId)) how.set(marketingCampaignId, new Set())
         how.get(marketingCampaignId).add(what)
     }
-    for (const {send} of recipientsOf(context)) add(send.marketingCampaignId, "sent")
-    for (const {registration} of registrationsOf(context)) add(registration.marketingCampaignId, "registered")
-    for (const {publication} of submissionsOf(context))
-        if (publication.contextEntityName === "mantle.marketing.campaign.MarketingCampaign")
-            add(publication.contextId, "answered a form")
+    const caps = context.caps
+    if (caps.audienceView) for (const {send} of recipientsOf(context)) add(send.marketingCampaignId, "sent")
+    if (caps.eventManage)
+        for (const {registration} of registrationsOf(context)) add(registration.marketingCampaignId, "registered")
+    if (caps.audienceView || caps.reportView)
+        for (const {publication} of submissionsOf(context))
+            if (publication.contextEntityName === "mantle.marketing.campaign.MarketingCampaign")
+                add(publication.contextId, "answered a form")
     const found = rowsIn("mantle.marketing.campaign.MarketingCampaign", "marketingCampaignId", Array.from(how.keys())).filter(
         row => context.covers(row.organizationPartyId)
     )
@@ -370,8 +383,8 @@ function getEngagement(p) {
         organizationPartyIds = [userScope.activeOrganizationPartyId].concat(
             organizationPartyIds.filter(id => id !== userScope.activeOrganizationPartyId)
         )
-    const context = {partyId, organizationPartyIds, covers: id => !!id && organizationPartyIds.includes(id)}
     const caps = userScope.capabilities
+    const context = {partyId, organizationPartyIds, caps, covers: id => !!id && organizationPartyIds.includes(id)}
     const answered = []
     const omitted = []
     const failedSources = []

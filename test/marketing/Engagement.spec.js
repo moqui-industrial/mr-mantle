@@ -107,16 +107,25 @@ spec({
     }
 })
 
-feature("a source without its permission is left out, never answered as zero; a reader sees their own organization's campaigns", {
+// P19 review: that the person was sent a campaign or registered for it is person-level; a campaign reader alone gets no source, and
+// an events manager's campaigns come from the registrations alone
+feature("a source without its permission is left out, never answered as zero; campaigns only from the sources the caller reads", {
     when() {
-        return {reader: as(users.reader, W, {partyId: pat}), outsider: as(users.outsider, W, {partyId: pat})}
+        return {
+            reader: as(users.reader, W, {partyId: pat}),
+            events: as(users.events, W, {partyId: pat}),
+            audience: as(users.audience, W, {partyId: pat}),
+            outsider: as(users.outsider, W, {partyId: pat})
+        }
     },
-    then({reader, outsider}) {
+    then({reader, events, audience, outsider}) {
         reader.refusal == ""
-        keys(reader) == ["campaigns"]
-        reader.omittedSources == ["memberships", "sends", "engagement", "submissions", "registrations", "promotionUse", "consent"]
-        source(reader, "campaigns").rows.map(row => row.campaignName + ": " + row.howText) == ["Campaign A: sent, registered"]
+        keys(reader) == []
+        reader.omittedSources ==
+            ["campaigns", "memberships", "sends", "engagement", "submissions", "registrations", "promotionUse", "consent"]
         reader.partyName == "Pat Engaged"
+        source(events, "campaigns").rows.map(row => row.campaignName + ": " + row.howText) == ["Campaign A: registered"]
+        source(audience, "campaigns").rows.map(row => row.campaignName + ": " + row.howText) == ["Campaign A: sent"]
         code(outsider) == "PERMISSION_DENIED"
     }
 })

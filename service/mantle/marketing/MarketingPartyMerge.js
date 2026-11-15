@@ -17,8 +17,10 @@
 // - consent (PartyConsent): the whole history moves; where the merged party had withdrawn a purpose (for an organization or
 //   every one, at an address or for the party) that the kept party's later grant would undo, a withdrawal is recorded for the
 //   kept party (source PcsMerge) at each of its addresses that is the same address (an email ignoring case, a phone by its
-//   parts), so a withdrawal always wins; the unsubscribe link tokens move;
-// - explicit segment members (MarketSegmentParty): moved; on a collision an exclusion wins over an inclusion;
+//   parts), and where the kept party's own withdrawal would be undone by the merged party's later grant, again for the kept
+//   party, so a withdrawal always wins whichever side it was on; the unsubscribe link tokens move;
+// - explicit segment members (MarketSegmentParty): moved; on a collision an exclusion wins over an inclusion, and a current row
+//   over the kept party's ended one; a list membership or campaign person meeting a row of the same key starts a millisecond later;
 // - subscription requests, audience import rows, campaign recipients (and with them their tracking events and tokens, which name
 //   the recipient), automation source events and ended enrollments, campaign people, list send statuses, event registrations
 //   (attendee and buyer), reservations, attendance facts and form submissions (lead captures name the submission): their party
@@ -186,6 +188,18 @@ function addressesOf(partyId) {
 }
 
 // ===== moves (merge#Parties) =====
+// Creates a moved row whose primary key holds fromDate; where the kept party has a row of the same key (two parties added in one
+// transaction share its timestamp), the moved row starts a millisecond later rather than being dropped (P19 review: never lost).
+function createMoved(entityName, copy) {
+    for (let tries = 0; tries < 1000; tries++) {
+        if (!query(entityName, copy.getPrimaryKeys()).one()) {
+            copy.create()
+            return
+        }
+        copy.set("fromDate", new Date((ms(copy.fromDate) ?? 0) + 1))
+    }
+    throw new Error("No free key to move a row of " + entityName)
+}
 const newestFirst = (a, b) =>
     (ms(b.consentDate) ?? 0) - (ms(a.consentDate) ?? 0) ||
     String(b.partyConsentId).length - String(a.partyConsentId).length ||
@@ -216,17 +230,16 @@ function moveMemberships(fromPartyId, toPartyId) {
             }
             copy.set("thruDate", ec.user.nowTimestamp)
         }
-        if (!query(CLP, copy.getPrimaryKeys()).one()) copy.create()
+        createMoved(CLP, copy)
         row.delete()
         moved++
     }
     return {moved, kept}
 }
-// The consent history, then a withdrawal for the kept party where the merged party's withdrawal would be undone. {moved, kept}
-function moveConsents(fromPartyId, toPartyId) {
-    const fromConsents = consentsOf(fromPartyId)
+// The withdrawn consent keys of one party's history (purpose, address, organization), as purposeState reads them.
+function withdrawnKeys(consents) {
     const keys = new Map()
-    for (const row of fromConsents) {
+    for (const row of consents) {
         if (row.contactListId) continue
         const key = [row.purposeEnumId, row.contactMechId || "", row.organizationPartyId || ""].join("|")
         if (!keys.has(key))
@@ -237,27 +250,41 @@ function moveConsents(fromPartyId, toPartyId) {
             })
     }
     const states = eligibility()
-    const withdrawn = Array.from(keys.values()).filter(
-        key => states.purposeState(fromConsents, key.purposeEnumId, key.contactMechId, key.organizationPartyId).withdrawn
+    return Array.from(keys.values()).filter(
+        key => states.purposeState(consents, key.purposeEnumId, key.contactMechId, key.organizationPartyId).withdrawn
     )
+}
+// The consent history, then a withdrawal for the kept party wherever either party's withdrawal would be undone by the other's later
+// grant (P19 review: the kept party's own withdrawal too, so a withdrawal wins whichever side it was on). {moved, kept}
+function moveConsents(fromPartyId, toPartyId) {
+    const fromConsents = consentsOf(fromPartyId)
+    const withdrawn = withdrawnKeys(fromConsents)
+    const keptWithdrawn = withdrawnKeys(consentsOf(toPartyId))
+    const states = eligibility()
     let moved = 0
     for (const row of fromConsents) {
         row.set("partyId", toPartyId)
         row.update()
         moved++
     }
-    if (!withdrawn.length) return {moved, kept: 0}
+    if (!withdrawn.length && !keptWithdrawn.length) return {moved, kept: 0}
     const toAddresses = addressesOf(toPartyId)
     const toConsents = consentsOf(toPartyId)
     let kept = 0
-    // each withdrawal at the party, or at each of the kept party's addresses that is the withdrawn address (an address the kept party
-    // does not have keeps its withdrawal on the moved rows)
-    const targets = withdrawn.flatMap(key =>
-        (key.contactMechId ? keptAddresses(key.contactMechId, toAddresses) : [null]).map(contactMechId =>
-            Object.assign({}, key, {contactMechId})
+    // each withdrawal of the merged party at the party, or at each of the kept party's addresses that is the withdrawn address (an
+    // address the kept party does not have keeps its withdrawal on the moved rows); each of the kept party's as it was
+    const targets = withdrawn
+        .flatMap(key =>
+            (key.contactMechId ? keptAddresses(key.contactMechId, toAddresses) : [null]).map(contactMechId =>
+                Object.assign({}, key, {contactMechId})
+            )
         )
-    )
+        .concat(keptWithdrawn)
+    const done = new Set()
     for (const key of targets) {
+        const doneKey = [key.purposeEnumId, key.contactMechId || "", key.organizationPartyId || ""].join("|")
+        if (done.has(doneKey)) continue
+        done.add(doneKey)
         const contactMechId = key.contactMechId
         if (states.purposeState(toConsents, key.purposeEnumId, contactMechId, key.organizationPartyId).withdrawn) continue
         ec.service
@@ -270,7 +297,7 @@ function moveConsents(fromPartyId, toPartyId) {
                 contactMechId,
                 organizationPartyId: key.organizationPartyId,
                 sourceEnumId: "PcsMerge",
-                evidenceText: "Withdrawn by party " + fromPartyId + " before it was merged into party " + toPartyId,
+                evidenceText: "Withdrawn before party " + fromPartyId + " was merged into party " + toPartyId,
                 comments: "Kept at the party merge: a withdrawal wins"
             })
             .disableAuthz()
@@ -287,8 +314,12 @@ function moveSegmentMembers(fromPartyId, toPartyId) {
         copy.set("partyId", toPartyId)
         const keptRow = query(SEGMENT_PARTY, copy.getPrimaryKeys()).one()
         if (!keptRow) copy.create()
-        else if (current(row) && row.memberKindEnumId === "MspExclude" && keptRow.memberKindEnumId !== "MspExclude") {
-            keptRow.set("memberKindEnumId", "MspExclude")
+        else if (
+            current(row) &&
+            ((row.memberKindEnumId === "MspExclude" && keptRow.memberKindEnumId !== "MspExclude") || !current(keptRow))
+        ) {
+            // an exclusion wins; a current membership replaces the kept party's ended one (P19 review: never lost)
+            keptRow.set("memberKindEnumId", row.memberKindEnumId)
             keptRow.set("fromDate", row.fromDate)
             keptRow.set("thruDate", row.thruDate)
             keptRow.update()
@@ -314,7 +345,7 @@ function move(fromPartyId, toPartyId) {
     for (const row of listOf("mantle.marketing.campaign.MarketingCampaignParty", {partyId: fromPartyId})) {
         const copy = row.cloneValue()
         copy.set("partyId", toPartyId)
-        if (!query("mantle.marketing.campaign.MarketingCampaignParty", copy.getPrimaryKeys()).one()) copy.create()
+        createMoved("mantle.marketing.campaign.MarketingCampaignParty", copy)
         row.delete()
         records++
     }
