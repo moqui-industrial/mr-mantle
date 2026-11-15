@@ -41,6 +41,12 @@
     <!-- A real SSO sign-in that links a GitHub id claims Smithy's imported placeholders of that id (design-smithy §18.2,
         DG8; SmithyImportServices.handle#SsoLinked checks the flow, its endpoints and the provider's host) -->
     <user-facade><login sso-linked-service="mantle.smithy.SmithyImportServices.handle#SsoLinked"/></user-facade>
+    <!-- Marketing P22 (mr-boss impl-marketing P22, F72): Mantle's answer to the framework's sms-consent hook, from its consent
+        records and SMS suppressions, asked for every sender of a promotional text, a campaign's dispatch running as the system
+        included (MessageSms.js consent; mr-moqui docs/tools/Comms.md "Provider hooks") -->
+    <screen-facade><shell-providers>
+        <sms-consent name="mantle.consent" service="mantle.party.MessageSmsServices.check#SmsConsent"/>
+    </shell-providers></screen-facade>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>

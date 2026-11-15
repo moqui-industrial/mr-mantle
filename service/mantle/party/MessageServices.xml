@@ -445,6 +445,8 @@
             <parameter name="profileListPageRangeHigh" type="Integer"/>
             <parameter name="canCreate" type="Boolean"/>
             <parameter name="relayOptions" type="List"><description>For a configurer: the relays Admin approved, by id</description></parameter>
+            <parameter name="numberOptions" type="List"><description>P22, for a configurer: the organizations' messaging numbers an SMS
+                profile may be bound to</description></parameter>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('find', context))</script></actions>
     </service>
@@ -458,6 +460,7 @@
             <parameter name="ready" type="Boolean"/>
             <parameter name="checkList" type="List"/>
             <parameter name="relayOptions" type="List"/>
+            <parameter name="numberOptions" type="List"/>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSendingProfiles.js').execute('get', context))</script></actions>
     </service>
@@ -483,6 +486,10 @@
             <parameter name="siteId"/>
             <parameter name="fromDate" type="Timestamp"/>
             <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="fromPhoneNumber"><description>P22, an SMS profile (channelEnumId MdcSms): one of the organization's
+                messaging numbers (NUMBER_INVALID); it has no relay, sender or bounce domain</description></parameter>
+            <parameter name="segmentCost"><description>P22: an SMS profile's cost of one segment, for the estimate</description></parameter>
+            <parameter name="segmentCostUomId"/>
         </in-parameters>
         <out-parameters>
             <parameter name="sendingProfileId"/>

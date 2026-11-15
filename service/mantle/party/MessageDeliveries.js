@@ -33,6 +33,12 @@
  *   organizations (a system administrator every one) and keeps who resolved it, when and why.
  * - Outcomes: a Message-ID is sent; retryable is tried again with backoff (five tries, then failed); permanent is failed;
  *   anything else is uncertain and waits for review: never a blind resend.
+ * - Text messages (impl-marketing P22, the channel MdcSms; Comms' owner contract): the attempt hands the source's text to the
+ *   framework's org.moqui.SmsServices.send#SmsMessage as a promotional text when the delivery is, from the profile's number, after
+ *   the same consent and suppression checks; its answer is the outcome (send#SmsMessage deliveryOutcome): accepted sent, the day's
+ *   limit of the number waits for the next day untried, a STOP or the sms-consent hook's no suppressed, a refusal failed, a lost
+ *   answer uncertain and never sent again. The framework keeps no row of such a text, so nothing after the hand-off is reported
+ *   (F73): DeliveryAnalysis shows hand-off outcomes for SMS.
  * Reads and writes are the authority's own (authorization disabled); only Mantle services call these.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -342,6 +348,8 @@ function attemptStep(p) {
     // delivery's (its own organization, else its store's); a hard bounce whatever the message, another block a promotional one only (the
     // user's call, Nov 14); a subscription never ends one
     if (suppressedFor(delivery, toAddress)) return record("MdsSuppressed", "suppressed", {lastError: "The address is suppressed"})
+    // P22: a text message through the framework's SMS sender
+    if (delivery.channelEnumId === "MdcSms") return attemptSms(delivery, attempts, built, toAddress, profileSend, record)
     let out
     try {
         out =
@@ -376,6 +384,62 @@ function attemptStep(p) {
     }
     return recordOutcome(delivery, attempts, out, record)
 }
+// ===== P22: the SMS channel's hand-off =====
+// A text from the source's text (smsText, else its text alternative) through send#SmsMessage, promotional unless the delivery is
+// transactional, from the profile's number (else the system's): its answer recorded as the attempt's outcome.
+function attemptSms(delivery, attempts, built, toAddress, profileSend, record) {
+    const message = text(built.smsText || built.bodyText || built.body)
+    if (!message) return record("MdsFailed", "permanent", {lastError: "The text is empty"})
+    let out
+    ec.message.pushErrors()
+    try {
+        out =
+            ec.service
+                .sync()
+                .name("org.moqui.SmsServices.send#SmsMessage")
+                .parameters({
+                    contactNumber: toAddress,
+                    message,
+                    isPromotional: delivery.transactional === "N",
+                    fromNumber: profileSend.fromNumber || null
+                })
+                // its own transaction: its refusal is an error there, never a rollback of this attempt's record
+                .requireNewTransaction(true)
+                .disableAuthz()
+                .call() || {}
+    } catch (error) {
+        // whether it reached the provider is not known: never sent again on its own
+        out = {deliveryOutcome: "uncertain", reasonCode: "failed", errorMessage: String(error.message).split("\n")[0]}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+    if (out.successful === true || out.successful === "true")
+        return recordOutcome(delivery, attempts, {messageId: text(out.messageId) || "sms:" + delivery.deliveryId}, record)
+    const reason = text(out.reasonCode)
+    const error = ((reason ? reason + ": " : "") + text(out.errorMessage)).slice(0, 255)
+    // the number's day of promotional texts is used: the next day, no try counted
+    if (reason === "dailyLimit") {
+        const tomorrow = new Date(nowMs())
+        tomorrow.setUTCHours(24, 1, 0, 0)
+        call("update#" + D, {
+            deliveryId: delivery.deliveryId,
+            nextAttemptDate: tomorrow,
+            lastError: error || "The day's limit of texts"
+        })
+        return {stateEnumId: delivery.stateEnumId}
+    }
+    // the person replied STOP, or the sms-consent hook says no: not consented, never a failure to retry
+    if (reason === "optedOut" || reason === "consentRequired")
+        return record("MdsSuppressed", "suppressed", {lastError: error || "No consent for this text"})
+    return recordOutcome(
+        delivery,
+        attempts,
+        {deliveryOutcome: text(out.deliveryOutcome) || "uncertain", sendError: error},
+        record
+    )
+}
+// ===== end of P22 =====
 // The outcome of a hand-off: a Message-ID sent; retryable again later (until the tries are used); permanent failed;
 // anything else uncertain, for review (design-crosscut CX-DELIVERY: an ambiguous send is never repeated on its own).
 function recordOutcome(delivery, attempts, out, record) {

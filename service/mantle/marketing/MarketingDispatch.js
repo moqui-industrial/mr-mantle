@@ -96,6 +96,8 @@ const reasonText = code => (code ? skipTexts[code] || eligibility.reasonTexts[co
 // falls back to a site the recipient belongs to (another organization's, F75).
 const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
 function unsubscribeLink(row, profile, releaseRoot) {
+    // P22: a text message carries no link: a reply of STOP is its opt-out (MessageSms.js)
+    if (profile?.channelEnumId === "MdcSms") return {siteId: null, baseUrl: null, ready: true}
     const serverBase = emailServerId =>
         emailServerId ? text(one("moqui.basic.email.EmailServer", {emailServerId})?.webBaseUrl) : ""
     let root = serverBase(profile?.emailServerId)
@@ -712,7 +714,8 @@ function handOffRecipient(recipient, row, verdict) {
         eventKey: eventKeyOf(recipient),
         sourceEnumId: SOURCE,
         recipientPartyId: recipient.partyId,
-        toAddress: verdict.address || null,
+        // P22: a text goes to the number's E.164 key
+        toAddress: (row.channelEnumId === "MdcSms" ? recipient.destinationKey : verdict.address) || null,
         channelEnumId: row.channelEnumId || "MdcEmail",
         templateKey: TEMPLATE_KEY,
         organizationPartyId: row.organizationPartyId,
@@ -1261,6 +1264,8 @@ function buildDelivery(p) {
             .list()
     )[0]
     if (!membership || !accepted.includes(membership.statusId)) return {suppress: "No longer on the topic"}
+    // P22: a text message's own message (its number, its text with the opt-out line)
+    if (row.channelEnumId === "MdcSms") return smsDelivery(row, recipient)
     // the address approved, still the person's
     const mech = recipient.contactMechId
         ? one("mantle.party.contact.ContactMech", {contactMechId: recipient.contactMechId})
@@ -1353,6 +1358,31 @@ function buildDelivery(p) {
         ...(attachments.length ? {attachments} : {}),
         ...(row.replyToAddress ? {replyToAddresses: row.replyToAddress} : {})
     }
+}
+
+// ===== P22: a text message's delivery =====
+// One recipient's text: the number approved, still the person's (its E.164 key the one prepared), the prepared text (an experiment's
+// variant's) with their values and the opt-out line; no unsubscribe link, tracking or attachment (a STOP is the opt-out).
+function smsDelivery(row, recipient) {
+    const current =
+        recipient.contactMechId &&
+        Array.from(
+            find("mantle.party.contact.PartyContactMech", {partyId: recipient.partyId, contactMechId: recipient.contactMechId})
+                .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+                .list()
+        ).length > 0
+    const phone = current ? eligibility.phoneOf(recipient.contactMechId) : null
+    if (!phone?.key || phone.key !== recipient.destinationKey) return {suppress: "The number changed since approval"}
+    const s = sends()
+    let prepared = s.preparedContent(row)
+    if (recipient.campaignExperimentVariantId) {
+        prepared = experiments().preparedVariantContent(row, recipient.campaignExperimentVariantId)
+        if (!prepared) return {suppress: "The recipient's variant was not prepared with the send"}
+    } else if (recipient.experimentRemainder === "Y") return {suppress: "The recipient waits for the winner"}
+    const rendered = s.render(prepared, s.recipientValues(recipient.partyId))
+    const smsText = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js").withOptOut(rendered.bodyText)
+    if (!smsText) return {suppress: "The text is empty"}
+    return {bodyParameters: {}, toAddress: phone.key, smsText}
 }
 
 // ===== the delivery report (CampaignDelivery's CSV and print) =====

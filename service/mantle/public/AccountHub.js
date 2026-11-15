@@ -155,7 +155,8 @@ function storeMarketing(site, marketing, choices, who) {
         const isOn = topic.state === "subscribed" || topic.state === "pending"
         if (want === isOn) continue
         if (want) {
-            turnOn.push(topic.contactListId)
+            // P22: a text message topic is never turned on from the email page (it needs a phone number's own evidence)
+            if (topic.channelEnumId !== "MdcSms") turnOn.push(topic.contactListId)
             continue
         }
         call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {

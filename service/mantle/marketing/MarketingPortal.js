@@ -166,11 +166,14 @@ function offersOf(siteId, organizationPartyId) {
         .filter(Boolean)
         .sort((a, b) => String(a.list.contactListName || "").localeCompare(String(b.list.contactListName || "")))
 }
+// P22: a topic of text messages (a list of phone numbers) is named as one; the email preferences page lets its member leave it, and
+// never turns it on (a text message topic is joined with a phone number's own evidence, where it is offered)
 const topicView = ({list, policy}) => ({
     contactListId: list.contactListId,
     name: list.contactListName || list.contactListId,
     description: list.description || "",
-    channelText: L("Email"),
+    channelEnumId: list.contactMechTypeEnumId === "CmtTelecomNumber" ? "MdcSms" : "MdcEmail",
+    channelText: list.contactMechTypeEnumId === "CmtTelecomNumber" ? L("Text messages") : L("Email"),
     consentText: policy.evidenceText || L("Yes, send me") + " " + (list.contactListName || "") + "."
 })
 

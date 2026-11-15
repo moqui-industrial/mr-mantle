@@ -85,7 +85,8 @@ const purposeOf = list => {
 }
 const archivedList = list => list.archivedDate != null && lib.ms(list.archivedDate) <= lib.ms(ec.user.nowTimestamp)
 
-// The text of a phone number and its key (a + and its digits), or null.
+// The text of a phone number and its key (E.164: P22, from its own country code, else the deployment's rules, MessageSms.js e164Of;
+// a text goes to the key), or null.
 function phoneOf(contactMechId) {
     const number = one("mantle.party.contact.TelecomNumber", {contactMechId})
     if (!number) return null
@@ -93,7 +94,9 @@ function phoneOf(contactMechId) {
         .filter(Boolean)
         .join(" ")
     const digits = shown.replace(/\D/g, "")
-    return {address: shown, key: digits.length >= 7 ? "+" + digits : null}
+    if (digits.length < 7) return {address: shown, key: null}
+    const key = ec.resource.script("component://mr-mantle/service/mantle/party/MessageSms.js").e164Of(number) || "+" + digits
+    return {address: shown, key}
 }
 // The consent state of a purpose for an address in an organization, from a party's rows newest first: withdrawn when its latest
 // global row or its latest row of the organization withdraws; granted when not withdrawn and the organization's row (else the global
@@ -661,6 +664,8 @@ const operations = {previewAudience, classifyRecipients, countAudience}
     purposeOf,
     channelOfList,
     listTypes,
+    // P22: a phone number's text and key, for a text message's delivery
+    phoneOf,
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown eligibility operation " + op)
         return operations[op](parameters || {})

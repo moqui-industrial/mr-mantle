@@ -46,7 +46,7 @@ along with this software (see the LICENSE.md file). If not, see
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('find', context))</script></actions>
     </service>
     <service verb="create" noun="Send" allow-remote="false">
-        <description>A draft send of a campaign (design §5 NewSend, QuickSend, a template's Use): its name, an open campaign of the scope (CAMPAIGN_CLOSED), a topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), an audience (listIds, segmentIds, excludeListIds, excludeSegmentIds of the organization, at most 20: TOO_MANY_SOURCES; none is the topic's members), a sending profile of the organization that is promotional or for both (PROFILE_PURPOSE, PROFILE_ENDED) and a template of the organization (P6 review R5) the caller reads, promotional, in use and with content in effect (TEMPLATE_UNAVAILABLE, TEMPLATE_PURPOSE, TEMPLATE_ENDED, NO_CONTENT), whose content is copied as the send's own. At revision 1, the caller its author. Needs MARKETING_SEND_EDIT (PERMISSION_DENIED); NAME_REQUIRED.</description>
+        <description>A draft send of a campaign (design §5 NewSend, QuickSend, a template's Use): its name, an open campaign of the scope (CAMPAIGN_CLOSED), a topic (a Marketing list of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED; P22: a list of phone numbers makes a text message send, which needs a ready SMS sending profile, CHANNEL_UNAVAILABLE, and a profile of the send's channel, PROFILE_CHANNEL; channelEnumId, when given, must be the topic's, CHANNEL_INVALID), an audience (listIds, segmentIds, excludeListIds, excludeSegmentIds of the organization, at most 20: TOO_MANY_SOURCES; none is the topic's members), a sending profile of the organization that is promotional or for both (PROFILE_PURPOSE, PROFILE_ENDED) and a template of the organization (P6 review R5) the caller reads, promotional, in use and with content in effect (TEMPLATE_UNAVAILABLE, TEMPLATE_PURPOSE, TEMPLATE_ENDED, NO_CONTENT), whose content is copied as the send's own. At revision 1, the caller its author. Needs MARKETING_SEND_EDIT (PERMISSION_DENIED); NAME_REQUIRED.</description>
         <in-parameters>
             <parameter name="marketingCampaignId" required="true"/>
             <parameter name="sendName" required="true"/>
@@ -92,6 +92,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="control" type="Map"/>
             <!-- P10: the experiment in short: its setup, its variants, its state and whether the caller may set one up -->
             <parameter name="experiment" type="Map"/>
+            <!-- P22: a text message send's estimate before approval: encoding, characterCount, segmentCount, segmentCost,
+                currencyUomId, messageCost, totalCost (with the prepared recipients), estimateText -->
+            <parameter name="smsEstimate" type="Map"/>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('get', context))</script></actions>
     </service>
@@ -180,6 +183,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sampleText"/>
             <parameter name="prepared" type="Boolean"/>
             <parameter name="recipientFields" type="List"/>
+            <!-- P22: a text message send's text as the person gets it (renderedText, with the opt-out line) and its estimate -->
+            <parameter name="smsEstimate" type="Map"/>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('preview', context))</script></actions>
     </service>
@@ -212,6 +217,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="body"/>
             <parameter name="bodyText"/>
             <parameter name="suppress"/>
+            <parameter name="smsText"><description>P22: a text message send's test, marked TEST</description></parameter>
         </out-parameters>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSends.js').execute('buildTest', context))</script></actions>
     </service>
@@ -526,6 +532,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="attachments" type="List"/>
             <parameter name="replyToAddresses"/>
             <parameter name="suppress"/>
+            <parameter name="smsText"><description>P22: a text message send's text, with the recipient's values and the opt-out line
+                (toAddress the number's E.164)</description></parameter>
         </out-parameters>
         <actions>
             <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingDispatch.js').execute('build', context)"/>
@@ -538,6 +546,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="attachments" from="out.attachments"/>
             <set field="replyToAddresses" from="out.replyToAddresses"/>
             <set field="suppress" from="out.suppress"/>
+            <set field="smsText" from="out.smsText"/>
         </actions>
     </service>
     <!-- ===== end of Marketing P9 ===== -->
