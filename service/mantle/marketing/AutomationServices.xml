@@ -49,7 +49,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="create" noun="Automation" allow-remote="false">
-        <description>A new draft automation of an open campaign of the scope (RECORD_UNAVAILABLE, CAMPAIGN_CLOSED): its name (NAME_REQUIRED), topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), sending profile (the organization's, promotional or for both: PROFILE_PURPOSE), trigger (AtrSubscription by default; AtrSegment with a segment of the organization, not archived (its sources read as the owner at each run); AtrOrderPlaced or AtrCartAbandoned with a store of the organization), description and time zone (the user's when empty). Re-entry once per person. MARKETING_SEND_EDIT.</description>
+        <description>A new draft automation of an open campaign of the scope (RECORD_UNAVAILABLE, CAMPAIGN_CLOSED): its name (NAME_REQUIRED), topic (a Marketing list of email of the campaign's organization, not archived: RECORD_UNAVAILABLE, LIST_ARCHIVED, CHANNEL_UNAVAILABLE), sending profile (the organization's, promotional or for both: PROFILE_PURPOSE), trigger (AtrSubscription by default; AtrSegment with a segment of the organization, not archived (its sources read as the owner at each run); AtrOrderPlaced or AtrCartAbandoned with a store of the organization; P18 AtrRegistered or AtrAttended with an event registration offer of the organization), description and time zone (the user's when empty). Re-entry once per person. MARKETING_SEND_EDIT.</description>
         <in-parameters>
             <parameter name="marketingCampaignId" required="true"/>
             <parameter name="automationName"/>
@@ -59,6 +59,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="triggerEnumId"/>
             <parameter name="triggerSegmentId"/>
             <parameter name="formPublicationId"><description>P12: the form-submission trigger's Marketing publication of the organization</description></parameter>
+            <parameter name="registrationPolicyId"><description>P18: the registration or attendance trigger's event offer of the organization</description></parameter>
             <parameter name="productStoreId"/>
             <parameter name="timeZone"/>
         </in-parameters>
@@ -95,6 +96,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="triggerEnumId"/>
             <parameter name="triggerSegmentId"/>
             <parameter name="formPublicationId"><description>P12: the form-submission trigger's Marketing publication of the organization</description></parameter>
+            <parameter name="registrationPolicyId"><description>P18: the registration or attendance trigger's event offer of the organization</description></parameter>
             <parameter name="productStoreId"/>
             <parameter name="goalSegmentId"/>
             <parameter name="reentryEnumId"/>
@@ -267,7 +269,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- the jobs and their internal steps, as each automation's owner (design §15.3 Automation admission/steps; the user's call, Nov 14, 2026) -->
     <service verb="run" noun="AutomationAdmission" authenticate="anonymous-all" allow-remote="false" operation="marketing.automation.admission.run">
-        <description>The admission job (run_MarketingAutomationAdmission; operation marketing.automation.admission.run): for each active automation (or the one named), its trigger's new source events filed (an accepted subscription to its topic since its cursor, a segment's new matches after the baseline of its first scan, its store's abandoned carts when the store's recovery sender is the automation) and its filed events admitted, each in a transaction of its own; one that fails is logged and the next goes on. Each automation's work runs signed in as its owner (activatedByUserId), who must still sign in, hold MARKETING_DISPATCH, work for its organization and read every segment it names; otherwise the automation is paused with the reason (pauseNote) and nothing of it runs.</description>
+        <description>The admission job (run_MarketingAutomationAdmission; operation marketing.automation.admission.run): for each active automation (or the one named), its trigger's new source events filed (an accepted subscription to its topic since its cursor, a segment's new matches after the baseline of its first scan, its store's abandoned carts when the store's recovery sender is the automation; P18 its event offer's places confirmed or attendances checked in since its cursor, once per registration) and its filed events admitted, each in a transaction of its own; one that fails is logged and the next goes on. Each automation's work runs signed in as its owner (activatedByUserId), who must still sign in, hold MARKETING_DISPATCH, work for its organization and read every segment it names; otherwise the automation is paused with the reason (pauseNote) and nothing of it runs.</description>
         <in-parameters><parameter name="marketingAutomationId"/></in-parameters>
         <out-parameters>
             <parameter name="automations" type="Integer"/>

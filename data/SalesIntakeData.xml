@@ -30,6 +30,10 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.basic.Enumeration enumId="SlisChatMessage" enumTypeId="SalesLeadIntakeSource" enumCode="chatMessage" description="Chat" sequenceNum="4"/>
     <moqui.basic.Enumeration enumId="SlisVoicemail" enumTypeId="SalesLeadIntakeSource" enumCode="voicemail" description="Voicemail" sequenceNum="5"/>
     <moqui.basic.Enumeration enumId="SlisStaff" enumTypeId="SalesLeadIntakeSource" enumCode="staff" description="Staff entry" sequenceNum="6"/>
+    <!-- Marketing P18 (an owner contract; impl-marketing §4 Nov 15): an event offer's lead rules hand a registration or an attendance,
+        one intake per registration and kind -->
+    <moqui.basic.Enumeration enumId="SlisEventRegistration" enumTypeId="SalesLeadIntakeSource" enumCode="eventRegistration" description="Event registration" sequenceNum="7"/>
+    <moqui.basic.Enumeration enumId="SlisEventAttendance" enumTypeId="SalesLeadIntakeSource" enumCode="eventAttendance" description="Event attendance" sequenceNum="8"/>
     <moqui.basic.EnumerationType enumTypeId="SalesLeadIntakeOutcome" description="Sales Lead Intake Outcome"/>
     <moqui.basic.Enumeration enumId="SlioCreated" enumTypeId="SalesLeadIntakeOutcome" description="New lead" sequenceNum="1"/>
     <moqui.basic.Enumeration enumId="SlioDuplicate" enumTypeId="SalesLeadIntakeOutcome" description="Joined an open lead" sequenceNum="2"/>

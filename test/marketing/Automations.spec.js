@@ -683,3 +683,96 @@ feature(
         }
     }
 )
+
+// P18 (the user's call, Nov 15): the registration and attendance triggers on an event offer of the organization
+feature("a confirmed registration and its attendance each file one admission event; another organization's offer is refused", {
+    when() {
+        const offerOf = (key, organizationPartyId) => {
+            const workEffortId = prefix + "_EV_" + key
+            make("mantle.work.effort.WorkEffort", {
+                workEffortId,
+                workEffortTypeEnumId: "WetEvent",
+                workEffortName: "Automation event " + key,
+                statusId: "WeInPlanning",
+                estimatedStartDate: ago(-2),
+                estimatedCompletionDate: ago(-2.1)
+            })
+            make("mantle.work.registration.RegistrationEvent", {workEffortId, organizationPartyId, createdDate: new Date()})
+            const registrationPolicyId = prefix + "_OFFER_" + key
+            make("mantle.work.registration.EventRegistrationPolicy", {
+                registrationPolicyId,
+                workEffortId,
+                organizationPartyId,
+                occurrenceStart: ago(-2),
+                occurrenceEnd: ago(-2.1),
+                statusId: "ErpPublished",
+                publicTitle: "Automation offer " + key
+            })
+            return registrationPolicyId
+        }
+        const offers = system(() => ({a: offerOf("A", orgA), b: offerOf("B", orgB)}))
+        const refused = as(users.author, A + "create#Automation", {
+            marketingCampaignId: ids.campaign,
+            automationName: "Other organization's event",
+            contactListId: topic,
+            sendingProfileId: profile,
+            triggerEnumId: "AtrRegistered",
+            registrationPolicyId: offers.b
+        })
+        const oneStep = [{kind: "send", stepName: "Thanks for coming", messageTemplateId: ids.template}]
+        const registered = active(
+            {automationName: "After registering", triggerEnumId: "AtrRegistered", registrationPolicyId: offers.a},
+            oneStep
+        )
+        const attended = active(
+            {automationName: "After attending", triggerEnumId: "AtrAttended", registrationPolicyId: offers.a},
+            oneStep
+        )
+        // Kim's place confirmed and checked in after the activations; a waitlisted place files nothing
+        const registrationId = prefix + "_REG_KIM"
+        system(() => {
+            make("mantle.work.registration.EventRegistration", {
+                registrationId,
+                registrationPolicyId: offers.a,
+                attendeePartyId: ids.Kim,
+                buyerPartyId: ids.Kim,
+                statusId: "EvrConfirmed",
+                confirmedDate: new Date(),
+                createdDate: new Date()
+            })
+            make("mantle.work.registration.EventRegistration", {
+                registrationId: prefix + "_REG_LEE",
+                registrationPolicyId: offers.a,
+                attendeePartyId: ids.Lee,
+                statusId: "EvrWaitlisted",
+                createdDate: new Date()
+            })
+            make("mantle.work.registration.EventAttendance", {
+                registrationId,
+                registrationPolicyId: offers.a,
+                organizationPartyId: orgA,
+                attendeePartyId: ids.Kim,
+                methodEnumId: "EamCode",
+                checkInDate: new Date()
+            })
+        })
+        for (const id of [registered, attended, registered, attended]) admit(id)
+        return {
+            refused,
+            registeredEvents: rows(EVENT, {marketingAutomationId: registered}),
+            attendedEvents: rows(EVENT, {marketingAutomationId: attended}),
+            registeredKim: enrollmentOf(registered, "Kim"),
+            attendedKim: enrollmentOf(attended, "Kim"),
+            offer: row(AUTOMATION, {marketingAutomationId: registered}).registrationPolicyId == offers.a,
+            registrationId
+        }
+    },
+    then(r) {
+        r.refused.refusal.includes("RECORD_UNAVAILABLE")
+        r.registeredEvents.length == 1 && r.registeredEvents[0].sourceKey == "registered:" + r.registrationId
+        r.attendedEvents.length == 1 && r.attendedEvents[0].sourceKey == "attended:" + r.registrationId
+        r.registeredKim != null && r.registeredKim.triggerEnumId == "AtrRegistered"
+        r.attendedKim != null && r.attendedKim.triggerEnumId == "AtrAttended"
+        r.offer
+    }
+})

@@ -447,3 +447,97 @@ feature("a lead takes a campaign of its organization and a tracking code of that
         r.codesB.refusal.includes("RECORD_UNAVAILABLE")
     }
 })
+
+// P18 (the user's call, Nov 15): an event offer's lead rule hands each attendance to Sales once, with the attendee's own name and address
+feature("an event's attended rule hands each attendance to Sales once; a reader and another organization's author are refused", {
+    when() {
+        const offer = prefix + "_OFFER"
+        const registrationId = prefix + "_REG_ROSA"
+        system(() => {
+            make("mantle.work.effort.WorkEffort", {
+                workEffortId: prefix + "_EVENT",
+                workEffortTypeEnumId: "WetEvent",
+                workEffortName: "Racking open day",
+                statusId: "WeInPlanning"
+            })
+            make("mantle.work.registration.RegistrationEvent", {workEffortId: prefix + "_EVENT", organizationPartyId: orgA})
+            make("mantle.work.registration.EventRegistrationPolicy", {
+                registrationPolicyId: offer,
+                workEffortId: prefix + "_EVENT",
+                organizationPartyId: orgA,
+                occurrenceStart: new Date(Date.now() - 3600000),
+                occurrenceEnd: new Date(Date.now() + 3600000),
+                statusId: "ErpPublished",
+                publicTitle: "Racking open day"
+            })
+            make("mantle.party.Party", {partyId: prefix + "_ROSA", partyTypeEnumId: "PtyPerson"})
+            make("mantle.party.Person", {partyId: prefix + "_ROSA", firstName: "Rosa", lastName: "Visitor"})
+            make("mantle.party.contact.ContactMech", {
+                contactMechId: prefix + "_ROSA_EM",
+                contactMechTypeEnumId: "CmtEmailAddress",
+                infoString: leadEmail("Rosa")
+            })
+            make("mantle.party.contact.PartyContactMech", {
+                partyId: prefix + "_ROSA",
+                contactMechId: prefix + "_ROSA_EM",
+                contactMechPurposeId: "EmailPrimary",
+                fromDate: new Date(Date.now() - 86400000)
+            })
+            make("mantle.work.registration.EventRegistration", {
+                registrationId,
+                registrationPolicyId: offer,
+                attendeePartyId: prefix + "_ROSA",
+                buyerPartyId: prefix + "_ROSA",
+                statusId: "EvrConfirmed",
+                confirmedDate: new Date(),
+                marketingCampaignId: ids.campaign
+            })
+        })
+        const store = (username, extra = {}) =>
+            as(username, M + "store#LeadRule", Object.assign({registrationPolicyId: offer, triggerEnumId: "MltAttended"}, extra))
+        const byReader = store(users.reader, {teamPartyId: ids.east})
+        const byOther = store(users.authorB, {teamPartyId: ids.north})
+        const made = store(users.manager, {teamPartyId: ids.east, ruleName: "Open day visitors"})
+        const twice = store(users.manager, {teamPartyId: ids.east})
+        // checked in after the rule began: the job captures it once, however often it runs
+        system(() =>
+            make("mantle.work.registration.EventAttendance", {
+                registrationId,
+                registrationPolicyId: offer,
+                organizationPartyId: orgA,
+                attendeePartyId: prefix + "_ROSA",
+                methodEnumId: "EamCode",
+                checkInDate: new Date()
+            })
+        )
+        const firstRun = runJob()
+        const secondRun = runJob()
+        const detail = as(users.manager, M + "get#LeadRule", {leadRuleId: made.leadRuleId})
+        return {
+            byReader,
+            byOther,
+            made,
+            twice,
+            firstRun,
+            secondRun,
+            detail,
+            captures: rows(CAPTURE, {leadRuleId: made.leadRuleId}),
+            intakes: rows(INTAKE, {sourceKindEnumId: "SlisEventAttendance", sourceId: registrationId})
+        }
+    },
+    then(r) {
+        r.byReader.refusal.includes("PERMISSION_DENIED")
+        r.byOther.refusal.includes("RECORD_UNAVAILABLE")
+        r.made.refusal == "" && r.made.created
+        r.twice.refusal.includes("RULE_EXISTS")
+        r.firstRun.captured == 1 && r.secondRun.captured == 0
+        r.captures.length == 1 &&
+            r.captures[0].statusEnumId == "MlcHandedOff" &&
+            r.captures[0].sourceKindEnumId == "MlcsAttendance"
+        r.intakes.length == 1 && r.intakes[0].submittedEmail == leadEmail("Rosa") && r.intakes[0].submittedName == "Rosa Visitor"
+        r.intakes[0].teamPartyId == ids.east &&
+            r.intakes[0].marketingCampaignId == ids.campaign &&
+            r.intakes[0].verifiedDate == null
+        r.detail.refusal == "" && r.detail.offer.offerText == "Racking open day" && r.detail.rule.offerRule
+    }
+})

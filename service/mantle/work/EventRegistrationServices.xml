@@ -699,4 +699,101 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <!-- ===== end of Marketing P17 ===== -->
+
+    <!-- ===== Marketing P18: check-in (impl-marketing P18; design-marketing §9 CheckIn, RegistrationDetail's Attendance) over
+        EventCheckIn.js. Each service is the door's: an events manager of the offer's organization (MARKETING_EVENT_MANAGE, their own
+        sign-in), or the offer's door tablet (a registered shared device whose route group fixes registrationPolicyId to the offer,
+        its display account holding MARKETING_CHECKIN in the offer's organization); every lookup and check-in counted against the
+        door's limit. ===== -->
+    <service verb="preview" noun="CheckIn" allow-remote="false" read-only="true">
+        <description>EntryLookup and EntryDecision: the offer's door (its title, occurrence, how many are checked in, whether it is open
+            now) and, for an entry code (or, for staff, a registration), whether that place may enter and why in words (confirmed,
+            already checked in and when, wrong event, cancelled, expired, waitlisted, pending, unconfirmed, the event cancelled, the
+            door closed); for a term (staff only), the offer's places whose attendee's name or address or whose id matches, at most
+            twenty, each with its decision. The door tablet is answered the attendee as a first name and initial and nothing of the
+            buyer, payment or answers. Changes nothing. RECORD_UNAVAILABLE for another organization's offer or another tablet's;
+            DEVICE_REQUIRED for MARKETING_CHECKIN outside a registered device; RATE_LIMITED past the door's limit.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId" required="true"/>
+            <parameter name="entryCode"/>
+            <parameter name="registrationId"/>
+            <parameter name="term"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="desk" type="Map"/>
+            <parameter name="decision" type="Map"/>
+            <parameter name="candidates" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventCheckIn.js').execute('previewCheckIn', context)"/>
+            <set field="desk" from="out.desk"/>
+            <set field="decision" from="out.decision"/>
+            <set field="candidates" from="out.candidates"/>
+        </actions>
+    </service>
+    <service verb="checkIn" noun="Registration" allow-remote="false">
+        <description>RecordEntry: the registration of an entry code (or, for staff, one found by name, with a reason) checked in once,
+            under its row lock: one attendance fact per registration (EventAttendance) and its action in the registration's history;
+            a second scan or a retry answers the first result (repeated) and writes nothing. A place that may not enter is refused
+            with its reason code; an events manager may override a held or pending place (override, with a reason), which records the
+            attendance and changes neither its state nor its payment; a wrong event, a cancelled, expired, waitlisted or review place,
+            a cancelled event and a closed door are never overridden. The door tablet checks in by entry code only.</description>
+        <in-parameters>
+            <parameter name="registrationPolicyId" required="true"/>
+            <parameter name="entryCode"/>
+            <parameter name="registrationId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+            <parameter name="override" type="Boolean"/>
+            <parameter name="operationKey"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="registrationId"/>
+            <parameter name="checkedIn" type="Boolean"/>
+            <parameter name="repeated" type="Boolean"/>
+            <parameter name="decision" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventCheckIn.js').execute('checkInRegistration', context)"/>
+            <set field="registrationId" from="out.registrationId"/>
+            <set field="checkedIn" from="out.checkedIn"/>
+            <set field="repeated" from="out.repeated"/>
+            <set field="decision" from="out.decision"/>
+        </actions>
+    </service>
+    <service verb="resolve" noun="EntryCode" allow-remote="false" read-only="true">
+        <description>The scan-input resolver of CheckIn's entry code (the scanResolve transition's): the code read is the match, its
+            decision the match's label (the attendee as the door shows them, the ticket) and detail, so a scan shows who it is before
+            Confirm; a code naming no place of the offer, or one that may not enter, is refused with its reason. The same door checks
+            and limit as preview#CheckIn.</description>
+        <in-parameters>
+            <parameter name="scanText"/>
+            <parameter name="allowedTypes" type="List"/>
+            <parameter name="scanId"/>
+            <parameter name="registrationPolicyId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="matches" type="List"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventCheckIn.js').execute('resolveEntryCode', context)"/>
+            <set field="matches" from="out.matches"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Attendance" allow-remote="false" read-only="true">
+        <description>RegistrationDetail's Attendance: whether a registration was checked in, when, how (entry code and its revision,
+            found by name, a manager's override), by whom and why, and its decision at the door now. An events manager of its
+            offer's organization (RECORD_UNAVAILABLE otherwise, as a missing one).</description>
+        <in-parameters><parameter name="registrationId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="attended" type="Boolean"/>
+            <parameter name="attendance" type="Map"/>
+            <parameter name="decision" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventCheckIn.js').execute('getAttendance', context)"/>
+            <set field="attended" from="out.attended"/>
+            <set field="attendance" from="out.attendance"/>
+            <set field="decision" from="out.decision"/>
+        </actions>
+    </service>
+    <!-- ===== end of Marketing P18 ===== -->
 </services>

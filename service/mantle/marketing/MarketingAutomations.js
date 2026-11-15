@@ -26,7 +26,9 @@
 //   after activation records the matches as a baseline, later scans file the new ones), staff enrollment with evidence
 //   (enroll#Party), an order placed (the Mantle SECA OrderPlacedRecordAttribution's handler TrackingServices.handle#OrderPlaced files
 //   it) and a cart abandoned (the carts Commerce's recovery reads for a store whose sender is the automation, CartRecovery.js
-//   automationCarts). A duplicate event finds its row filed and enrolls no one again.
+//   automationCarts). A duplicate event finds its row filed and enrolls no one again. P18 (the user's call, Nov 15): an attendee's
+//   place confirmed on an event registration offer of the organization (AtrRegistered, a cursor over EventRegistration.confirmedDate)
+//   or checked in at its door (AtrAttended, a cursor over EventAttendance.checkInDate), each filed once per registration.
 // - Admission (run#AutomationAdmission, admit#SourceEvent): one enrollment per automation, person and source; re-entry once per person
 //   (the default) or once per new event after a cooldown, never two active at once; the person classified for the topic now (an
 //   accepted, evidenced member, not withdrawn or suppressed), else the event is refused with the reason.
@@ -84,7 +86,18 @@ const limits = {
 }
 const waitBounds = {AwuMinutes: [1, 525600], AwuHours: [1, 8760], AwuDays: [1, 365], AwuBusinessDays: [1, 260]}
 // P12: a form submitted (AtrFormSubmitted: a submission of a Marketing publication of the organization by a known party)
-const triggers = ["AtrSubscription", "AtrSegment", "AtrStaff", "AtrOrderPlaced", "AtrCartAbandoned", "AtrFormSubmitted"]
+// P18: registered for an event and attended it (AtrRegistered, AtrAttended: an event registration offer of the organization)
+const triggers = [
+    "AtrSubscription",
+    "AtrSegment",
+    "AtrStaff",
+    "AtrOrderPlaced",
+    "AtrCartAbandoned",
+    "AtrFormSubmitted",
+    "AtrRegistered",
+    "AtrAttended"
+]
+const offerTriggers = ["AtrRegistered", "AtrAttended"]
 const stepKinds = {send: "AskSendEmail", wait: "AskWait", condition: "AskCondition"}
 const editableStatuses = ["MaDraft", "MaAwaitingApproval", "MaApproved", "MaActive", "MaPaused"]
 const closedCampaignStatuses = ["MKTG_CAMP_COMPLETED", "MKTG_CAMP_CANCELLED"]
@@ -445,6 +458,7 @@ function automationProblems(row) {
     if (row.triggerEnumId === "AtrSegment" && !row.triggerSegmentId) problems.push("its trigger needs a segment")
     if (row.triggerEnumId === "AtrCartAbandoned" && !row.productStoreId) problems.push("its trigger needs a store")
     if (row.triggerEnumId === "AtrFormSubmitted" && !row.formPublicationId) problems.push("its trigger needs a form publication")
+    if (offerTriggers.includes(row.triggerEnumId) && !row.registrationPolicyId) problems.push("its trigger needs an event offer")
     return problems
 }
 // MarketingApprovals.js targetKinds.automation delegates to this
@@ -479,7 +493,7 @@ function activationParties(row, approval) {
 }
 
 // ===== create#Automation, store#EnrollmentRule =====
-// The trigger's fields checked: {triggerEnumId, triggerSegmentId, productStoreId}.
+// The trigger's fields checked: {triggerEnumId, triggerSegmentId, productStoreId, formPublicationId, registrationPolicyId}.
 function triggerFor(userScope, p, organizationPartyId) {
     const triggerEnumId = text(p.triggerEnumId) || "AtrSubscription"
     if (!triggers.includes(triggerEnumId)) denied("VALUE_INVALID", "Choose one of the triggers")
@@ -501,7 +515,23 @@ function triggerFor(userScope, p, organizationPartyId) {
             denied("RECORD_UNAVAILABLE", "Form publication " + p.formPublicationId + " is not available")
         formPublicationId = publication.publicationId
     }
-    return {triggerEnumId, triggerSegmentId: segmentId, productStoreId: store?.productStoreId || null, formPublicationId}
+    // P18: an event registration offer of the organization (RECORD_UNAVAILABLE otherwise)
+    let registrationPolicyId = null
+    if (offerTriggers.includes(triggerEnumId) && !blank(p.registrationPolicyId)) {
+        const policy = one("mantle.work.registration.EventRegistrationPolicy", {
+            registrationPolicyId: text(p.registrationPolicyId)
+        })
+        if (!policy || policy.organizationPartyId !== organizationPartyId)
+            denied("RECORD_UNAVAILABLE", "Event offer " + p.registrationPolicyId + " is not available")
+        registrationPolicyId = policy.registrationPolicyId
+    }
+    return {
+        triggerEnumId,
+        triggerSegmentId: segmentId,
+        productStoreId: store?.productStoreId || null,
+        formPublicationId,
+        registrationPolicyId
+    }
 }
 function createAutomation(p) {
     const userScope = editScope()
@@ -524,6 +554,7 @@ function createAutomation(p) {
         triggerSegmentId: trigger.triggerSegmentId,
         productStoreId: trigger.productStoreId,
         formPublicationId: trigger.formPublicationId,
+        registrationPolicyId: trigger.registrationPolicyId,
         reentryEnumId: "ArOnce",
         timeZone: zoneOf(p.timeZone),
         statusId: "MaDraft",
@@ -929,6 +960,8 @@ function collect(automation) {
             lastAdmissionDate: ec.user.nowTimestamp,
             admissionNote: null
         })
+    } else if (offerTriggers.includes(trigger)) {
+        filed += collectOffer(automation)
     } else if (trigger === "AtrCartAbandoned") {
         if (!automation.productStoreId) return 0
         for (const cart of carts().automationCarts(automation.productStoreId, limits.eventsPerRun)) {
@@ -962,6 +995,47 @@ function collect(automation) {
             admissionNote: null
         })
     }
+    return filed
+}
+// P18: the offer's confirmed places (AtrRegistered) or attendances (AtrAttended) after the cursor, each filed once per registration
+// for its attendee; the number filed.
+function collectOffer(automation) {
+    if (!automation.registrationPolicyId) return 0
+    const since = automation.admissionCursorDate || automation.activatedDate || ec.user.nowTimestamp
+    const attended = automation.triggerEnumId === "AtrAttended"
+    const dateField = attended ? "checkInDate" : "confirmedDate"
+    let query = find(attended ? "mantle.work.registration.EventAttendance" : "mantle.work.registration.EventRegistration", {
+        registrationPolicyId: automation.registrationPolicyId
+    })
+    if (!attended) query = query.condition("statusId", "EvrConfirmed")
+    const found = Array.from(
+        query
+            .condition(dateField, "greater-equals", since)
+            .orderBy([dateField, "registrationId"])
+            .limit(limits.eventsPerRun)
+            .list()
+    )
+    let filed = 0
+    let cursor = since
+    for (const row of found) {
+        cursor = row[dateField]
+        if (!row.attendeePartyId) continue
+        if (
+            fileEvent(automation, {
+                sourceKey: (attended ? "attended:" : "registered:") + row.registrationId,
+                sourceId: row.registrationId,
+                partyId: row.attendeePartyId,
+                eventDate: row[dateField]
+            }).created
+        )
+            filed++
+    }
+    call("update#" + AUTOMATION, {
+        marketingAutomationId: automation.marketingAutomationId,
+        admissionCursorDate: cursor,
+        lastAdmissionDate: ec.user.nowTimestamp,
+        admissionNote: null
+    })
     return filed
 }
 // admit#SourceEvent: one filed event of an active automation admitted (an enrollment) or refused with its reason; an event of a paused
@@ -1645,6 +1719,9 @@ function getAutomation(p) {
         return segment ? segments.segmentLabel(segment) : ""
     }
     const store = row.productStoreId ? one("mantle.product.store.ProductStore", {productStoreId: row.productStoreId}) : null
+    const offer = row.registrationPolicyId
+        ? one("mantle.work.registration.EventRegistrationPolicy", {registrationPolicyId: row.registrationPolicyId})
+        : null
     const editable = editableStatuses.includes(row.statusId)
     return {
         automation: automationRow(row, {
@@ -1653,6 +1730,8 @@ function getAutomation(p) {
             productStoreId: row.productStoreId || null,
             storeName: store ? store.storeName || store.productStoreId : "",
             formPublicationId: row.formPublicationId || null,
+            registrationPolicyId: row.registrationPolicyId || null,
+            offerName: offer ? offer.publicTitle || offer.registrationPolicyId : "",
             goalSegmentId: row.goalSegmentId || null,
             goalSegmentName: segmentName(row.goalSegmentId),
             reentryEnumId: row.reentryEnumId || "ArOnce",
