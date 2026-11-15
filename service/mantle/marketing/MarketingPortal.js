@@ -979,6 +979,10 @@ function registrationView(reservation, policy, via, extra = {}) {
     const confirmedAny = all.some(row => row.statusId === "EvrConfirmed")
     const publication = !state.completed ? P.questionsOf(policy) : null
     const occurrenceStarted = (facts.startMs ?? Infinity) <= nowMs()
+    // what the accepted terms' cancellation rule allows each live place now (follow-up 1)
+    const cancelTerms = new Map(
+        all.filter(row => P.LIVE_STATES.includes(row.statusId)).map(row => [row.registrationId, P.cancelTermsOf(row, policy)])
+    )
     const terms =
         reservation.termsRevision != null
             ? one("mantle.work.registration.EventRegistrationTerms", {
@@ -1010,6 +1014,7 @@ function registrationView(reservation, policy, via, extra = {}) {
                 statusId: row.statusId,
                 stateText: L(P.stateTexts[row.statusId] || row.statusId),
                 canShowCode: row.statusId === "EvrConfirmed",
+                canCancel: !!cancelTerms.get(row.registrationId)?.allowed,
                 refundText: row.refundStatusEnumId
                     ? L(
                           {
@@ -1024,8 +1029,10 @@ function registrationView(reservation, policy, via, extra = {}) {
             })),
             // the link to join goes to confirmed registrants only, never to a pending or waitlisted place
             joinUrl: confirmedAny && workEffort?.infoUrl ? workEffort.infoUrl : null,
-            canCancel: !occurrenceStarted && all.some(row => P.LIVE_STATES.includes(row.statusId)),
+            canCancel: !occurrenceStarted && [...cancelTerms.values()].some(decision => decision.allowed),
             cancellationTerms: (terms ? terms.cancellationTerms : policy.cancellationTerms) || "",
+            // the rule in words: the accepted revision's once completed, else the offer's now (which completing accepts)
+            cancelRule: registrations().cancelRuleText(terms || policy),
             termsAccepted: terms ? terms.termsText || "" : "",
             // while it is not completed: the terms to accept and the questions (each attendee's or the buyer's once)
             terms: !state.completed ? policy.termsText || "" : "",
@@ -1135,7 +1142,8 @@ function getRegistrationPaymentForm(p) {
     return {form}
 }
 // getRegistration: the reservation's state with its payment looked up (bounded) and its order placed once paid; showTicket (with a
-// fresh operationId) issues a new entry code for one confirmed place, answered once with its QR, revoking the earlier code.
+// fresh operationId) shows one confirmed place's entry code with its QR: the code of its current revision, the same each time
+// (follow-up 1), the showing recorded.
 function getRegistration(p) {
     const {reservation, policy, via} = reach(p)
     if (reservation.paymentId) payments().refresh(reservation.reservationId, yes(p.returned) ? "return" : "page")
@@ -1164,7 +1172,10 @@ function getRegistration(p) {
     return {registration: registrationView(fresh, policy, via, ticket ? {ticket} : {})}
 }
 // cancelRegistration: the buyer's cancellation of the reservation's live places (or the ones named) before the occurrence starts,
-// confirmed and with PASS's request key; each seat released once, a paid place's refund handed to Accounting and shown pending.
+// confirmed and with PASS's request key, as the cancellation rule of the accepted terms allows (follow-up 1): a confirmed place until
+// the rule's deadline for its refund percentage, after it with no refund where the rule allows that, else not online; a place never
+// confirmed in full. Each seat released once, a paid place's refund handed to Accounting and shown pending. When none of the places
+// may be cancelled online, CANCELLATION_CLOSED and nothing changes.
 function cancelRegistrationPublic(p) {
     const {reservation, policy, via} = reach(p, "RegistrationCancel")
     if (via === "return") unavailable()
@@ -1181,10 +1192,17 @@ function cancelRegistrationPublic(p) {
     const reason = String(p.reason || "")
         .trim()
         .slice(0, 200)
-    if (live.length)
+    const decisions = new Map(live.map(row => [row.registrationId, placesOf().cancelTermsOf(row, policy)]))
+    const allowed = live.filter(row => decisions.get(row.registrationId).allowed)
+    if (live.length && (!allowed.length || (named.length && allowed.length < live.length)))
+        fail("Conflict", "CANCELLATION_CLOSED: The cancellation deadline has passed; contact the organizer")
+    if (allowed.length)
         placesOf().cancelPlaces(
-            live.map(row => row.registrationId),
-            "Cancelled by the buyer" + (reason ? ": " + reason : "")
+            allowed.map(row => row.registrationId),
+            "Cancelled by the buyer" + (reason ? ": " + reason : ""),
+            null,
+            // the percentage the rule gave when the buyer asked (decided before the lock, at the same moment)
+            row => decisions.get(row.registrationId)?.refundPercent ?? 100
         )
     return {registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via)}
 }
