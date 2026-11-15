@@ -292,6 +292,42 @@
     // Commerce P14: a store feed's active build at the Shop mount's feed path (feeds/{feedKey}.{extension}), checked against
     // the site's current generation
     ['GET', 'shop/feeds', 'getShopFeed'],
+    // IronStone Sales P13: PASS Sales' quotes
+    ['GET', 'sales/quotes', 'findSalesQuotes'],
+    ['GET', 'sales/quote', 'getSalesQuote'],
+    ['GET', 'sales/quote/document', 'getSalesQuoteDocument'],
+    ['POST', 'sales/quote/response', 'respondSalesQuote'],
+    ['GET', 'sales/quote/response', 'getSalesQuoteResponse'],
+    // IronStone Sales P17: PASS Sales' orders
+    ['GET', 'sales/orders', 'findSalesOrders'],
+    ['GET', 'sales/order', 'getSalesOrder'],
+    ['GET', 'sales/order/document', 'getSalesOrderDocument'],
+    // IronStone Marketing P7: PASS Marketing's subscription (the request an anonymous write PASS's request key and the limits
+    // bound; the confirmation a bearer write)
+    ['GET', 'marketing/publication', 'getMarketingPublication'],
+    ['POST', 'marketing/subscription', 'requestSubscription'],
+    ['GET', 'marketing/subscription/request', 'getSubscriptionRequest'],
+    ['POST', 'marketing/subscription/verification', 'verifySubscription'],
+    // IronStone Marketing P12: the SubmitForm page (the answer an anonymous write PASS's request key and the limits bound, or a
+    // bearer write with an invitation's token)
+    ['GET', 'marketing/form', 'getMarketingForm'],
+    ['POST', 'marketing/form/submission', 'submitMarketingForm'],
+    // IronStone Marketing P14: a landing page of the marketing mount (read only)
+    ['GET', 'marketing/page', 'getMarketingPage'],
+    // IronStone Marketing P15: the tracking redirect's link read and its event (an anonymous write the authority's limits bound)
+    ['GET', 'marketing/tracking/link', 'resolveTrackingLink'],
+    ['POST', 'marketing/tracking/event', 'recordTrackingEvent'],
+    // IronStone Marketing P16: a published event registration offer (read only)
+    ['GET', 'marketing/event', 'getMarketingEvent'],
+    // IronStone Marketing P17: a registration's reservation (an anonymous write PASS's request key and the limits bound) and its
+    // completion, payment, read (a capability read, a POST) and cancellation by its capability or the provider's return key
+    ['POST', 'marketing/registration', 'reserveRegistration'],
+    ['POST', 'marketing/registration/completion', 'completeRegistration'],
+    ['POST', 'marketing/registration/payment', 'startRegistrationPayment'],
+    // the provider's posted form (Accept Hosted) of a pending payment: a fresh token for Register's relay (the user's call, Nov 15)
+    ['POST', 'marketing/registration/payment/form', 'getRegistrationPaymentForm'],
+    ['POST', 'marketing/registration/view', 'getRegistration'],
+    ['POST', 'marketing/registration/cancellation', 'cancelRegistration'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],
@@ -396,4 +432,58 @@
     ['POST', 'smithy/repositories/{repositoryId}/issues/from-topic', 'convertTopicToIssue'],
     ['POST', 'smithy/groups/{groupId}/issue-mail-route', 'storeIssueMailRoute'],
     ['POST', 'smithy/held-reports/claim', 'claimHeldReport'],
+    // Dogfood DG5: Smithy's pipelines (design-smithy §15.6)
+    ['GET', 'smithy/repositories/{repositoryId}/pipelines', 'findPipelineRuns'],
+    ['GET', 'smithy/repositories/{repositoryId}/pipelines/{runNum}', 'getPipelineRun'],
+    ['GET', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/jobs/{jobRunId}', 'getJobRun'],
+    ['GET', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/jobs/{jobRunId}/log', 'getJobLog'],
+    ['GET', 'smithy/repositories/{repositoryId}/artifacts/{artifactId}', 'downloadArtifact'],
+    ['POST', 'smithy/repositories/{repositoryId}/pipelines', 'runPipeline'],
+    ['POST', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/rerun', 'rerunPipelineRun'],
+    ['POST', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/cancel', 'cancelPipelineRun'],
+    ['POST', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/jobs/{jobRunId}/retry', 'retryJobRun'],
+    ['POST', 'smithy/repositories/{repositoryId}/pipelines/{runNum}/approve', 'approvePipelineRun'],
+    ['GET', 'smithy/repositories/{repositoryId}/ci-secrets', 'findCiSecrets'],
+    ['POST', 'smithy/repositories/{repositoryId}/ci-secrets', 'storeCiSecret'],
+    ['DELETE', 'smithy/repositories/{repositoryId}/ci-secrets/{secretId}', 'deleteCiSecret'],
+    ['GET', 'smithy/repositories/{repositoryId}/ci-environments', 'findCiEnvironments'],
+    ['POST', 'smithy/repositories/{repositoryId}/ci-environments', 'storeCiEnvironment'],
+    ['DELETE', 'smithy/repositories/{repositoryId}/ci-environments/{environmentId}', 'deleteCiEnvironment'],
+    // Dogfood DG10: deployments
+    ['GET', 'smithy/repositories/{repositoryId}/deployments', 'findDeployments'],
+    ['GET', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}', 'getDeployment'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments', 'requestDeploy'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}/decide', 'decideDeploy'],
+    ['POST', 'smithy/repositories/{repositoryId}/deployments/{deploymentId}/cancel', 'cancelDeploy'],
+    ['GET', 'smithy/pipeline-settings', 'getPipelineSettings'],
+    ['PATCH', 'smithy/pipeline-settings', 'storePipelineSettings'],
+    // Dogfood DG7: the site (design-smithy §15.8)
+    ['GET', 'smithy/groups/{groupId}/landing', 'getGroupLanding'],
+    ['PATCH', 'smithy/groups/{groupId}/landing', 'setGroupLanding'],
+    ['GET', 'smithy/repositories/{repositoryId}/docs', 'getDocsPage'],
+    ['GET', 'smithy/releases', 'findReleases'],
+    ['GET', 'smithy/repositories/{repositoryId}/releases/{tag}', 'getRelease'],
+    ['POST', 'smithy/repositories/{repositoryId}/releases', 'storeRelease'],
+    ['DELETE', 'smithy/repositories/{repositoryId}/releases/{tag}', 'deleteRelease'],
+    ['POST', 'smithy/repositories/{repositoryId}/releases/{tag}/assets', 'addReleaseAsset'],
+    ['DELETE', 'smithy/repositories/{repositoryId}/release-assets/{assetId}', 'removeReleaseAsset'],
+    ['GET', 'smithy/repositories/{repositoryId}/release-assets/{assetId}', 'downloadReleaseAsset'],
+    ['GET', 'smithy/components', 'findComponents'],
+    ['GET', 'smithy/groups/{groupId}/addons', 'getAddons'],
+    ['GET', 'smithy/search', 'searchSite'],
+    ['GET', 'smithy/redirects', 'findRedirects'],
+    ['POST', 'smithy/redirects', 'storeRedirect'],
+    ['POST', 'smithy/redirects/import', 'importRedirects'],
+    ['DELETE', 'smithy/redirects/{redirectId}', 'deleteRedirect'],
+    ['GET', 'smithy/redirect', 'resolveRedirect'],
+    // Dogfood DG8: GitHub (design-smithy §15.9)
+    ['POST', 'smithy/imports', 'startGitHubImport'],
+    ['GET', 'smithy/imports', 'findGitHubImports'],
+    ['GET', 'smithy/imports/{importId}', 'getGitHubImport'],
+    ['POST', 'smithy/imports/{importId}/resume', 'resumeGitHubImport'],
+    ['POST', 'smithy/imports/{importId}/cancel', 'cancelGitHubImport'],
+    ['GET', 'smithy/repositories/{repositoryId}/mirrors', 'findMirrors'],
+    ['POST', 'smithy/repositories/{repositoryId}/mirrors', 'storeMirror'],
+    ['DELETE', 'smithy/repositories/{repositoryId}/mirrors/{mirrorId}', 'deleteMirror'],
+    ['POST', 'smithy/repositories/{repositoryId}/mirrors/{mirrorId}/push', 'pushMirror'],
 ]

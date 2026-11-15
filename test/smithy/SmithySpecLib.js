@@ -13,6 +13,15 @@ const run = (name, parameters) => {
     return out
 }
 const make = (entity, fields) => run("create#" + entity, fields)
+/* Work with authorization off, as a service that checked its caller reads and writes (a file's content). */
+function privileged(work) {
+    const was = ec.artifactExecution.disableAuthz()
+    try {
+        return work()
+    } finally {
+        if (!was) ec.artifactExecution.enableAuthz()
+    }
+}
 const row = (entity, fields) => ec.entity.find(entity).condition(fields).disableAuthz().one()
 function set(entity, key, fields) {
     const value = row(entity, key)
@@ -237,7 +246,92 @@ const file = (username, siteId, repositoryId, title, more = {}) =>
 /* A comment on an issue as a user, through the forum's publishPost: its result, or its refusal. */
 const comment = (username, siteId, rootCommEventId, body, more = {}) =>
     op(username, siteId, "publishPost", {rootCommEventId, body, operationId: "note-" + ec.user.randomString(12), ...more})
+/* The site specs' fixture (DG7; SmithyDocs makes it, and SmithyReleases, SmithyComponents, SmithySearch and
+   SmithyRedirects name SmithyDocs in dependsOn and read it with siteIds): the site SST_SITE with the canonical host
+   sst.smithy.test; accounts SST_MAINT (Maintainer of the group), SST_STRANGER (no role) and SST_OWNER (the site's owner);
+   the public group sstgroup with a public repository site (docs and issues on; component.xml sst-site 1.2.0 depending on
+   mr-mantle; docs/README.md, docs/guide/intro.md with a script tag, landing.md; the tag v1.2.0) and a private repository
+   secret (docs on; component.xml sst-secret); a public category news with a topic about a widget. */
+const SITE7 = "SST_SITE"
+const SITE7_HOST = "sst.smithy.test"
+function turnOn(siteId, repositoryId, fields) {
+    const revision = op(OPERATOR, siteId, "getRepository", {repositoryId}).repository.revision
+    const out = op(OPERATOR, siteId, "updateRepository", {repositoryId, ...fields, expectedRevision: revision})
+    if (out.kind) throw new Error("Repository not changed: " + out.message)
+}
+function siteFixture() {
+    site(SITE7)
+    make("mantle.public.PublicSiteHost", {hostname: SITE7_HOST, siteId: SITE7, canonical: "Y"})
+    for (const name of ["SST_MAINT", "SST_STRANGER"]) {
+        account(SITE7, name, {handle: name.toLowerCase().replace("_", "")})
+        settled(SITE7, name)
+    }
+    account(SITE7, "SST_OWNER", {handle: "sstowner", siteRole: "owner"})
+    const groupId = createGroup(OPERATOR, {siteId: SITE7, pathSegment: "sstgroup", visibility: "public"}).groupId
+    role(SITE7, {groupId}, "SST_MAINT", "SmrMaintainer")
+    const siteId = createRepository(OPERATOR, {siteId: SITE7, groupId, slug: "site", visibility: "public"}).repositoryId
+    const secretId = createRepository(OPERATOR, {siteId: SITE7, groupId, slug: "secret", visibility: "private"}).repositoryId
+    turnOn(SITE7, siteId, {docsEnabled: true})
+    issuesOn(SITE7, siteId)
+    turnOn(SITE7, secretId, {docsEnabled: true})
+    commit(siteId, "Start", {
+        "README.md": "# Site\n",
+        "component.xml":
+            '<?xml version="1.0"?>\n<component name="sst-site" version="1.2.0">\n    <depends-on name="mr-mantle"/>\n</component>\n',
+        "docs/README.md": "# Site docs\n\nSee [the guide](guide/intro.md).\n",
+        "docs/guide/intro.md": "# Getting started\n\nThe widget handbook.\n\n<script>alert(1)</script>\n\n## Getting started\n",
+        "landing.md": "# Welcome\n\nHello from the site.<script>alert(2)</script>\n"
+    })
+    commit(secretId, "Start", {
+        "component.xml": '<component name="sst-secret" version="0.1"/>\n',
+        "docs/README.md": "# Hidden widget notes\n"
+    })
+    run("org.moqui.git.GitServices.create#GitRef", {repositoryId: siteId, refName: "v1.2.0", refType: "tag"})
+    settle(siteId)
+    settle(secretId)
+    const news = make("mantle.marketing.contact.ContactList", {
+        contactListTypeEnumId: "MAILBOX",
+        contactListName: "News",
+        isPublic: "N",
+        postingEnumId: "ClpAnyUser"
+    }).contactListId
+    make("mantle.forum.ForumCategory", {
+        contactListId: news,
+        siteId: SITE7,
+        slug: news,
+        sequenceNum: 0,
+        publicationState: "published",
+        visibility: "public",
+        mode: "discussion",
+        policyRevision: 1
+    })
+    const posted = op("SST_MAINT", SITE7, "publishPost", {
+        contactListId: news,
+        title: "The widget is out",
+        body: "A new widget for everyone",
+        operationId: "sst-news-" + ec.user.randomString(12)
+    })
+    if (posted.kind) throw new Error("No topic: " + posted.message)
+    return siteIds()
+}
+function siteIds() {
+    const group = row("mantle.smithy.SmithyGroup", {siteId: SITE7, groupPath: "sstgroup"})
+    return {
+        siteId: SITE7,
+        groupId: group.groupId,
+        repositoryId: row("mantle.smithy.SmithyRepository", {repositoryPath: "sstgroup/site"}).repositoryId,
+        secretId: row("mantle.smithy.SmithyRepository", {repositoryPath: "sstgroup/secret"}).repositoryId,
+        newsId: Array.from(ec.entity.find("mantle.forum.ForumCategory").condition({siteId: SITE7}).disableAuthz().list())
+            .map(category => category.contactListId)
+            .find(id => row("mantle.marketing.contact.ContactList", {contactListId: id})?.contactListName === "News")
+    }
+}
 ;({
+    privileged,
+    SITE7,
+    SITE7_HOST,
+    siteFixture,
+    siteIds,
     settled,
     settle,
     tracker,

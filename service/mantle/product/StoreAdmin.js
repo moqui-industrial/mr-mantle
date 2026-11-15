@@ -783,11 +783,21 @@ const settingKinds = {
         return raw
     },
     // P10: the recovery policy's numbers (whole minutes from 15 minutes to 30 days; 1 to 5 sends; a 1 to 365 day window) and
-    // its sender (built-in recovery until Marketing's automation exists, design §8)
+    // its sender (design §8): built-in recovery, or (impl-marketing P11, F27) a Marketing automation while an active one of the
+    // store's organization has the store's cart trigger (AUTOMATION_UNAVAILABLE otherwise)
     recoveryDelay: wholeKind(15, 43200),
     recoveryMaxSends: wholeKind(1, 5),
     recoveryRetention: wholeKind(1, 365),
-    recoverySender: choiceKind(["builtin"]),
+    recoverySender: (raw, label, store) => {
+        choiceKind(["builtin", "automation"])(raw, label)
+        const recovery = ec.resource.script("component://mr-mantle/service/mantle/order/CartRecovery.js")
+        if (raw === "automation" && !(store && recovery.automationSenderOffered(store)))
+            denied(
+                "AUTOMATION_UNAVAILABLE",
+                label + ": no active Marketing automation of the store's organization has this store's abandoned cart trigger"
+            )
+        return raw
+    },
     // F118: the checkout's opt-ins (none, or some of reviewRequests, cartReminders and news, StoreTopics.js) and the news list
     // (a current marketing list the store's organization owns, never a topic's list)
     checkoutOptIns: (raw, label) => {

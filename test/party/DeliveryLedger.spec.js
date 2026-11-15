@@ -247,3 +247,139 @@ feature("the mail queue leaves the ledger's messages to the ledger, and reconcil
         r.sends === 0
     }
 })
+
+// impl-marketing P8 (F13): a source's build gives its own subject, body and text alternative, which go out as given (the subject is
+// never expanded again); a promotional delivery never names a transactional-only sending profile
+feature("a source's own subject, body and text go out as given; a promotional delivery refuses a transactional profile", {
+    when() {
+        capture.clear()
+        const base = "dbresource://mantle/spec-ledger/own/"
+        ec.resource.getLocationReference(base + "body.html.fancy-locked").putText("<p>Own body for ${firstName}</p>")
+        ec.resource.getLocationReference(base + "text.fancy-locked").putText("Own text for ${firstName}")
+        call("create#mantle.party.Party", {partyId: "MDL_ORG", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.MessageTemplate", {
+            messageTemplateId: "MDL_OWN",
+            organizationPartyId: "MDL_ORG",
+            templateName: "Own content",
+            channelEnumId: "MdcEmail",
+            purposeEnumId: "MtpTransactional",
+            emailTemplateId: ids.sent,
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        call("create#mantle.party.MessageTemplateContent", {
+            messageTemplateId: "MDL_OWN",
+            contentSeqId: "001",
+            // the escape is the literal text ${own}: what the source answers is never a template again
+            subject: "Own \\${own} for ${firstName}",
+            bodyLocation: base + "body.html.fancy-locked",
+            bodyTextLocation: base + "text.fancy-locked",
+            variablesJson: JSON.stringify([{name: "firstName", label: "First name", fallback: "you"}]),
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        const own = queue({
+            sourceEnumId: "MdsrcMessageTemplate",
+            eventKey: "spec:own-1",
+            recipientPartyId: ids.buyer,
+            toAddress: "buyer@ledger.example.test",
+            organizationPartyId: "MDL_ORG",
+            bodyParameters: {firstName: "Lee"},
+            sendNow: true
+        })
+        const message = Array.from(capture.getMessages()).find(m =>
+            Array.from(m.toList || []).includes("buyer@ledger.example.test")
+        )
+        call("create#mantle.party.MessageSendingProfile", {
+            sendingProfileId: "MDL_NOTICES",
+            organizationPartyId: "MDL_ORG",
+            channelEnumId: "MdcEmail",
+            emailServerId: "MDL_SMTP",
+            fromAddress: "notices@ledger.example.test",
+            purposeEnumId: "MtpTransactional",
+            fromDate: new Date(Date.now() - 86400000)
+        })
+        let refused = ""
+        try {
+            queue({
+                eventKey: "spec:promo-1",
+                recipientPartyId: ids.reader,
+                toAddress: "reader@ledger.example.test",
+                sendingProfileId: "MDL_NOTICES",
+                transactional: false,
+                marketingPurposeEnumId: "PcpMarketingEmail"
+            })
+        } catch (error) {
+            refused = String(error.message)
+        }
+        ec.message.clearErrors()
+        return {own, message: message || {}, refused, promo: list("mantle.party.MessageDelivery", {eventKey: "spec:promo-1"})}
+    },
+    then({own, message, refused, promo}) {
+        own.stateEnumId == "MdsSent"
+        message.subject == "Own ${own} for Lee"
+        String(message.body).includes("Own body for Lee")
+        refused.includes("PROFILE_PURPOSE")
+        promo.length == 0
+    }
+})
+
+// Marketing P9: a topic's delivery within an organization (a Marketing send's recipient) reads Marketing's evidenced rule: the purpose
+// granted in the organization admits it without a list row, a global withdrawal refuses it; the same topic delivery queued without an
+// organization keeps the list's own rule (no list row, no consent). The delivery carries its organization.
+feature("a topic's delivery within an organization reads the organization's consent; one without keeps the list's rule", {
+    when() {
+        call("create#mantle.party.Party", {partyId: "MDL_ORG9", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.marketing.contact.ContactList", {
+            contactListId: "MDL_TOPIC",
+            contactListName: "Ledger topic",
+            contactListTypeEnumId: "NEWSLETTER",
+            ownerPartyId: "MDL_ORG9"
+        })
+        for (const [partyId, statusId, organizationPartyId] of [
+            ["MDL_GRANTED", "PconGranted", "MDL_ORG9"],
+            ["MDL_WITHDRAWN", "PconGranted", "MDL_ORG9"]
+        ]) {
+            call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
+            call("create#mantle.party.PartyConsent", {
+                partyId,
+                purposeEnumId: "PcpMarketingEmail",
+                organizationPartyId,
+                statusId,
+                consentDate: new Date(Date.now() - 86400000),
+                sourceEnumId: "PcsForm"
+            })
+        }
+        // a later global withdrawal, which an organization's grant never undoes
+        call("create#mantle.party.PartyConsent", {
+            partyId: "MDL_WITHDRAWN",
+            purposeEnumId: "PcpMarketingEmail",
+            statusId: "PconWithdrawn",
+            consentDate: new Date(Date.now() - 3600000),
+            sourceEnumId: "PcsForm"
+        })
+        const topicDelivery = (eventKey, partyId, organization) =>
+            queue({
+                eventKey,
+                recipientPartyId: partyId,
+                toAddress: partyId.toLowerCase() + "@ledger.example.test",
+                transactional: false,
+                marketingPurposeEnumId: "PcpMarketingEmail",
+                consentContactListId: "MDL_TOPIC",
+                organizationPartyId: "MDL_ORG9",
+                ...(organization ? {consentOrganizationPartyId: "MDL_ORG9"} : {}),
+                sendNow: true
+            })
+        const granted = topicDelivery("spec:topic-org-1", "MDL_GRANTED", true)
+        const withdrawn = topicDelivery("spec:topic-org-2", "MDL_WITHDRAWN", true)
+        const legacy = topicDelivery("spec:topic-list-1", "MDL_GRANTED", false)
+        const row = one("mantle.party.MessageDelivery", {deliveryId: granted.deliveryId})
+        return {granted, withdrawn, legacy, row, consent: JSON.parse(row.consentJson || "{}")}
+    },
+    then({granted, withdrawn, legacy, row, consent}) {
+        granted.stateEnumId == "MdsSent"
+        row.organizationPartyId == "MDL_ORG9"
+        consent.organizationPartyId == "MDL_ORG9"
+        consent.granted == true
+        withdrawn.stateEnumId == "MdsSuppressed"
+        legacy.stateEnumId == "MdsSuppressed"
+    }
+})

@@ -13,4 +13,6 @@
 # Nov 13, 2026: raised to the final ./moq test-apps of People's build (the user's agreement, impl-people §4 and its Final
 # suites note): 554.6 s of feature time, People's thirty-nine regression specs 111.8 s of it, the rest other apps' changes
 # since Maintenance's raise (CalcGrid among them), rounded up.
-server = 555
+# Nov 14, 2026: raised to the final suites of the Dogfood build (DG0 to DG10, Dev AIDE P11 to P13) with the Sales and
+# Marketing apps merged, with the user's agreement: 744.9 s measured, rounded up. A review of regression vs acceptance follows.
+server = 745

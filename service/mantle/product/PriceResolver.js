@@ -19,6 +19,51 @@ const call = (name, p) => {
     return out
 }
 const internal = id => !!id && !!one("mantle.party.PartyRole", {partyId: id, roleTypeId: "OrgInternal"})
+// ===== agreements (impl-sales P15, F20; design-sales §7, Products' owner contract) =====
+// An agreement's price row or list applies only while its agreement does: the agreement active (or outside the status flow, with no
+// status at all, as Mantle's older agreements and Customer Service's service agreements are, judged by its dates alone), in its dates
+// at the price date, not a template, of the context's price organization and, when it names a counterparty, with the context's (the
+// customer of a sale, the supplier of a purchase). A draft, expired, closed or cancelled agreement, one not yet started or past its
+// end, or another customer's never prices a transaction; an order priced earlier keeps its price.
+const AGREEMENT = "mantle.party.agreement.Agreement"
+const sellingAgreementTypes = ["AgrSales", "AgrProduct"]
+function agreementApplies(agreementId, c) {
+    if (!agreementId) return true
+    if (!c.agreementChecks) c.agreementChecks = {}
+    if (Object.hasOwn(c.agreementChecks, agreementId)) return c.agreementChecks[agreementId]
+    const agreement = one(AGREEMENT, {agreementId})
+    const counterparty = c.direction === "purchase" ? c.vendorPartyId : c.customerPartyId
+    const applies =
+        !!agreement &&
+        agreement.isTemplate !== "Y" &&
+        (!agreement.statusId || agreement.statusId === "AgmStActive") &&
+        active(agreement, c.validDate) &&
+        (!agreement.organizationPartyId || !c.organizationPartyId || agreement.organizationPartyId === c.organizationPartyId) &&
+        (!agreement.otherPartyId || agreement.otherPartyId === counterparty)
+    c.agreementChecks[agreementId] = applies
+    return applies
+}
+// The agreements a seller's quote line is priced under (get#SellerProductPrice, impl-sales P15): the selling organization's customer
+// agreements (AgrSales, AgrProduct) with the customer that are active and in their dates at the price date, latest first. Only the
+// seller's authority reads them; a caller naming an agreement (agreementId) gets that one, and every other caller none.
+function sellerAgreementIds(c) {
+    if (!c.customerPartyId || !c.organizationPartyId) return []
+    return Array.from(
+        find(AGREEMENT, {organizationPartyId: c.organizationPartyId, otherPartyId: c.customerPartyId, statusId: "AgmStActive"})
+            .condition("agreementTypeEnumId", "in", sellingAgreementTypes)
+            .list()
+    )
+        .filter(row => row.isTemplate !== "Y" && active(row, c.validDate))
+        .sort((a, b) => (ms(b.fromDate) ?? 0) - (ms(a.fromDate) ?? 0))
+        .map(row => row.agreementId)
+}
+// Whether a row or list naming an agreement is chosen by the context: the agreement (and item) named, else one of the seller's
+// current agreements with the customer (sellerAgreementIds).
+function agreementChosen(agreementId, agreementItemSeqId, c) {
+    if (c.agreementId)
+        return agreementId === c.agreementId && (agreementItemSeqId == null || agreementItemSeqId === c.agreementItemSeqId)
+    return Array.isArray(c.agreementIds) && c.agreementIds.includes(agreementId)
+}
 const has = permission => ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js").has(permission)
 const read = (direction, cost = false) =>
     has("ADMIN") ||
@@ -58,7 +103,13 @@ function context(p) {
     // Shop's catalog prices as the authority for its routed store and signed-in customer (impl-shop P3, F18): only
     // get#StoreProductPrice sets this, in its own script (no service declares it, so no caller's input can)
     out.storeAuthority = p.storeAuthority === true && !!out.productStoreId && out.direction === "sales"
-    out.traceAllowed = !!p.explain && !out.storeAuthority && read(out.direction)
+    // A seller's prices as the authority for a sale its own checks admitted (impl-sales P7): only get#SellerProductPrice sets
+    // this, in its own script, for Sales' quote lines after SalesQuotes.js checked the seller and the customer
+    out.sellerAuthority =
+        p.sellerAuthority === true && !out.storeAuthority && out.direction === "sales" && !!out.organizationPartyId
+    // P15: the seller's current agreements with the customer, whose price rows and lists its authority then reads
+    out.agreementIds = out.sellerAuthority && !out.agreementId ? sellerAgreementIds(out) : []
+    out.traceAllowed = !!p.explain && !out.storeAuthority && !out.sellerAuthority && read(out.direction)
     out.priceTrace = []
     out.priceWarnings = []
     return out
@@ -70,12 +121,16 @@ function readable(row, c) {
     if (row.priceTypeEnumId === "PptAverage" && !read(c.direction, true)) return false
     const d = internal(row.vendorPartyId) ? "sales" : row.vendorPartyId ? "purchase" : "sales"
     if (d !== c.direction) return false
-    // The store's authority (get#StoreProductPrice): the public rows, the store organization's and the customer's own;
-    // never an agreement's, an average cost or another party's.
-    if (c.storeAuthority)
+    // The store's authority (get#StoreProductPrice) and the seller's (get#SellerProductPrice): the public rows, the store's or
+    // selling organization's and the customer's own; never an average cost or another party's. The store's never an agreement's;
+    // the seller's (P15) an agreement's row only of a current agreement of the seller with the customer (sellerAgreementIds).
+    if (c.storeAuthority || c.sellerAuthority)
         return (
             row.priceTypeEnumId !== "PptAverage" &&
-            !row.agreementId &&
+            (!row.agreementId ||
+                (c.sellerAuthority &&
+                    agreementChosen(row.agreementId, row.agreementItemSeqId, c) &&
+                    agreementApplies(row.agreementId, c))) &&
             (!row.vendorPartyId || row.vendorPartyId === c.vendorPartyId) &&
             (!row.customerPartyId || (!!c.customerPartyId && row.customerPartyId === c.customerPartyId))
         )
@@ -169,6 +224,11 @@ function typed(c, type, productId = c.productId) {
             "termUomId"
         ])
             if (row[key] != null) {
+                // an agreement's row is matched below, by the agreement the context names or chooses and the agreement's guard
+                if (row.agreementId != null && (key === "agreementId" || key === "agreementItemSeqId")) {
+                    specificity++
+                    continue
+                }
                 if (row[key] !== c[key]) {
                     eligible = false
                     why = "Different " + key
@@ -176,6 +236,15 @@ function typed(c, type, productId = c.productId) {
                 }
                 specificity++
             }
+        if (eligible && row.agreementId != null) {
+            if (!agreementChosen(row.agreementId, row.agreementItemSeqId, c)) {
+                eligible = false
+                why = "Different agreementId"
+            } else if (!agreementApplies(row.agreementId, c)) {
+                eligible = false
+                why = "Agreement not active, outside its dates or not with these parties"
+            }
+        }
         if (eligible && !active(row, c.validDate)) {
             eligible = false
             why = "Outside effective interval"
@@ -221,6 +290,8 @@ function typed(c, type, productId = c.productId) {
                 minQuantity: toDecimal(row.minQuantity || 0),
                 specificity,
                 agreement: row.agreementId ? 1 : 0,
+                // of the seller's current agreements, the latest first (sellerAgreementIds)
+                agreementRank: row.agreementId && c.agreementIds?.length ? c.agreementIds.indexOf(row.agreementId) : 0,
                 taxInPrice: row.taxInPrice
             })
         }
@@ -228,6 +299,7 @@ function typed(c, type, productId = c.productId) {
     matches.sort(
         (a, b) =>
             b.agreement - a.agreement ||
+            a.agreementRank - b.agreementRank ||
             b.specificity - a.specificity ||
             b.minQuantity.compare(a.minQuantity) ||
             b.fromDate - a.fromDate ||
@@ -261,13 +333,14 @@ function fallback(c, type) {
 // scope's owners; as the store's authority (get#StoreProductPrice, impl-shop P4, F64), the features with no owner (_NA_) or the
 // store organization's (the selling vendor), so a shopper's variant price is the one staff see.
 function extras(c, selected) {
-    if (!selected?.virtualFallback || c.direction !== "sales" || !(c.storeAuthority || read("sales"))) return selected
+    const authority = c.storeAuthority || c.sellerAuthority
+    if (!selected?.virtualFallback || c.direction !== "sales" || !(authority || read("sales"))) return selected
     let price = toDecimal(selected.price)
     const unit = one(P + "Product", {productId: selected.productId})?.amountUomId,
         factor = conversion(1, c.quantityUomId || unit, unit, c.validDate, c, "quantity-unit-factor"),
-        s = c.storeAuthority ? null : policy().scope()
+        s = authority ? null : policy().scope()
     const owned = feature =>
-        c.storeAuthority
+        authority
             ? !feature.ownerPartyId || feature.ownerPartyId === "_NA_" || feature.ownerPartyId === c.vendorPartyId
             : s.systemAdmin || s.ownerPartyIds.includes(feature.ownerPartyId)
     for (const appl of rows(P + "feature.ProductFeatureAppl", {productId: c.productId}).filter(
@@ -409,8 +482,9 @@ function listEligible(list, c) {
     if (
         (list.pricePurposeEnumId && list.pricePurposeEnumId !== c.pricePurposeEnumId) ||
         (list.productStoreId && list.productStoreId !== c.productStoreId) ||
-        (list.agreementId && list.agreementId !== c.agreementId) ||
-        (list.agreementItemSeqId && list.agreementItemSeqId !== c.agreementItemSeqId) ||
+        (list.agreementId &&
+            (!agreementChosen(list.agreementId, list.agreementItemSeqId, c) || !agreementApplies(list.agreementId, c))) ||
+        (!list.agreementId && list.agreementItemSeqId && list.agreementItemSeqId !== c.agreementItemSeqId) ||
         !classified(list.partyClassificationId, c) ||
         !geoMatches(list.geoId, c.shipToCountryGeoId || c.billToCountryGeoId || c.countryGeoId)
     )
@@ -482,7 +556,7 @@ function evaluate(list, c, path = []) {
             if (!source) throw new Error("Missing " + rule.basePriceTypeEnumId + " base for rule " + rule.priceRuleId)
             base = source.price
         } else if (rule.baseType === "list") {
-            const nested = policy().getList(rule.basePriceListId)
+            const nested = listOf(c, rule.basePriceListId)
             if (!listEligible(nested, c))
                 throw new Error("Base list " + rule.basePriceListId + " is not effective for this context")
             source = evaluate(nested, Object.assign({}, c, {priceUomId: nested.priceUomId}), path.concat(list.priceListId))
@@ -542,13 +616,24 @@ function evaluate(list, c, path = []) {
     }
     return null
 }
+// A price list as the context reads it: the reader's (PricePolicy getList), or, as the seller's authority, the row itself, which
+// listEligible then keeps to the selling organization's published lists (a rule's base list too).
+function listOf(c, id) {
+    if (!c.sellerAuthority) return policy().getList(id)
+    const found = one(P + "ProductPriceList", {priceListId: id})
+    if (!found) throw new Error("Price list is not available")
+    return found
+}
 function applyList(p) {
     const c = p.pricingContext || context(p)
     if (p.listModifierApplied) return {}
-    if (!ec.user.userId || !read(c.direction)) return {listModifierApplied: true}
+    // the seller's authority (get#SellerProductPrice) reads its organization's published lists, which listEligible keeps to
+    // the selling organization, without the reader's own price grant
+    if (!c.sellerAuthority && (!ec.user.userId || !read(c.direction))) return {listModifierApplied: true}
+    const getList = id => listOf(c, id)
     let selected
     if (c.priceListId) {
-        selected = policy().getList(c.priceListId)
+        selected = getList(c.priceListId)
         if (!listEligible(selected, c)) throw new Error("Selected price list is not effective for the transaction context")
     } else {
         const defaults = c.organizationPartyId
@@ -557,7 +642,7 @@ function applyList(p) {
                   .sort((a, b) => ms(b.fromDate) - ms(a.fromDate))[0]
             : null
         if (defaults?.defaultPriceListId && c.direction === "sales") {
-            const candidate = policy().getList(defaults.defaultPriceListId)
+            const candidate = getList(defaults.defaultPriceListId)
             if (
                 listEligible(candidate, c) &&
                 rows(P + "ProductPriceRule", {priceListId: candidate.priceListId}).some(r => eligibleRule(r, c))
@@ -571,7 +656,7 @@ function applyList(p) {
                     String(a.priceListId).localeCompare(String(b.priceListId))
             )) {
                 try {
-                    policy().getList(list.priceListId)
+                    getList(list.priceListId)
                 } catch (e) {
                     continue
                 }
@@ -608,4 +693,8 @@ function finalize(p) {
 function execute(op, p) {
     return {resolve, byType, applyList, finalize}[op](p)
 }
-;({execute})
+;({
+    execute,
+    // impl-sales P16: the recurrence worker checks a base's agreement by the same rule at each occurrence
+    agreementApplies
+})

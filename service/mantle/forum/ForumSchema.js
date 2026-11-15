@@ -1460,6 +1460,8 @@
             'operationId',
             'optIns',
             'recurringConsent',
+            // Marketing follow-up 4: the frontend's first-party visitor key; the authority keeps only its digest, where allowed
+            'visitorKey',
         ],
     },
     getCheckoutPaymentResult: {
@@ -1673,5 +1675,186 @@
     claimHeldMail: {
         service: 'mantle.forum.DeliveryServices.claim#HeldMail',
         fields: ['siteId', 'token', 'operationId'],
+    },
+    // IronStone Sales P13 (impl-sales P13; design-sales §10): PASS Sales' customer quotes (mantle.order.SalesPortalServices)
+    findSalesQuotes: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerQuotes',
+        fields: ['siteId', 'state', 'cursor', 'limit'],
+    },
+    getSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerQuote',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesQuoteDocument: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    respondSalesQuote: {
+        service: 'mantle.order.SalesPortalServices.respond#CustomerQuote',
+        fields: [
+            'siteId',
+            'token',
+            'orderId',
+            'action',
+            'expectedRevision',
+            'acknowledge',
+            'purchaseOrder',
+            'acceptorName',
+            'acceptorTitle',
+            'reason',
+            'operationId',
+        ],
+    },
+    getSalesQuoteResponse: {
+        service: 'mantle.order.SalesPortalServices.get#QuoteResponse',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    // IronStone Sales P17 (impl-sales P17; design-sales §10): PASS Sales' customer orders, reads only
+    findSalesOrders: {
+        service: 'mantle.order.SalesPortalServices.find#CustomerOrders',
+        fields: ['siteId', 'state', 'reference', 'cursor', 'limit'],
+    },
+    getSalesOrder: {
+        service: 'mantle.order.SalesPortalServices.get#CustomerOrder',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    getSalesOrderDocument: {
+        service: 'mantle.order.SalesPortalServices.get#OrderDocument',
+        fields: ['siteId', 'token', 'orderId'],
+    },
+    // IronStone Marketing P7 (impl-marketing P7; design-marketing §13): PASS Marketing's public subscription
+    // (mantle.marketing.MarketingPortalServices)
+    getMarketingPublication: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Publication',
+        fields: ['siteId', 'contactListId'],
+    },
+    requestSubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.request#Subscription',
+        fields: [
+            'siteId',
+            'emailAddress',
+            'displayName',
+            'contactListIds',
+            'consent',
+            'operationId',
+        ],
+    },
+    getSubscriptionRequest: {
+        service: 'mantle.marketing.MarketingPortalServices.get#SubscriptionRequest',
+        fields: ['siteId', 'token'],
+    },
+    verifySubscription: {
+        service: 'mantle.marketing.MarketingPortalServices.verify#Subscription',
+        fields: ['siteId', 'token', 'operationId'],
+    },
+    // IronStone Marketing P12 (impl-marketing P12; design-marketing §13 SubmitForm): the SubmitForm page (a public or an invited
+    // publication's form and its answer)
+    getMarketingForm: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Form',
+        fields: ['siteId', 'publicationId', 'token'],
+    },
+    submitMarketingForm: {
+        service: 'mantle.marketing.MarketingPortalServices.submit#Form',
+        fields: [
+            'siteId',
+            'publicationId',
+            'token',
+            'values',
+            'subscribe',
+            'subscriptionEmail',
+            'operationId',
+        ],
+    },
+    // IronStone Marketing P14 (impl-marketing P14; design-marketing §8 LandingPages, §13.1): a landing page of the marketing mount,
+    // read only
+    getMarketingPage: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Page',
+        fields: ['siteId', 'routePath', 'locale'],
+    },
+    // IronStone Marketing P15 (impl-marketing P15; design-marketing §8 "Capture on the authority", §13.1): the tracking redirect's and
+    // pixel's two operations (mr-pass script/TrackingRedirect.js and TrackingPixel.js), never a page's form; the destination comes from
+    // the authority alone
+    resolveTrackingLink: {
+        service: 'mantle.marketing.TrackingServices.resolve#TrackingLink',
+        fields: ['siteId', 'code', 'token'],
+    },
+    recordTrackingEvent: {
+        service: 'mantle.marketing.TrackingServices.record#TrackingEvent',
+        fields: ['siteId', 'code', 'token', 'visitorKey', 'kind'],
+    },
+    // IronStone Marketing P16 (impl-marketing P16; design-marketing §13 Event): a published event registration offer, read only
+    getMarketingEvent: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Event',
+        fields: ['siteId', 'registrationPolicyId'],
+    },
+    // IronStone Marketing P17 (impl-marketing P17; design-marketing §13 Register, Registration): a registration's reservation (an
+    // anonymous write PASS's request key and the authority's limits bound), and its completion, payment, read and cancellation by the
+    // reservation's capability (input.token), the signed-in buyer's own reservation (reservationId) or the provider's return
+    // (reference and key, the state alone)
+    reserveRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.reserve#Registration',
+        fields: [
+            'siteId',
+            'registrationPolicyId',
+            'lines',
+            'buyerName',
+            'buyerEmail',
+            'operationId',
+        ],
+    },
+    completeRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.complete#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'attendees',
+            'answers',
+            'acceptTerms',
+            'termsRevision',
+            'operationId',
+        ],
+    },
+    startRegistrationPayment: {
+        service: 'mantle.marketing.MarketingPortalServices.start#RegistrationPayment',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'priceKey',
+            'operationId',
+            // Marketing follow-up 5: the frontend's first-party visitor key; the authority keeps only its digest, where allowed
+            'visitorKey',
+        ],
+    },
+    // the user's call (Nov 15): the provider's posted form (Accept Hosted) of a pending payment, a fresh token for Register's relay
+    getRegistrationPaymentForm: {
+        service: 'mantle.marketing.MarketingPortalServices.get#RegistrationPaymentForm',
+        fields: ['siteId', 'token', 'reservationId', 'operationId'],
+    },
+    getRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.get#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'reference',
+            'key',
+            'returned',
+            'showTicket',
+            'operationId',
+        ],
+    },
+    cancelRegistration: {
+        service: 'mantle.marketing.MarketingPortalServices.cancel#Registration',
+        fields: [
+            'siteId',
+            'token',
+            'reservationId',
+            'registrationIds',
+            'reason',
+            'confirm',
+            'operationId',
+        ],
     },
 })

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales orders (IronStone Sales design §6, §16; impl-sales P11, X1, F15, F16; mantle.order.SalesOrderServices): the delivery
+    ledger's source of the storeless confirmation, with its build service, so a confirmation goes once to a recipient for an order's
+    revision (X8), and its EmailTemplate, whose subject, sender and body the build makes (an organization names another through
+    SalesPolicy.confirmationEmailTemplateId). -->
+<entity-facade-xml type="seed">
+    <moqui.basic.Enumeration enumId="MdsrcSalesOrderConfirmation" description="Sales order confirmation" sequenceNum="22"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.order.SalesOrderServices.build#OrderConfirmationMessage"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_SALES_ORDER_CONFIRMATION" description="Sales order confirmation to the customer"
+            emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses="" subject="${subject}"/>
+</entity-facade-xml>

@@ -63,6 +63,27 @@ const TOKEN_WRITES = [
     'requestOrderCancel',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
+    // IronStone Sales P13: a quote link's acceptance or decline (input.token)
+    'respondSalesQuote',
+    // IronStone Marketing P7: a subscription request (anonymous: PASS's request key, its limits and the neutral receipt bound it)
+    // and its confirmation link's POST (input.token)
+    'requestSubscription',
+    'verifySubscription',
+    // IronStone Marketing P12: a form's answer (anonymous for a public publication: PASS's request key, its limits and the neutral
+    // receipt bound it; an invitation's link with input.token)
+    'submitMarketingForm',
+    // IronStone Marketing P15: a tracking event of the redirect, the pixel or a page carrying a code (anonymous: the authority's limits
+    // per client and code and per site bound it, and its answer is the same; a personalized link's or pixel's input.token)
+    'recordTrackingEvent',
+    // IronStone Marketing P17: a registration's reservation (anonymous: PASS's request key and the authority's limits bound it) and
+    // its completion, payment, read and cancellation by its capability (input.token) or the provider's return (input.key)
+    'reserveRegistration',
+    'completeRegistration',
+    'startRegistrationPayment',
+    // the provider's posted form of a pending payment, by the capability (the user's call, Nov 15)
+    'getRegistrationPaymentForm',
+    'getRegistration',
+    'cancelRegistration',
 ]
 const fail = (kind, message) => {
     const e = new Error(message)
@@ -122,6 +143,8 @@ function respond(response, answer) {
         response.write(JSON.stringify(body))
         return
     }
+    // Smithy DG5: the authority's operation wrote the response itself (a run's artifact, send#RunArtifact)
+    if (answer.sent) return
     if (answer.download && answer.download.size != null) {
         // Shop P6: a granted download, streamed in pieces with its byte range (206, or 416 outside the file)
         streamRanged(response, answer.download)
@@ -199,6 +222,15 @@ function respond(response, answer) {
                 fail('AuthenticationRequired', 'Registered client required')
             // A write a bearer link's token authorizes (a payment, a supplier's bill) comes from the registered
             // deployment that served the link's page, with no session of its own.
+            // A login key in a header logged its user in for this request (the framework's api_key or login_key, as the
+            // Dev AIDE sends an installed app's key): it carries no ambient cookie authority, so it skips the session
+            // token, and the authority lets it call only an installed app's operations (APP_KEY_OPERATIONS). A session
+            // whose user came by such a header is held to the same, with no key to show.
+            const headerKey =
+                    request.getHeader('api_key') ||
+                    request.getHeader('login_key') ||
+                    '',
+                headerLogin = !!ec.web.sessionAttributes?.moquiHeaderLogin
             const tokenWrite =
                 registeredClient &&
                 routes.some(
@@ -219,6 +251,7 @@ function respond(response, answer) {
                 !(path.join('/') === 'opt-out' && method === 'POST') &&
                 !tokenWrite &&
                 !bearer &&
+                !headerKey &&
                 request.getHeader('x-csrf-token') !== ec.web.sessionToken
             )
                 fail('Unauthorized', 'Invalid session token')
@@ -237,11 +270,13 @@ function respond(response, answer) {
                 clientSecret,
                 visitorAddress: request.getHeader('x-pass-client-ip') || '',
                 sessionChecked: true,
+                headerKey,
+                headerLogin,
             }
             if (path[0] === 'account') {
                 if (['sso', 'sso-complete'].includes(path[1])) {
                     // The SSO front channel: the browser is redirected to the provider and back here.
-                    if (method !== 'GET')
+                    if (method !== 'GET' || headerKey || headerLogin)
                         fail(
                             'Unauthorized',
                             'Registered sign-in client required',

@@ -233,6 +233,14 @@ function accountRows(userScope, found, ids) {
             .condition("customerPartyId", "in", ids)
             .condition("vendorPartyId", "in", organizationIds(userScope))
             .condition("statusId", "in", ["OrderPlaced", "OrderProcessing", "OrderApproved", "OrderHold"])
+            // P16: a recurring base or a quote template is no open order (OrderHeader.orderPurposeEnumId, null for most)
+            .condition(
+                factory().makeCondition(
+                    factory().makeCondition("orderPurposeEnumId", "is-null", null),
+                    "or",
+                    factory().makeCondition("orderPurposeEnumId", "not-in", salesAccess.orderExcludedPurposes)
+                )
+            )
             .selectField("customerPartyId")
             .selectField("orderId")
             .distinct(true)
@@ -430,7 +438,8 @@ function customerSales(p) {
         }
     }
 }
-// The account's orders with the organizations, newest first: no quote template or recurring base (F7).
+// The account's orders with the organizations, newest first: no quote template or recurring base (F7), and no quote that was never
+// placed (P7: Customer360's Quotes tab, find#Quotes; an accepted quote is an order).
 function ordersOf(customerPartyId, vendors) {
     if (!vendors.length) return []
     const found = Array.from(
@@ -442,6 +451,16 @@ function ordersOf(customerPartyId, vendors) {
                     [
                         factory().makeCondition("orderPurposeEnumId", "is-null", null),
                         factory().makeCondition("orderPurposeEnumId", "not-in", ["OrpRecurringTemplate", "OrpSalesQuoteTemplate"])
+                    ],
+                    "or"
+                )
+            )
+            .condition(
+                factory().makeCondition(
+                    [
+                        factory().makeCondition("orderPurposeEnumId", "is-null", null),
+                        factory().makeCondition("orderPurposeEnumId", "not-equals", "OrpSalesQuote"),
+                        factory().makeCondition("placedDate", "is-not-null", null)
                     ],
                     "or"
                 )
@@ -715,7 +734,115 @@ function endContact(p) {
     return {partyRelationshipId: row.partyRelationshipId}
 }
 
+// ===== P13: Invite to Sales (design-sales §4 Customer360 and ContactDetail, §10.1; impl-sales P13) =====
+const given = value => (value == null || String(value).trim() === "" ? null : String(value).trim())
+// A holder of SALES_CUSTOMER_INVITE invites a contact of a customer account of their sales scope to the organization's PASS Sales
+// pages, at one of the contact's own addresses, through ExternalAccess invite#Contact for the sales app bound to the account and
+// the organization (which checks the permission there again). An address seen elsewhere is no authority to invite it.
+// The contact's own email addresses (current, of the email type), lower case.
+function emailsOf(partyId) {
+    const out = []
+    for (const row of find("mantle.party.contact.PartyContactMechInfo")
+        .condition("partyId", partyId)
+        .condition("contactMechTypeEnumId", "CmtEmailAddress")
+        .condition(currentCondition())
+        .list()) {
+        const email = String(row.infoString || "")
+            .trim()
+            .toLowerCase()
+        if (email && !out.includes(email)) out.push(email)
+    }
+    return out
+}
+// The organizations of the scope that may serve the account (its owner, any for a shared account) with a published PASS Sales site.
+function inviteOrganizations(userScope, account) {
+    const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
+    const candidates = account.organizationPartyId ? [account.organizationPartyId] : organizationIds(userScope)
+    return candidates.filter(partyId => salesAccess.covers(userScope, partyId) && apps.sitesFor("sales", partyId).length > 0)
+}
+const isCustomer = partyId => !!one("mantle.party.PartyRole", {partyId, roleTypeId: "Customer"})
+// The people an invitation for an account may go to: its current contacts and, for a person account, the person.
+function inviteesOf(account) {
+    const accountPartyId = account.party.partyId
+    const people = (currentTo("PrtContact", [accountPartyId])[accountPartyId] || []).map(row => row.fromPartyId)
+    if (account.party.partyTypeEnumId === "PtyPerson") people.unshift(accountPartyId)
+    return Array.from(new Set(people))
+}
+// get#SalesInvite: what Customer360 (accountPartyId: the account's contacts and their addresses) or ContactDetail (contactPartyId:
+// the person's customer accounts of the scope and the person's addresses) offers: whether the caller may invite, why not, the
+// organizations, and each choice of account, contact and address as one option (value "account|contact|email").
+function salesInvite(p) {
+    const userScope = scopeOrRefuse()
+    const accounts = given(p.accountPartyId)
+        ? [salesAccess.requireAccount(userScope, given(p.accountPartyId))]
+        : salesAccess.contactAccounts(userScope, given(p.contactPartyId))
+    const choices = []
+    const organizationPartyIds = []
+    for (const account of accounts) {
+        if (!isCustomer(account.party.partyId)) continue
+        const organizations = inviteOrganizations(userScope, account)
+        if (!organizations.length) continue
+        for (const partyId of organizations) if (!organizationPartyIds.includes(partyId)) organizationPartyIds.push(partyId)
+        const people = given(p.contactPartyId)
+            ? inviteesOf(account).filter(partyId => partyId === given(p.contactPartyId))
+            : inviteesOf(account)
+        for (const partyId of people)
+            for (const email of emailsOf(partyId))
+                choices.push({
+                    value: [account.party.partyId, partyId, email].join("|"),
+                    label:
+                        (given(p.accountPartyId) ? "" : partyName(account.party.partyId) + ": ") +
+                        lib.partyNames([partyId])[partyId] +
+                        " <" +
+                        email +
+                        ">"
+                })
+    }
+    const allowed = userScope.capabilities.customerInvite
+    return {
+        canInvite: allowed && choices.length > 0,
+        reason: !allowed
+            ? L("Inviting a customer's contact to PASS Sales needs SALES_CUSTOMER_INVITE")
+            : !accounts.some(account => isCustomer(account.party.partyId))
+              ? L("Only a customer account's contacts are invited")
+              : !organizationPartyIds.length
+                ? L("No organization of yours has a published PASS site with the Sales app")
+                : !choices.length
+                  ? L("Add the contact's email address first")
+                  : null,
+        organizationOptions: organizationPartyIds.map(partyId => ({value: partyId, label: lib.partyNames([partyId])[partyId]})),
+        choices
+    }
+}
+// invite#SalesContact: the invitation for one of the contact's own addresses, for a customer account of the scope the contact
+// belongs to (or the person account itself), on an organization of the scope serving it with a published Sales site.
+function inviteContact(p) {
+    const userScope = scopeOrRefuse()
+    salesAccess.requireCapability(userScope, "customerInvite")
+    const account = salesAccess.requireAccount(userScope, given(p.accountPartyId))
+    if (!isCustomer(account.party.partyId)) denied("PARTY_INVALID", "Only a customer account's contacts are invited")
+    const contactPartyId = given(p.contactPartyId)
+    if (!contactPartyId || !inviteesOf(account).includes(contactPartyId))
+        denied("RECORD_UNAVAILABLE", "Contact " + (contactPartyId || "") + " is not a contact of the account")
+    const email = String(p.emailAddress || "")
+        .trim()
+        .toLowerCase()
+    if (!emailsOf(contactPartyId).includes(email)) denied("EMAIL_INVALID", "Choose one of the contact's own email addresses")
+    const organizations = inviteOrganizations(userScope, account)
+    const organizationPartyId = given(p.organizationPartyId) || organizations[0] || null
+    if (!organizationPartyId || !organizations.includes(organizationPartyId))
+        denied("SITE_UNAVAILABLE", "Choose an organization with a published PASS site with the Sales app")
+    return lib.call("mantle.party.ExternalAccessServices.invite#Contact", {
+        organizationPartyId,
+        app: "sales",
+        partyId: account.party.partyId,
+        emailAddress: email
+    })
+}
+
 const operations = {
+    salesInvite,
+    inviteContact,
     findAccounts,
     findContacts,
     customerSales,

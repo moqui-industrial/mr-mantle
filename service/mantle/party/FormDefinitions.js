@@ -17,7 +17,10 @@
 // respondents an app's service assigns, with no public or invitation link) and the word the messages use for it. Customer
 // Service's case templates and case feedback, and People's purposes (the interview scorecard, the review, the training
 // assessment and the exit interview) are registered; Marketing registers its own. A form of a purpose with no registration is
-// no form here. Refusals carry reason codes (EntityLib.denied); a missing form, one of another organization and one of an
+// no form here. impl-marketing P12: a purpose may fix the audience of every field (fieldAudienceEnumId: a public purpose's are
+// customer-visible), and a single choice's option may carry a score (DbFormFieldOption.scoreValue, an option line
+// "value | label | score", a whole number from 0 to 1000) that a survey's summary adds up; a published option's new score is a new
+// option of the same value from now, so a response reads the scores of its date (scoresAt). Refusals carry reason codes (EntityLib.denied); a missing form, one of another organization and one of an
 // unregistered purpose are refused alike (RECORD_UNAVAILABLE), a purpose's permission not held is PERMISSION_DENIED.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const facilityScope = ec.resource.script("component://mr-mantle/service/mantle/facility/FacilityScope.js")
@@ -184,12 +187,21 @@ const ended = row => row.thruDate != null && ms(row.thruDate) <= nowMs()
 const isDraft = row => row.fromDate == null
 const audienceOf = row => (row?.audienceEnumId === CUSTOMER ? CUSTOMER : INTERNAL)
 
+// The score of a field's option of a value as of a date (null: none): the option row of that value in effect then.
+function scoreOf(formId, fieldName, keyValue, asOfDate = null, drafts = false, optionRows = null) {
+    const at = asOfDate == null ? nowMs() : Number(ms(asOfDate))
+    const row = (optionRows || rows(OPTION, {formId, fieldName, keyValue})).find(
+        option => option.fieldName === fieldName && option.keyValue === keyValue && inEffectAt(option, at, !!drafts)
+    )
+    return row?.scoreValue == null ? null : Number(row.scoreValue)
+}
 // The form as of a date, as the framework renders it (ec.screen.getFormNode: the rows in effect, a draft in place of the
 // field it replaces when drafts count): its fields in order, each with its row's type and audience, its options and its show
 // and require rules.
 function formAt(formId, asOfDate, drafts) {
     const node = ec.screen.getFormNode("DbForm#" + formId, asOfDate ?? null, !!drafts)
     const byName = new Map(fieldsOf(formId).map(row => [row.fieldName, row]))
+    const optionRows = rows(OPTION, {formId}).filter(option => option.scoreValue != null)
     const rule = node =>
         node
             ? {
@@ -214,7 +226,13 @@ function formAt(formId, asOfDate, drafts) {
                 required: sub.attribute("required") === "true",
                 audienceEnumId: audienceOf(row),
                 options: widget
-                    ? widget.children("option").map(option => ({key: option.attribute("key"), text: option.attribute("text")}))
+                    ? widget.children("option").map(option => ({
+                          key: option.attribute("key"),
+                          text: option.attribute("text"),
+                          score: optionRows.length
+                              ? scoreOf(formId, name, option.attribute("key"), asOfDate, drafts, optionRows)
+                              : null
+                      }))
                     : [],
                 show: rule(sub.first("visible-when")),
                 require: rule(sub.first("require-when")),
@@ -502,10 +520,17 @@ function editRows(form, noun = "form") {
                     sequenceNum: option.sequenceNum,
                     keyValue: option.keyValue,
                     text: option.text,
+                    scoreValue: option.scoreValue ?? null,
                     draft: isDraft(option)
                 })),
                 optionText: options
-                    .map(option => (option.keyValue === option.text ? option.text : option.keyValue + " | " + option.text))
+                    .map(option =>
+                        option.scoreValue != null
+                            ? option.keyValue + " | " + option.text + " | " + option.scoreValue
+                            : option.keyValue === option.text
+                              ? option.text
+                              : option.keyValue + " | " + option.text
+                    )
                     .join("\n"),
                 optionSummary: options.map(option => option.text).join(", "),
                 choice: !!TYPES[row.fieldTypeEnumId]?.choice,
@@ -542,14 +567,23 @@ function checkOptions(lines, fieldTitle) {
         if (blank(line)) continue
         const at = line.indexOf("|")
         const keyValue = (at >= 0 ? line.substring(0, at) : line).trim()
-        const optionText = (at >= 0 ? line.substring(at + 1) : line).trim() || keyValue
+        let optionText = (at >= 0 ? line.substring(at + 1) : line).trim() || keyValue
+        // impl-marketing P12: a third part that is a number is the option's score ("value | label | score")
+        let scoreValue = null
+        const last = optionText.lastIndexOf("|")
+        if (at >= 0 && last >= 0 && /^-?\d+(\.\d+)?$/.test(optionText.substring(last + 1).trim())) {
+            scoreValue = Number(optionText.substring(last + 1).trim())
+            optionText = optionText.substring(0, last).trim() || keyValue
+            if (!Number.isInteger(scoreValue) || scoreValue < 0 || scoreValue > 1000)
+                denied("SCORE_INVALID", fieldTitle + ": a score is a whole number from 0 to 1000")
+        }
         if (!keyValue) continue
         if (keyValue.includes(",") || keyValue.length > 60)
             denied("OPTION_INVALID", fieldTitle + ": an option's value has no comma and at most 60 characters")
         noExpression(keyValue + optionText, fieldTitle + ": an option")
         if (options.some(option => option.keyValue === keyValue))
             denied("OPTION_DUPLICATE", fieldTitle + ": " + keyValue + " is offered twice")
-        options.push({keyValue, text: optionText.substring(0, 255)})
+        options.push({keyValue, text: optionText.substring(0, 255), scoreValue})
     }
     return options
 }
@@ -588,11 +622,31 @@ function storeOptions(formId, fieldName, options, published) {
     let next = Math.max(0, ...rows(OPTION, {formId, fieldName}).map(option => Number(option.sequenceNum))) + 1
     for (const option of existing) {
         const wanted = options.find(item => item.keyValue === option.keyValue)
+        const score = option.scoreValue == null ? null : Number(option.scoreValue)
         if (!wanted) {
             if (isDraft(option)) call(S + "delete#DbFormFieldOption", {formId, fieldName, sequenceNum: option.sequenceNum})
             else call(S + "end#DbFormFieldOption", {formId, fieldName, sequenceNum: option.sequenceNum})
-        } else if (wanted.text !== option.text) {
-            call("update#" + OPTION, {formId, fieldName, sequenceNum: option.sequenceNum, text: wanted.text})
+        } else if ((wanted.scoreValue ?? null) !== score && !isDraft(option)) {
+            // a published option's new score: that option ends now and one of the same value starts now with the new score, so a
+            // response reads the scores of its date (impl-marketing P12)
+            call(S + "end#DbFormFieldOption", {formId, fieldName, sequenceNum: option.sequenceNum})
+            call("create#" + OPTION, {
+                formId,
+                fieldName,
+                sequenceNum: next++,
+                keyValue: option.keyValue,
+                text: wanted.text,
+                scoreValue: wanted.scoreValue ?? null,
+                fromDate: now()
+            })
+        } else if (wanted.text !== option.text || (wanted.scoreValue ?? null) !== score) {
+            call("update#" + OPTION, {
+                formId,
+                fieldName,
+                sequenceNum: option.sequenceNum,
+                text: wanted.text,
+                scoreValue: wanted.scoreValue ?? null
+            })
         }
     }
     for (const option of options) {
@@ -603,6 +657,7 @@ function storeOptions(formId, fieldName, options, published) {
             sequenceNum: next++,
             keyValue: option.keyValue,
             text: option.text,
+            scoreValue: option.scoreValue ?? null,
             fromDate: published ? now() : null
         })
     }
@@ -624,6 +679,8 @@ function saveFieldOf(form, p, noun = "form") {
     if (!audienceEnumId) denied("AUDIENCE_INVALID", p.audienceEnumId + " is not an audience")
     const options = TYPES[fieldTypeEnumId].choice ? checkOptions(p.optionText, title) : []
     if (TYPES[fieldTypeEnumId].choice && !options.length) denied("OPTIONS_REQUIRED", title + ": add its options, one a line")
+    if (TYPES[fieldTypeEnumId].multiple && options.some(option => option.scoreValue != null))
+        denied("SCORE_INVALID", title + ": scores are for a single choice, not checkboxes")
     const fields = {
         title: title.substring(0, 255),
         tooltip: text(p.tooltip),
@@ -688,6 +745,7 @@ function saveFieldOf(form, p, noun = "form") {
                     sequenceNum: options.indexOf(option) + 1,
                     keyValue: option.keyValue,
                     text: option.text,
+                    scoreValue: option.scoreValue ?? null,
                     fromDate
                 })
             return {fieldName: successor, successor: true}
@@ -839,13 +897,15 @@ function createForm(p) {
             fieldTypeEnumId: field.fieldTypeEnumId,
             isRequired: field.required ? "Y" : "N",
             audienceEnumId: field.audienceEnumId,
-            optionText: field.options.map(option => option.key + " | " + option.text).join("\n")
+            optionText: field.options
+                .map(option => option.key + " | " + option.text + (option.score != null ? " | " + option.score : ""))
+                .join("\n")
         }))
         if (!fields.length) denied("FORM_NOT_PUBLISHED", "The " + noun + " to copy has no published field")
     }
     const formId = makeForm(registration.purposeEnumId, organizationPartyId, p.description, p.comments, noun)
     const form = one(FORM, {formId})
-    for (const field of fields) saveFieldOf(form, field, noun)
+    for (const field of fields) saveFieldOf(form, withAudience(registration, field), noun)
     return {formId}
 }
 const editForm = p => {
@@ -853,9 +913,12 @@ const editForm = p => {
     const registration = requireGenericBuilder(registrationOf(form.purposeEnumId))
     return {form, noun: nounOf(registration)}
 }
+// impl-marketing P12: a purpose that fixes its fields' audience (a public purpose's, customer-visible) gives it to every field.
+const withAudience = (registration, p) =>
+    registration?.fieldAudienceEnumId ? Object.assign({}, p, {audienceEnumId: registration.fieldAudienceEnumId}) : p
 function saveField(p) {
     const {form, noun} = editForm(p)
-    return saveFieldOf(form, p, noun)
+    return saveFieldOf(form, withAudience(registrationOf(form.purposeEnumId), p), noun)
 }
 function saveCondition(p) {
     const {form, noun} = editForm(p)
@@ -1020,6 +1083,7 @@ const operations = {createForm, saveField, saveCondition, endPart, publishForm, 
     makeForm,
     publishedFormFor,
     recordAnswer,
+    scoreOf,
     // each operation checks the purpose's permission and organization, and reads and writes with artifact authorization off
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown form definition operation " + op)

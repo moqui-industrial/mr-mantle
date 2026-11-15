@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Sales' quote templates (IronStone Sales design §5 QuoteTemplates and QuoteTemplateDetail, §17 SAL-TEMPLATE; impl-sales P12, §4
+    Nov 11, 2026): a template is the native OrderHeader, OrderPart and OrderItem of purpose SalesQuoteTemplate, never placed and
+    never leaving Open (OrderServices.update#OrderStatus refuses it any other status), with no SalesQuoteTemplate table. Its one part
+    names the selling organization and no customer; the part's validity is its published interval (none while it is a draft); its
+    lines are order items (a product at the price of the quote's own date, or a fixed price with its reason, or a charge). A quote
+    is a copy made with clone#Order and priced as of its own date (mantle.order.SalesQuoteServices over
+    service/mantle/order/SalesQuoteTemplates.js). Every reader that leaves out a recurring base (OrpRecurringTemplate) leaves this
+    purpose out too: credit, reservation, invoicing, the sales summaries, store worklists and store mail. -->
+<entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
+    <extend-entity entity-name="OrderHeader" package="mantle.order">
+        <field name="templateDescription" type="text-medium"><description>A quote template's description (purpose
+            SalesQuoteTemplate); empty on every other order, a quote made from it included.</description></field>
+        <field name="templateValidityDays" type="number-integer"><description>A quote template's default validity: the days from
+            its start a quote made from it is valid for; empty for the selling organization's (SalesPolicy).</description></field>
+        <seed-data>
+            <moqui.basic.Enumeration enumId="OrpSalesQuoteTemplate" description="Sales quote template" sequenceNum="3" enumTypeId="OrderPurpose"/>
+        </seed-data>
+    </extend-entity>
+</entities>

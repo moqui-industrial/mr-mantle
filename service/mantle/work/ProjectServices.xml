@@ -3521,11 +3521,13 @@ along with this software (see the LICENSE.md file). If not, see
                     for (const orderId of orderIds) {
                         const header = ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()
                         if (!header || !['OrderOpen', 'OrderProposed'].includes(header.statusId)) continue
-                        // placed (from the quote), then approved unless the store approved it on placing
+                        // placed (from the quote), then approved unless the store approved it on placing, or its seller's sales orders
+                        // wait for a Sales approver (impl-sales P11, §4 Q12: the seller's approval setting on leaves it placed)
                         ec.service.sync().name('mantle.order.OrderServices.update#OrderStatus').parameters({orderId: orderId, statusId: 'OrderPlaced',
                             placedDate: ec.user.nowTimestamp}).call()
                         if (ec.message.hasError()) return
-                        if (ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()?.statusId === 'OrderPlaced')
+                        if (ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()?.statusId === 'OrderPlaced'
+                                && !ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').approvalWaits(orderId))
                             ec.service.sync().name('mantle.order.OrderServices.update#OrderStatus').parameters({orderId: orderId, statusId: 'OrderApproved',
                                 approvedDate: ec.user.nowTimestamp}).call()
                         if (ec.message.hasError()) return
@@ -4171,6 +4173,9 @@ along with this software (see the LICENSE.md file). If not, see
                 if (current) return
                 const header = ec.entity.find('mantle.order.OrderHeader').condition('orderId', orderId).one()
                 if (!header || ['OrderCancelled', 'OrderRejected'].includes(header.statusId)) { ec.message.addError(L('The order is cancelled')); return }
+                // a recurring base or a quote template is never fulfilled or billed (impl-sales P16 review): its generated orders are
+                if (['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(header.orderPurposeEnumId)) {
+                    ec.message.addError(ec.resource.expand('RECURRING_TEMPLATE: Order ${orderId} is a template; link a line of an order made from it', '', {orderId})); return }
                 const part = ec.entity.find('mantle.order.OrderPart').condition({orderId: orderId, orderPartSeqId: item.orderPartSeqId}).one()
                 const client = ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', workEffortId).condition('roleTypeId', 'in', ['Customer', 'CustomerBillTo'])
                         .condition('partyId', part?.customerPartyId || '_NA_').conditionDate('fromDate', 'thruDate', null).count() > 0

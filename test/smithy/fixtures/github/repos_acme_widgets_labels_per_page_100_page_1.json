@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": [
+    {
+      "id": 101,
+      "name": "bug",
+      "color": "d73a4a",
+      "description": "Something isn't working"
+    },
+    {
+      "id": 102,
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": null
+    }
+  ]
+}

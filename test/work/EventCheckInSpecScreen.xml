@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- The EventCheckIn spec's door tablet (test only, never mounted): its spec-local route group admits this screen and its call
+    transition, which calls one of mantle.work.EventRegistrationServices' check-in services in the device's request, as its display
+    account, and answers the result or the refusal as JSON. The offer is the device's fixed registrationPolicyId (the framework puts the
+    registered value under that name whatever the request sends); askOffer names another one directly, to check the service's own
+    refusal. Authorization is not what the spec tests (the services' own checks are), so the call runs with it off, in a transaction of
+    its own. -->
+<screen xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/xml-screen-3.xsd"
+        require-authentication="false" standalone="true" default-menu-title="Check-in spec">
+    <transition name="call">
+        <actions><script><![CDATA[
+            const given = name => (typeof ec.context[name] === 'undefined' || ec.context[name] === '' ? null : ec.context[name])
+            const services = {preview: 'preview#CheckIn', checkIn: 'checkIn#Registration', resolve: 'resolve#EntryCode'}
+            let out = {}
+            let error = ''
+            ec.message.pushErrors()
+            try {
+                out = ec.service.sync().name('mantle.work.EventRegistrationServices.' + services[given('op')])
+                    .parameters({registrationPolicyId: given('askOffer') || given('registrationPolicyId'), entryCode: given('entryCode'),
+                        scanText: given('entryCode'), term: given('term'), registrationId: given('registrationId'),
+                        reason: given('reason'), override: given('override'), operationKey: given('operationKey')})
+                    .disableAuthz().requireNewTransaction(true).call() || {}
+                if (ec.message.hasError()) error = ec.message.getErrorsString()
+            } catch (e) {
+                error = String(e.message || e)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+            ec.web.sendJsonResponse({out, error, userId: ec.user.userId || null})
+        ]]></script></actions>
+        <default-response type="none"/>
+    </transition>
+    <widgets>
+        <label text="Check-in spec"/>
+    </widgets>
+</screen>

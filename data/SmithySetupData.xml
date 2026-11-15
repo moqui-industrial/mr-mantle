@@ -37,6 +37,38 @@
     <moqui.basic.Enumeration enumId="SalCopyright" enumTypeId="SmithyAgreementList" enumCode="copyright" sequenceNum="1" description="Copyright Waiver"/>
     <moqui.basic.Enumeration enumId="SalPatent" enumTypeId="SmithyAgreementList" enumCode="patent" sequenceNum="2" description="Grant of Patent License"/>
 
+    <!-- DG7: a release's asset (design-smithy §14.3) and where a redirect of an old path came from -->
+    <moqui.basic.EnumerationType description="Smithy Asset Kind" enumTypeId="SmithyAssetKind"/>
+    <moqui.basic.Enumeration enumId="SakFile" enumTypeId="SmithyAssetKind" enumCode="file" sequenceNum="1" description="File"/>
+    <moqui.basic.Enumeration enumId="SakImage" enumTypeId="SmithyAssetKind" enumCode="image" sequenceNum="2" description="Container image"/>
+    <moqui.basic.EnumerationType description="Smithy Redirect Source" enumTypeId="SmithyRedirectSource"/>
+    <moqui.basic.Enumeration enumId="SrsSite" enumTypeId="SmithyRedirectSource" enumCode="site" sequenceNum="1" description="The old site"/>
+    <moqui.basic.Enumeration enumId="SrsForum" enumTypeId="SmithyRedirectSource" enumCode="forum" sequenceNum="2" description="The old forum"/>
+    <moqui.basic.Enumeration enumId="SrsGithub" enumTypeId="SmithyRedirectSource" enumCode="github" sequenceNum="3" description="GitHub"/>
+    <moqui.basic.Enumeration enumId="SrsManual" enumTypeId="SmithyRedirectSource" enumCode="manual" sequenceNum="4" description="Added by hand"/>
+
+    <!-- DG8: the GitHub import (design-smithy §14.3); an operation gives a stage as its statusCode. People are made as the
+        run meets them, so there is no stage of their own. -->
+    <moqui.basic.EnumerationType description="Smithy Import Source" enumTypeId="SmithyImportSource"/>
+    <moqui.basic.Enumeration enumId="SisGithub" enumTypeId="SmithyImportSource" enumCode="github" sequenceNum="1" description="GitHub"/>
+    <moqui.basic.StatusType description="Smithy Import" statusTypeId="SmithyImport"/>
+    <moqui.basic.StatusItem statusId="SmiQueued" statusTypeId="SmithyImport" statusCode="queued" sequenceNum="1" description="Queued"/>
+    <moqui.basic.StatusItem statusId="SmiLabels" statusTypeId="SmithyImport" statusCode="labels" sequenceNum="2" description="Labels and milestones"/>
+    <moqui.basic.StatusItem statusId="SmiIssues" statusTypeId="SmithyImport" statusCode="issues" sequenceNum="3" description="Issues"/>
+    <moqui.basic.StatusItem statusId="SmiPulls" statusTypeId="SmithyImport" statusCode="pulls" sequenceNum="4" description="Pull requests"/>
+    <moqui.basic.StatusItem statusId="SmiComments" statusTypeId="SmithyImport" statusCode="comments" sequenceNum="5" description="Comments and reactions"/>
+    <moqui.basic.StatusItem statusId="SmiLinks" statusTypeId="SmithyImport" statusCode="links" sequenceNum="6" description="Numbers and links"/>
+    <moqui.basic.StatusItem statusId="SmiDone" statusTypeId="SmithyImport" statusCode="done" sequenceNum="7" description="Done"/>
+    <moqui.basic.StatusItem statusId="SmiFailed" statusTypeId="SmithyImport" statusCode="failed" sequenceNum="8" description="Failed"/>
+    <moqui.basic.StatusItem statusId="SmiCancelled" statusTypeId="SmithyImport" statusCode="cancelled" sequenceNum="9" description="Cancelled"/>
+    <moqui.basic.StatusType description="Smithy Import Item" statusTypeId="SmithyImportItem"/>
+    <moqui.basic.StatusItem statusId="SmmDone" statusTypeId="SmithyImportItem" statusCode="done" sequenceNum="1" description="Done"/>
+    <moqui.basic.StatusItem statusId="SmmSkipped" statusTypeId="SmithyImportItem" statusCode="skipped" sequenceNum="2" description="Skipped"/>
+    <moqui.basic.StatusItem statusId="SmmFailed" statusTypeId="SmithyImportItem" statusCode="failed" sequenceNum="3" description="Failed"/>
+    <!-- a step of each import that is due, as the account that started it -->
+    <moqui.service.job.ServiceJob jobName="smithy_run_imports" description="Advance Smithy's GitHub imports a step each"
+            serviceName="mantle.smithy.SmithyImportServices.run#Imports" cronExpression="0 * * * * ?" paused="N" errorHistoryOnly="Y"/>
+
     <moqui.basic.StatusType description="Smithy Group" statusTypeId="SmithyGroup"/>
     <moqui.basic.StatusItem statusId="SmgRequested" statusTypeId="SmithyGroup" statusCode="requested" sequenceNum="1" description="Requested"/>
     <moqui.basic.StatusItem statusId="SmgActive" statusTypeId="SmithyGroup" statusCode="active" sequenceNum="2" description="Active"/>

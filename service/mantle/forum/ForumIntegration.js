@@ -827,11 +827,26 @@
                 : null
             if (!reviewer || !internalParty(reviewer.partyId))
                 invalid('Name an internal reviewer')
-            const title = String(p.title || event.subject || 'Article')
-                .replace(/[^\w.\-,':()!? ]+/g, ' ')
-                .trim()
-                .slice(0, 120)
-            if (!title) invalid('A title is required')
+            // A page name (update#WikiPage): in NFC, letters, digits and combining marks (after a letter or digit) of any
+            // script, spaces and . , ' - _ : ( ) ! ? only; at most 120 characters and 240 bytes in UTF-8, by whole characters.
+            const titleChars = Array.from(
+                String(p.title || event.subject || 'Article')
+                    .normalize('NFC')
+                    .replace(/[^\p{L}\p{M}\p{Nd}_.\-,':()!? ]+/gu, ' ')
+                    .replace(/(^|[^\p{L}\p{M}\p{Nd}])\p{M}+/gu, '$1')
+                    .replace(/\s+/g, ' ')
+                    .trim(),
+            ).slice(0, 120)
+            while (
+                encodeURIComponent(titleChars.join('')).replace(
+                    /%[0-9A-F]{2}/g,
+                    '_',
+                ).length > 240
+            )
+                titleChars.pop()
+            const title = titleChars.join('').trim()
+            if (!title || title === '.' || title === '..')
+                invalid('A title is required')
             // A draft is a new page: a page of that title (perhaps a published article) is never overwritten.
             if (
                 one('moqui.resource.wiki.WikiPage', {

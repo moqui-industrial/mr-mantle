@@ -43,6 +43,40 @@ const events = {
             recordType: "mantle.product.store.ProductStorePromotion"
         }
     },
+    // Marketing P20 (impl-marketing P20, F85): a campaign send released (release#Send) or its experiment's winner released
+    // (release#ExperimentWinner, recordId "{campaignSendId}:winner"): its campaign's organization, its name, the time it goes out
+    CampaignSent(recordId) {
+        const [campaignSendId, part] = String(recordId).split(":")
+        const send = one("mantle.marketing.campaign.CampaignSend", {campaignSendId})
+        if (!send || !send.releasedDate || !send.organizationPartyId) return null
+        const campaign = send.marketingCampaignId
+            ? one("mantle.marketing.campaign.MarketingCampaign", {marketingCampaignId: send.marketingCampaignId})
+            : null
+        let time = stamp(
+            send.scheduledDate && lib.ms(send.scheduledDate) > lib.ms(send.releasedDate) ? send.scheduledDate : send.releasedDate
+        )
+        if (part === "winner") {
+            const experiment = Array.from(
+                lib
+                    .find("mantle.marketing.campaign.CampaignExperiment", {campaignSendId})
+                    .condition("winnerReleasedDate", "is-not-null", null)
+                    .list()
+            )[0]
+            if (!experiment) return null
+            time = stamp(experiment.winnerReleasedDate)
+        }
+        const name = send.sendName || send.subject || campaignSendId
+        return {
+            organizationPartyId: send.organizationPartyId,
+            text:
+                (part === "winner" ? "Winner sent: " : "Campaign sent: ") +
+                name +
+                (campaign?.campaignName ? " (" + campaign.campaignName + ")" : ""),
+            time,
+            recordType: "mantle.marketing.campaign.CampaignSend",
+            recordId: campaignSendId
+        }
+    },
     PeriodClosed(recordId) {
         const run = one("mantle.ledger.transaction.AccountingCloseRun", {closeRunId: recordId})
         if (!run || run.statusId !== "CrnClosed" || !run.organizationPartyId) return null

@@ -607,3 +607,36 @@ feature("merge#Parties moves the consent rows and the unsubscribe tokens of the 
         found.includes(party.Fay)
     },
 })
+
+// impl-marketing P3 (F9): a purpose scoped to one organization; a scoped grant never undoes a global withdrawal, and an
+// organization's answer holds its own rows and lists only
+feature("a scoped grant is that organization's alone and never undoes a global withdrawal", {
+    when() {
+        at(21)
+        call(STORE, { partyId: party.Dale, contactMechId: email.Dale, purposeEnumId: "PcpMarketingEmail", statusId: "PconWithdrawn",
+            sourceEnumId: "PcsEmailLink", evidenceText: "All marketing email" })
+        at(22)
+        const scoped = call(STORE, { partyId: party.Dale, contactMechId: email.Dale, purposeEnumId: "PcpMarketingEmail", statusId: "PconGranted",
+            organizationPartyId: orgId, sourceEnumId: "PcsStaff", evidenceText: "Asked at the counter" })
+        at(23)
+        call(STORE, { partyId: party.Fay, contactMechId: email.Fay, purposeEnumId: "PcpMarketingEmail", statusId: "PconGranted",
+            organizationPartyId: otherOrgId, sourceEnumId: "PcsForm", evidenceText: "Other Co's form" })
+        const state = (partyId, organizationPartyId) => call(`${CONSENT}.get#PartyConsentState`, { partyId, organizationPartyId })
+        const ofOrg = call(`${CONSENT}.find#Consents`, { text: "consentspec", organizationPartyIds: [orgId] }).consentList
+        return { scoped, daleOrg: state(party.Dale, orgId), daleGlobal: state(party.Dale, null), fayOther: state(party.Fay, otherOrgId),
+            fayOrg: state(party.Fay, orgId), ofOrg, solicitation: solicitation("Dale", email.Dale) }
+    },
+    then({ scoped, daleOrg, daleGlobal, fayOther, fayOrg, ofOrg, solicitation }) {
+        scoped.allowSolicitation == null
+        // the global withdrawal wins over the organization's later grant, and the address stays not to be solicited
+        !daleOrg.grantedPurposeEnumIds.includes("PcpMarketingEmail")
+        !daleGlobal.grantedPurposeEnumIds.includes("PcpMarketingEmail")
+        solicitation.every((flag) => flag == "N")
+        // Fay's scoped grant is Other Co's: answered there, never for Consent Co (her global grant, merged from Evan, is apart)
+        fayOther.consentList.some((row) => row.contactMechId == email.Fay && row.organizationPartyId == otherOrgId && row.granted)
+        !fayOrg.consentList.some((row) => row.organizationPartyId == otherOrgId)
+        fayOrg.listList.every((row) => row.ownerPartyId == orgId)
+        // Consent Co's registry: its lists only, Fay's Other Co grant not counted
+        ofOrg.every((row) => row.listList.every((entry) => entry.contactListId != list.other))
+    },
+})

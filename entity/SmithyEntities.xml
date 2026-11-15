@@ -23,6 +23,11 @@
         <field name="groupRunnerMinutes" type="number-integer"><description>A group's default, a month; 2000 when empty</description></field>
         <field name="maxEditBytes" type="number-integer"><description>The page editor's limit; 1048576 when empty</description></field>
         <field name="repositoryKind" type="text-short"><description>The kind of a new repository, a GitRepository.repositoryKind: db when empty, or local</description></field>
+        <field name="outsideRunApproval" type="text-short"><description>When an outside pipeline run (untrusted: a fork's or a
+            pushed-for-review merge request, an account below Developer) waits for a Maintainer's approval: first (the
+            default: each new head waits until its author and pusher have had a merge request merged in the repository
+            by another account), always, or never (only a top-level group's Owner sets never for a group). A group may set its own</description></field>
+        <field name="outsideRunMaxJobs" type="number-integer"><description>The most jobs an outside run may have; 10 when empty</description></field>
         <field name="revision" type="number-integer"/>
         <relationship type="one" related="mantle.public.PublicSite"/>
         <relationship type="one-nofk" title="Home" related="mantle.smithy.SmithyGroup">
@@ -54,11 +59,15 @@
         <field name="landingPath" type="text-medium"/>
         <field name="agreementEnumId" type="id"><description>SmithyAgreement; SmaInherit when empty</description></field>
         <field name="agreementPath" type="text-medium"><description>AUTHORS.md when empty</description></field>
-        <field name="runnerPoolId" type="id"><description>Trusted runs</description></field>
-        <field name="outsideRunnerPoolId" type="id"><description>Untrusted runs</description></field>
+        <field name="runnerPoolId" type="id"><description>The GitRunnerPool of trusted runs, one an operator allowed (a shared pool or one
+            of the top-level group's); empty: the nearest group above that sets it, else the engine's choice</description></field>
+        <field name="outsideRunnerPoolId" type="id"><description>The pool of untrusted runs, as runnerPoolId</description></field>
+        <field name="outsideRunApproval" type="text-short"><description>first, always or never (SmithySite.outsideRunApproval);
+            empty: the nearest group above that sets it, else the site's</description></field>
         <field name="maxRepositoryBytes" type="number-integer"><description>Empty: the site's default</description></field>
         <field name="maxLfsBytes" type="number-integer"><description>Empty: the site's default</description></field>
-        <field name="runnerMinutesMonthly" type="number-integer"><description>Empty: the site's default</description></field>
+        <field name="runnerMinutesMonthly" type="number-integer"><description>A top-level group's, for every repository below it
+            (the pipeline runs' owner); empty: the site's default</description></field>
         <field name="hiddenAt" type="date-time"><description>Set: Not Found to everyone but its Owners and the site's staff</description></field>
         <field name="hiddenByPartyId" type="id"/>
         <field name="hideReason" type="text-long"/>
@@ -285,12 +294,31 @@
         <field name="blobId" type="text-short"><description>The file's blob the row was read from</description></field>
         <field name="checkedAt" type="date-time"/>
     </entity>
+    <entity entity-name="SmithyGithubLink" package="mantle.smithy">
+        <description>A GitHub id an account's sign-in proved (DG8 review): written when the framework tells of a sign-in
+            that linked it (UserAccount.externalUserId; the sso-linked-service, SmithyImportServices.handle#SsoLinked) and
+            the flow's endpoints are exactly GitHub's own, so a claim made later, when a membership becomes active, claims only for an id proven so and still the
+            account's.</description>
+        <field name="userId" type="id" is-pk="true"/>
+        <field name="githubUserId" type="text-short"/>
+        <field name="githubHost" type="text-medium"><description>github.com or an Enterprise Server's host</description></field>
+        <field name="authFlowId" type="id"/>
+        <field name="provenAt" type="date-time"/>
+        <relationship type="one" related="moqui.security.UserAccount"/>
+    </entity>
     <entity entity-name="SmithyAccount" package="mantle.smithy">
         <description>An account's Smithy settings in a site, made when first needed: its limits (each the site's default
             when empty), the bot mark and the GitHub login.</description>
         <field name="siteId" type="id" is-pk="true"/>
         <field name="partyId" type="id" is-pk="true"/>
         <field name="githubLogin" type="text-medium"><description>Lower case; set at a sign-in through the GitHub provider, or by the import for a placeholder</description></field>
+        <field name="githubUserId" type="text-short"><description>GitHub's own id of the user (a login can be renamed, the id
+            not): set by the import for a placeholder, and moved to the account that claims it, whose sign-in through a
+            GitHub provider names the same id (UserAccount.externalUserId)</description></field>
+        <field name="githubHost" type="text-medium"><description>The GitHub githubUserId and githubLogin are of: github.com
+            (also when empty), or a GitHub Enterprise Server's host, whose login is kept as login@host so it is apart
+            from github.com's. The import sets it from the API it reads (smithy_github_api); a claim needs a GitHub
+            sign-in of the same host</description></field>
         <field name="placeholder" type="text-indicator"><description>Y: made by the import, not yet claimed</description></field>
         <field name="claimedAt" type="date-time"/>
         <field name="bot" type="text-indicator"/>
@@ -307,6 +335,7 @@
         <relationship type="one-nofk" title="BotOperator" related="mantle.party.Party">
             <key-map field-name="botOperatorPartyId" related="partyId"/></relationship>
         <index name="SMITHY_ACCOUNT_LOGIN" unique="true"><index-field name="siteId"/><index-field name="githubLogin"/></index>
+        <index name="SMITHY_ACCOUNT_GITHUB_ID"><index-field name="githubUserId"/></index>
     </entity>
     <entity entity-name="SmithyPathRedirect" package="mantle.smithy">
         <description>The old path of a renamed group, or the old handle of an account: pages redirect from it to where
@@ -326,5 +355,131 @@
             <key-map field-name="redirectKindEnumId" related="enumId"/></relationship>
         <index name="SMITHY_REDIRECT_GROUP"><index-field name="groupId"/></index>
         <index name="SMITHY_REDIRECT_PARTY"><index-field name="siteId"/><index-field name="partyId"/></index>
+    </entity>
+    <entity entity-name="SmithyReleaseAsset" package="mantle.smithy">
+        <description>A file of a release (design-smithy §13.3): one a pipeline uploaded for the release's tag (a run's
+            artifact, copied so the run's retention does not remove it) or one a Maintainer attached, or a container image's
+            name. The file is at contentLocation, read and written through ec.resource; the row names no blob.</description>
+        <field name="assetId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="repositoryId" type="id"/>
+        <field name="workEffortId" type="id"><description>The release (a WorkEffort of type WetRelease)</description></field>
+        <field name="tagName" type="text-medium"/>
+        <field name="name" type="text-medium"><description>The file's name, unique in its release</description></field>
+        <field name="assetKindEnumId" type="id"><description>SmithyAssetKind: SakFile, SakImage</description></field>
+        <field name="contentLocation" type="text-medium"><description>Where the file is; empty for an image's name</description></field>
+        <field name="imageName" type="text-medium"><description>A container image's name</description></field>
+        <field name="sizeBytes" type="number-integer"/>
+        <field name="sha256" type="text-medium"/>
+        <field name="pipelineRunId" type="id"><description>The run that uploaded it, when one did</description></field>
+        <field name="artifactId" type="id"><description>The run's artifact it was copied from, when it was</description></field>
+        <field name="uploadedByPartyId" type="id"/>
+        <field name="createdAt" type="date-time"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" related="mantle.work.effort.WorkEffort"/>
+        <relationship type="one-nofk" title="SmithyAssetKind" related="moqui.basic.Enumeration">
+            <key-map field-name="assetKindEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_ASSET_TAG"><index-field name="repositoryId"/><index-field name="tagName"/></index>
+    </entity>
+    <view-entity entity-name="SmithyReleaseTag" package="mantle.smithy">
+        <description>A tag of a repository and the work effort it is linked to (WorkEffortGitRef), with what a list of
+            releases filters and sorts by: Smithy's releases are Mantle's releases (WetRelease) by their tags.</description>
+        <member-entity entity-alias="R" entity-name="mantle.work.effort.WorkEffortGitRef"/>
+        <member-entity entity-alias="W" entity-name="mantle.work.effort.WorkEffort" join-from-alias="R">
+            <key-map field-name="workEffortId"/></member-entity>
+        <alias-all entity-alias="R"/>
+        <alias entity-alias="W" name="workEffortTypeEnumId"/>
+        <alias entity-alias="W" name="statusId"/>
+        <alias entity-alias="W" name="workEffortName"/>
+        <alias entity-alias="W" name="actualStartDate"/>
+        <alias entity-alias="W" name="actualCompletionDate"/>
+    </view-entity>
+    <entity entity-name="SmithyRedirect" package="mantle.smithy">
+        <description>An old path of a site, of one of its own hosts or of a host it replaces (a site that moved here, its
+            forum), and where it now leads (design-smithy §13.6). A page request that no app's mount and no Smithy name
+            takes is looked up here before Not Found (SmithySiteServices.resolve#Redirect). The target is a path of the
+            site or an https address of one of its hosts, never another site's.</description>
+        <field name="redirectId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="oldHost" type="text-medium"><description>Lower case; empty: the site's own hosts</description></field>
+        <field name="oldPath" type="text-medium"><description>The path as it was, starting with /, without a query</description></field>
+        <field name="targetPath" type="text-medium"><description>A path of the site, or an absolute https address of one of its hosts</description></field>
+        <field name="sourceEnumId" type="id"><description>SmithyRedirectSource: SrsSite, SrsForum, SrsGithub, SrsManual</description></field>
+        <field name="note" type="text-medium"/>
+        <field name="createdByPartyId" type="id"/>
+        <field name="createdAt" type="date-time"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" title="SmithyRedirectSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <index name="SMITHY_REDIRECT_OLD"><index-field name="siteId"/><index-field name="oldPath"/></index>
+    </entity>
+    <entity entity-name="SmithyImportRun" package="mantle.smithy">
+        <description>An import of a GitHub repository's labels, milestones, issues and pull requests into a repository of a
+            group (design-smithy §11 Import, §18.2, DG8; SmithyImport.js): a checkpointed run that a step at a time
+            (SmithyImportServices.run#Import) moves through its stages, resumable, waiting on the API's rate limit, and
+            safe to run again (SmithyImportMap). The token is kept encrypted for the run and dropped when it ends.</description>
+        <field name="importId" type="id" is-pk="true"/>
+        <field name="siteId" type="id"/>
+        <field name="groupId" type="id"/>
+        <field name="repositoryId" type="id"><description>The hosted repository it fills</description></field>
+        <field name="sourceEnumId" type="id"><description>SmithyImportSource: SisGithub</description></field>
+        <field name="sourceRepository" type="text-medium"><description>owner/name, as typed</description></field>
+        <field name="tokenRemoteId" type="id"><description>The SystemMessageRemote whose password is the token, encrypted;
+            empty once the run ended</description></field>
+        <field name="options" type="text-long"><description>JSON: issues, pullRequests</description></field>
+        <field name="statusId" type="id"><description>Status type SmithyImport: the stage</description></field>
+        <field name="cursorJson" type="text-long"><description>Where to resume: the stage's phase and page, the source's facts</description></field>
+        <field name="countsJson" type="text-long"><description>By type: imported, source (seen at GitHub), failed</description></field>
+        <field name="reportJson" type="text-very-long"><description>What could not be carried: a list of sourceType,
+            sourceId and errorText (at most 500), and notCarried counts</description></field>
+        <field name="waitingUntil" type="date-time"><description>The API's rate limit: no step runs before this</description></field>
+        <field name="leaseUntil" type="date-time"><description>A step is running until this; another step waits</description></field>
+        <field name="startedByPartyId" type="id"><description>Steps run as this account, which must still hold the right</description></field>
+        <field name="createdAt" type="date-time"/>
+        <field name="finishedAt" type="date-time"/>
+        <field name="revision" type="number-integer"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyGroup"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <relationship type="one-nofk" title="SmithyImportSource" related="moqui.basic.Enumeration">
+            <key-map field-name="sourceEnumId" related="enumId"/></relationship>
+        <relationship type="one" title="SmithyImport" related="moqui.basic.StatusItem"/>
+        <index name="SMITHY_IMPORT_GROUP"><index-field name="siteId"/><index-field name="groupId"/></index>
+        <index name="SMITHY_IMPORT_REPO"><index-field name="repositoryId"/><index-field name="statusId"/></index>
+    </entity>
+    <entity entity-name="SmithyImportMap" package="mantle.smithy">
+        <description>What an import made of a source item, one row an item of a repository: a run that meets an item with a
+            row Done or Skipped makes nothing of it again. sourceType: user, label, milestone, issue, pull, comment,
+            review, reviewComment, reaction; reactionsDue (an item whose reactions are still to read: sourceId issue:n or
+            comment:id, the post as targetId, statusId empty until read).</description>
+        <field name="siteId" type="id" is-pk="true"/>
+        <field name="repositoryId" type="id" is-pk="true"/>
+        <field name="sourceType" type="id" is-pk="true"/>
+        <field name="sourceId" type="id-long" is-pk="true"><description>GitHub's id</description></field>
+        <field name="importId" type="id"/>
+        <field name="targetType" type="id"/>
+        <field name="targetId" type="id"/>
+        <field name="checksum" type="text-short"/>
+        <field name="statusId" type="id"><description>Status type SmithyImportItem: SmmDone, SmmSkipped, SmmFailed</description></field>
+        <field name="errorText" type="text-long"/>
+        <relationship type="one" related="mantle.public.PublicSite"/>
+        <relationship type="one-nofk" related="mantle.smithy.SmithyRepository"/>
+        <index name="SMITHY_IMPORT_STATE"><index-field name="siteId"/><index-field name="repositoryId"/><index-field name="sourceType"/><index-field name="statusId"/></index>
+    </entity>
+    <entity entity-name="SmithyRunApproval" package="mantle.smithy">
+        <description>A Maintainer's approval of an outside pipeline run of a merge request (design-smithy §10, DG5): the
+            head it was given for, as its pusher brought it. With outsideRunApproval first, later runs of that head run
+            without waiting; a new head waits again until its author has had a merge request merged here by another
+            account (SmithyPipelines.js).</description>
+        <field name="mergeRequestId" type="id" is-pk="true"/>
+        <field name="commitId" type="text-short" is-pk="true"/>
+        <field name="pusherUserId" type="id" is-pk="true"><description>The account of the first push that brought the
+            head (moqui.resource.GitCommitPush), _NA_ when none is recorded</description></field>
+        <field name="repositoryId" type="id"/>
+        <field name="approvedByUserId" type="id"/>
+        <field name="pipelineRunId" type="id"/>
+        <field name="approvedDate" type="date-time"/>
+        <relationship type="one-nofk" related="moqui.resource.GitMergeRequest"/>
     </entity>
 </entities>

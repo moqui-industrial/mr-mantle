@@ -948,6 +948,10 @@
     <alias entity-alias="R" name="partyId"/>
     <alias entity-alias="E" name="communicationEventId"/>
     <alias entity-alias="E" name="rootCommEventId"/>
+    <!-- the list's type and owner, which the organization filters of ContactList read (MANTLE_USER_ORG_CLST,
+        impl-marketing P1): a view without them is refused under an app root's grant -->
+    <alias entity-alias="L" name="contactListTypeEnumId"/>
+    <alias entity-alias="L" name="listOwnerPartyId" field="ownerPartyId"/>
     <entity-condition>
       <econdition entity-alias="L" field-name="contactListTypeEnumId" value="MAILBOX"/>
     </entity-condition>

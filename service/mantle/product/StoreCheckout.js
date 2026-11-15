@@ -65,6 +65,14 @@ const gatewayCapabilities = {
         const hosted = String(config.authorizeServiceName || "").includes("hostedPending")
         // Shop P7: hostedPendingOrApprove charges a kept card off-session (approves a payment that names its method)
         const offSession = String(config.authorizeServiceName || "").includes("hostedPendingOrApprove")
+        // impl-marketing P17 review: the test page that takes a posted form token (Accept Hosted's shape), for Register's relay
+        if (String(config.authorizeServiceName || "").includes("hostedForm#"))
+            return {
+                hostedCheckout: false,
+                savedMethods: false,
+                offSession: false,
+                hostedFormService: "mantle.account.PaymentTestServices.get#HostedPaymentForm"
+            }
         return Object.assign(
             {hostedCheckout: hosted, savedMethods: hosted, offSession},
             hosted

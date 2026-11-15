@@ -174,11 +174,40 @@ function sourceFor(organizationPartyId, dataSourceId) {
         denied("SOURCE_INVALID", "Choose a lead source offered to the organization")
     return text(dataSourceId)
 }
-function campaignFor(marketingCampaignId) {
+// impl-marketing P13 (owner contract): a campaign of the deal's organization (or one of none, a legacy campaign); another
+// organization's is CAMPAIGN_INVALID as a missing one is
+function campaignFor(marketingCampaignId, organizationPartyId = null) {
     if (blank(marketingCampaignId)) return null
-    if (!one("mantle.marketing.campaign.MarketingCampaign", {marketingCampaignId: text(marketingCampaignId)}))
+    const campaign = one("mantle.marketing.campaign.MarketingCampaign", {marketingCampaignId: text(marketingCampaignId)})
+    if (
+        !campaign ||
+        (organizationPartyId && campaign.organizationPartyId && campaign.organizationPartyId !== organizationPartyId)
+    )
         denied("CAMPAIGN_INVALID", "Campaign " + marketingCampaignId + " is not available")
     return text(marketingCampaignId)
+}
+// impl-marketing P13 (owner contract): a tracking code of the deal's campaign (TRACKING_INVALID), or null; a code given with no
+// campaign brings its own, which must be of the organization
+function trackingFor(trackingCodeId, marketingCampaignId, organizationPartyId) {
+    if (blank(trackingCodeId)) return null
+    const code = one("mantle.marketing.tracking.TrackingCode", {trackingCodeId: text(trackingCodeId)})
+    if (!code || !code.marketingCampaignId || (marketingCampaignId && code.marketingCampaignId !== marketingCampaignId))
+        denied("TRACKING_INVALID", "Tracking code " + trackingCodeId + " is not one of the lead's campaign")
+    campaignFor(code.marketingCampaignId, organizationPartyId)
+    return code
+}
+// A deal's tracking code, kept once (a lead keeps where it came from: a code is added, never removed).
+function keepTracking(salesOpportunityId, code) {
+    if (
+        !code ||
+        one("mantle.sales.opportunity.SalesOpportunityTracking", {salesOpportunityId, trackingCodeId: code.trackingCodeId})
+    )
+        return
+    call("create#mantle.sales.opportunity.SalesOpportunityTracking", {
+        salesOpportunityId,
+        trackingCodeId: code.trackingCodeId,
+        receivedDate: ec.user.nowTimestamp
+    })
 }
 function enumFor(enumTypeId, enumId, reason, label) {
     if (blank(enumId)) return null
@@ -275,6 +304,10 @@ function createOpportunity(p) {
     const estimatedAmount = amountOf(p.estimatedAmount, "The estimated amount")
     const recurringAmount = amountOf(p.recurringAmount, "The recurring amount")
     const manualProbability = probabilityOf(p.estimatedProbability)
+    // impl-marketing P13: the campaign of the organization and a tracking code of it
+    let marketingCampaignId = campaignFor(p.marketingCampaignId, organizationPartyId)
+    const tracking = trackingFor(p.trackingCodeId, marketingCampaignId, organizationPartyId)
+    if (tracking && !marketingCampaignId) marketingCampaignId = tracking.marketingCampaignId
     const mode =
         p.probabilityModeEnumId === modes.stage || (manualProbability == null && p.probabilityModeEnumId !== modes.manual)
             ? modes.stage
@@ -296,7 +329,7 @@ function createOpportunity(p) {
         recurringAmount,
         recurringPlanEnumId: enumFor("SalesRecurringPlan", p.recurringPlanEnumId, "PLAN_INVALID", "recurring plan"),
         dataSourceId: sourceFor(organizationPartyId, p.dataSourceId),
-        marketingCampaignId: campaignFor(p.marketingCampaignId),
+        marketingCampaignId,
         statusId: statuses.open,
         createdDate: ec.user.nowTimestamp,
         stageEnteredDate: stage ? ec.user.nowTimestamp : null
@@ -306,6 +339,7 @@ function createOpportunity(p) {
     if (ownerPartyId) startParty(salesOpportunityId, ownerPartyId, roles.owner)
     if (teamPartyId) startParty(salesOpportunityId, teamPartyId, roles.team)
     if (contact) startParty(salesOpportunityId, contact.partyId, roles.contact)
+    keepTracking(salesOpportunityId, tracking)
     return {salesOpportunityId}
 }
 
@@ -342,7 +376,17 @@ function updateOpportunity(p) {
     }
     if (given("estimatedCloseDate")) changes.estimatedCloseDate = dateOf(p.estimatedCloseDate, "The expected close")
     if (given("dataSourceId")) changes.dataSourceId = sourceFor(organizationPartyId, p.dataSourceId)
-    if (given("marketingCampaignId")) changes.marketingCampaignId = campaignFor(p.marketingCampaignId)
+    if (given("marketingCampaignId")) changes.marketingCampaignId = campaignFor(p.marketingCampaignId, organizationPartyId)
+    // impl-marketing P13: a tracking code of the deal's campaign, kept once
+    const tracking = given("trackingCodeId")
+        ? trackingFor(
+              p.trackingCodeId,
+              changes.marketingCampaignId !== undefined ? changes.marketingCampaignId : opportunity.marketingCampaignId,
+              organizationPartyId
+          )
+        : null
+    if (tracking && !(changes.marketingCampaignId !== undefined ? changes.marketingCampaignId : opportunity.marketingCampaignId))
+        changes.marketingCampaignId = tracking.marketingCampaignId
     // the probability: a value given is the rep's (Manual) unless Stage is chosen, which copies the stage's default
     const mode = text(p.probabilityModeEnumId)
     if (mode && !Object.values(modes).includes(mode)) denied("MODE_INVALID", "Choose Stage or Manual")
@@ -355,6 +399,7 @@ function updateOpportunity(p) {
         if (given("estimatedProbability")) changes.estimatedProbability = probabilityOf(p.estimatedProbability)
     }
     if (Object.keys(changes).length > 1) call("update#" + OPPORTUNITY, changes)
+    keepTracking(opportunity.salesOpportunityId, tracking)
     return {salesOpportunityId: opportunity.salesOpportunityId}
 }
 
@@ -834,6 +879,15 @@ function findOpportunities(p) {
               ])
           )
         : {}
+    // impl-marketing P13: each lead's campaign by its name (F66), read in one query
+    const campaignIds = Array.from(new Set(pageRows.map(row => row.marketingCampaignId).filter(Boolean)))
+    const campaignNames = campaignIds.length
+        ? Object.fromEntries(
+              Array.from(
+                  find("mantle.marketing.campaign.MarketingCampaign").condition("marketingCampaignId", "in", campaignIds).list()
+              ).map(row => [row.marketingCampaignId, row.campaignName || row.marketingCampaignId])
+          )
+        : {}
     const at = nowMs()
     const opportunityList = pageRows.map(row => {
         const entry = people[row.salesOpportunityId] || {rows: []}
@@ -871,6 +925,7 @@ function findOpportunities(p) {
             teamName: entry.team ? names[entry.team] || entry.team : "",
             sourceText: sources[row.dataSourceId] || "",
             marketingCampaignId: row.marketingCampaignId || null,
+            campaignName: row.marketingCampaignId ? campaignNames[row.marketingCampaignId] || row.marketingCampaignId : "",
             // P5: how the lead came in (its first intake), when, and whether the inquirer verified the email
             intakeKindText: intakes[row.salesOpportunityId]?.kindText || "",
             receivedText: intakes[row.salesOpportunityId]?.receivedText || "",
@@ -1014,12 +1069,13 @@ function getOpportunity(p) {
         statusText: taskStatus[task.statusId] || task.statusId || "",
         done: doneTaskStatuses.includes(task.statusId)
     }))
-    // the linked quotes and orders: an organization reader's until the quote and order scope (P7, P11), of the scope's sellers
+    // the linked orders: an organization reader's until the order scope (P11), of the scope's sellers; a quote not placed is
+    // find#Quotes' (P7: the quotes the caller sees, salesOpportunityId), not repeated here; an accepted quote is an order
     const orders = []
     if (caps.teamRead)
         for (const link of rows(ORDER_LINK, {salesOpportunityId: row.salesOpportunityId})) {
             const order = one("mantle.order.OrderHeader", {orderId: link.orderId})
-            if (!order) continue
+            if (!order || (order.orderPurposeEnumId === salesAccess.quotePurpose && !order.placedDate)) continue
             const vendor = Array.from(
                 find("mantle.order.OrderPart").condition("orderId", link.orderId).selectField("vendorPartyId").list()
             )
@@ -1039,6 +1095,9 @@ function getOpportunity(p) {
     const campaign = row.marketingCampaignId
         ? one("mantle.marketing.campaign.MarketingCampaign", {marketingCampaignId: row.marketingCampaignId})
         : null
+    const trackingRows = rows("mantle.sales.opportunity.SalesOpportunityTracking", {
+        salesOpportunityId: row.salesOpportunityId
+    }).sort((a, b) => (ms(b.receivedDate) ?? 0) - (ms(a.receivedDate) ?? 0))
     const organization = one("mantle.party.Organization", {partyId: row.organizationPartyId})
     const opportunity = {
         salesOpportunityId: row.salesOpportunityId,
@@ -1084,6 +1143,9 @@ function getOpportunity(p) {
         sourceText: source?.description || "",
         marketingCampaignId: row.marketingCampaignId,
         campaignText: campaign?.campaignName || "",
+        // impl-marketing P13: the tracking codes the deal came by (the latest first)
+        trackingCodeId: trackingRows[0]?.trackingCodeId || null,
+        trackingText: trackingRows.map(code => code.trackingCodeId).join(", "),
         ownerPartyId: ownerRow?.partyId || null,
         ownerName: ownerRow?.name || "",
         teamPartyId: teamRow?.partyId || null,

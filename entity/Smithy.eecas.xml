@@ -10,4 +10,27 @@
         <actions><service-call name="mantle.smithy.SmithyReviewServices.sync#MergeRequestHidden"
                 in-map="{communicationEventId:communicationEventId}" disable-authz="true"/></actions>
     </eeca>
+    <!-- DG8 (F6): the framework tells only the account that stored a push mirror of its failure (topic GitMirrorFailure,
+        no record); a repository Smithy keeps tells its other Maintainers and Owners too (handle#MirrorFailure's notice has the repository as its record, so this rule leaves it alone) -->
+    <eeca id="SmithyMirrorFailure" entity="moqui.security.user.NotificationMessage" on-create="true" run-on-error="false">
+        <condition><expression>topic == 'GitMirrorFailure' &amp;&amp; !recordEntityName</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#MirrorFailure"
+                in-map="{subTopic:subTopic, messageJson:messageJson}" disable-authz="true"/></actions>
+    </eeca>
+    <!-- DG10: the engine tells a deployment's requester, and its environment's approver group when it names one, that it
+        waits for approval (topic GitDeployment, no record); with no approver group the repository's Maintainers and
+        Owners are told too (handle#DeploymentNotice's notice has the repository as its record, so this rule leaves it) -->
+    <eeca id="SmithyDeploymentNotice" entity="moqui.security.user.NotificationMessage" on-create="true" run-on-error="false">
+        <condition><expression>topic == 'GitDeployment' &amp;&amp; !recordEntityName</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyPipelineServices.handle#DeploymentNotice"
+                in-map="{subTopic:subTopic, messageJson:messageJson}" disable-authz="true"/></actions>
+    </eeca>
+    <!-- DG8 review: an account that signed in with GitHub before it joined a site claims that site's placeholders of its
+        proven id when its membership becomes active (handle#MembershipActive; claim#GithubAccount checks the proof) -->
+    <eeca id="SmithyClaimOnMembership" entity="mantle.public.PublicSiteParty" on-create="true" on-update="true"
+            get-original-value="true" run-on-error="false">
+        <condition><expression>state == 'active' &amp;&amp; (originalValue == null || originalValue.state != 'active')</expression></condition>
+        <actions><service-call name="mantle.smithy.SmithyImportServices.handle#MembershipActive" in-map="{partyId:partyId}"
+                disable-authz="true"/></actions>
+    </eeca>
 </eecas>

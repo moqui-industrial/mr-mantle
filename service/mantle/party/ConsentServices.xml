@@ -64,6 +64,12 @@ along with this software (see the LICENSE.md file). If not, see
             match: Y while any of those purposes is granted on it, else N, on each of its current PartyContactMech rows
             through ContactServices.store#PartyContactMech. The source defaults to PcsStaff for a signed-in user, else
             PcsApi. A signed-in user does not record consent for another user's personal contact.
+            organizationPartyId scopes a purpose to one organization (impl-marketing P3, F9): such a row never changes the
+            address's allowSolicitation, which follows the global rows, and never undoes a global withdrawal
+            (get#PartyConsentState). Another party's consent is recorded by a contact administrator, or by a holder of
+            MARKETING_CONSENT_EDIT for a list whose owner, or an organization, is of their Marketing scope; a signed-in user's
+            own, and a run with no user, as before (mantle/marketing/MarketingAccess.js requireConsentChange, PERMISSION_DENIED); the rest is
+            record#PartyConsent, which the services that decide who may themselves (a link's token) call.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
@@ -75,6 +81,52 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="sourceEnumId"><description>PartyConsentSource</description></parameter>
             <parameter name="evidenceText"/>
             <parameter name="comments"/>
+            <parameter name="organizationPartyId"><description>The organization a purpose is for; empty is global</description></parameter>
+            <parameter name="updateSolicitation" type="Boolean" default="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="partyConsentId"/>
+            <parameter name="allowSolicitation"><description>The address's new allowSolicitation, when it follows this change</description></parameter>
+            <parameter name="solicitationUpdatedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            partyConsentId = null; allowSolicitation = null; solicitationUpdatedCount = 0
+            // another party's consent: a contact administrator, or Marketing's consent editor of the list's or purpose's organization
+            const consentList = contactListId ? ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one() : null
+            try {
+                ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js')
+                        .requireConsentChange(partyId, consentList ? consentList.ownerPartyId : organizationPartyId)
+            } catch (error) { ec.message.addError(String(error.message)); return }
+            const out = ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId,
+                purposeEnumId: purposeEnumId, statusId: statusId, contactMechId: contactMechId, contactListId: contactListId,
+                consentDate: consentDate, sourceEnumId: sourceEnumId, evidenceText: evidenceText, comments: comments,
+                organizationPartyId: organizationPartyId, updateSolicitation: updateSolicitation}).call() || {}
+            if (ec.message.hasError()) return
+            partyConsentId = out.partyConsentId ?? null
+            allowSolicitation = out.allowSolicitation ?? null
+            solicitationUpdatedCount = out.solicitationUpdatedCount ?? 0
+        ]]></script></actions>
+    </service>
+    <service verb="record" noun="PartyConsent" allow-remote="false">
+        <description>
+            Internal: store#PartyConsent without its rule of who may change another party's consent, for the services that
+            decided that themselves (impl-marketing P3 review): set#ContactListPartySubscription (for subscribe#ContactListParty,
+            unsubscribe#ContactListParty and apply#UnsubscribePreferences, which check the user or the link token), the token
+            paths of unsubscribe#ContactListParty and a store's confirmed checkout opt-in (StoreTopics.js, by its code). A link's
+            token, not whoever is signed in, decides there: a visitor signed in as someone else still unsubscribes. Everything
+            else as store#PartyConsent.
+        </description>
+        <in-parameters>
+            <parameter name="partyId" required="true"/>
+            <parameter name="purposeEnumId" required="true"><description>PartyConsentPurpose</description></parameter>
+            <parameter name="statusId" required="true"><description>PconGranted or PconWithdrawn</description></parameter>
+            <parameter name="contactMechId"/>
+            <parameter name="contactListId"/>
+            <parameter name="consentDate" type="Timestamp"><description>Defaults to now; an import may give the original date</description></parameter>
+            <parameter name="sourceEnumId"><description>PartyConsentSource</description></parameter>
+            <parameter name="evidenceText"/>
+            <parameter name="comments"/>
+            <parameter name="organizationPartyId"><description>The organization a purpose is for; empty is global</description></parameter>
             <parameter name="updateSolicitation" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
@@ -118,21 +170,24 @@ along with this software (see the LICENSE.md file). If not, see
                     ec.message.addError(`Contact information ${contactMechId} is not party ${partyId}'s`); return }
                 contactMech = ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechId', contactMechId).one()
             }
-            if (contactListId && ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one() == null) {
-                ec.message.addError(`Contact list ${contactListId} not found`); return }
+            const consentList = contactListId ? ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one() : null
+            if (contactListId && consentList == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
+            if (organizationPartyId && ec.entity.find('mantle.party.Organization').disableAuthz().condition('partyId', organizationPartyId).one() == null) {
+                ec.message.addError(`Organization ${organizationPartyId} not found`); return }
 
-            partyConsentId = ec.service.sync().name('create#mantle.party.PartyConsent').parameters({partyId: partyId,
+            partyConsentId = ec.service.sync().name('create#mantle.party.PartyConsent').parameters({partyId: partyId, organizationPartyId: organizationPartyId || null,
                 contactMechId: contactMechId || null, purposeEnumId: purposeEnumId, statusId: statusId,
                 consentDate: consentDate || ec.user.nowTimestamp, sourceEnumId: sourceEnumId, evidenceText: evidenceText || null,
                 contactListId: contactListId || null, userId: userId, comments: comments || null}).call()?.partyConsentId ?? null
             if (ec.message.hasError()) return
 
-            // allowSolicitation follows the marketing purposes of the address
-            if (!updateSolicitation || contactMech == null || contactListId) return
+            // allowSolicitation follows the global marketing purposes of the address; a scoped row is one organization's
+            if (!updateSolicitation || contactMech == null || contactListId || organizationPartyId) return
             const purposes = solicitationPurposes[contactMech.contactMechTypeEnumId] || []
             if (!purposes.includes(purposeEnumId)) return
             const rows = Array.from(ec.entity.find('mantle.party.PartyConsent').condition('partyId', partyId)
-                    .condition('contactMechId', contactMechId).condition('purposeEnumId', 'in', purposes).condition('contactListId', null).list())
+                    .condition('contactMechId', contactMechId).condition('purposeEnumId', 'in', purposes).condition('contactListId', null)
+                    .condition('organizationPartyId', null).list())
             rows.sort(newestFirst)
             const latest = {}
             for (const row of rows) if (!latest[row.purposeEnumId]) latest[row.purposeEnumId] = row
@@ -160,10 +215,15 @@ along with this software (see the LICENSE.md file). If not, see
             mailboxes unless they have members by email) with the party's status (its latest current row, else its latest
             row), subscribed, and the list's last consent change; grantedPurposeEnumIds. sameOwnerAsListId limits the lists
             to those of that list's organization (ownerPartyId, an empty one matching only empty ones).
+            organizationPartyId answers for one organization (impl-marketing P3, F9): a purpose's state is its latest row of that
+            organization unless its latest global row withdraws it (a scoped grant never undoes a global withdrawal), and the
+            lists are that organization's; each consent then says whether it is scoped. Without it the state is the global rows'
+            alone, as before, and another organization's scoped rows are left out.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="sameOwnerAsListId"/>
+            <parameter name="organizationPartyId"/>
             <parameter name="includeArchived" type="Boolean" default="true"/>
         </in-parameters>
         <out-parameters>
@@ -197,15 +257,27 @@ along with this software (see the LICENSE.md file). If not, see
             const entry = (row) => ({partyConsentId: row.partyConsentId, contactMechId: row.contactMechId ?? null,
                 purposeEnumId: row.purposeEnumId, statusId: row.statusId, granted: row.statusId === 'PconGranted',
                 consentDate: row.consentDate ?? null, sourceEnumId: row.sourceEnumId ?? null, evidenceText: row.evidenceText ?? null,
-                contactListId: row.contactListId ?? null, userId: row.userId ?? null, comments: row.comments ?? null})
+                contactListId: row.contactListId ?? null, userId: row.userId ?? null, comments: row.comments ?? null,
+                organizationPartyId: row.organizationPartyId ?? null, scoped: !!row.organizationPartyId})
             const rows = Array.from(ec.entity.find('mantle.party.PartyConsent').condition('partyId', partyId).list())
             rows.sort(newestFirst)
             const current = new Map()
+            const scopedCurrent = new Map()
             const lastByList = new Map()
             for (const row of rows) {
                 if (row.contactListId) { if (!lastByList.has(row.contactListId)) lastByList.set(row.contactListId, row); continue }
                 const key = `${row.contactMechId || ''}|${row.purposeEnumId}`
+                // a scoped row counts only for its organization, when one is asked
+                if (row.organizationPartyId) {
+                    if (organizationPartyId && row.organizationPartyId === organizationPartyId && !scopedCurrent.has(key)) scopedCurrent.set(key, row)
+                    continue
+                }
                 if (!current.has(key)) current.set(key, row)
+            }
+            // the organization's state: its own latest row, unless the latest global row withdraws the purpose
+            for (const [key, row] of scopedCurrent) {
+                const global = current.get(key)
+                if (!global || global.statusId !== 'PconWithdrawn') current.set(key, row)
             }
             consentList = Array.from(current.values()).map(entry)
             grantedPurposeEnumIds = Array.from(new Set(consentList.filter((consent) => consent.granted).map((consent) => consent.purposeEnumId)))
@@ -246,15 +318,15 @@ along with this software (see the LICENSE.md file). If not, see
             const memberRows = Array.from(ec.entity.find(CLP).condition('partyId', partyId).orderBy('-fromDate').list())
             const listIds = Array.from(new Set(memberRows.map((row) => row.contactListId)))
             if (listIds.length === 0) return
-            let ownerFilter = undefined
+            let ownerFilter = organizationPartyId ? organizationPartyId : undefined
             if (sameOwnerAsListId) {
-                const ownerList = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', sameOwnerAsListId).one()
+                const ownerList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', sameOwnerAsListId).one()
                 ownerFilter = ownerList?.ownerPartyId ?? null
             }
             // a mailbox is membership, not consent, until it has members by email
             const emailMembers = (contactListId) => ec.entity.find(CLP).condition('contactListId', contactListId)
                     .condition('preferredContactMechId', 'is-not-null', null).condition(currentDate).count() > 0
-            const lists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', listIds)
+            const lists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', listIds)
                     .orderBy('contactListName').list())
             for (const list of lists) {
                 if (list.contactListTypeEnumId === 'MAILBOX' && !emailMembers(list.contactListId)) continue
@@ -280,9 +352,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>
             The consent audit of a party, newest first: when, purpose, granted or withdrawn, source, evidence, the address
             and list, and who recorded it, with the descriptions; by address, purpose and list, a page at a time.
+            organizationPartyIds limits it to those organizations' rows (impl-marketing P3: Marketing's Consent mount): the global
+            rows of a purpose, the rows scoped to one of them and the rows of their lists; another organization's are left out.
         </description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
+            <parameter name="organizationPartyIds" type="List"/>
             <parameter name="contactMechId"/>
             <parameter name="purposeEnumId"/>
             <parameter name="contactListId"/>
@@ -320,7 +395,14 @@ along with this software (see the LICENSE.md file). If not, see
             if (contactMechId) find = find.condition('contactMechId', contactMechId)
             if (purposeEnumId) find = find.condition('purposeEnumId', purposeEnumId)
             if (contactListId) find = find.condition('contactListId', contactListId)
-            const rows = Array.from(find.list())
+            let rows = Array.from(find.list())
+            if (organizationPartyIds != null) {
+                const orgIds = new Set(Array.from(organizationPartyIds))
+                const listIds = Array.from(new Set(rows.map((row) => row.contactListId).filter((id) => id)))
+                const ownListIds = new Set(listIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz()
+                        .condition('contactListId', 'in', listIds).list()).filter((list) => orgIds.has(list.ownerPartyId)).map((list) => list.contactListId) : [])
+                rows = rows.filter((row) => row.contactListId ? ownListIds.has(row.contactListId) : (!row.organizationPartyId || orgIds.has(row.organizationPartyId)))
+            }
             rows.sort(newestFirst)
             historyListCount = rows.length
             const pageIndexInt = pageNoLimit ? 0 : Math.max(0, Math.trunc(Number(pageIndex || 0)))
@@ -352,7 +434,7 @@ along with this software (see the LICENSE.md file). If not, see
             const listNames = new Map()
             const listName = (id) => {
                 if (!id) return null
-                if (!listNames.has(id)) listNames.set(id, ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', id).one()?.contactListName ?? id)
+                if (!listNames.has(id)) listNames.set(id, ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', id).one()?.contactListName ?? id)
                 return listNames.get(id)
             }
             const userNames = new Map()
@@ -365,6 +447,7 @@ along with this software (see the LICENSE.md file). If not, see
                 return userNames.get(id)
             }
             historyList = page.map((row) => ({partyConsentId: row.partyConsentId, consentDate: row.consentDate ?? null,
+                organizationPartyId: row.organizationPartyId ?? null,
                 purposeEnumId: row.purposeEnumId, purposeDescription: enumText(row.purposeEnumId), statusId: row.statusId,
                 statusDescription: statusText(row.statusId), granted: row.statusId === 'PconGranted', sourceEnumId: row.sourceEnumId ?? null,
                 sourceDescription: enumText(row.sourceEnumId), evidenceText: row.evidenceText ?? null, comments: row.comments ?? null,
@@ -385,8 +468,13 @@ along with this software (see the LICENSE.md file). If not, see
             (PconGranted, PconWithdrawn: of purposeEnumId, or of any purpose); purposeEnumId (granted, unless statusId
             says withdrawn); changedFromDate and changedThruDate (a consent change in the period); allowSolicitation (Y or
             N on any current address). A page at a time, or with exportCsv every match as CSV text (csvText).
+            organizationPartyIds answers for those organizations only (impl-marketing P3: Marketing's Consent mount): their
+            lists, the parties with a row on one of them or a consent scoped to one of them, the purposes' states with their
+            scoped rows (a global withdrawal still wins) and no other organization's rows. Without it every list and party, the
+            global states, as before.
         </description>
         <in-parameters>
+            <parameter name="organizationPartyIds" type="List"/>
             <parameter name="text"/>
             <parameter name="contactListId"/>
             <parameter name="statusId"/>
@@ -441,13 +529,18 @@ along with this software (see the LICENSE.md file). If not, see
             const consentStatus = statusId && !listStatus ? statusId : null
 
             // the consent lists: every list but a mailbox without members by email
-            const allLists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').list())
+            const allLists = Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().list())
             const mailboxIds = allLists.filter((list) => list.contactListTypeEnumId === 'MAILBOX').map((list) => list.contactListId)
             const emailMailboxIds = new Set(mailboxIds.length ? Array.from(ec.entity.find(CLP).condition('contactListId', 'in', mailboxIds)
                     .condition('preferredContactMechId', 'is-not-null', null).condition(currentDate).selectField('contactListId')
                     .distinct(true).list()).map((row) => row.contactListId) : [])
-            const listById = new Map(allLists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' || emailMailboxIds.has(list.contactListId))
+            const orgIds = organizationPartyIds == null ? null : new Set(Array.from(organizationPartyIds))
+            const listById = new Map(allLists.filter((list) => orgIds == null ? (list.contactListTypeEnumId !== 'MAILBOX' || emailMailboxIds.has(list.contactListId))
+                    : (list.contactListTypeEnumId !== 'MAILBOX' && orgIds.has(list.ownerPartyId)))
                     .map((list) => [list.contactListId, list]))
+            // a row the answer may hold: a global purpose, one scoped to an asked organization, a row of one of the lists
+            const visibleRow = (row) => row.contactListId ? (orgIds == null || listById.has(row.contactListId))
+                    : (!row.organizationPartyId || (orgIds != null && orgIds.has(row.organizationPartyId)))
             const consentListIds = Array.from(listById.keys())
             if (contactListId && !listById.has(contactListId)) return
 
@@ -467,6 +560,13 @@ along with this software (see the LICENSE.md file). If not, see
             }
             if (allowSolicitation) narrow(partyIdsOf(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition(currentDate)
                     .condition('contactMechTypeEnumId', 'in', addressTypes).condition('allowSolicitation', allowSolicitation)))
+            // an organization's answer: the parties of its lists and its scoped consents only
+            if (orgIds != null) {
+                const own = new Set(consentListIds.length ? partyIdsOf(ec.entity.find(CLP).condition('contactListId', 'in', consentListIds)) : [])
+                if (orgIds.size) for (const id of partyIdsOf(ec.entity.find('mantle.party.PartyConsent').condition('organizationPartyId', 'in', Array.from(orgIds)))) own.add(id)
+                if (consentListIds.length) for (const id of partyIdsOf(ec.entity.find('mantle.party.PartyConsent').condition('contactListId', 'in', consentListIds))) own.add(id)
+                narrow(Array.from(own))
+            }
             if (candidates == null) {
                 candidates = new Set(partyIdsOf(ec.entity.find('mantle.party.PartyConsent')))
                 if (consentListIds.length) for (const id of partyIdsOf(ec.entity.find(CLP).condition('contactListId', 'in', consentListIds))) candidates.add(id)
@@ -506,13 +606,17 @@ along with this software (see the LICENSE.md file). If not, see
                         const flags = infos.filter((info) => info.contactMechId === contactMechId).map((info) => info.allowSolicitation)
                         return flags.includes('Y') ? 'Y' : flags.includes('N') ? 'N' : null
                     }
-                    const consents = (consentsByParty.get(party.partyId) || []).slice().sort(newestFirst)
+                    const consents = (consentsByParty.get(party.partyId) || []).filter(visibleRow).sort(newestFirst)
                     const current = new Map()
+                    const scopedCurrent = new Map()
                     for (const consent of consents) {
                         if (consent.contactListId) continue
                         const key = `${consent.contactMechId || ''}|${consent.purposeEnumId}`
-                        if (!current.has(key)) current.set(key, consent)
+                        const target = consent.organizationPartyId ? scopedCurrent : current
+                        if (!target.has(key)) target.set(key, consent)
                     }
+                    // an organization's scoped state, unless the global one withdraws it
+                    for (const [key, consent] of scopedCurrent) if (current.get(key)?.statusId !== 'PconWithdrawn') current.set(key, consent)
                     const states = Array.from(current.values())
                     const granted = Array.from(new Set(states.filter((state) => state.statusId === 'PconGranted').map((state) => state.purposeEnumId)))
                     const withdrawn = Array.from(new Set(states.filter((state) => state.statusId === 'PconWithdrawn' && !granted.includes(state.purposeEnumId))
@@ -659,7 +763,7 @@ along with this software (see the LICENSE.md file). If not, see
             const now = ec.user.nowTimestamp
             const nowMillis = toMillis(now)
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const listName = list.contactListName || contactListId
             if (list.contactListTypeEnumId === 'MAILBOX' && ec.entity.find(CLP).condition('contactListId', contactListId)
@@ -680,7 +784,7 @@ along with this software (see the LICENSE.md file). If not, see
             consents.sort(newestFirst)
             const lastListConsent = consents.find((row) => row.contactListId === contactListId) || null
             const record = (consentStatusId, extraEvidence, forList) => {
-                ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId,
+                ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId,
                     contactMechId: contactMechId, purposeEnumId: purposeEnumId, statusId: consentStatusId, sourceEnumId: sourceEnumId,
                     evidenceText: [evidenceText, extraEvidence].filter((part) => part).join('; ') || null,
                     comments: comments ? String(comments).trim().slice(0, 255) || null : null,
@@ -805,7 +909,7 @@ along with this software (see the LICENSE.md file). If not, see
             const cf = ec.entity.conditionFactory
             sent = false
             const currentDate = cf.makeConditionDate('fromDate', 'thruDate', null)
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             const listEmail = Array.from(ec.entity.find('mantle.marketing.contact.ContactListEmail').condition('contactListId', contactListId)
                     .condition('emailTypeEnumId', 'CONT_UNSUB_VER').condition(currentDate).orderBy('-fromDate').list()).find((row) => row.emailTemplateId)
@@ -867,6 +971,9 @@ along with this software (see the LICENSE.md file). If not, see
             row goes to CLPT_ACCEPTED (from unsubscribed, pending or an unsubscribe waiting for its confirmation) with a
             consent grant for the list, and the address's marketing consent is granted again when it was withdrawn
             (allowSolicitation back to Y). The source defaults to PcsStaff for another party, PcsForm for the user's own.
+            Another party is subscribed by a contact administrator, or by a holder of MARKETING_CONSENT_EDIT for a list of their
+            Marketing scope (impl-marketing P3; PERMISSION_DENIED); Marketing's own path is AudienceServices request#Subscriptions,
+            which never clears a withdrawal.
             Already subscribed changes nothing. A mailbox is joined with ContactListServices.join#ContactList instead.
         </description>
         <in-parameters>
@@ -889,6 +996,11 @@ along with this software (see the LICENSE.md file). If not, see
             if (!partyId) { ec.message.addError('No party to subscribe'); return }
             const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
             if (party == null || (party.privateOwnerUserId && party.privateOwnerUserId !== userId)) { ec.message.addError(`Party ${partyId} not found`); return }
+            // another party: a contact administrator, or Marketing's consent editor of the list's organization (impl-marketing P3)
+            const subscribeList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
+            try {
+                ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js').requireConsentChange(partyId, subscribeList?.ownerPartyId || null)
+            } catch (error) { ec.message.addError(String(error.message)); return }
             if (!sourceEnumId) sourceEnumId = partyId === userPartyId ? 'PcsForm' : 'PcsStaff'
             const out = ec.service.sync().name('mantle.party.ConsentServices.set#ContactListPartySubscription').parameters({contactListId: contactListId,
                 partyId: partyId, subscribe: true, contactMechId: contactMechId, sourceEnumId: sourceEnumId, evidenceText: evidenceText}).call()
@@ -911,9 +1023,16 @@ along with this software (see the LICENSE.md file). If not, see
             another of that organization's lists the party is on (contactListId). The source is PcsEmailLink. A one-click
             call is confirmed (CLPT_UNSUBSCRIBED at once); otherwise only a verifyCode matching the pending row confirms.
             Without a token: a signed-in user, with contactListId (unless allMarketing) and partyId; source PcsStaff by
-            default, and confirmed=true skips the confirmation. reasonText (why, as the visitor or staff gave it) goes on
+            default, and confirmed=true skips the confirmation. Another party is changed by a contact administrator, or by a
+            holder of MARKETING_CONSENT_EDIT for a list of their Marketing scope (allMarketing a contact administrator's;
+            impl-marketing P3, PERMISSION_DENIED). reasonText (why, as the visitor or staff gave it) goes on
             the consent rows as their comments; an unsubscribe that waits for confirmation sends the verification email,
             its link under baseUrl (verifyEmailSent).
+
+            impl-marketing P7 (the PASS Email preferences page's Marketing context): with organizationPartyId and allMarketing,
+            only that organization's lists are left and the marketing email withdrawal is that organization's (a scoped
+            PartyConsent row, which a staff acceptance of the purpose for it then meets), not every organization's; with a token
+            the organization must be the token list's. Without it everything is as before, so a legacy token keeps working.
         </description>
         <in-parameters>
             <parameter name="token"/>
@@ -921,6 +1040,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="partyId"/>
             <parameter name="contactMechId"/>
             <parameter name="allMarketing" type="Boolean" default="false"/>
+            <parameter name="organizationPartyId"><description>impl-marketing P7: with allMarketing, one organization's lists and a
+                withdrawal scoped to it</description></parameter>
             <parameter name="listUnsubscribe"><description>One-Click for the RFC 8058 POST, whose form field
                 List-Unsubscribe=One-Click the route passes here; Mailto for the email to the List-Unsubscribe mailto
                 (process#UnsubscribeEmail, which gives the sender as evidenceText)</description></parameter>
@@ -969,6 +1090,7 @@ along with this software (see the LICENSE.md file). If not, see
                 if (tokenRow == null || (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(now))) { ec.message.addError(invalid); return }
                 if (partyId && partyId !== tokenRow.partyId) { ec.message.addError(invalid); return }
             }
+            const scopeOrganization = organizationPartyId ? String(organizationPartyId) : null
             const oneClick = String(listUnsubscribe || '').trim().toLowerCase() === 'one-click'
             // the List-Unsubscribe mailto: an email whose subject carries the token (process#UnsubscribeEmail)
             const byMail = String(listUnsubscribe || '').trim().toLowerCase() === 'mailto'
@@ -989,14 +1111,23 @@ along with this software (see the LICENSE.md file). If not, see
                 const mailFrom = byMail && evidenceText ? ` from ${String(evidenceText).replace(/[<>]/g, '').trim().slice(0, 200)}` : ''
                 evidenceText = oneClick ? `One-click unsubscribe (RFC 8058)${ofMessage}`
                         : byMail ? `Unsubscribe by email (List-Unsubscribe mailto)${mailFrom}${ofMessage}` : `Unsubscribe link${ofMessage}`
-                tokenList = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+                tokenList = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
                 if (tokenList == null) { ec.message.addError(invalid); return }
+                // P7: a token's organization scope is its list's organization only
+                if (scopeOrganization && scopeOrganization !== (tokenList.ownerPartyId ?? null)) { ec.message.addError(invalid); return }
             } else {
                 const userId = ec.user.userId || null
                 if (!userId) { ec.message.addError('Unsubscribing without a link token needs a signed-in user'); return }
                 if (!partyId) { ec.message.addError('Unsubscribing needs a partyId'); return }
                 const party = ec.entity.find('mantle.party.Party').condition('partyId', partyId).one()
                 if (party == null || (party.privateOwnerUserId && party.privateOwnerUserId !== userId)) { ec.message.addError(`Party ${partyId} not found`); return }
+                // another party: a contact administrator, or Marketing's consent editor of the list's organization; all marketing
+                // email (a global withdrawal) a contact administrator's (impl-marketing P3)
+                const ownerList = !allMarketing && contactListId ? ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz()
+                        .condition('contactListId', contactListId).one() : null
+                try {
+                    ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAccess.js').requireConsentChange(partyId, ownerList?.ownerPartyId || null)
+                } catch (error) { ec.message.addError(String(error.message)); return }
                 if (!sourceEnumId) sourceEnumId = 'PcsStaff'
             }
             const sameOwner = (list) => tokenList == null || (list.ownerPartyId ?? null) === (tokenList.ownerPartyId ?? null)
@@ -1007,16 +1138,17 @@ along with this software (see the LICENSE.md file). If not, see
                 const memberIds = Array.from(new Set(Array.from(ec.entity.find(CLP).condition('partyId', partyId)
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('contactListId').distinct(true).list())
                         .map((row) => row.contactListId)))
-                const lists = memberIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', 'in', memberIds)
+                const lists = memberIds.length ? Array.from(ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', 'in', memberIds)
                         .orderBy('contactListName').list()) : []
-                listIds = lists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' && list.contactMechTypeEnumId !== 'CmtTelecomNumber' && sameOwner(list))
+                listIds = lists.filter((list) => list.contactListTypeEnumId !== 'MAILBOX' && list.contactMechTypeEnumId !== 'CmtTelecomNumber' && sameOwner(list)
+                        && (!scopeOrganization || (list.ownerPartyId ?? null) === scopeOrganization))
                         .map((list) => list.contactListId)
             } else {
                 const targetId = contactListId || tokenRow?.contactListId
                 if (!targetId) { ec.message.addError('Unsubscribing needs a contactListId'); return }
                 if (tokenRow != null && targetId !== tokenRow.contactListId) {
                     // another of the party's lists of the token list's organization, as the preferences page offers
-                    const other = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', targetId).one()
+                    const other = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', targetId).one()
                     if (other == null || !sameOwner(other) || ec.entity.find(CLP).condition('contactListId', targetId).condition('partyId', partyId).count() === 0) {
                         ec.message.addError(invalid); return }
                 }
@@ -1059,15 +1191,19 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('partyId', partyId).condition('contactMechTypeEnumId', 'CmtEmailAddress')
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).list()).map((info) => info.contactMechId)))
                 if (mechIds.length === 0) mechIds = [null]
+                // P7: an organization's scope withdraws its own (scoped) purpose; else every organization's, as before
                 const consents = Array.from(ec.entity.find('mantle.party.PartyConsent').condition('partyId', partyId)
                         .condition('purposeEnumId', 'PcpMarketingEmail').condition('contactListId', null).list())
+                        .filter((row) => (row.organizationPartyId ?? null) === scopeOrganization)
                 consents.sort(newestFirst)
                 for (const mechId of mechIds) {
                     const state = consents.find((row) => (row.contactMechId || null) === mechId)
                     if (state?.statusId === 'PconWithdrawn') continue
-                    ec.service.sync().name('mantle.party.ConsentServices.store#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
+                    ec.service.sync().name('mantle.party.ConsentServices.record#PartyConsent').parameters({partyId: partyId, contactMechId: mechId,
                         purposeEnumId: 'PcpMarketingEmail', statusId: 'PconWithdrawn', sourceEnumId: sourceEnumId,
-                        evidenceText: [evidenceText, 'all marketing email'].filter((part) => part).join('; '), comments: reason}).call()
+                        ...(scopeOrganization ? {organizationPartyId: scopeOrganization} : {}),
+                        evidenceText: [evidenceText, scopeOrganization ? 'all marketing email of the organization' : 'all marketing email']
+                            .filter((part) => part).join('; '), comments: reason}).call()
                     if (ec.message.hasError()) return
                     marketingWithdrawn = true
                 }
@@ -1206,7 +1342,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
             if (!contactListId || !partyId) { ec.message.addError('An unsubscribe token needs a contactListId and a partyId'); return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             if (list == null) { ec.message.addError(`Contact list ${contactListId} not found`); return }
             if (ec.entity.find('mantle.party.Party').condition('partyId', partyId).one() == null) { ec.message.addError(`Party ${partyId} not found`); return }
             if (!contactMechId) contactMechId = Array.from(ec.entity.find('mantle.marketing.contact.ContactListParty').condition('contactListId', contactListId)
@@ -1278,7 +1414,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (tokenRow == null) return
             valid = true
             if (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(ec.user.nowTimestamp)) { routeContext = {expired: true}; return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
             if (list == null) { routeContext = {expired: true}; return }
             let organizationName = null
             if (list.ownerPartyId) {
@@ -1329,7 +1465,7 @@ along with this software (see the LICENSE.md file). If not, see
             if (!/^[A-Za-z0-9_-]{16,128}$/.test(tokenText)) { ec.message.addError(invalid); return }
             const tokenRow = ec.entity.find('mantle.marketing.contact.ContactListToken').condition('tokenHash', ec.user.singleUseCodeHash(tokenText)).one()
             if (tokenRow == null || (tokenRow.thruDate != null && toMillis(tokenRow.thruDate) <= toMillis(ec.user.nowTimestamp))) { ec.message.addError(invalid); return }
-            const list = ec.entity.find('mantle.marketing.contact.ContactList').condition('contactListId', tokenRow.contactListId).one()
+            const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', tokenRow.contactListId).one()
             if (list == null) { ec.message.addError(invalid); return }
 
             if (list.ownerPartyId) {

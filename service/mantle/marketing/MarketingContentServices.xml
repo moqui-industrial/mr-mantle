@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingContentServices (T, IronStone Marketing design §14.2; impl-marketing P14): a campaign's planned content
+    (CampaignContent) and its blog posts over the framework's WikiBlog (MarketingContent.js). Each service checks its permission and
+    the organization itself (mantle/marketing/MarketingAccess.js) and, for a post, the wiki's own rule (get#WikiPageAccess). A link
+    publishes nothing; a post's body and its publication are the wiki's. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="find" noun="CampaignContent" allow-remote="false" read-only="true">
+        <description>The current content links of the campaigns of the caller's organizations (or one campaign), by kind, source and
+            use, a page at a time, each with its source's title and its owner's publication state read only (a post's publish date and
+            published page version, a site page's binding and window, a wiki page's published version, a file never public). A
+            Marketing reader.</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="contentKindEnumId"/>
+            <parameter name="wikiBlogId"/>
+            <parameter name="sitePageId"/>
+            <parameter name="term"/>
+            <parameter name="includeEnded" type="Boolean"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contents" type="List"/>
+            <parameter name="contentsCount" type="Integer"/>
+            <parameter name="contentsPageIndex" type="Integer"/>
+            <parameter name="contentsPageSize" type="Integer"/>
+            <parameter name="contentsPageMaxIndex" type="Integer"/>
+            <parameter name="contentsPageRangeLow" type="Integer"/>
+            <parameter name="contentsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('findContent', context)"/>
+            <set field="contents" from="out.contents"/>
+            <set field="contentsCount" from="out.contentsCount"/>
+            <set field="contentsPageIndex" from="out.contentsPageIndex"/>
+            <set field="contentsPageSize" from="out.contentsPageSize"/>
+            <set field="contentsPageMaxIndex" from="out.contentsPageMaxIndex"/>
+            <set field="contentsPageRangeLow" from="out.contentsPageRangeLow"/>
+            <set field="contentsPageRangeHigh" from="out.contentsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="CampaignContent" allow-remote="false" read-only="true">
+        <description>One content link with its owner's publication read only (state, published version, latest review, public binding)
+            and its distribution: the sends drafted from it and, for a blog post, those prepared with it (the version each read).
+            A Marketing reader of the campaign's organization; another organization's link answers as missing.</description>
+        <in-parameters><parameter name="campaignContentId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="content" type="Map"/>
+            <parameter name="distribution" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('getContent', context)"/>
+            <set field="content" from="out.content"/>
+            <set field="distribution" from="out.distribution"/>
+        </actions>
+    </service>
+    <service verb="store" noun="CampaignContent" allow-remote="false">
+        <description>Link content to an open campaign of the caller's scope (action add: a blog post or wiki page the wiki lets the
+            caller view, a site page of the campaign's organization, a file of the campaign; KIND_UNAVAILABLE, RECORD_UNAVAILABLE,
+            CAMPAIGN_CLOSED), change its use and intended date (update, at expectedLastUpdatedStamp: REVISION_STALE) or end it (end).
+            A current link of the same source is answered again. Linking publishes nothing and a planned date is no release
+            instruction. MARKETING_CONTENT_EDIT.</description>
+        <in-parameters>
+            <parameter name="campaignContentId"/>
+            <parameter name="action"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="contentKindEnumId"/>
+            <parameter name="sourceId"/>
+            <parameter name="useText"/>
+            <parameter name="intendedDate" type="Timestamp"/>
+            <parameter name="expectedLastUpdatedStamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="campaignContentId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('storeContent', context)"/>
+            <set field="campaignContentId" from="out.campaignContentId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="find" noun="BlogPosts" allow-remote="false" read-only="true">
+        <description>The blog posts (WikiBlog) of the wiki spaces the caller may view (get#UserWikiSpaces; a page restricted on its own
+            only for a user it lets view it), newest first, by space, category, title, author, publish period and the campaign that
+            links them, a page at a time, each with its categories, its campaign uses and its publication. A Marketing reader.</description>
+        <in-parameters>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="wikiPageCategoryId"/>
+            <parameter name="term"/>
+            <parameter name="author"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="posts" type="List"/>
+            <parameter name="postsCount" type="Integer"/>
+            <parameter name="postsPageIndex" type="Integer"/>
+            <parameter name="postsPageSize" type="Integer"/>
+            <parameter name="postsPageMaxIndex" type="Integer"/>
+            <parameter name="postsPageRangeLow" type="Integer"/>
+            <parameter name="postsPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('findPosts', context)"/>
+            <set field="posts" from="out.posts"/>
+            <set field="postsCount" from="out.postsCount"/>
+            <set field="postsPageIndex" from="out.postsPageIndex"/>
+            <set field="postsPageSize" from="out.postsPageSize"/>
+            <set field="postsPageMaxIndex" from="out.postsPageMaxIndex"/>
+            <set field="postsPageRangeLow" from="out.postsPageRangeLow"/>
+            <set field="postsPageRangeHigh" from="out.postsPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="BlogPost" allow-remote="false" read-only="true">
+        <description>One blog post the wiki lets the caller view: its metadata, page, space, published and current versions, latest
+            review and public link, its categories (with the legacy sent date), its campaign uses in the caller's organizations with
+            their sends, and whether the caller may edit it (MARKETING_CONTENT_EDIT and the wiki's update right). A Marketing reader;
+            another's private post answers as missing.</description>
+        <in-parameters><parameter name="wikiBlogId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="post" type="Map"/>
+            <parameter name="categories" type="List"/>
+            <parameter name="campaignUses" type="List"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('getPost', context)"/>
+            <set field="post" from="out.post"/>
+            <set field="categories" from="out.categories"/>
+            <set field="campaignUses" from="out.campaignUses"/>
+        </actions>
+    </service>
+    <service verb="store" noun="BlogPost" allow-remote="false">
+        <description>A new blog post in a space the caller may write (wikiSpaceId with its text, blogText, or an existing page of the
+            space, wikiPageId) or a post's metadata (wikiBlogId: title, author, summary, publish date, meta keywords and description
+            of at most 160 characters), through org.moqui.resource.WikiServices create#WikiBlog and update#WikiBlog as built (their
+            title rule applies). MARKETING_CONTENT_EDIT and the wiki's update right to the space (SPACE_WRITE_DENIED).</description>
+        <in-parameters>
+            <parameter name="wikiBlogId"/>
+            <parameter name="wikiSpaceId"/>
+            <parameter name="wikiPageId"/>
+            <parameter name="title"/>
+            <parameter name="author"/>
+            <parameter name="summary" allow-html="safe"/>
+            <parameter name="publishDate" type="Timestamp"/>
+            <parameter name="metaKeywords"/>
+            <parameter name="metaDescription"/>
+            <parameter name="blogText" allow-html="safe"/>
+            <parameter name="expectedLastUpdatedStamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="wikiBlogId"/>
+            <parameter name="created" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('storePost', context)"/>
+            <set field="wikiBlogId" from="out.wikiBlogId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="add" noun="BlogCategory" allow-remote="false">
+        <description>Put a post in a category (WikiPageCategory), checking MARKETING_CONTENT_EDIT and the wiki's write access to the
+            post's space before the entity write (SPACE_WRITE_DENIED); a post in the category already is answered again.</description>
+        <in-parameters>
+            <parameter name="wikiBlogId" required="true"/>
+            <parameter name="wikiPageCategoryId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="added" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="added" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('addCategory', context).added"/>
+        </actions>
+    </service>
+    <service verb="remove" noun="BlogCategory" allow-remote="false">
+        <description>Take a post out of a category, checking MARKETING_CONTENT_EDIT and the wiki's write access to the post's space
+            before the entity write (SPACE_WRITE_DENIED).</description>
+        <in-parameters>
+            <parameter name="wikiBlogId" required="true"/>
+            <parameter name="wikiPageCategoryId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="removed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="removed" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('removeCategory', context).removed"/>
+        </actions>
+    </service>
+    <service verb="create" noun="ContentSend" allow-remote="false">
+        <description>A draft send of a content link's campaign (CampaignSendServices create#Send, with its checks): from a blog post a
+            newsletter that takes the approved posts of a blog category at its preparation (postCategoryId, else the topic list's
+            newsletter category, else the post's first: CATEGORY_REQUIRED), from a landing page its public link (PAGE_NOT_PUBLISHED).
+            The send is approved and released as every send, and sets nothing of the post's or page's publication.
+            MARKETING_CONTENT_EDIT and MARKETING_SEND_EDIT.</description>
+        <in-parameters>
+            <parameter name="campaignContentId" required="true"/>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sendName"/>
+            <parameter name="postCategoryId"/>
+            <parameter name="sendingProfileId"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendId"/></out-parameters>
+        <actions>
+            <set field="campaignSendId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('createContentSend', context).campaignSendId"/>
+        </actions>
+    </service>
+    <!-- P15 (impl-marketing §4 Nov 14): a landing page's optional review; asked and decided through CampaignServices
+        request#MarketingApproval and decide#MarketingApproval with targetKind page -->
+    <service verb="get" noun="PageReview" allow-remote="false" read-only="true">
+        <description>A landing page's review (a page of a Marketing mount of the caller's organizations, RECORD_UNAVAILABLE otherwise; any
+            Marketing reader): its state at the current text version (approved, asked, refused or not reviewed; the version is the count
+            of the text's saved versions), the decisions newest first, and whether the caller may ask for a review (MARKETING_CONTENT_EDIT,
+            none pending or approved at this version) or decide it (MARKETING_APPROVE, a request pending, not the caller's own text or
+            request). A review publishes nothing: publish#SitePage stays the content grant's act with or without one.</description>
+        <in-parameters><parameter name="sitePageId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="review" type="Map"/>
+            <parameter name="decisions" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingContent.js').execute('pageReview', context)"/>
+            <set field="review" from="found.review"/>
+            <set field="decisions" from="found.decisions"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+</services>

@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "headers": {},
+  "body": [
+    {
+      "id": 201,
+      "number": 1,
+      "title": "v1.0",
+      "description": "The first release",
+      "state": "closed",
+      "due_on": "2025-01-31T08:00:00Z",
+      "closed_at": "2025-02-02T10:00:00Z"
+    }
+  ]
+}

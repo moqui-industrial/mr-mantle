@@ -1011,13 +1011,18 @@ along with this software (see the LICENSE.md file). If not, see
                 </entity-find>
                 <set field="otherPartCount" from="otherPartList.length"/>
 
+                <!-- an event registration's storeless ticket order (IronStone impl-marketing P17, the user's call to confirm): nothing ships
+                    and no store's settings apply, so the new-customer and shipping-address checks, which guard a first order's goods
+                    and their delivery, do not stop it; its part's address is where its tax is worked out (X1). A store ticket order
+                    keeps its store's settings, and every warning another service adds (Sales' rules) still applies. -->
+                <set field="ticketOrder" from="!productStoreId &amp;&amp; orderHeader.orderPurposeEnumId == 'OrpEventRegistration'"/>
                 <!-- check new customer (no other orders; see also PromotionServices.apply#NewCustomerDiscount) -->
-                <if condition="otherPartCount == 0 &amp;&amp; !('false' === storeSettingList.find((it) =&gt; it.settingTypeEnumId === 'PsstOrdApproveNewCust')?.settingValue)">
+                <if condition="!ticketOrder &amp;&amp; otherPartCount == 0 &amp;&amp; !('false' === storeSettingList.find((it) =&gt; it.settingTypeEnumId === 'PsstOrdApproveNewCust')?.settingValue)">
                     <script>approveWarnings.push(ec.resource.expand('OrderApproveNewCustomer', null))</script>
                 </if>
 
                 <!-- check shipping address (for each part) present and valid -->
-                <iterate list="orderPartList" entry="orderPart">
+                <iterate list="ticketOrder ? [] : orderPartList" entry="orderPart">
                     <if condition="!orderPart.postalContactMechId &amp;&amp; !('false' === storeSettingList.find((it) =&gt; it.settingTypeEnumId === 'PsstOrdApproveAddrMissing')?.settingValue)">
                         <script>approveWarnings.push(ec.resource.expand('OrderPlacePartNoShippingAddress', null, {orderPart:orderPart}))</script>
                         <continue/>
@@ -1431,7 +1436,8 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.order.OrderHeader" value-field="orderHeader"/>
             <if condition="orderHeader == null"><return/></if>
             <!-- a recurring base (RecurringTemplate, X5) sends no store email: it is never placed for the customer (mr-pass impl-shop P7) -->
-            <if condition="orderHeader.orderPurposeEnumId == 'OrpRecurringTemplate'"><return/></if>
+            <!-- nor does a Sales quote template (impl-sales P12), never placed -->
+            <if condition="['OrpRecurringTemplate', 'OrpSalesQuoteTemplate'].includes(orderHeader.orderPurposeEnumId)"><return/></if>
             <set field="productStoreId" from="orderHeader.productStoreId"/>
             <if condition="!productStoreId"><return/></if>
 

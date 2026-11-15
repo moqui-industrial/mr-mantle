@@ -7,7 +7,8 @@
 // sent, and an automatic message on no case making nothing; an unknown sender and staff held for review, accepted or
 // dismissed; the dry run; the queue's intake token (the party-less RequestCategory kind) issued, used with the queue's
 // limit and revoked; a logged call meeting first response and an internal one not; a forum topic escalated through a
-// route a Submitted request on channel ScForum, held for a poster who is no customer until accepted; at most three
+// route a Submitted request on channel ScForum, held for a poster who is no customer until accepted, and an article drafted
+// from it named in letters of any script with their combining marks, in NFC (ForumIntegration.js); at most three
 // acknowledgements an hour to an address. Standalone: spec-local organizations, customers, groups and users, artifact
 // authorization disabled (the rules are the services' own checks). Run: ./moq test mr-mantle --spec SupportChannels
 const prefix = "SCH"
@@ -770,6 +771,7 @@ feature("a forum topic escalated through a route: in the queue on ScForum, held 
             reason: "Heater fault"
         })
         const requestId = created.requestId
+        Object.assign(state, {forumSite: siteId, forumTopic: rootId})
         // a public member who is no customer: held for review (the Nov 5 rule), until an agent accepts the poster as customer
         const heldRole = one("mantle.party.PartyRole", {partyId: poster, roleTypeId: "Customer"})
         const note = rows("mantle.request.RequestNote", {requestId})[0]
@@ -800,6 +802,29 @@ feature("a forum topic escalated through a route: in the queue on ScForum, held 
         customerRows.length == 1
         customerRows[0].partyId == poster
         profile != null
+    }
+})
+
+feature("an article drafted from the topic is named in letters of any script with their combining marks, in NFC", {
+    when() {
+        ec.artifactExecution.disableAuthz()
+        call("org.moqui.resource.WikiServices.create#WikiSpace", {wikiSpaceId: "SCHPUB", description: "Spec publishing"})
+        call("update#mantle.public.PublicSite", {siteId: state.forumSite, publishingWikiSpaceId: "SCHPUB"})
+        const drafted = call(F + "draft#ArticleFromTopic", {
+            input: {
+                operationId: ec.user.randomString(32),
+                siteId: state.forumSite,
+                rootCommEventId: state.forumTopic,
+                postIds: [state.forumTopic],
+                reviewerUsername: "john.doe",
+                title: "\u0301हिन्दी / cafe\u0301 <ภาษาไทย>"
+            }
+        }).result
+        return {drafted, page: drafted?.wikiPageId ? one("moqui.resource.wiki.WikiPage", {wikiPageId: drafted.wikiPageId}) : null}
+    },
+    then({page}) {
+        page.wikiSpaceId == "SCHPUB"
+        page.pagePath == "हिन्दी café ภาษาไทย"
     }
 })
 

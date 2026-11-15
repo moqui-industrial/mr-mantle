@@ -59,19 +59,50 @@ kit => {
                 policyRevision: Number(category.policyRevision || 0) + 1
             })
     }
+    /* A scope's category follows the scope's own visibility change (the same transaction): narrower when it narrows (as
+       narrow), and wider when it widens, so the forum's published audience is the scope's. A category of another kind
+       (help) only narrows. */
+    function follow(contactListId, visibility) {
+        const category = contactListId ? one(F + "ForumCategory", {contactListId}, true) : null
+        if (!category) return
+        const rank = categoryRank(category.visibility)
+        if (rank < visibility || (CATEGORY_VISIBILITY.includes(category.visibility) && rank > visibility)) {
+            update(category, {
+                visibility: CATEGORY_VISIBILITY[visibility],
+                policyRevision: Number(category.policyRevision || 0) + 1
+            })
+            forum.scopeChanged(contactListId)
+        }
+    }
     /* What was in a scope's category follows the scope to the category that takes its place: the conversations of its
-       records, the review items that wait, and the categories below it. */
+       records, its forum's topics with their posts (so none is left in a category that no scope bounds any more), its
+       mail addresses, its sanctions and rules, the review items that wait, and the categories below it. The old category, empty now, is taken out
+       of the forum. */
     function rescope(siteId, oldContactListId, contactListId) {
         if (!oldContactListId || oldContactListId === contactListId) return
         for (let batch = 0; batch < 40; batch++) {
             const topics = Array.from(
-                find(F + "ForumTopic", {siteId, contactListId: oldContactListId, kind: "record"})
+                find(F + "ForumTopic", {siteId, contactListId: oldContactListId})
+                    .condition("kind", "in", ["record", "category"])
                     .limit(500)
                     .list()
             )
             for (const topic of topics) update(topic, {contactListId})
             if (topics.length < 500) break
         }
+        // a forum topic's posts carry its category (a record's carry none)
+        for (let batch = 0; batch < 200; batch++) {
+            const posts = Array.from(find(E + "CommunicationEvent", {contactListId: oldContactListId}).limit(500).list())
+            for (const post of posts) update(post, {contactListId})
+            if (posts.length < 500) break
+        }
+        for (const timer of rows(F + "ForumTopicTimer", {siteId, contactListId: oldContactListId, state: "pending"}, 2000))
+            update(timer, {contactListId})
+        for (const route of rows(F + "ForumMailRoute", {siteId, contactListId: oldContactListId}, 200))
+            update(route, {contactListId, revision: revisionOf(route) + 1})
+        // what its moderators set there holds in its place: sanctions and rules
+        for (const entity of ["ForumSanction", "ForumRule"])
+            for (const row of rows(F + entity, {siteId, contactListId: oldContactListId}, 2000)) update(row, {contactListId})
         for (const item of find(F + "ForumReviewItem", {siteId, contactListId: oldContactListId})
             .condition("state", "in", ["pending", "claimed"])
             .limit(2000)
@@ -79,22 +110,22 @@ kit => {
             update(item, {contactListId})
         for (const child of rows(F + "ForumCategory", {siteId, parentContactListId: oldContactListId}, 2000))
             if (child.contactListId !== contactListId) update(child, {parentContactListId: contactListId})
+        const old = one(F + "ForumCategory", {contactListId: oldContactListId}, true)
+        if (old && old.publicationState !== "disabled")
+            update(old, {publicationState: "disabled", policyRevision: Number(old.policyRevision || 0) + 1})
         forum.scopeChanged(oldContactListId)
     }
-    /* A category of the site that the caller owns and that is bound to nothing, no wider than the scope: the one to link. */
-    function linkable(siteId, contactListId, visibility, parentContactListId) {
+    /* A category of the site that is bound to nothing: the one to link. Linking a category that is not the scope's own
+       is the site's owners' and operators' (a list's own staff do not give it to a scope). */
+    function linkable(siteId, r, contactListId, parentContactListId) {
         const category = one(F + "ForumCategory", {contactListId: text(contactListId)})
         if (!category || category.siteId !== siteId) invalid("contactListId names no category of this site")
-        const access = forum.categoryAccess(category.contactListId)
-        if (!(forum.isOperator() || access?.isOwner || access?.canInvite))
-            invalid("contactListId names a category you do not own")
+        if (!r.access.owner) denied("Linking a category of the site to this is for the site's owners")
         if (
             find(M + "SmithyGroup", {contactListId: category.contactListId}).count() > 0 ||
             find(M + "SmithyRepository", {contactListId: category.contactListId}).count() > 0
         )
             invalid("contactListId names a category that is another group's or repository's")
-        if (categoryRank(category.visibility) < visibility)
-            invalid("policyRefused[contactListId]: That category is wider than this is")
         if (parentContactListId && forum.categoryChain(parentContactListId).includes(category.contactListId))
             invalid("contactListId names a category above this one")
         // the linked category takes the place of the scope's own in the tree, so the ceiling above it holds
@@ -121,8 +152,12 @@ kit => {
         if (enabled && above && !published(above)) invalid("policyRefused[enabled]: Turn the forum of the group above on first")
         // where the repository's conversations are now: its own category, else its group's or the site's
         const oldScope = isGroup ? own : core.scopeCategory(row)
+        // who reads a linked category before: linking must not open it to more readers (the anonymous, or the site's
+        // members), whatever its own visibility says
+        let before = null
         if (given(o.contactListId) && o.contactListId !== own) {
-            contactListId = linkable(siteId, o.contactListId, r.visibility, above)
+            before = forum.audience(text(o.contactListId))
+            contactListId = linkable(siteId, r, o.contactListId, above)
             linked = true
             update(row, {contactListId})
             // what was in the scope's own category follows it to the one that takes its place
@@ -142,6 +177,11 @@ kit => {
                 enabled,
                 linked
             )
+        if (before) {
+            const after = forum.audience(contactListId)
+            if ((after.anonymous && !before.anonymous) || (after.members && !before.members))
+                invalid("policyRefused[contactListId]: Linking that category would open it to more readers than it has")
+        }
         return {contactListId, enabled}
     }
     methods.setScopeForum = p => {
@@ -207,13 +247,14 @@ kit => {
 
     // ===== Report and Hide (§12.3) =====
     const TARGETS = ["repository", "group"]
-    /* A repository or a group as the caller views it (Not Found otherwise), its row locked. */
-    function target(p) {
+    /* A repository or a group as the caller views it (Not Found otherwise), its row locked. staffToo: the site's staff,
+       who hide anything (design §12.3), have it whether or not they may view it. */
+    function target(p, staffToo = false) {
         if (!TARGETS.includes(p.targetType)) invalid("targetType must be repository or group")
         core.site(p.siteId)
         const a = core.actor()
         const held = core.targetRights(p.siteId, p.targetType, p.targetId, a)
-        if (!held || !held.r.canView) missing()
+        if (!held || !(held.r.canView || (staffToo && held.r.access.staff))) missing()
         const entity = p.targetType === "group" ? "SmithyGroup" : "SmithyRepository"
         return {a, r: held.r, row: one(M + entity, {[p.targetType + "Id"]: p.targetId}, true)}
     }
@@ -251,7 +292,7 @@ kit => {
         })
     }
     methods.hideSmithyTarget = p => {
-        const {a, r, row} = target(p)
+        const {a, r, row} = target(p, true)
         writer(p.siteId)
         if (!core.mayHide(p.targetType, r, a)) denied("Hiding this needs the owner role on a group above it")
         fresh(revisionOf(row), p.expectedRevision)
@@ -267,16 +308,18 @@ kit => {
     }
 
     // ===== a topic made an issue (§12.5) =====
-    /* The categories whose topics may become issues of a repository: its own forum, and its top-level group's with what
-       is below it. */
+    /* The categories whose topics may become issues of a repository: its own forum's category and the categories of the
+       groups above it, no other group's below them. */
     function repositoryForum(r) {
-        const inside = new Set()
-        if (r.repo.contactListId)
-            for (const contactListId of forum.categorySubtree(r.repo.siteId, r.repo.contactListId)) inside.add(contactListId)
-        const top = r.chain[r.chain.length - 1]
-        if (top?.contactListId)
-            for (const contactListId of forum.categorySubtree(r.repo.siteId, top.contactListId)) inside.add(contactListId)
-        return inside
+        return new Set([r.repo.contactListId, ...r.chain.map(group => group.contactListId)].filter(id => !!id))
+    }
+    /* Whether an issue of a repository may quote a topic of a category: the category is read by at least who reads the
+       repository's issues (the anonymous for a public repository, the site's members for a members-only one), so the
+       issue opens the text to nobody new. A private repository's readers have roles in its groups, who read their
+       categories. */
+    function audienceCovers(contactListId, visibility) {
+        const reads = forum.audience(contactListId)
+        return visibility === 1 ? reads.anonymous : visibility === 2 ? reads.members : true
     }
     methods.convertTopicToIssue = p => {
         const r = core.repository(p.repositoryId, p.siteId)
@@ -289,7 +332,10 @@ kit => {
             const {t, event, a} = forum.topic(p.rootCommEventId, p.siteId)
             if (t.kind !== "category") invalid("Only a topic of a forum category becomes an issue")
             if (!repositoryForum(r).has(event.contactListId))
-                invalid("That topic is not in the forum of this repository or of its group")
+                invalid("That topic is not in the forum of this repository or of a group above it")
+            const confidentialIssue = flag(p.confidential)
+            if (!confidentialIssue && !audienceCovers(event.contactListId, r.visibility))
+                invalid("policyRefused[rootCommEventId]: That topic is read by fewer than this repository's issues are")
             if (!Array.isArray(p.postIds) || !p.postIds.length || p.postIds.length > 50)
                 invalid("postIds is a list of 1 to 50 posts of the topic")
             const quotes = []
@@ -315,7 +361,7 @@ kit => {
                         "</blockquote>"
                 )
             }
-            const confidential = flag(p.confidential)
+            const confidential = confidentialIssue
             const filed = kit.issues.fileIssue({
                 r,
                 partyId,
@@ -424,10 +470,9 @@ kit => {
     function fileMailReport(p) {
         const route = one(F + "ForumMailRoute", {routeId: p.routeId})
         if (!route || route.targetType !== "issue" || route.enabled !== "Y") invalid("This address takes no reports now")
-        const previous = ec.user.username
-        ec.user.internalLoginUser(p.username)
-        try {
-            return receipt(
+        // as the sender's account, and then as who was signed in again (a request's own user is never signed out)
+        return forum.asUser(p.username, () =>
+            receipt(
                 {siteId: route.siteId, routeId: p.routeId, title: p.title, body: p.body, operationId: p.operationId},
                 "fileMailReport",
                 () => {
@@ -439,10 +484,7 @@ kit => {
                     return {issueNumber: filed.issueNumber, rootCommEventId: filed.rootCommEventId, state: filed.state}
                 }
             )
-        } finally {
-            ec.user.logoutUser()
-            if (previous) ec.user.internalLoginUser(previous)
-        }
+        )
     }
     methods.claimHeldReport = p => {
         core.site(p.siteId)
@@ -480,5 +522,5 @@ kit => {
         forum.gateCommit(gated)
         return {allowed: true}
     }
-    return {applyForum, narrow, forumView, mailRouteView, fileMailReport, countPipelineRun}
+    return {applyForum, narrow, follow, forumView, mailRouteView, fileMailReport, countPipelineRun}
 }

@@ -42,4 +42,113 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="publicationId" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('openPublication', context).publicationId"/>
         </actions>
     </service>
+
+    <!-- impl-marketing P12 (design-drawers-commons §19; design-marketing §10 SurveyDistribution, §13 SubmitForm; F20, F70): the
+        publication services every app's forms share, beside open#Publication. Marketing's mantle.marketing.MarketingFormServices are
+        thin wrappers adding the campaign, the site's Marketing mount and the promotional eligibility of invitations. -->
+    <service verb="store" noun="Publication" allow-remote="false">
+        <description>A new publication of a form (formId) or a change of one (publicationId, at expectedRevision: REVISION_CHANGED
+            naming the current one) by the form's editor (its purpose's edit permission and organization; RECORD_UNAVAILABLE for a
+            form or publication not theirs): the access kind its purpose admits (PUBLICATION_NOT_OFFERED otherwise), the repeat
+            policy, the site, the opening interval (fromDate empty: a draft; INTERVAL_INVALID; FORM_NOT_PUBLISHED before its
+            questions are), the heading, introduction and completion words (no expression, bounded), the context record. A closed
+            publication is not changed (PUBLICATION_CLOSED); one with answers keeps its access kind (PUBLICATION_ANSWERED).</description>
+        <in-parameters>
+            <parameter name="publicationId"/>
+            <parameter name="formId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="accessEnumId"/>
+            <parameter name="repeatEnumId"/>
+            <parameter name="siteId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="titleText"/>
+            <parameter name="introText"/>
+            <parameter name="completionMessage"/>
+            <parameter name="contextEntityName"/>
+            <parameter name="contextId"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="created" type="Boolean"/></out-parameters>
+        <actions>
+            <script><![CDATA[
+                const input = {}
+                for (const name of ['publicationId', 'formId', 'expectedRevision', 'accessEnumId', 'repeatEnumId', 'siteId', 'fromDate',
+                        'thruDate', 'description', 'titleText', 'introText', 'completionMessage', 'contextEntityName', 'contextId'])
+                    if (context.containsKey(name) && context[name] !== undefined) input[name] = context[name]
+                const out = ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('storePublication', input)
+                publicationId = out.publicationId
+                created = out.created
+            ]]></script>
+        </actions>
+    </service>
+    <service verb="preview" noun="Publication" allow-remote="false">
+        <description>What a respondent sees of a publication (its heading, introduction, the customer-visible questions as of its
+            opening or now with their rules, the completion words) and its state, for its form's editor or reader; changes nothing.</description>
+        <in-parameters><parameter name="publicationId" required="true"/></in-parameters>
+        <out-parameters><parameter name="publication" type="Map"/><parameter name="page" type="Map"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('previewPublication', context)"/>
+            <set field="publication" from="out.publication"/>
+            <set field="page" from="out.page"/>
+        </actions>
+    </service>
+    <service verb="close" noun="Publication" allow-remote="false">
+        <description>A publication stops taking answers at thruDate (now or later), by its form's editor at the revision read; its
+            answers are kept. A closed one answers closed false.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="closed" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('closePublication', context)"/>
+            <set field="publicationId" from="out.publicationId"/>
+            <set field="closed" from="out.closed"/>
+        </actions>
+    </service>
+    <service verb="create" noun="Invitations" allow-remote="false">
+        <description>The form's editor invites recipients ([{partyId, contactPartyId, emailAddress, invitationKey}]) to an open or
+            draft publication of invited recipients (PUBLICATION_NOT_OFFERED otherwise, PUBLICATION_CLOSED when closed), each once by
+            its key; the app's own service sends them and makes their links.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="recipients" type="List" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="invitationIds" type="List"/><parameter name="createdCount" type="Integer"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('createInvitations', context)"/>
+            <set field="invitationIds" from="out.invitationIds"/>
+            <set field="createdCount" from="out.createdCount"/>
+        </actions>
+    </service>
+    <service verb="accept" noun="Submission" authenticate="anonymous-all" allow-remote="false">
+        <description>An answer to a publication, for an app's public page that checked the site, the visitor's limits and an
+            invitation's link (invitationId) or a signed-in account (partyId) first: while the publication is open
+            (PUBLICATION_CLOSED), against the form as of now; an unknown or internal field (FIELD_UNKNOWN) and a value for a field its
+            rules hide (FIELD_HIDDEN) are refused, each value of its type (FORM_VALUES_INVALID). The page's request key makes one
+            submission: the same key with the same answers answers the first (alreadyApplied), with other answers REQUEST_KEY_REUSED.
+            An invitation answers once (ALREADY_ANSWERED); an account's publication with the once policy too. The response is kept
+            as submitted.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="values" type="Map"/>
+            <parameter name="requestKey" required="true"/>
+            <parameter name="invitationId"/>
+            <parameter name="partyId"/>
+            <parameter name="siteId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formSubmissionId"/>
+            <parameter name="formResponseId"/>
+            <parameter name="alreadyApplied" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/party/FormPublication.js').execute('acceptSubmission', context)"/>
+            <set field="formSubmissionId" from="out.formSubmissionId"/>
+            <set field="formResponseId" from="out.formResponseId"/>
+            <set field="alreadyApplied" from="out.alreadyApplied"/>
+        </actions>
+    </service>
 </services>

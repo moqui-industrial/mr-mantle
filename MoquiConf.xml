@@ -6,18 +6,47 @@
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->
-    <llm-facade><constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/></llm-facade>
+    <!-- and the user's organizations and active one for a new agent conversation's prompt (service/mantle/party/UserFactServices.xml;
+        mr-boss impl-sales P6, F65), the prerequisite of the apps' skills -->
+    <llm-facade>
+        <constitution-provider service="mantle.party.ConstitutionServices.get#ScopedConstitution"/>
+        <user-facts service="mantle.party.UserFactServices.get#OrganizationFacts"/>
+    </llm-facade>
     <!-- Smithy's quota for Git LFS (mr-pass plan/design-smithy.md §11 Quotas): asked before an upload is accepted; it
         returns at once for a repository with no SmithyRepository row -->
-    <!-- Smithy over the git host (design-smithy §9.1, §9.3, N-HOOKS): the status contexts agreement/ and ci/ are the
-        system's (the agreement check and the engine write them with authorization disabled, a user never); a merge
+    <!-- Smithy over the git host (design-smithy §9.1, §9.3, N-HOOKS): the status contexts agreement/, ci/ and deploy/ are
+        the system's (the agreement check and the engine, its runs and deployments, write them with authorization disabled, a user never); a merge
         request pushed for review, proposed on a page or opened from a fork starts hidden until Smithy's handler of its
         opened event has passed its text through the post gate (SmithyReviewServices.handle#MergeRequestEvent); and the
         answer to a push names the merge request's page under a root Smithy mount (a path: the host is the server's
         public URL) -->
+    <!-- A hidden repository (or one of a site without Smithy) sends no webhook and pushes to no mirror
+        (SmithyGitServices.check#Outbound) -->
+    <!-- A repository Smithy keeps is written through Smithy's REST, not the framework's, and the hosting offer and the
+        agreement check name Smithy's REST to a client such as the Dev AIDE (mr-moqui plans/design-dev-aide.md §21;
+        SmithyGitServices check#RestWrite, add#HostingOffer, check#AuthorSigned); the review threads of the framework's REST
+        are Mantle's (mantle.work.GitServices.handle#GitReviewThread) -->
     <git-server lfs-upload-check-service="mantle.smithy.SmithyGitServices.check#LfsUpload"
-            reserved-status-contexts="agreement/,ci/" review-start-hidden="true"
+            outbound-check-service="mantle.smithy.SmithyGitServices.check#Outbound"
+            rest-write-check-service="mantle.smithy.SmithyGitServices.check#RestWrite"
+            offer-service="mantle.smithy.SmithyGitServices.add#HostingOffer"
+            agreement-check-service="mantle.smithy.SmithyGitServices.check#AuthorSigned"
+            review-thread-service="mantle.work.GitServices.handle#GitReviewThread"
+            reserved-status-contexts="agreement/,ci/,deploy/" review-start-hidden="true"
             merge-request-url="/{repositoryPath}/-/merge-requests/{mergeRequestNum}"/>
+    <!-- Smithy decides whether a pipeline run may start, waits or is refused, its trust, owner and pool (design-smithy §10,
+        DG5), and names the run's page for its statuses -->
+    <git-ci run-check-service="mantle.smithy.SmithyPipelineServices.check#Run"
+            run-url-service="mantle.smithy.SmithyPipelineServices.get#RunUrl"/>
+    <!-- A real SSO sign-in that links a GitHub id claims Smithy's imported placeholders of that id (design-smithy §18.2,
+        DG8; SmithyImportServices.handle#SsoLinked checks the flow, its endpoints and the provider's host) -->
+    <user-facade><login sso-linked-service="mantle.smithy.SmithyImportServices.handle#SsoLinked"/></user-facade>
+    <!-- Marketing P22 (mr-boss impl-marketing P22, F72): Mantle's answer to the framework's sms-consent hook, from its consent
+        records and SMS suppressions, asked for every sender of a promotional text, a campaign's dispatch running as the system
+        included (MessageSms.js consent; mr-moqui docs/tools/Comms.md "Provider hooks") -->
+    <screen-facade><shell-providers>
+        <sms-consent name="mantle.consent" service="mantle.party.MessageSmsServices.check#SmsConsent"/>
+    </shell-providers></screen-facade>
     <webapp-list><webapp name="webroot">
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>
@@ -27,5 +56,12 @@
         servable); bounded, as each generation change leaves the earlier keys behind -->
     <cache-list>
         <cache name="mantle.product.feedServing" type="local" max-elements="2000" expire-time-live="86400"/>
+        <!-- Smithy DG7 (SmithySite.js): a docs or landing page rendered, by its blob id, and the component.xml of a commit,
+            by repository and commit id; bounded, as each change leaves the earlier keys behind -->
+        <cache name="smithy.docs.rendered" type="local" max-elements="2000" expire-time-live="86400"/>
+        <!-- the docs files of a repository at a commit (repositoryId|commitId|root), a list of at most 500 entries; a
+            rendering over 64 KB is not kept, so the renders hold at most about 128 MB -->
+        <cache name="smithy.docs.files" type="local" max-elements="1000" expire-time-live="86400"/>
+        <cache name="smithy.component" type="local" max-elements="5000" expire-time-live="86400"/>
     </cache-list>
 </moqui-conf>

@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.MarketingFormServices (F, IronStone Marketing design §14.2; impl-marketing P12): Marketing's form publications,
+    their invitation sends and the responses (MarketingForms.js), thin wrappers over Commons' mantle.party.FormPublicationServices and
+    the survey builder's mantle.party.FormDefinitionServices that add the campaign, the site's Marketing mount and the promotional
+    eligibility of invitations. Each service checks its permission and the organization itself (mantle/marketing/MarketingAccess.js,
+    the purposes' registrations). -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="get" noun="FormScope" allow-remote="false" read-only="true">
+        <description>The scope service of Marketing's form purposes (mantle.party.FormPurpose scopeServiceName): the organizations of
+            the caller's Marketing scope (every internal one for a holder of MARKETING_ALL_ORGANIZATIONS or a system administrator),
+            none for a caller who reads nothing of Marketing.</description>
+        <out-parameters><parameter name="organizationPartyIds" type="List"/></out-parameters>
+        <actions>
+            <set field="organizationPartyIds" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('formScope', context).organizationPartyIds"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Publication" allow-remote="false">
+        <description>A new publication of a Marketing form (formId) or a change of one (publicationId, at expectedRevision), by a
+            content author (MARKETING_CONTENT_EDIT) of the form's organization: the access kind its purpose admits, the repeat policy,
+            the site (a published one whose marketing mount targets the organization: SITE_INVALID), the campaign (an open one of the
+            organization, its context record and CampaignAssociation; CAMPAIGN_CLOSED, CAMPAIGN_FIXED), the list a respondent may choose to
+            subscribe to (a Marketing list of the organization), the closing date and the page's words; the Commons rules of
+            mantle.party.FormPublicationServices.store#Publication apply. It opens by publish#Publication.</description>
+        <in-parameters>
+            <parameter name="publicationId"/>
+            <parameter name="formId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="accessEnumId"/>
+            <parameter name="repeatEnumId"/>
+            <parameter name="siteId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="subscriptionListId"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="description"/>
+            <parameter name="titleText"/>
+            <parameter name="introText"/>
+            <parameter name="completionMessage"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="created" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('storePublication', context)"/>
+            <set field="publicationId" from="out.publicationId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="publish" noun="Publication" allow-remote="false">
+        <description>A publication opens at fromDate (now or later) once its readiness holds (NOT_READY naming what is missing: the
+            form's questions published, a site whose Marketing pages serve the organization, and for invitations a campaign), by a
+            content author of its organization at the revision read.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="fromDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="publicationId"/><parameter name="state"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('publishPublication', context)"/>
+            <set field="publicationId" from="out.publicationId"/>
+            <set field="state" from="out.state"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Publications" allow-remote="false" read-only="true">
+        <description>The Marketing publications of the caller's scope (a Marketing reader), of one form or campaign when named, newest
+            first (at most 200): each one's form, purpose, access, repeat policy, site, campaign, subscription choice, state, dates,
+            invitation and answer counts and public page.</description>
+        <in-parameters>
+            <parameter name="formId"/>
+            <parameter name="marketingCampaignId"/>
+        </in-parameters>
+        <out-parameters><parameter name="publications" type="List"/></out-parameters>
+        <actions>
+            <set field="publications" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('findPublications', context).publications"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Publication" allow-remote="false" read-only="true">
+        <description>One Marketing publication of the caller's scope (RECORD_UNAVAILABLE otherwise), or with formId alone what a new
+            publication of that form offers: its view, its readiness, its invitation sends with their invited and answered counts, the
+            access kinds, sites, campaigns and lists to choose from, and what the caller may do (canEdit, canPublish, canClose,
+            canInvite).</description>
+        <in-parameters>
+            <parameter name="publicationId"/>
+            <parameter name="formId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="publication" type="Map"/>
+            <parameter name="form" type="Map"/>
+            <parameter name="readiness" type="List"/>
+            <parameter name="invitationSends" type="List"/>
+            <parameter name="choices" type="Map"/>
+            <parameter name="canEdit" type="Boolean"/>
+            <parameter name="canPublish" type="Boolean"/>
+            <parameter name="canClose" type="Boolean"/>
+            <parameter name="canInvite" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getPublication', context))</script>
+        </actions>
+    </service>
+    <service verb="create" noun="Invitations" allow-remote="false">
+        <description>An invitation send of a publication of invited recipients (PUBLICATION_NOT_OFFERED, PUBLICATION_CLOSED; a campaign
+            and a site first: CAMPAIGN_REQUIRED, NOT_READY), by a send author (MARKETING_SEND_EDIT): a draft CampaignSend of the
+            publication's campaign to a topic and audience (mantle.marketing.CampaignSendServices.create#Send's rules) that names the
+            publication. Its preparation, approval, release and dispatch are the send's own, so an invitation reaches only a recipient
+            the promotional checks admit; each message carries the recipient's own invitation link, made at each attempt.</description>
+        <in-parameters>
+            <parameter name="publicationId" required="true"/>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="sendName"/>
+            <parameter name="messageTemplateId"/>
+            <parameter name="sendingProfileId"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+        </in-parameters>
+        <out-parameters><parameter name="campaignSendId"/></out-parameters>
+        <actions>
+            <set field="campaignSendId" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('createInvitations', context).campaignSendId"/>
+        </actions>
+    </service>
+    <service verb="find" noun="Responses" allow-remote="false" read-only="true">
+        <description>A Marketing form's responses for a reader of its purpose (MARKETING_AUDIENCE_VIEW or MARKETING_REPORT_VIEW) and
+            organization: only those submitted to a Marketing publication of the scope (one publication's when named), newest first (at
+            most 200), each with its publication, date, respondent (named for an audience reader only, else "A respondent"; anonymous
+            when none was verified), how it came (invitation, signed in, public page) and score; the form and publication choices and
+            the summary (get#ResponseStats). A case's feedback on any form is never among them.</description>
+        <in-parameters>
+            <parameter name="formId"/>
+            <parameter name="publicationId"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="formOptions" type="List"/>
+            <parameter name="formId"/>
+            <parameter name="publicationOptions" type="List"/>
+            <parameter name="publicationId"/>
+            <parameter name="rows" type="List"/>
+            <parameter name="stats" type="Map"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('findResponses', context))</script>
+        </actions>
+    </service>
+    <service verb="get" noun="Response" allow-remote="false" read-only="true">
+        <description>One response submitted to a Marketing publication of the caller's scope, for a reader of its purpose, with the form
+            as of its submission (each answer with its question and option text then), its publication, respondent (as find#Responses
+            names one), how it came and score. Any other response (a case's feedback, one of no Marketing publication, another
+            organization's) is RECORD_UNAVAILABLE.</description>
+        <in-parameters><parameter name="formResponseId" required="true"/></in-parameters>
+        <out-parameters><parameter name="response" type="Map"/></out-parameters>
+        <actions>
+            <set field="response" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getResponse', context).response"/>
+        </actions>
+    </service>
+    <service verb="get" noun="ResponseStats" allow-remote="false" read-only="true">
+        <description>The summary of a Marketing form's responses (one publication's when named) for a reader of its purpose: invited,
+            delivered and answered, the response rate, the average score of the answered scored questions with the answered count and
+            maximum apart (an unscored or unanswered question left out), and each choice's answers by option, each response read with
+            the form of its date; truncated past 5,000 responses.</description>
+        <in-parameters>
+            <parameter name="formId" required="true"/>
+            <parameter name="publicationId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters><parameter name="stats" type="Map"/></out-parameters>
+        <actions>
+            <set field="stats" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingForms.js').execute('getResponseStats', context).stats"/>
+        </actions>
+    </service>
+
+    <!-- ===== P13: lead rules and the Sales handoff (design §10 Leads, LeadRules, §15.3 Capture handoff; MarketingLeads.js) ===== -->
+    <service verb="find" noun="LeadRules" allow-remote="false" read-only="true">
+        <description>The lead rules of the caller's scope for a content author or the Marketing administrator (MARKETING_CONTENT_EDIT or
+            MARKETING_CONFIGURE; PERMISSION_DENIED otherwise), current ones unless includeEnded, of one organization, lead form publication
+            or campaign when named, newest first (at most 200): each one's lead form, campaign, trigger, team, Sales source, mapping,
+            condition, dates and state, with its handed-off, failed and waiting counts.</description>
+        <in-parameters>
+            <parameter name="organizationPartyId"/>
+            <parameter name="publicationId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="includeEnded"/>
+        </in-parameters>
+        <out-parameters><parameter name="ruleList" type="List"/></out-parameters>
+        <actions>
+            <set field="ruleList" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('findLeadRules', context).ruleList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="LeadRule" allow-remote="false" read-only="true">
+        <description>One lead rule of the caller's scope (RECORD_UNAVAILABLE otherwise), or with publicationId alone the current rule or
+            what a new one of that lead form offers, or with neither the lead form publications a new rule may route (not closed, none
+            current): the rule's view, its publication, the form's questions to map, the organization's current sales teams and offered
+            sources, its counts and recent captures (a Sales lead named only to a caller who opens it in Sales), and whether the caller
+            may change it. P18: with registrationPolicyId (and triggerEnumId, MltRegistered by default) an event offer's current rule of
+            that trigger or what a new one offers (offer in place of publication); with neither, also the event offers a new rule may
+            route (offerOptions).</description>
+        <in-parameters>
+            <parameter name="leadRuleId"/>
+            <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="rule" type="Map"/>
+            <parameter name="publication" type="Map"/>
+            <parameter name="offer" type="Map"/>
+            <parameter name="publicationOptions" type="List"/>
+            <parameter name="offerOptions" type="List"/>
+            <parameter name="choices" type="Map"/>
+            <parameter name="handoffs" type="Map"/>
+            <parameter name="captures" type="List"/>
+            <parameter name="canEdit" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('getLeadRule', context))</script>
+        </actions>
+    </service>
+    <service verb="store" noun="LeadRule" allow-remote="false">
+        <description>A new lead rule of a lead form's publication (publicationId; RULE_EXISTS when it has a current one), a change of a
+            current rule (leadRuleId at expectedRevision: a new rule from now replacing it, REVISION_CHANGED, RULE_ENDED), or its end
+            (end), by a content author (MARKETING_CONTENT_EDIT) of the publication's organization: the team (a current sales team of the
+            organization, TEAM_UNAVAILABLE; chosen or changed only by a holder of SALES_TEAM_MANAGE in the organization, TEAM_PERMISSION,
+            else the rule's own or Sales' default team; empty hands each lead to Sales' default team, TEAM_REQUIRED when there is none:
+            the user's call of Nov 14, 2026), the Sales source (offered to the organization, SOURCE_INVALID), the questions mapped to the
+            inquiry's name, organization, email and phone (at least one, MAPPING_REQUIRED) and to its notes, an optional condition on one
+            answer (CONDITION_INVALID), each a customer-visible question of the form (FIELD_UNKNOWN), and the notice the page shows. A
+            closed lead form takes no new rule (PUBLICATION_CLOSED). P18: an event offer's rule (registrationPolicyId of the
+            organization, RECORD_UNAVAILABLE; triggerEnumId MltRegistered or MltAttended, one current rule each: RULE_EXISTS) takes the
+            team and source alone: each attendee's own name and address go to Sales, no answer.</description>
+        <in-parameters>
+            <parameter name="leadRuleId"/>
+            <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="end" type="Boolean"/>
+            <parameter name="ruleName"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="nameFieldName"/>
+            <parameter name="organizationFieldName"/>
+            <parameter name="emailFieldName"/>
+            <parameter name="phoneFieldName"/>
+            <parameter name="noteFieldNames"/>
+            <parameter name="conditionFieldName"/>
+            <parameter name="conditionValue"/>
+            <parameter name="noticeText"/>
+        </in-parameters>
+        <out-parameters><parameter name="leadRuleId"/><parameter name="created" type="Boolean"/></out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('storeLeadRule', context)"/>
+            <set field="leadRuleId" from="out.leadRuleId"/>
+            <set field="created" from="out.created"/>
+        </actions>
+    </service>
+    <service verb="preview" noun="LeadRule" allow-remote="false" read-only="true">
+        <description>What a lead rule (saved, or the values given for a new one of a publication) would hand to Sales for a sample answer,
+            for a reader of the rules: the publication's latest answer (or the one named) for an audience reader (MARKETING_AUDIENCE_VIEW),
+            else an answer made of the questions; the mapped name, organization, email, phone, lead name and notes, whether the condition
+            lets it through, the queue, the source, the campaign, verification, the duplicate policy and a capture already made of that
+            answer. Changes nothing and asks nothing of Sales. P18: an event offer's rule (or registrationPolicyId and triggerEnumId for
+            a new one) previews its latest registration taken (an audience reader's), else a sample.</description>
+        <in-parameters>
+            <parameter name="leadRuleId"/>
+            <parameter name="publicationId"/>
+            <parameter name="registrationPolicyId"/>
+            <parameter name="triggerEnumId"/>
+            <parameter name="formSubmissionId"/>
+            <parameter name="dataSourceId"/>
+            <parameter name="teamPartyId"/>
+            <parameter name="nameFieldName"/>
+            <parameter name="organizationFieldName"/>
+            <parameter name="emailFieldName"/>
+            <parameter name="phoneFieldName"/>
+            <parameter name="noteFieldNames"/>
+            <parameter name="conditionFieldName"/>
+            <parameter name="conditionValue"/>
+        </in-parameters>
+        <out-parameters><parameter name="preview" type="Map"/></out-parameters>
+        <actions>
+            <set field="preview" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('previewLeadRule', context).preview"/>
+        </actions>
+    </service>
+    <service verb="find" noun="LeadCaptures" allow-remote="false" read-only="true">
+        <description>The captures of a lead rule, a campaign or a lead form publication of the caller's scope (a Marketing reader), of one
+            state when named, newest first (at most 200): state, when captured and handed off, attempts, the reason of a failure and when
+            it is tried again, new or joined lead, and the Sales lead only for a caller who opens it in Sales. No answer is shown.</description>
+        <in-parameters>
+            <parameter name="leadRuleId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="publicationId"/>
+            <parameter name="statusEnumId"/>
+        </in-parameters>
+        <out-parameters><parameter name="captureList" type="List"/></out-parameters>
+        <actions>
+            <set field="captureList" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('findLeadCaptures', context).captureList"/>
+        </actions>
+    </service>
+    <service verb="get" noun="LeadHandoffs" allow-remote="false" read-only="true">
+        <description>The handoff counts of a campaign, a lead rule or a lead form publication of the caller's scope, for any Marketing
+            reader (MARKETING_VIEW alone gives these and no pipeline): captured, new leads, joined open leads, waiting, failed and not
+            handed off, from Marketing's own capture rows (F66).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="leadRuleId"/>
+            <parameter name="publicationId"/>
+        </in-parameters>
+        <out-parameters><parameter name="handoffs" type="Map"/></out-parameters>
+        <actions>
+            <set field="handoffs" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('getLeadHandoffs', context).handoffs"/>
+        </actions>
+    </service>
+    <service verb="process" noun="LeadCaptures" allow-remote="false">
+        <description>ReprocessCapture (design §10): the failed or waiting captures named (leadCaptureIds, at most 200), or a rule's failed
+            ones, of the caller's scope handed to Sales again with the reason (REASON_REQUIRED), by a content author
+            (MARKETING_CONTENT_EDIT); each in its own transaction under its own operation key, so a capture Sales already took answers its
+            first lead; a capture handed off or skipped is left as it is, another organization's is not available.</description>
+        <in-parameters>
+            <parameter name="leadCaptureIds" type="List"/>
+            <parameter name="leadRuleId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="handedOff" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="unchanged" type="Integer"/>
+            <parameter name="unavailable" type="Integer"/>
+            <parameter name="results" type="List"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('processLeadCaptures', context))</script>
+        </actions>
+    </service>
+    <service verb="run" noun="LeadCaptures" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.run">
+        <description>The capture job (run_MarketingLeadCaptures; design §15.3 Capture handoff), as the system: each lead rule's accepted
+            answers of the last 30 days with no capture captured once (P18: each event offer rule's confirmed places or attendances
+            likewise), then the waiting captures and the failed ones whose time has come
+            handed to Sales, each in a transaction of its own; one that fails is logged and the next goes on.</description>
+        <in-parameters><parameter name="leadRuleId"/></in-parameters>
+        <out-parameters>
+            <parameter name="captured" type="Integer"/>
+            <parameter name="handedOff" type="Integer"/>
+            <parameter name="failed" type="Integer"/>
+            <parameter name="skipped" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('runLeadCaptures', context))</script>
+        </actions>
+    </service>
+    <service verb="capture" noun="FormSubmission" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.submission" operation-ref="formSubmissionId">
+        <description>Internal (after a lead form's answer commits, and the capture job), in a transaction of its own, as the system: an
+            accepted submission of a lead form captured once by the rule in effect when it was submitted (one capture per rule and
+            submission) and handed to Sales; an answer of another purpose, or with no rule, is left alone.</description>
+        <in-parameters><parameter name="formSubmissionId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="captured" type="Boolean"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="salesOpportunityId"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('captureSubmission', context))</script>
+        </actions>
+    </service>
+    <service verb="capture" noun="EventRegistration" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.registration" operation-ref="registrationId">
+        <description>Internal (the capture job; P18), in a transaction of its own, as the system: a registration of an event offer's lead
+            rule (confirmed for a registered rule, checked in for an attended one) captured once (one capture per rule and registration)
+            and handed to Sales; a registration of another offer is left alone.</description>
+        <in-parameters>
+            <parameter name="leadRuleId" required="true"/>
+            <parameter name="registrationId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="captured" type="Boolean"/>
+            <parameter name="statusEnumId"/>
+            <parameter name="salesOpportunityId"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('captureRegistration', context)"/>
+            <set field="captured" from="!!out.captured"/>
+            <set field="statusEnumId" from="out.statusEnumId || null"/>
+            <set field="salesOpportunityId" from="out.salesOpportunityId || null"/>
+        </actions>
+    </service>
+    <service verb="hand" noun="LeadCapture" authenticate="anonymous-all" allow-remote="false" operation="marketing.lead.capture.hand" operation-ref="leadCaptureId">
+        <description>Internal (capture#FormSubmission, the capture job, process#LeadCaptures), in a transaction of its own: one capture under
+            its lock handed to Sales' mantle.sales.OpportunityServices.store#LeadIntake as the system, in Sales' own transaction, under the
+            capture's operation key, with values only from Marketing's records (the publication's organization and campaign, the rule's
+            team and source and mapped published answers, Marketing's own verification); handed off with the lead made or joined, skipped
+            when the rule's condition is not met, or failed with the reason and the next try. A capture handed off or skipped answers as it
+            is.</description>
+        <in-parameters>
+            <parameter name="leadCaptureId" required="true"/>
+            <parameter name="reprocessedByUserId"/>
+            <parameter name="reprocessReason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="statusEnumId"/>
+            <parameter name="salesOpportunityId"/>
+            <parameter name="errorText"/>
+        </out-parameters>
+        <actions>
+            <script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingLeads.js').execute('handCapture', context))</script>
+        </actions>
+    </service>
+</services>

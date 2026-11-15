@@ -714,7 +714,8 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- Commerce P10: RecoveryPolicy (CartRecovery.js), with F118's checkout opt-ins and news list -->
     <service verb="get" noun="CartRecoveryPolicy" allow-remote="false">
         <description>A store's RecoveryPolicy (design-commerce §8): whether recovery is on (nothing is sent until it is), the
-            inactivity delay, the sender (built-in recovery), the most sends a cart gets, the recovery window and the
+            inactivity delay, the sender (built-in recovery, or a Marketing automation: view.senderOptions offers it while an
+            active automation of the store's organization has the store's cart trigger, impl-marketing P11), the most sends a cart gets, the recovery window and the
             PsetCartRecovery binding, each a dated setting with its default and a later change; and (F118) the checkout's
             optional emails (PsstCheckoutOptIns) and the news list (PsstNewsList). COMMERCE_VIEW and the store scope.</description>
         <in-parameters><parameter name="productStoreId" required="true"/></in-parameters>
@@ -732,7 +733,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="CartRecoveryPolicy" allow-remote="false">
         <description>The RecoveryPolicy from a date (now when empty, never past): enabled (true or false), delayMinutes (15 to
-            43200), sender (builtin), maxSends (1 to 5), retentionDays (1 to 365), and (F118) checkoutOptIns (none, or some
+            43200), sender (builtin, or automation while an active Marketing automation of the store's organization has the store's
+            cart trigger: AUTOMATION_UNAVAILABLE otherwise), maxSends (1 to 5), retentionDays (1 to 365), and (F118) checkoutOptIns (none, or some
             of reviewRequests, cartReminders, news) and newsListId (a current list of the store's organization). Each changed
             field is a dated setting ending the one it replaces; an empty one ends its setting (its default applies); a field
             not given is left. A change needs its reason. COMMERCE_STORE_EDIT and the store scope.</description>

@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.SegmentServices (Q, IronStone Marketing design §14.2; impl-marketing P5): an organization's segments (the native
+    MarketSegment, its owner the organization) with their native rules, a saved filter over registered projections and dated explicit
+    members, evaluated bounded and paged (MarketingSegments.js); and the audience eligibility every send is prepared and admitted with:
+    preview#Audience for the screens and classify#Recipients, internal, for the send and automation services (MarketingEligibility.js).
+    Each public service checks MARKETING_AUDIENCE_VIEW or _EDIT (a preview also MARKETING_SEND_EDIT or MARKETING_DISPATCH) and the
+    organization itself (mantle/marketing/MarketingAccess.js); a source of a filter needs its own read. An evaluation or a preview
+    subscribes no one and is no send authority. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <!-- ===== segments (design §4 Segments, SegmentDetail) ===== -->
+    <service verb="find" noun="Segments" allow-remote="false" read-only="true">
+        <description>The segments of the caller's scope (design §4 SegmentList), filtered in the query by text (id, name or description, ignoring case), organization, kind (MskRule, MskExplicit), parent, store and archived (N, the default; Y; all); paged (segmentList with its page fields; pageNoLimit for an export, up to 1,000). Each row: name, description, kind, organization, parent, store, the rules in words, the explicit inclusions and exclusions in effect, state and revision. No count of matches: an evaluation is the caller's own, under the sources they read (evaluate#Segment). Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses an organization outside the scope (ORGANIZATION_DENIED).</description>
+        <in-parameters>
+            <parameter name="text"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="segmentKindEnumId"/>
+            <parameter name="parentMarketSegmentId"/>
+            <parameter name="productStoreId"/>
+            <parameter name="archived"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+            <parameter name="pageNoLimit"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="segmentList" type="List"/>
+            <parameter name="segmentListCount" type="Integer"/>
+            <parameter name="segmentListPageIndex" type="Integer"/>
+            <parameter name="segmentListPageSize" type="Integer"/>
+            <parameter name="segmentListPageMaxIndex" type="Integer"/>
+            <parameter name="segmentListPageRangeLow" type="Integer"/>
+            <parameter name="segmentListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('findSegments', context)"/>
+            <set field="segmentList" from="found.segmentList"/>
+            <set field="segmentListCount" from="found.segmentListCount"/>
+            <set field="segmentListPageIndex" from="found.segmentListPageIndex"/>
+            <set field="segmentListPageSize" from="found.segmentListPageSize"/>
+            <set field="segmentListPageMaxIndex" from="found.segmentListPageMaxIndex"/>
+            <set field="segmentListPageRangeLow" from="found.segmentListPageRangeLow"/>
+            <set field="segmentListPageRangeHigh" from="found.segmentListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="Segment" allow-remote="false" read-only="true">
+        <description>One segment for SegmentDetail: its header (segment), native rules (classifications, geos, dimensions with their bounds), the saved filter in effect described (each top-level condition marked when the caller cannot read its source) and its dated history, the explicit members (current and ended, of parties the caller may see), the sources and fields the caller may build a filter on, and what the caller may do. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE (missing, another organization's or unowned).</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="segment" type="Map"/>
+            <parameter name="classifications" type="List"/>
+            <parameter name="geos" type="List"/>
+            <parameter name="dimensions" type="List"/>
+            <parameter name="filter" type="Map"/>
+            <parameter name="filterHistory" type="List"/>
+            <parameter name="members" type="List"/>
+            <parameter name="sources" type="List"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('getSegment', context)"/>
+            <set field="segment" from="found.segment"/>
+            <set field="classifications" from="found.classifications"/>
+            <set field="geos" from="found.geos"/>
+            <set field="dimensions" from="found.dimensions"/>
+            <set field="filter" from="found.filter"/>
+            <set field="filterHistory" from="found.filterHistory"/>
+            <set field="members" from="found.members"/>
+            <set field="sources" from="found.sources"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+    <service verb="store" noun="Segment" allow-remote="false">
+        <description>Makes a segment of an organization of the caller's scope (no marketSegmentId: its organization, name, description, kind MskRule or MskExplicit, parent and store), or changes one at the revision read (expectedRevision, its lastUpdatedStamp): name, description, store, kind and parent; a change of kind or parent raises its definition revision. A parent is a segment of the same organization, not archived, never the segment itself through its parents (PARENT_CYCLE); a store is the organization's. The owner is changed only by adoption. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses ORGANIZATION_DENIED, RECORD_UNAVAILABLE, SEGMENT_ARCHIVED, NAME_REQUIRED, KIND_INVALID, PARENT_CYCLE, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="organizationPartyId"/>
+            <parameter name="segmentName"/>
+            <parameter name="description"/>
+            <parameter name="segmentKindEnumId"/>
+            <parameter name="parentMarketSegmentId"/>
+            <parameter name="productStoreId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketSegmentId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('storeSegment', context)"/>
+            <set field="marketSegmentId" from="found.marketSegmentId"/>
+        </actions>
+    </service>
+    <service verb="archive" noun="Segment" allow-remote="false">
+        <description>Archives a segment at the revision read: no new use, its definition and history kept, a reason in the audit log. Archiving an archived segment changes nothing (archived false). Refused while an open segment names it as its parent (SEGMENT_IN_USE). Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketSegmentId"/>
+            <parameter name="archived" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('archiveSegment', context)"/>
+            <set field="marketSegmentId" from="found.marketSegmentId"/>
+            <set field="archived" from="found.archived"/>
+        </actions>
+    </service>
+    <service verb="duplicate" noun="Segment" allow-remote="false">
+        <description>A copy of a segment in its organization (design §4: a template is a duplicate): its kind, parent (unless archived), store, native rules, the filter in effect and the explicit members in effect, from now; named segmentName or "Copy of" its name. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="segmentName"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketSegmentId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('duplicateSegment', context)"/>
+            <set field="marketSegmentId" from="found.marketSegmentId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SegmentRules" allow-remote="false">
+        <description>One change of a rule segment's native rules (design §4 NativeRules) at the segment's revision: action addClassification or removeClassification (partyClassificationId), addGeo or removeGeo (geoId: an area, or a group of areas), storeDimension (uomDimensionTypeId, uomId, its default when empty, and minValue, maxValue or both, inclusive, min no more than max) or removeDimension. Classification rows are alternatives, geography rows are alternatives, dimension bounds all hold, and the families populated all hold. The definition's revision rises. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, SEGMENT_ARCHIVED, KIND_INVALID (a segment of explicit members), RULE_INVALID, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="action" required="true"/>
+            <parameter name="partyClassificationId"/>
+            <parameter name="geoId"/>
+            <parameter name="uomDimensionTypeId"/>
+            <parameter name="uomId"/>
+            <parameter name="minValue"/>
+            <parameter name="maxValue"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketSegmentId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('storeSegmentRules', context)"/>
+            <set field="marketSegmentId" from="found.marketSegmentId"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SegmentFilter" allow-remote="false">
+        <description>A rule segment's saved filter (design §4 SavedFilter) at the segment's revision, as a new dated row, the one in effect ended: action replace (filter: {match: all|any, conditions: [{source, field, operator, value} or a nested group]}, empty to clear), addCondition (fieldKey source.field, operator, value), removeCondition (index of a top-level condition), setMatch (match all or any) or clear. Only the registered sources and fields (MarketingSegments.js sources), their operators and typed values, at most three levels and twenty conditions; no entity name, SQL or script. Every source named must be readable by the caller in the organization (SOURCE_UNAVAILABLE: Sales' leads, opportunities and accounts need the caller's own Sales read of the organization, purchases COMMERCE_VIEW and COMMERCE_ORDER_VIEW over a store of the organization in Commerce's store scope, store orders only). The definition's revision rises. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, SEGMENT_ARCHIVED, KIND_INVALID, FILTER_INVALID, VALUE_INVALID, SOURCE_UNAVAILABLE, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="action"/>
+            <parameter name="filter" type="Object"/>
+            <parameter name="fieldKey"/>
+            <parameter name="source"/>
+            <parameter name="field"/>
+            <parameter name="operator"/>
+            <parameter name="value" type="Object"/>
+            <parameter name="index" type="Integer"/>
+            <parameter name="match"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="marketSegmentId"/>
+            <parameter name="filterText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('storeSegmentFilter', context)"/>
+            <set field="marketSegmentId" from="found.marketSegmentId"/>
+            <set field="filterText" from="found.filterText"/>
+        </actions>
+    </service>
+    <service verb="store" noun="SegmentMember" allow-remote="false">
+        <description>An explicit member of a segment (design §4 ExplicitMembers; MarketSegmentParty, dated): action add (the default) includes (MspInclude, the default) or excludes (MspExclude, which wins over every match) a party from fromDate (now) until thruDate (none), in a role (none: _NA_); end ends the member's row now. A row is never deleted; a party added again after its end takes the same row with new dates, the audit log keeping the earlier ones. The party exists, is not disabled or merged and is not another user's personal contact. The member row's revision (expectedRevision) is named when the row exists. An explicit member subscribes no one. Needs MARKETING_AUDIENCE_EDIT (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, SEGMENT_ARCHIVED, KIND_INVALID, DATE_INVALID, REVISION_REQUIRED and STALE_REVISION.</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="partyId" required="true"/>
+            <parameter name="roleTypeId"/>
+            <parameter name="action"/>
+            <parameter name="memberKindEnumId"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+            <parameter name="comments"/>
+            <parameter name="expectedRevision"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="ended" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('storeSegmentMember', context)"/>
+            <set field="ended" from="found.ended"/>
+        </actions>
+    </service>
+    <service verb="evaluate" noun="Segment" allow-remote="false" read-only="true">
+        <description>A segment evaluated as of a time (asOf, now by default; design §4 Evaluation): bounded to the organization's audience (its lists' current members, the parties it owns, the segment's explicit members and what the filter's sources discover; AUDIENCE_TOO_LARGE past 5,000), the rule match joined by the explicit inclusions, within the parent's match, less the explicit exclusions; paged (evaluationList; show matched, the default, excluded or all), each row the party, its name, the rule it matched by or the reason it is left out. Nothing is stored and no one is subscribed. Needs MARKETING_AUDIENCE_VIEW (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE, PARENT_CYCLE and SOURCE_UNAVAILABLE (a filter, its own or a parent's, on a source the caller cannot read: no count is answered).</description>
+        <in-parameters>
+            <parameter name="marketSegmentId" required="true"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="show"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="evaluationList" type="List"/>
+            <parameter name="evaluationListCount" type="Integer"/>
+            <parameter name="evaluationListPageIndex" type="Integer"/>
+            <parameter name="evaluationListPageSize" type="Integer"/>
+            <parameter name="evaluationListPageMaxIndex" type="Integer"/>
+            <parameter name="evaluationListPageRangeLow" type="Integer"/>
+            <parameter name="evaluationListPageRangeHigh" type="Integer"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="evaluatedText"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingSegments.js').execute('evaluateSegment', context)"/>
+            <set field="evaluationList" from="found.evaluationList"/>
+            <set field="evaluationListCount" from="found.evaluationListCount"/>
+            <set field="evaluationListPageIndex" from="found.evaluationListPageIndex"/>
+            <set field="evaluationListPageSize" from="found.evaluationListPageSize"/>
+            <set field="evaluationListPageMaxIndex" from="found.evaluationListPageMaxIndex"/>
+            <set field="evaluationListPageRangeLow" from="found.evaluationListPageRangeLow"/>
+            <set field="evaluationListPageRangeHigh" from="found.evaluationListPageRangeHigh"/>
+            <set field="matchedCount" from="found.matchedCount"/>
+            <set field="excludedCount" from="found.excludedCount"/>
+            <set field="evaluatedText" from="found.evaluatedText"/>
+        </actions>
+    </service>
+    <!-- ===== audience eligibility (design §4 AudiencePreview; impl-marketing §1: what P8 prepares and P11 admits with) ===== -->
+    <service verb="preview" noun="Audience" allow-remote="false" read-only="true">
+        <description>An audience explained (design §4 AudienceSelection, Eligibility, RecipientPreview): for a topic (topicListId, a Marketing list, not archived) as of a time (asOf, now by default), the people of its lists (listIds; the topic itself when none and no segment) and segments (segmentIds), less those of excludeListIds and excludeSegmentIds, each put in one bucket by precedence: not available (inactive, merged or private), no valid address, suppressed (promotional), withdrawn or not subscribed (the topic's membership, its consent, the purpose by organization, the address's solicitation, another person's withdrawal at the same address), needs evidence (a legacy member with no evidenced grant), duplicate address (one chosen by the lowest party id, deduplicated by normalized address in the organization and channel), eligible (with the untracked flag: no PcpTracking grant). The buckets sum to the matched total (bucketList), with the reasons (reasonList), the memberships and exclusions counted, and the rows paged (recipientList; bucket to show one): names and whole addresses for an audience reader (MARKETING_AUDIENCE_VIEW), for anyone else the address masked and no name or party; a person the caller may not see is a count only. previewKey (from what was asked) and resultDigest (from who is eligible) identify the preview for the send prepared from it. Subscribes no one. Needs a Marketing read with MARKETING_AUDIENCE_VIEW, MARKETING_SEND_EDIT or MARKETING_DISPATCH (PERMISSION_DENIED); refuses RECORD_UNAVAILABLE (a list or segment missing, of another organization than the topic's or unowned), LIST_ARCHIVED, SEGMENT_ARCHIVED, CHANNEL_MISMATCH, PURPOSE_INVALID, TOO_MANY_SOURCES (over 20), SOURCE_UNAVAILABLE and AUDIENCE_TOO_LARGE.</description>
+        <in-parameters>
+            <parameter name="topicListId" required="true"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="bucket"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recipientList" type="List"/>
+            <parameter name="recipientListCount" type="Integer"/>
+            <parameter name="recipientListPageIndex" type="Integer"/>
+            <parameter name="recipientListPageSize" type="Integer"/>
+            <parameter name="recipientListPageMaxIndex" type="Integer"/>
+            <parameter name="recipientListPageRangeLow" type="Integer"/>
+            <parameter name="recipientListPageRangeHigh" type="Integer"/>
+            <parameter name="topic" type="Map"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="channelText"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="purposeText"/>
+            <parameter name="asOf" type="Timestamp"/>
+            <parameter name="asOfText"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="membershipCount" type="Integer"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="eligibleCount" type="Integer"/>
+            <parameter name="untrackedEligibleCount" type="Integer"/>
+            <parameter name="bucketList" type="List"/>
+            <parameter name="reasonList" type="List"/>
+            <parameter name="addressesShown" type="Boolean"/>
+            <parameter name="previewKey"/>
+            <parameter name="resultDigest"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingEligibility.js').execute('previewAudience', context)"/>
+            <set field="recipientList" from="found.recipientList"/>
+            <set field="recipientListCount" from="found.recipientListCount"/>
+            <set field="recipientListPageIndex" from="found.recipientListPageIndex"/>
+            <set field="recipientListPageSize" from="found.recipientListPageSize"/>
+            <set field="recipientListPageMaxIndex" from="found.recipientListPageMaxIndex"/>
+            <set field="recipientListPageRangeLow" from="found.recipientListPageRangeLow"/>
+            <set field="recipientListPageRangeHigh" from="found.recipientListPageRangeHigh"/>
+            <set field="topic" from="found.topic"/>
+            <set field="channelEnumId" from="found.channelEnumId"/>
+            <set field="channelText" from="found.channelText"/>
+            <set field="purposeEnumId" from="found.purposeEnumId"/>
+            <set field="purposeText" from="found.purposeText"/>
+            <set field="asOf" from="found.asOf"/>
+            <set field="asOfText" from="found.asOfText"/>
+            <set field="matchedCount" from="found.matchedCount"/>
+            <set field="membershipCount" from="found.membershipCount"/>
+            <set field="excludedCount" from="found.excludedCount"/>
+            <set field="eligibleCount" from="found.eligibleCount"/>
+            <set field="untrackedEligibleCount" from="found.untrackedEligibleCount"/>
+            <set field="bucketList" from="found.bucketList"/>
+            <set field="reasonList" from="found.reasonList"/>
+            <set field="addressesShown" from="found.addressesShown"/>
+            <set field="previewKey" from="found.previewKey"/>
+            <set field="resultDigest" from="found.resultDigest"/>
+        </actions>
+    </service>
+    <service verb="classify" noun="Recipients" allow-remote="false" read-only="true">
+        <description>Internal, for the services that prepare a send (P8) and admit to an automation (P11), which have checked the caller and the topic: people (partyIdList) classified for a topic (contactListId) and purpose (the topic's when empty) as of a time, each with its bucket and reason, address and its normalized key and the tracking flag, by the rule of preview#Audience (MarketingEligibility.js classify), with the bucket counts.</description>
+        <in-parameters>
+            <parameter name="contactListId" required="true"/>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recipientList" type="List"/>
+            <parameter name="bucketCounts" type="Map"/>
+            <parameter name="untrackedEligible" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingEligibility.js').execute('classifyRecipients', context)"/>
+            <set field="recipientList" from="found.recipientList"/>
+            <set field="bucketCounts" from="found.bucketCounts"/>
+            <set field="untrackedEligible" from="found.untrackedEligible"/>
+        </actions>
+    </service>
+    <!-- ===== Marketing P20 review: Assist's aggregate-only audience tool (the user's call of Nov 15) ===== -->
+    <service verb="count" noun="Audience" allow-remote="false" read-only="true">
+        <description>An audience's counts alone (preview#Audience's buckets and reasons, for Assist's marketing_audience_counts): for a topic (topicListId) and its lists and segments as preview#Audience takes them, the matched, membership, excluded, eligible and untracked eligible counts, each bucket and each reason with its count. Never a name, an address, a party id or a row. Needs MARKETING_AUDIENCE_VIEW in a Marketing read (PERMISSION_DENIED) and the topic and every source of the reader's Marketing scope (RECORD_UNAVAILABLE); refuses as preview#Audience does otherwise. Counts are shown as they are (the reader may open the same people in Audience preview).</description>
+        <in-parameters>
+            <parameter name="topicListId" required="true"/>
+            <parameter name="listIds" type="List"/>
+            <parameter name="segmentIds" type="List"/>
+            <parameter name="excludeListIds" type="List"/>
+            <parameter name="excludeSegmentIds" type="List"/>
+            <parameter name="channelEnumId"/>
+            <parameter name="purposeEnumId"/>
+            <parameter name="asOf" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="topic" type="Map"/>
+            <parameter name="channelText"/>
+            <parameter name="purposeText"/>
+            <parameter name="asOfText"/>
+            <parameter name="matchedCount" type="Integer"/>
+            <parameter name="membershipCount" type="Integer"/>
+            <parameter name="excludedCount" type="Integer"/>
+            <parameter name="eligibleCount" type="Integer"/>
+            <parameter name="untrackedEligibleCount" type="Integer"/>
+            <parameter name="bucketList" type="List"/>
+            <parameter name="reasonList" type="List"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingEligibility.js').execute('countAudience', context))</script></actions>
+    </service>
+</services>

@@ -4,8 +4,11 @@
 // (scopeContactListId) gives the scope's subtree only, and a topic of another category is Not Found in it; the category
 // is no wider than its group: a private group's is Not Found to a stranger and to a site moderator with no role through
 // every scoped read, and in no unscoped one, while a Guest of the group reads and posts; a narrowed group narrows its
-// category; a topic of the scope becomes an issue of a repository of it, by a Reporter, and stays linked to it; and a
-// silence its Owner sets in a group's category refuses an issue in that group's repositories and not elsewhere.
+// category, and a widened group widens it; a topic of the repository's category or of a group above it becomes an issue
+// of the repository, by a Reporter, and stays linked to it, unless fewer read the topic than the issue; a silence its
+// Owner sets in a group's category refuses an issue in that group's repositories and not elsewhere; and a category of
+// the site is linked to a scope by the site's owners only, never opening it to more readers, and what was in the scope's
+// own category moves to it.
 // Spec-local site, groups, db repositories and accounts. Regression suite: these are rules.
 // Run: ./moq test mr-mantle --spec SmithyForumScope
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
@@ -119,7 +122,18 @@ feature("an Owner turns a group's forum on and a repository's under it; a scoped
             feedLink: feed.includes("https://sfs.example.test/code/sfsgroup/-/forum/t/" + ids.groupTopic),
             topicInside: kind(op(null, "getTopic", {rootCommEventId: ids.groupTopic, scopeContactListId: ids.groupCategory})),
             topicOutside: kind(op(null, "getTopic", {rootCommEventId: ids.outsideTopic, scopeContactListId: ids.groupCategory})),
-            topicAbove: kind(op(null, "getTopic", {rootCommEventId: ids.groupTopic, scopeContactListId: ids.repositoryCategory}))
+            topicAbove: kind(op(null, "getTopic", {rootCommEventId: ids.groupTopic, scopeContactListId: ids.repositoryCategory})),
+            // the address a bound category's pages (its list archive, its held mail) are at: its group's forum
+            scopedUrl: (() => {
+                const was = ec.artifactExecution.disableAuthz()
+                try {
+                    return ec.resource
+                        .script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+                        .forumUrl(SITE, ids.repositoryCategory)
+                } finally {
+                    if (!was) ec.artifactExecution.enableAuthz()
+                }
+            })()
         }
     },
     then({
@@ -140,7 +154,8 @@ feature("an Owner turns a group's forum on and a repository's under it; a scoped
         feedLink,
         topicInside,
         topicOutside,
-        topicAbove
+        topicAbove,
+        scopedUrl
     }) {
         // made with the group, and not a forum until its Owner says
         before.enabled == false
@@ -164,6 +179,7 @@ feature("an Owner turns a group's forum on and a repository's under it; a scoped
         topicInside == null
         topicOutside == "NotFound"
         topicAbove == "NotFound"
+        scopedUrl == "https://sfs.example.test/code/sfsgroup/code/-/forum"
     }
 })
 
@@ -278,10 +294,25 @@ feature("a topic of the scope becomes an issue of a repository of it, by a Repor
                 operationId: "sfs-convert-4"
             }),
             links: op("SFS_STRANGER", "getTopicLinks", {rootCommEventId: ids.groupTopic}).linkList,
-            topic: op(null, "getTopic", {rootCommEventId: ids.groupTopic}).topic
+            topic: op(null, "getTopic", {rootCommEventId: ids.groupTopic}).topic,
+            // a category read by the site's members only: its topic is no public issue, and is a confidential one
+            narrower: (() => {
+                lib.set("mantle.forum.ForumCategory", {contactListId: ids.groupCategory}, {visibility: "members"})
+                lib.settled(SITE, "SFS_REPORTER")
+                const open = op("SFS_REPORTER", "convertTopicToIssue", {...input, operationId: "sfs-convert-5"})
+                lib.settled(SITE, "SFS_REPORTER")
+                const confidential = op("SFS_REPORTER", "convertTopicToIssue", {
+                    ...input,
+                    confidential: true,
+                    operationId: "sfs-convert-6"
+                })
+                lib.set("mantle.forum.ForumCategory", {contactListId: ids.groupCategory}, {visibility: "public"})
+                return [open.reason, confidential.issueNumber > made.issueNumber]
+            })()
         }
     },
-    then({stranger, made, issue, text, ofRecord, outside, links, topic}) {
+    then({stranger, made, issue, text, ofRecord, outside, links, topic, narrower}) {
+        narrower == ["policyRefused", true]
         stranger.reason == "accessDenied"
         made.issueNumber >= 1
         issue.title == "SFS from the forum"
@@ -327,10 +358,20 @@ feature("a silence its Owner sets in a group's category refuses an issue in that
             ),
             log: (op("SFS_OWNER", "findActions", {scopeContactListId: ids.groupCategory}).actionList || [])
                 .map(action => action.action)
-                .includes("silence")
+                .includes("silence"),
+            // the Owner reads what the member did in the scope, not the member's activity across the site; the site's
+            // moderator reads that too
+            ownerMember: (() => {
+                const out = op("SFS_OWNER", "getMember", {contactListId: ids.groupCategory, targetPartyId: "SFS_AUTHOR"})
+                return [out.memberState, out.membership, out.sanctionList.length, out.scopeActivity.postCount >= 2]
+            })(),
+            staffMember: !!op("SFS_MOD", "getMember", {contactListId: ids.groupCategory, targetPartyId: "SFS_AUTHOR"}).memberState
+                ?.trustLevel
         }
     },
-    then({maintainer, owner, here, elsewhere, topic, log}) {
+    then({maintainer, owner, here, elsewhere, topic, log, ownerMember, staffMember}) {
+        ownerMember == [null, null, 1, true]
+        staffMember == true
         maintainer.kind == "Unauthorized"
         !!owner.sanctionId == true
         here.kind == "Unauthorized"
@@ -338,5 +379,82 @@ feature("a silence its Owner sets in a group's category refuses an issue in that
         elsewhere.issueNumber >= 1
         topic == "Unauthorized"
         log == true
+    }
+})
+
+feature("a widened group widens its category; the site's owners link a category to a scope, never opening it, and what was in the scope's own moves to it", {
+    when() {
+        const groupRevision = groupId => revisionOf("SmithyGroup", {groupId})
+        // the other group was narrowed to members: widened again, its forum is the public's again
+        op("SFS_OWNER", "updateGroup", {groupId: ids.otherGroup, visibility: "public", expectedRevision: groupRevision(ids.otherGroup)})
+        const widened = lib.row("mantle.forum.ForumCategory", {
+            contactListId: lib.row("mantle.smithy.SmithyGroup", {groupId: ids.otherGroup}).contactListId
+        }).visibility
+        // a category nobody reads yet (not published): linking it to a public group's forum would publish it
+        const unpublished = lib.make("mantle.marketing.contact.ContactList", {
+            contactListTypeEnumId: "MAILBOX",
+            contactListName: "Staff room",
+            isPublic: "N",
+            postingEnumId: "ClpAnyUser"
+        }).contactListId
+        lib.make("mantle.forum.ForumCategory", {
+            contactListId: unpublished,
+            siteId: SITE,
+            slug: unpublished,
+            sequenceNum: 0,
+            publicationState: "disabled",
+            visibility: "members",
+            mode: "discussion",
+            policyRevision: 1
+        })
+        const opened = op(lib.OPERATOR, "setScopeForum", {
+            groupId: ids.otherGroup,
+            contactListId: unpublished,
+            expectedRevision: groupRevision(ids.otherGroup)
+        })
+        // the public category of the site linked to the private group: narrower, so it may be, by the site's owners only
+        const own = lib.row("mantle.smithy.SmithyGroup", {groupId: ids.privateGroup}).contactListId
+        const byOwner = op("SFS_OWNER", "setScopeForum", {
+            groupId: ids.privateGroup,
+            contactListId: ids.outside,
+            expectedRevision: groupRevision(ids.privateGroup)
+        })
+        const linked = op(lib.OPERATOR, "setScopeForum", {
+            groupId: ids.privateGroup,
+            contactListId: ids.outside,
+            expectedRevision: groupRevision(ids.privateGroup)
+        })
+        return {
+            widened,
+            opened: opened.reason,
+            byOwner: byOwner.reason,
+            linked: linked.contactListId,
+            // the private group's topic is in the linked category now, its posts with it, and the old category is out
+            topics: Array.from(
+                ec.entity
+                    .find("mantle.forum.ForumPostSearch")
+                    .condition({siteId: SITE, contactListId: ids.outside})
+                    .disableAuthz()
+                    .list()
+            )
+                .map(post => post.subject)
+                .includes("SFS private words"),
+            left: Array.from(
+                ec.entity.find("mantle.forum.ForumTopic").condition({siteId: SITE, contactListId: own}).disableAuthz().list()
+            ).length,
+            old: lib.row("mantle.forum.ForumCategory", {contactListId: own}).publicationState,
+            stranger: kind(op("SFS_STRANGER", "getTopic", {rootCommEventId: ids.outsideTopic}))
+        }
+    },
+    then({widened, opened, byOwner, linked, topics, left, old, stranger}) {
+        widened == "public"
+        opened == "policyRefused"
+        byOwner == "accessDenied"
+        linked == ids.outside
+        topics == true
+        left == 0
+        old == "disabled"
+        // what the private group's forum holds is the group's: Not Found to a stranger
+        stranger == "NotFound"
     }
 })

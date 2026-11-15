@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<!-- Comms' text messages (mr-boss impl-marketing P22, F57, F72-F74) over service/mantle/party/MessageSms.js: the answer to the
+    framework's sms-consent hook (registered in MoquiConf.xml), a STOP's withdrawal and suppression (SmsOptOut.eecas.xml) and a
+    text's segment estimate. Internal: nothing is remote. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="check" noun="SmsConsent" allow-remote="false" read-only="true">
+        <description>The sms-consent provider (org.moqui.comms.ProviderInterfaces sms#Consent), asked by the framework for every
+            sender of a promotional text, the system included: consent true only when a party holding toNumber has PcpSms granted
+            with an internal organization that owns fromNumber (one of its current telecom numbers; that organization's row, else the
+            global one, neither withdrawn) and toNumber has no SMS suppression of every organization or that one; false otherwise. The
+            topic is the ledger's to check, not this hook's. Reads only, with authorization disabled.</description>
+        <in-parameters>
+            <parameter name="fromNumber" required="true"/>
+            <parameter name="toNumber" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="consent" type="Boolean"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSms.js').execute('consent', context))</script></actions>
+    </service>
+    <service verb="note" noun="SmsKeyword" allow-remote="false">
+        <description>A STOP the framework kept (moqui.call.SmsOptOut optedOut Y, lastKeyword STOP): for each internal organization that
+            owns ourNumber, each party holding theirNumber gets a PcpSms withdrawal with it (source PcsSmsReply; once: one already
+            withdrawn there is left) and theirNumber an SMS suppression for it (MsrSmsStop, MssSmsReply; never doubled). Anything else
+            (a START, a HELP) changes nothing: new consent needs new evidence.</description>
+        <in-parameters>
+            <parameter name="ourNumber" required="true"/>
+            <parameter name="theirNumber" required="true"/>
+            <parameter name="optedOut"/>
+            <parameter name="lastKeyword"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="withdrawnCount" type="Integer"/>
+            <parameter name="suppressedCount" type="Integer"/>
+        </out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/party/MessageSms.js').execute('noteKeyword', context))</script></actions>
+    </service>
+</services>

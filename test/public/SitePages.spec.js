@@ -463,8 +463,14 @@ feature(
                 nav(users.merchandiser, {redirect: {oldPath, destinationTypeEnumId, destinationValue}})
             const toApi = redirect("/old-api", "SdtPath", "/api/v1")
             const fromReserved = redirect("/static/x", "SdtPath", "/pages/returns")
+            // a servlet answers on every host, so the framework reserves each declared one's first segment (the default
+            // conf's /dashboard proxy)
+            const fromServlet = redirect("/dashboard/old", "SdtPath", "/pages/returns")
             const offSite = redirect("/partner", "SdtExternal", "https://partner.example.com/")
             const intoAccount = redirect("/account/old", "SdtPath", "/pages/returns")
+            // ci and .well-known are the host's only in the sub-paths it uses: /ci/runner is, /.well-known/security.txt is not
+            const intoRunner = redirect("/ci/runner/jobs", "SdtPath", "/pages/returns")
+            const securityTxt = redirect("/.well-known/security.txt", "SdtPath", "/pages/returns")
             const first = redirect("/old-a", "SdtPath", "/old-b")
             const loop = redirect("/old-b", "SdtPath", "/old-a")
             const self = redirect("/old-c", "SdtPath", "/old-c")
@@ -484,8 +490,11 @@ feature(
                 category,
                 toApi,
                 fromReserved,
+                fromServlet,
                 offSite,
                 intoAccount,
+                intoRunner,
+                securityTxt,
                 first,
                 loop,
                 self
@@ -505,8 +514,11 @@ feature(
             r.category.draftRevision == 4
             code(r.toApi) == "PATH_RESERVED"
             code(r.fromReserved) == "PATH_RESERVED"
+            code(r.fromServlet) == "PATH_RESERVED"
             code(r.offSite) == "REDIRECT_OFF_SITE"
             code(r.intoAccount) == "PATH_RESERVED"
+            code(r.intoRunner) == "PATH_RESERVED"
+            r.securityTxt.error == ""
             r.first.error == ""
             code(r.loop) == "REDIRECT_LOOP"
             code(r.self) == "REDIRECT_LOOP"
@@ -671,6 +683,211 @@ feature(
             r.due.publicationStateEnumId == "SpsActive"
             r.redirect.publicationStateEnumId == "SpsFailed"
             r.redirect.failureCode == "WINDOW_PASSED"
+        }
+    }
+)
+
+// IronStone Marketing P14 (impl-marketing F23): the storeless marketing mount. A landing page is a page of the site's marketing
+// mount, worked through the mount's organization with MARKETING_CONTENT_EDIT, its text in the organization's page space; a page
+// of another organization's mount is refused, a Commerce designer cannot edit it and a Marketing author cannot edit a Shop's page.
+feature(
+    "a Marketing author drafts and publishes a storeless landing page on the site's marketing mount; the two apps' pages stay apart",
+    {
+        when() {
+            const marketer = (kind, organizationPartyId) =>
+                system(() => {
+                    const id = user(kind, organizationPartyId, ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT"])
+                    call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                    return id
+                })
+            const author = marketer("mktauthor", orgA)
+            const otherAuthor = marketer("mktother", orgB)
+            system(() => {
+                for (const [siteId, target] of [
+                    [ids.site, orgA],
+                    [ids.otherSite, orgB]
+                ])
+                    make("mantle.public.PublicSiteApp", {
+                        siteId,
+                        appMountId: "marketing",
+                        app: "marketing",
+                        pathPrefix: "/marketing",
+                        enabled: "Y",
+                        targetId: target
+                    })
+            })
+            const created = run(author, T + "store#SitePage", {
+                app: "marketing",
+                siteId: ids.site,
+                title: "Spring sale",
+                routePath: "spring",
+                pageText: "# Spring\n\nTwenty percent off.\n"
+            })
+            const binding = page(created.sitePageId)
+            // P15's review feature works this landing page
+            state.landingPageId = created.sitePageId
+            state.mktAuthor = author
+            const wikiPage = one("moqui.resource.wiki.WikiPage", {wikiPageId: binding.wikiPageId})
+            const orgSpace = one("mantle.marketing.content.MarketingPageSpace", {organizationPartyId: orgA})
+            const space = one("moqui.resource.wiki.WikiSpace", {wikiSpaceId: wikiPage.wikiSpaceId})
+            const template = run(author, T + "store#SitePage", {sitePageId: created.sitePageId, templateKey: "page.landing"})
+            const otherMount = run(otherAuthor, T + "store#SitePage", {
+                app: "marketing",
+                siteId: ids.site,
+                title: "Mine",
+                routePath: "mine"
+            })
+            const otherEdit = run(otherAuthor, T + "store#SitePage", {sitePageId: created.sitePageId, title: "Changed"})
+            const designerEdit = run(users.lead, T + "store#SitePage", {sitePageId: created.sitePageId, title: "Changed"})
+            const authorShop = run(author, T + "store#SitePage", {sitePageId: state.pageId, title: "Changed"})
+            const draft = live({appMountId: "marketing", routePath: "spring"})
+            const published = publish(author, created.sitePageId, {versionName: created.versionName})
+            const designerPublish = publish(users.lead, created.sitePageId, {versionName: created.versionName})
+            const read = live({appMountId: "marketing", routePath: "spring"})
+            const authorList = run(author, T + "find#SitePages", {app: "marketing"})
+            const designerList = run(users.lead, T + "find#SitePages", {siteId: ids.site})
+            return {
+                created,
+                binding,
+                orgSpace,
+                space,
+                template,
+                otherMount,
+                otherEdit,
+                designerEdit,
+                authorShop,
+                draft,
+                published,
+                designerPublish,
+                read,
+                authorList,
+                designerList
+            }
+        },
+        then(r) {
+            r.created.error == ""
+            r.binding.appMountId == "marketing"
+            r.orgSpace.wikiSpaceId == r.space.wikiSpaceId
+            r.space.restrictUpdate == "Y"
+            code(r.template) == "TEMPLATE_UNKNOWN"
+            code(r.otherMount) == "RECORD_UNAVAILABLE"
+            code(r.otherEdit) == "RECORD_UNAVAILABLE"
+            code(r.designerEdit) == "RECORD_UNAVAILABLE"
+            code(r.authorShop) == "RECORD_UNAVAILABLE"
+            code(r.draft) == "NOT_FOUND"
+            r.published.result.state == "published"
+            code(r.designerPublish) == "RECORD_UNAVAILABLE"
+            r.read.result.page.body.includes("Twenty percent off")
+            r.read.result.page.url == "/marketing/pages/spring"
+            r.authorList.pages.map(p => p.sitePageId).join() == r.created.sitePageId
+            r.authorList.pages[0].canPublish == true
+            !r.designerList.pages.some(p => p.sitePageId == r.created.sitePageId)
+            r.designerList.pages.some(p => p.sitePageId == state.pageId)
+        }
+    }
+)
+
+// IronStone Marketing P15 (impl-marketing §4 Nov 14): a landing page's optional review. An editor asks at the text version, an approver
+// of the organization is told and approves it (not whoever saved it or asked); a later save leaves the approval at its version; a
+// reader cannot ask; publishing never waits for a review.
+feature(
+    "a landing page's review: an author asks, an approver approves the version, a new save is not reviewed, publishing never waits",
+    {
+        when() {
+            const C = "mantle.marketing.CampaignServices."
+            const R = "mantle.marketing.MarketingContentServices.get#PageReview"
+            const author = state.mktAuthor
+            const sitePageId = state.landingPageId
+            const approver = system(() => {
+                const id = user("mktapprover", orgA, ["MARKETING_VIEW", "MARKETING_APPROVE"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            // an editor who also approves: asking makes the request theirs, so they do not decide it
+            const editor = system(() => {
+                const id = user("mkteditor", orgA, ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT", "MARKETING_APPROVE"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            const reader = system(() => {
+                const id = user("mktreader", orgA, ["MARKETING_VIEW"])
+                call("update#mantle.party.PartyRelationship", {partyRelationshipId: id, toRoleTypeId: "OrgInternal"})
+                return id
+            })
+            const before = run(author, R, {sitePageId})
+            const revision = before.review.revision
+            const readerAsks = run(reader, C + "request#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision
+            })
+            const asked = run(editor, C + "request#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                reason: "Ready for the sale"
+            })
+            const notices = one("moqui.security.user.NotificationMessage", {topic: "MarketingPageReview", recordId: sitePageId})
+            const own = run(editor, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "approve"
+            })
+            const forApprover = run(approver, R, {sitePageId})
+            const approved = run(approver, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "approve"
+            })
+            const after = run(author, R, {sitePageId})
+            const decision = one("mantle.marketing.campaign.MarketingDecision", {
+                marketingDecisionId: approved.marketingDecisionId
+            })
+            const saved = run(author, T + "store#SitePage", {sitePageId, pageText: "# Spring\n\nThirty percent off.\n"})
+            const changed = run(author, R, {sitePageId})
+            const stale = run(approver, C + "decide#MarketingApproval", {
+                targetKind: "page",
+                targetId: sitePageId,
+                targetRevision: revision,
+                decision: "refuse",
+                reason: "Old"
+            })
+            const published = publish(author, sitePageId, {versionName: saved.versionName})
+            return {
+                before,
+                readerAsks,
+                asked,
+                notices,
+                own,
+                forApprover,
+                approved,
+                after,
+                decision,
+                saved,
+                changed,
+                stale,
+                published,
+                revision
+            }
+        },
+        then(r) {
+            r.before.error == "" &&
+                r.before.review.stateText.startsWith("Not reviewed at version") &&
+                r.before.capabilities.canRequest == true
+            code(r.readerAsks) == "PERMISSION_DENIED"
+            r.asked.error == "" && r.asked.notifiedCount == 1 && r.notices != null
+            code(r.own) == "SELF_APPROVAL"
+            r.forApprover.capabilities.canDecide == true && r.forApprover.review.pending == true
+            r.approved.error == "" &&
+                r.after.review.approved == true &&
+                r.after.review.stateText.startsWith("Approved at version")
+            r.decision.targetVersionName == r.after.review.versionName && r.decision.targetKindEnumId == "MdtPage"
+            r.saved.error == "" && r.changed.review.revision == r.revision + 1 && r.changed.review.approved == false
+            r.changed.review.stateText.startsWith("Not reviewed at version") && r.changed.capabilities.canRequest == true
+            code(r.stale) == "STALE_REVISION"
+            r.published.error == "" && r.published.result.state == "published"
         }
     }
 )

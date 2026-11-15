@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- mantle.marketing.TrackingServices (K, IronStone Marketing design §14.2; impl-marketing P11, §4): the order-placed handler of the
+    Mantle SECA OrderPlacedRecordAttribution (MarketingTracking.secas.xml). P11 files the automation admission event; P20 adds the
+    attribution (record#OrderAttribution, MarketingAttribution.js); P15 adds the tracking links and their capture. -->
+<services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="handle" noun="OrderPlaced" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, the SECA OrderPlacedRecordAttribution's one handler (design §15.1), after an order's placement commits, in a transaction of its own: the order's admission event (order:orderId, the customer, the time placed) filed once for each active automation of its seller with the order-placed trigger, of the order's store or of every store; a failure of one automation is logged and the next goes on, and the placement never waits on it. P20: then the order's attribution (record#OrderAttribution) in a transaction of its own, so neither part's failure undoes the other or the placement; a failed attribution is logged and decided by the attribution job. Runs as the system.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="filedCount" type="Integer"/>
+            <parameter name="outcomeLinkId"/>
+        </out-parameters>
+        <actions>
+            <script><![CDATA[
+                filedCount = 0
+                try {
+                    filedCount = ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAutomations.js').execute('orderPlaced', context).filedCount
+                } catch (error) {
+                    ec.message.clearErrors()
+                    ec.logger.error('Order ' + orderId + ': its automation events were not filed: ' + String(error.message).split('\n')[0])
+                }
+                // P20: the attribution, apart (a probe: its own transaction and error frame)
+                outcomeLinkId = null
+                try {
+                    outcomeLinkId = ec.resource.script('component://mr-mantle/service/mantle/ledger/EntityLib.js')
+                        .probe('mantle.marketing.TrackingServices.record#OrderAttribution', {orderId}).outcomeLinkId || null
+                } catch (error) {
+                    ec.logger.error('Order ' + orderId + ': its attribution waits for the attribution job: ' + String(error.message).split('\n')[0])
+                }
+            ]]></script>
+        </actions>
+    </service>
+    <!-- P15: the tracking links and their capture (impl-marketing P15; design §8 TrackingLinks, TrackingLinkDetail, "Capture on the
+        authority", §18), over MarketingTracking.js. P13 built find#TrackingLinks minimally for Sales' lead forms (a campaign's codes,
+        each with its label and whether it is current), which this extends. -->
+    <service verb="find" noun="TrackingLinks" allow-remote="false" read-only="true">
+        <description>The tracking links of the caller's organizations (a campaign's when marketingCampaignId names one of them,
+            RECORD_UNAVAILABLE otherwise), current ones unless includeEnded, by text (the description or code), source, medium and type,
+            a page at a time; each with its label and whether it is current (Sales' lead forms read the two), its campaign, state,
+            destination in words, public URL, UTM values and non-automated clicks. Any Marketing reader (PERMISSION_DENIED for a caller
+            who reads nothing of Marketing).</description>
+        <in-parameters>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="includeEnded"/>
+            <parameter name="term"/>
+            <parameter name="utmSource"/>
+            <parameter name="utmMedium"/>
+            <parameter name="trackingCodeTypeEnumId"/>
+            <parameter name="pageIndex" type="Integer"/>
+            <parameter name="pageSize" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="trackingLinkList" type="List"/>
+            <parameter name="trackingLinkListCount" type="Integer"/>
+            <parameter name="trackingLinkListPageIndex" type="Integer"/>
+            <parameter name="trackingLinkListPageSize" type="Integer"/>
+            <parameter name="trackingLinkListPageMaxIndex" type="Integer"/>
+            <parameter name="trackingLinkListPageRangeLow" type="Integer"/>
+            <parameter name="trackingLinkListPageRangeHigh" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('findTrackingLinks', context)"/>
+            <set field="trackingLinkList" from="found.trackingLinkList"/>
+            <set field="trackingLinkListCount" from="found.trackingLinkListCount"/>
+            <set field="trackingLinkListPageIndex" from="found.trackingLinkListPageIndex"/>
+            <set field="trackingLinkListPageSize" from="found.trackingLinkListPageSize"/>
+            <set field="trackingLinkListPageMaxIndex" from="found.trackingLinkListPageMaxIndex"/>
+            <set field="trackingLinkListPageRangeLow" from="found.trackingLinkListPageRangeLow"/>
+            <set field="trackingLinkListPageRangeHigh" from="found.trackingLinkListPageRangeHigh"/>
+        </actions>
+    </service>
+    <service verb="get" noun="TrackingLink" allow-remote="false" read-only="true">
+        <description>A tracking link of the caller's organizations (RECORD_UNAVAILABLE otherwise): its public URL
+            (https://{site's canonical host}/trk/{siteId}/{publicCode}) and that URL's QR code (SVG text from the built barcode helper),
+            its campaign, site, destination (a landing page of the organization's Marketing mount or a registered https address), safe
+            destination, type, UTM values and dates, where it sends a visitor now, what the caller may do, and for a reader of reports
+            or an author its observations over the last periodDays (30 by default) and in all: clicks, page visits, visitors by key,
+            the events with no key, the recipients who clicked and the automated fetches set apart (aggregates, no person).</description>
+        <in-parameters>
+            <parameter name="trackingCodeId" required="true"/>
+            <parameter name="periodDays" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="trackingLink" type="Map"/>
+            <parameter name="qrSvg"/>
+            <parameter name="observations" type="Map"/>
+            <parameter name="capabilities" type="Map"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('getTrackingLink', context)"/>
+            <set field="trackingLink" from="found.trackingLink"/>
+            <set field="qrSvg" from="found.qrSvg"/>
+            <set field="observations" from="found.observations"/>
+            <set field="capabilities" from="found.capabilities"/>
+        </actions>
+    </service>
+    <service verb="store" noun="TrackingLink" allow-remote="false">
+        <description>A new tracking link of an open campaign (marketingCampaignId) or a change of one (trackingCodeId at expectedRevision,
+            its revision as read: STALE_REVISION otherwise), MARKETING_CAMPAIGN_EDIT in the campaign's organization (PERMISSION_DENIED,
+            RECORD_UNAVAILABLE; a closed campaign STATUS_INVALID; a legacy code of no organization is read only). The site is one whose
+            Marketing mount serves the organization, with a canonical host (SITE_INVALID); the destination a landing page of that
+            organization's Marketing mount (destinationKindEnumId TdkSitePage, sitePageId) or an https address (TdkUrl, redirectUrl) on
+            a host of a site that serves the organization or of its MarketingPolicy trackingDomains (DESTINATION_INVALID,
+            DESTINATION_NOT_REGISTERED); the safe destination likewise; the type and UTM values the organization's current vocabulary
+            (VALUE_INVALID). The public code is random, made once and kept.</description>
+        <in-parameters>
+            <parameter name="trackingCodeId"/>
+            <parameter name="expectedRevision"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="description"/>
+            <parameter name="comments"/>
+            <parameter name="siteId"/>
+            <parameter name="destinationKindEnumId"/>
+            <parameter name="sitePageId"/>
+            <parameter name="redirectUrl"/>
+            <parameter name="safeUrl"/>
+            <parameter name="trackingCodeTypeEnumId"/>
+            <parameter name="utmSource"/>
+            <parameter name="utmMedium"/>
+            <parameter name="utmContent"/>
+            <parameter name="disabled"/>
+            <parameter name="trackableLifetime"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="trackingCodeId"/>
+            <parameter name="publicCode"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('storeTrackingLink', context)"/>
+            <set field="trackingCodeId" from="found.trackingCodeId"/>
+            <set field="publicCode" from="found.publicCode"/>
+        </actions>
+    </service>
+    <!-- the public capture: PASS's tracking web scripts (mr-pass script/TrackingRedirect.js, TrackingPixel.js), through PASS's
+        facade and transport, local or from a registered remote frontend; the schema's only fields are the site, the code or token,
+        the visitor key and the kind -->
+    <service verb="resolve" noun="TrackingLink" authenticate="anonymous-all" allow-remote="false" read-only="true">
+        <description>resolveTrackingLink: where a link of a published site (its public code; a personalized token beside it) sends its
+            visitor now: its registered destination with its UTM values while it is current, else its safe destination, else none (the
+            neutral page); and whether the visitor key may be set (the organization's policy visitorKeys, or a recipient who allows
+            tracking, PcpTracking). The destination comes only from the link; nothing of the request names it. An unknown code, another
+            site's or an unpublished site is NotFound. Reads only.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('resolvePublic', input)"/>
+        </actions>
+    </service>
+    <service verb="record" noun="TrackingEvent" authenticate="anonymous-all" allow-remote="false">
+        <description>recordTrackingEvent: one observation of a published site: a link's click, a page visit carrying its code or a
+            known automated fetch (the code), or a send's pixel opened or fetched (a personalized token, no code); with the digest of the
+            visitor's opaque key where it may be kept (the organization's policy, or a recipient who allows tracking; never the key or a
+            party id) and the recipient only for a recipient who allows tracking (PcpTracking, checked now). Limited per client and code
+            (30 in ten minutes) and per site (20,000 an hour); over a limit, an unknown code or token, or another site's link nothing is
+            kept and the answer is the same (recorded false). An automated fetch is an observation, never a conversion. A
+            TrackingCodeVisit is written beside the event when the request has a local visit.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('recordPublic', input)"/>
+        </actions>
+    </service>
+    <!-- Commerce's Home and Online sales (impl-commerce §7, F28): the visits of a store's sites -->
+    <service verb="count" noun="StoreVisits" allow-remote="false" read-only="true">
+        <description>The visits of the sites whose enabled Shop mount sells for the stores (productStoreIds, each one of the caller's
+            Commerce stores: RECORD_UNAVAILABLE otherwise) from fromDate until thruDate: the distinct visitor keys of the
+            non-automated tracking events plus each such event with no key. Conversion is P20's attribution.</description>
+        <in-parameters>
+            <parameter name="productStoreIds" type="List"/>
+            <parameter name="fromDate" type="Timestamp"/>
+            <parameter name="thruDate" type="Timestamp"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visitCount" type="Integer"/>
+            <parameter name="siteCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingTracking.js').execute('countStoreVisits', context)"/>
+            <set field="visitCount" from="found.visitCount"/>
+            <set field="siteCount" from="found.siteCount"/>
+        </actions>
+    </service>
+    <!-- ===== Marketing P20: the attribution of placed orders (impl-marketing P20, §4 Nov 11; design-marketing §11 Attribution, §15.3,
+        X10), over MarketingAttribution.js ===== -->
+    <service verb="record" noun="OrderAttribution" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal (handle#OrderPlaced after the placement commits; the attribution job): the one attribution decision of a
+            placed sales order (MarketingOutcomeLink): the decision in force when there is one (a repeat answers it), else the most recent
+            eligible tracking event of the order's identity (its local visit and the visitor key that visit carried, or its customer as a
+            recipient who allows tracking now; a click or a page visit of a link of the seller, never an automated fetch or an open) within
+            the link's trackable lifetime (30 days when it names none), else the source opportunity's campaign, else unattributed; with
+            its evidence and evidence time, and TrackingCodeOrder beside a tracking event (never billable). An order that is not a placed
+            sales order gets none (attributable false). Runs as the system.</description>
+        <in-parameters><parameter name="orderId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="attributable" type="Boolean"/>
+            <parameter name="created" type="Boolean"/>
+            <parameter name="outcomeLinkId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="basisEnumId"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('recordOrderAttribution', context)"/>
+            <set field="attributable" from="!!found.attributable"/>
+            <set field="created" from="!!found.created"/>
+            <set field="outcomeLinkId" from="found.outcomeLinkId || null"/>
+            <set field="marketingCampaignId" from="found.marketingCampaignId || null"/>
+            <set field="basisEnumId" from="found.basisEnumId || null"/>
+        </actions>
+    </service>
+    <service verb="correct" noun="OrderAttribution" allow-remote="false">
+        <description>A staff correction of an order's attribution: MARKETING_CONFIGURE in the order's seller organization
+            (PERMISSION_DENIED; an order of another organization or no placed sales order RECORD_UNAVAILABLE), the decision read
+            (expectedOutcomeLinkId; STALE_REVISION when another is in force), a campaign of the seller or none (CAMPAIGN_INVALID) and a
+            reason (REASON_REQUIRED). The decision in force is ended, never changed, and its successor records the user, the time and the
+            reason; the same campaign again changes nothing.</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="expectedOutcomeLinkId"/>
+            <parameter name="marketingCampaignId"/>
+            <parameter name="reason"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="outcomeLinkId"/>
+            <parameter name="changed" type="Boolean"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('correctOrderAttribution', context)"/>
+            <set field="outcomeLinkId" from="found.outcomeLinkId"/>
+            <set field="changed" from="!!found.changed"/>
+        </actions>
+    </service>
+    <service verb="run" noun="OrderAttributions" authenticate="anonymous-all" allow-remote="false" operation="marketing.attribution.run">
+        <description>The attribution job (design §15.3): the sales orders placed in the last days (30 by default) that have no decision,
+            at most 200 a run (maxOrders, fewer), each decided by record#OrderAttribution in a transaction of its own; an order that is not
+            a placed sales order (a purchase order, an internal customer's) is passed over and takes no place (skippedCount); one that
+            fails is logged by its order and the rest go on, and the run's time and counts are kept on the watermark "attribution". Runs
+            as the system.</description>
+        <in-parameters>
+            <parameter name="days" type="Integer"/>
+            <parameter name="maxOrders" type="Integer"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="recordedCount" type="Integer"/>
+            <parameter name="failedCount" type="Integer"/>
+            <parameter name="skippedCount" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="found" from="ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingAttribution.js').execute('runOrderAttributions', context)"/>
+            <set field="recordedCount" from="found.recordedCount"/>
+            <set field="failedCount" from="found.failedCount"/>
+            <set field="skippedCount" from="found.skippedCount"/>
+        </actions>
+    </service>
+    <!-- ===== end of Marketing P20 ===== -->
+</services>

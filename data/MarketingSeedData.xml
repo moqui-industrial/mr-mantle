@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Marketing's fixed setup (impl-marketing P1 onward; IronStone Marketing design §1.1, §14.1): the values the marketing services
+    act on, so seed. The MARKETING_* and MESSAGE_* permissions and the organization filter rows are in MantleSetupData beside the
+    other apps'. Later phases append their blocks here. -->
+<entity-facade-xml type="seed">
+    <!-- ===== Marketing P1: foundation (impl-marketing P1, F3, F10) ===== -->
+    <!-- A campaign's owning organization (design §1.1): a dated MarketingCampaignParty row of this role, which
+        MarketingCampaign.organizationPartyId copies (CampaignServices keep them equal); managers and contributors have roles of
+        their own (P2) -->
+    <mantle.party.RoleType roleTypeId="MarketingOrganization" description="Marketing Organization"/>
+    <!-- The consent purpose of tracking (design §2 ground rules: tracking needs its own purpose; a recipient without it gets direct
+        links and no pixel) and the consent source of a checkout opt-in (Shop's store news choice, P7) -->
+    <moqui.basic.Enumeration enumId="PcpTracking" description="Tracking" sequenceNum="10" enumTypeId="PartyConsentPurpose"/>
+    <moqui.basic.Enumeration enumId="PcsCheckout" description="Checkout" sequenceNum="6" enumTypeId="PartyConsentSource"/>
+    <!-- Marketing's readiness (moqui.server.ReadinessProvider marketing.setup, registered by the app), called as the viewer by
+        Admin's registry: every user may call it, and it checks MARKETING_CONFIGURE and the organization itself, as Sales'
+        get#SalesReadiness is -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMarketingSetupServices" description="Marketing's readiness service"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMarketingSetupServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            artifactName="mantle.marketing.MarketingWorkspaceServices.get#Readiness"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingSetupServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMarketingSetupServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <!-- ===== end of Marketing P1 ===== -->
+
+    <!-- ===== Marketing P2: campaigns and approvals (impl-marketing P2, F42, F59; design-marketing §3, §14.3) ===== -->
+    <!-- A campaign's responsible people (design §3 CampaignParties): dated MarketingCampaignParty rows of these roles; the lifecycle
+        participant marketing.campaigns moves a departing user's rows on open campaigns -->
+    <mantle.party.RoleType roleTypeId="MarketingCampaignManager" description="Campaign Manager"/>
+    <mantle.party.RoleType roleTypeId="MarketingCampaignContributor" description="Campaign Contributor"/>
+    <!-- An approved campaign that changes materially returns to review (Planned) before it starts: its approval ends with the
+        revision it approved (CampaignServices) -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="MKTG_CAMP_APPROVED" toStatusId="MKTG_CAMP_PLANNED"
+            transitionName="Return Marketing Campaign to Review"/>
+    <!-- The approval topics (design §3 Approvals, F42): Marketing's, seeded here with their decision services, which the framework's
+        approve#NotificationMessage and refuse#NotificationMessage call as the user (CampaignServices approve#MarketingTarget and
+        refuse#MarketingTarget, deciding at the revision the notice names). Sent to the holders of MARKETING_APPROVE who work for the
+        target's organization, the author left out where they may not decide; a title names the campaign or send only, never an
+        audience or an address. MarketingSendApproval (P8) and MarketingAutomationApproval (P11) are seeded now, sent by those phases.
+        The BOSS links are Marketing's setup (mr-boss BossSetupMarketingData). -->
+    <moqui.security.user.NotificationTopic topic="MarketingCampaignApproval" inboxEnumId="NinNotifications"
+            description="Marketing campaign to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve campaign ${targetName} (revision ${targetRevision})"/>
+    <moqui.security.user.NotificationTopic topic="MarketingSendApproval" inboxEnumId="NinNotifications"
+            description="Marketing send to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve send ${targetName} (revision ${targetRevision})"/>
+    <moqui.security.user.NotificationTopic topic="MarketingAutomationApproval" inboxEnumId="NinNotifications"
+            description="Marketing automation to approve" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Approve automation ${targetName} (revision ${targetRevision})"/>
+    <!-- Their delivery settings, delegated by Admin to a holder of MARKETING_APPROVE (the framework's TopicRegistration, as
+        AdminConfigurationData's and Maintenance's rows); the decision services and the title are never editable there -->
+    <moqui.server.TopicRegistration topic="MarketingCampaignApproval" ownerApp="Marketing" purpose="A marketing campaign waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="40"/>
+    <moqui.server.TopicRegistration topic="MarketingSendApproval" ownerApp="Marketing" purpose="A marketing send waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="41"/>
+    <moqui.server.TopicRegistration topic="MarketingAutomationApproval" ownerApp="Marketing" purpose="A marketing automation waiting for the user's approval"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="42"/>
+    <!-- MARKETING_OWNER_CHANGE (as SALES_OWNER_CHANGE, impl-sales P6): moves another user's campaign manager and contributor rows, the
+        permission of the lifecycle participant marketing.campaigns (mr-boss grants it to Admin's identity operators); in this file,
+        not MantleSetupData's Marketing block, to keep Marketing's track out of the shared file -->
+    <moqui.security.UserPermission userPermissionId="MARKETING_OWNER_CHANGE" description="Marketing Owner Change (another user's campaign roles)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MARKETING_OWNER_CHANGE" fromDate="0"/>
+    <!-- The lifecycle services, called by Admin's registry as the operator: every user may call them, and each checks
+        MARKETING_OWNER_CHANGE itself (as Sales' MantleSalesWorkspaceServices) -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleMarketingLifecycleServices" description="Marketing's lifecycle services"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleMarketingLifecycleServices" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.marketing\.CampaignServices\.(find#OwnedCampaignRoles|transfer#CampaignRole)"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleMarketingLifecycleServicesALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleMarketingLifecycleServices" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
+    <!-- ===== end of Marketing P2 ===== -->
+
+    <!-- ===== Marketing P7: PASS Marketing, subscription and preferences (impl-marketing P7) ===== -->
+    <!-- The ledger's source of a public request's verification message (mantle.marketing.MarketingPortalServices): its build makes the
+        confirmation link of each attempt -->
+    <moqui.basic.Enumeration enumId="MdsrcSubscriptionVerify" description="Subscription verification" sequenceNum="40"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.MarketingPortalServices.build#VerificationDelivery"/>
+    <!-- ===== end of Marketing P7 ===== -->
+
+    <!-- ===== Marketing P8: sends and the composer (impl-marketing P8; design-marketing §5 Compose TestSend, §18 Test message) ===== -->
+    <!-- The ledger's source of a send's test message (mantle.marketing.CampaignSendServices): its build gives the send's own subject
+        (marked TEST), body and text with sample values, and the EmailTemplate it goes out under, whose subject, body and sender each
+        call gives (the sending profile's). A test is a promotional delivery that names the send's profile, so a suppressed address is
+        refused as any other is; it asks no recipient's consent (the ledger's snapshot says test) and enters no count. -->
+    <moqui.basic.Enumeration enumId="MdsrcCampaignSendTest" description="Campaign send test" sequenceNum="41"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.CampaignSendServices.build#TestDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND_TEST" description="Campaign send test message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- ===== end of Marketing P8 ===== -->
+
+    <!-- ===== Marketing P9: dispatch and delivery (impl-marketing P9; design-marketing §5 SendDetail's control, CampaignDelivery, §15.2,
+        §15.3) ===== -->
+    <!-- A recipient's dispatch states beside P8's Selected and Replaced: handed off to the ledger (its delivery holds every attempt and
+        receipt), skipped at dispatch with its reason (a withdrawal, a suppression, a changed address, the frequency cap), or not sent
+        because the send was cancelled first. -->
+    <moqui.basic.StatusItem statusId="CrsHandedOff" statusTypeId="CampaignRecipient" sequenceNum="2" description="Handed off"/>
+    <moqui.basic.StatusItem statusId="CrsSkipped" statusTypeId="CampaignRecipient" sequenceNum="3" description="Skipped at dispatch"/>
+    <moqui.basic.StatusItem statusId="CrsCancelled" statusTypeId="CampaignRecipient" sequenceNum="4" description="Not sent: the send was cancelled"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsHandedOff" transitionName="Hand off"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsSkipped" transitionName="Skip at dispatch"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsSelected" toStatusId="CrsReplaced" transitionName="Replace"/>
+    <!-- a send completed with failures sends again when the dispatcher retries its known retryable failures (retry#Recipients) -->
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsCompletedFailures" toStatusId="CsSending" transitionName="Retry failures"/>
+    <!-- The ledger's source of a send's messages (mantle.marketing.CampaignSendServices build#CampaignDelivery): each recipient's prepared
+        content with their own values, the List-Unsubscribe headers and link of a token made at each attempt for the sending profile's
+        site, the attachments copied at preparation and the send's reply-to; the EmailTemplate it goes out under, whose subject, body
+        and sender each call gives (the sending profile's). A promotional delivery of the send's organization and topic: the ledger
+        checks the recipient's consent within the organization and every suppression at each attempt. -->
+    <moqui.basic.Enumeration enumId="MdsrcCampaignSend" description="Campaign send" sequenceNum="40"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.marketing.CampaignSendServices.build#CampaignDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_CAMPAIGN_SEND" description="Campaign send message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- ===== end of Marketing P9 ===== -->
+
+    <!-- ===== Marketing P10: experiments (impl-marketing P10; design-marketing §5 ExperimentDetail) ===== -->
+    <!-- A send with an experiment: once its sample is handed off and settled while its remainder waits for the winner it is "Sample
+        sent"; the winner's release (release#ExperimentWinner) sends it on, a retry of the sample's failures too; a dispatcher may
+        cancel it, the remainder then not sent. -->
+    <moqui.basic.StatusItem statusId="CsSampleSent" statusTypeId="CampaignSend" sequenceNum="6" description="Sample sent"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSending" toStatusId="CsSampleSent" transitionName="Sample sent"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSampleSent" toStatusId="CsSending" transitionName="Release the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CsSampleSent" toStatusId="CsCancelled" transitionName="Cancel"/>
+    <!-- A remainder recipient is held until the winner's release (then selected, or skipped when the audience no longer admits it),
+        cancelled with its send or replaced by a later preparation. -->
+    <moqui.basic.StatusItem statusId="CrsHeld" statusTypeId="CampaignRecipient" sequenceNum="5" description="Held for the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsSelected" transitionName="Release the winner"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsSkipped" transitionName="Leave out at the winner's release"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsCancelled" transitionName="Cancel"/>
+    <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="CrsHeld" toStatusId="CrsReplaced" transitionName="Replace"/>
+    <!-- ===== end of Marketing P10 ===== -->
+
+    <!-- ===== Marketing P12: surveys and form publication (impl-marketing P12; design-marketing §10; F21, F53, F70) ===== -->
+    <!-- Marketing's purposes of the survey builder (mantle.party.FormPurpose, FormDefinitions.js): the survey (the framework's
+        DbfpSurvey), the lead form (P13's handoff) and an event's registration questions (P16), each built by a content author
+        (MARKETING_CONTENT_EDIT) and read by an audience or report reader of the organizations Marketing's scope answers
+        (MarketingFormServices get#FormScope), every field customer-visible (a respondent answers each). A survey is published to
+        invited recipients, anyone with the page or signed-in accounts; a lead form and registration questions to anyone or accounts,
+        never by an invitation. No case feedback or People form is in reach: those are other purposes. -->
+    <moqui.basic.Enumeration enumId="DbfpLead" description="Lead form" sequenceNum="31" enumTypeId="DbFormPurpose"/>
+    <moqui.basic.Enumeration enumId="DbfpRegistration" description="Registration questions" sequenceNum="32" enumTypeId="DbFormPurpose"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpSurvey" publicationPurposeEnumId="FppSurvey" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaInvited,FpaAnonymous,FpaAccount" formNoun="survey" fieldAudienceEnumId="CfaCustomer"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpLead" publicationPurposeEnumId="FppLead" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaAnonymous,FpaAccount" formNoun="form" fieldAudienceEnumId="CfaCustomer"/>
+    <mantle.party.FormPurpose purposeEnumId="DbfpRegistration" publicationPurposeEnumId="FppRegistration" editPermission="MARKETING_CONTENT_EDIT"
+            viewPermission="MARKETING_AUDIENCE_VIEW,MARKETING_REPORT_VIEW" scopeServiceName="mantle.marketing.MarketingFormServices.get#FormScope"
+            accessEnumIds="FpaAnonymous,FpaAccount" formNoun="form" fieldAudienceEnumId="CfaCustomer"/>
+    <!-- ===== end of Marketing P12 ===== -->
+
+    <!-- ===== Marketing P15: tracking links and capture; a landing page's optional review (impl-marketing P15, §4 Nov 14) ===== -->
+    <!-- A landing page's review (MarketingApprovals.js, the page kind): asked by a content author of the page, sent to the holders of
+        MARKETING_APPROVE who work for the mount's organization, decided at the text version the notice names; publishing stays the
+        content grant's act with or without it. The BOSS link is Marketing's setup. -->
+    <moqui.security.user.NotificationTopic topic="MarketingPageReview" inboxEnumId="NinNotifications"
+            description="Marketing landing page to review" typeString="info" showAlert="Y" persistOnSend="Y" receiveNotifications="Y"
+            isPrivate="Y" emailTemplateId="NOTIFICATION"
+            approveServiceName="mantle.marketing.CampaignServices.approve#MarketingTarget"
+            refuseServiceName="mantle.marketing.CampaignServices.refuse#MarketingTarget" refuseReasonRequired="Y"
+            titleTemplate="Review landing page ${targetName}"/>
+    <moqui.server.TopicRegistration topic="MarketingPageReview" ownerApp="Marketing" purpose="A landing page waiting for the user's review"
+            editableFields="showAlert,alertNoAutoHide,emailNotifications,pushNotifications,digestDefault"
+            subscriptionPermission="MARKETING_APPROVE" sequenceNum="43"/>
+    <!-- ===== end of Marketing P15 ===== -->
+
+    <!-- ===== Marketing P17: registrations, tickets and payment (impl-marketing P17; design-marketing §9, §18) ===== -->
+    <!-- The ledger's source of an event registration's messages (mantle.work.EventRegistrationServices build#RegistrationDelivery): the
+        receipt, the ticket with a new entry code, a waitlist offer, a status or a cancellation, and an offer's scheduled notices with
+        their Comms template; the EmailTemplate they go out under, whose subject, body and sender each call gives (the offer's
+        transactional sending profile's). -->
+    <moqui.basic.Enumeration enumId="MdsrcEventRegistration" description="Event registration" sequenceNum="45"
+            enumTypeId="MessageDeliverySource" enumCode="mantle.work.EventRegistrationServices.build#RegistrationDelivery"/>
+    <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_EVENT_REGISTRATION" description="Event registration message"
+            emailServerId="SYSTEM" subject=""/>
+    <!-- a ticket order (EventRegistrationPayments.js): the native sales order of a paid registration -->
+    <moqui.basic.Enumeration enumId="OrpEventRegistration" description="Event registration" sequenceNum="10" enumTypeId="OrderPurpose"/>
+    <!-- ===== end of Marketing P17 ===== -->
+
+    <!-- ===== Marketing P18: check-in (impl-marketing P18, §4 Nov 13, §5 Q7; F83) ===== -->
+    <!-- A door tablet's permission: mantle.work.EventRegistrationServices preview#CheckIn, resolve#EntryCode and checkIn#Registration
+        accept it beside MARKETING_EVENT_MANAGE only in a registered shared device's request whose route group fixes registrationPolicyId
+        to the offer and whose display account (the request's user) belongs to the offer's organization; anywhere else it opens nothing.
+        Meant for a display group alone (as People's PEOPLE_KIOSK_PUNCH): the app's setup gives it to its door tablet group. -->
+    <moqui.security.UserPermission userPermissionId="MARKETING_CHECKIN" description="Marketing Check-in (an event's door tablet checks in entry codes)"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="MARKETING_CHECKIN" fromDate="0"/>
+    <!-- ===== end of Marketing P18 ===== -->
+
+    <!-- ===== Marketing P20: reports (impl-marketing P20; design-marketing §11, CX-OPS-REPORTS) ===== -->
+    <!-- The row filter of Marketing's datasets (mr-boss report/boss-marketing-deliveries.json and boss-marketing-audience.json): a report
+        reader's Marketing scope (MarketingReportServices get#ReportRowFilter), so the report engine calls it as its own reviewed code; a
+        dataset names its organization field (organizationField). -->
+    <moqui.basic.Enumeration enumId="MantleMarketingScope" enumTypeId="ReportScopePolicy"
+            enumCode="mantle.marketing.MarketingReportServices.get#ReportRowFilter" description="the viewer's Marketing report scope (the organizations of their Marketing scope, for a report reader)"
+            optionValue="organizationField"/>
+    <!-- ===== end of Marketing P20 ===== -->
+
+    <!-- ===== Marketing P21: the campaign calendar (impl-marketing P21, F71; design-marketing §3 Calendar, §1.3 CX-SYNC) ===== -->
+    <!-- "Campaign calendar", a projected CalDAV collection (mantle.work.CalendarDavServices, impl-people P12's kind:
+        collectionId projected-MarketingCampaigns, read only, a device write refused), answered by its owner service as the user:
+        the campaign windows, scheduled sends, automation milestones, publication dates and events of their organizations, for a
+        holder of MARKETING_VIEW -->
+    <mantle.work.calendar.CalendarProjection projectionId="MarketingCampaigns" title="Campaign calendar"
+            description="The campaign windows, scheduled sends, automation milestones, publication dates and events of your organizations"
+            sequenceNum="30" ownerServiceName="mantle.marketing.MarketingWorkspaceServices.get#CampaignCalendar"/>
+    <!-- ===== end of Marketing P21 ===== -->
+</entity-facade-xml>

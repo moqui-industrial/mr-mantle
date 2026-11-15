@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+This software is in the public domain under CC0 1.0 Universal plus a
+Grant of Patent License.
+
+To the extent possible under law, the author(s) have dedicated all
+copyright and related and neighboring rights to this software to the
+public domain worldwide. This software is distributed without any
+warranty.
+
+You should have received a copy of the CC0 Public Domain Dedication
+along with this software (see the LICENSE.md file). If not, see
+<http://creativecommons.org/publicdomain/zero/1.0/>.
+-->
+<!-- Marketing P17 (IronStone Marketing design §9 "Where the seller's approval setting is on", §15.1; impl-marketing P17, §4): a ticket
+    order's registrations follow the order, not the payment. When a sales order's status becomes Approved (autoApprove#Order on the
+    payment's authorization, or a holder of SALES_ORDER_APPROVE in Sales' Awaiting approval list), Cancelled or Rejected, its places
+    are confirmed or cancelled once, in the same transaction as the order's change, by EventRegistrationServices; an order with no
+    registration is left alone at the cost of one indexed count. -->
+<secas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-eca-3.xsd">
+    <seca id="EventRegistrationOrderStatus" service="update#mantle.order.OrderHeader" when="post-service" run-on-error="false">
+        <condition><expression>statusChanged &amp;&amp; ['OrderApproved', 'OrderCancelled', 'OrderRejected'].includes(statusId)</expression></condition>
+        <actions><service-call name="mantle.work.EventRegistrationServices.handle#RegistrationOrderStatus" disable-authz="true"
+                in-map="{orderId:orderId, statusId:statusId}"/></actions>
+    </seca>
+    <!-- follow-up 1 (§4 Nov 15, the user's call): once a ticket order's approval commits, it is invoiced through Accounting's
+        create#FulfillmentInvoice, which captures its authorized payment (EventRegistrationServices.invoice#RegistrationOrder, in a
+        transaction of its own under the part's lock, never failing the approval); any other order returns at once -->
+    <seca id="EventRegistrationApprovedInvoice" service="update#mantle.order.OrderHeader" when="tx-commit">
+        <condition><expression>statusChanged &amp;&amp; statusId == 'OrderApproved'</expression></condition>
+        <actions><service-call name="mantle.work.EventRegistrationServices.invoice#RegistrationOrder" in-map="{orderId:orderId}"
+                disable-authz="true" transaction="force-new" ignore-error="true"/></actions>
+    </seca>
+</secas>

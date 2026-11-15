@@ -2,9 +2,14 @@
 // list mode has its own List-Id, List-Post and List-Archive by its address; an mbox archive is imported once, threaded by
 // its references (a reply before its parent in the file, a subject that answers one), an encoded subject and a flowed
 // text read, a file left out, a duplicate Message-ID and a second run adding nothing, each author a profile with no
-// account that shows a name and never an address, claimed by the account that verifies the address; an invitation
-// subscribes only when it is redeemed; mail to a list from an address that is no account's is held and answered once,
-// and posted as the account once the address is verified; and mail the gateway marked as spam is held for review.
+// account that shows a name and never an address (even where an account has that address), claimed by the account that
+// verifies the address; a message over the byte cap is passed, and an archive goes only into a list; an invitation
+// subscribes only when it is redeemed, and an inviter who is not the site's owner invites a day's allowance; mail to a
+// list from an address that is no account's is held and answered once, and posted as the account once the address is
+// verified, its sender's address kept no longer than its time; only the trusted gateway's Authentication-Results
+// authenticate a sender (RFC 8601: quoted strings, comments, the first result of a method); and mail the gateway marked as
+// spam is held for review, read only in the forum's own inbound account; a reply by a member's reply address or by
+// In-Reply-To to a notice it was mailed is a post in that topic.
 // Spec-local site, category and accounts; the fixture is test/forum/fixtures/list.mbox. Regression suite: these are rules.
 // Run: ./moq test mr-mantle --spec MailingLists
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
@@ -74,6 +79,7 @@ spec({
     setupSpec() {
         login(lib.OPERATOR)
         setProperty("pass_import_dir", "runtime://tmp/mantle-mbox-import")
+        setProperty("smtp_authserv_id", "gw.example.test")
         lib.site(SITE)
         lib.make("mantle.public.PublicSiteHost", {siteId: SITE, hostname: "mls.example.test", canonical: "Y"})
         ids.list = category("Dev", "list", "dev@" + LISTS)
@@ -82,6 +88,29 @@ spec({
         lib.settled(SITE, "MLS_MEMBER")
         lib.account(SITE, "MLS_OTHER", {handle: "mlsother"})
         lib.account(SITE, "MLS_OWNER", {member: true, siteRole: "owner"})
+        // an account that has an archive author's address, verified before the import: the import does not give it the
+        // author's posts by the From field
+        lib.account(SITE, "MLS_BOB", {unconfirmed: true})
+        lib.set("moqui.security.UserAccount", {userId: "MLS_BOB"}, {emailAddress: "bob@list-archive.test"})
+        lib.make("moqui.security.public.VerifiedAddress", {
+            userId: "MLS_BOB",
+            emailAddress: "bob@list-archive.test",
+            verifiedAt: ec.user.nowTimestamp
+        })
+        // the forum's own inbound account of the list's address (shared, fed by the mail listener), and a user's synced one
+        lib.make("moqui.basic.email.EmailAccount", {
+            emailAccountId: "MLS_FORUM_ACCOUNT",
+            accountKindEnumId: "EakShared",
+            emailAddress: "dev@" + LISTS
+        })
+        lib.make("moqui.basic.email.EmailServer", {emailServerId: "MLS_IMAP", storeHost: "imap.mls.test"})
+        lib.make("moqui.basic.email.EmailAccount", {
+            emailAccountId: "MLS_USER_ACCOUNT",
+            accountKindEnumId: "EakExternal",
+            ownerUserId: "MLS_MEMBER",
+            emailServerId: "MLS_IMAP",
+            emailAddress: "mls_member@smithy.test"
+        })
     }
 })
 
@@ -271,19 +300,38 @@ feature("an invitation to a list subscribes when it is redeemed, and nobody with
                 addresses: ["a@b.test"],
                 operationId: "mls-invite-4"
             }),
+            // the list's own owner, new on the site, invites twenty addresses a day
+            limited: (() => {
+                lib.account(SITE, "MLS_LISTOWNER", {handle: "mlslistowner"})
+                lib.make("mantle.marketing.contact.ContactListParty", {
+                    contactListId: ids.list,
+                    partyId: "MLS_LISTOWNER",
+                    roleTypeId: "ListOwner",
+                    statusId: "CLPT_ACCEPTED",
+                    fromDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 1000
+                })
+                return lib.op("MLS_LISTOWNER", SITE, "inviteListMembers", {
+                    contactListId: ids.list,
+                    addresses: Array.from({length: 22}, (unused, index) => "limit" + index + "@many.test"),
+                    operationId: "mls-invite-5"
+                })
+            })(),
             before,
             wrong: lib.op("MLS_MEMBER", SITE, "redeemInvitation", {token: "mls-known-token"}),
             redeemed: lib.op("MLS_OTHER", SITE, "redeemInvitation", {token: "mls-known-token"}),
             after: subscribed(),
-            member: list("mantle.marketing.contact.ContactListParty", {contactListId: ids.list}).map(
-                row => row.partyId + " " + row.statusId
-            )
+            member: list("mantle.marketing.contact.ContactListParty", {contactListId: ids.list})
+                .filter(row => row.roleTypeId !== "ListOwner")
+                .map(row => row.partyId + " " + row.statusId)
         }
     },
-    then({invited, again, notOwner, notList, before, wrong, redeemed, after, member}) {
+    then({invited, again, notOwner, notList, limited, before, wrong, redeemed, after, member}) {
+        limited.invited + limited.unsent == 20
+        limited.limitedCount == 2
         // two addresses invited (mail is not sent here: the site's template is not there), one not an address
         invited.invited + invited.unsent == 2
         invited.invalidCount == 1
+        invited.limitedCount == 0
         again.alreadyInvited == 1
         notOwner.kind == "Unauthorized"
         notList.kind == "Unprocessable"
@@ -348,7 +396,16 @@ feature(
                 )
                 lib.op("MLS_NEWCOMER", SITE, "claimHeldMail", {token: "mls-held-rest", operationId: "mls-claim-3"})
             }
+            // past its time a claimed message loses its sender's address and subject
+            for (const row of held("newcomer@held.test"))
+                lib.set("mantle.forum.ForumHeldMail", {heldId: row.heldId}, {expiresAt: ec.user.timestampMillis(ec.user.nowTimestamp) - 1000})
+            const ids0 = held("newcomer@held.test").map(row => row.heldId)
+            const expired = lib.run("mantle.forum.DeliveryServices.expire#HeldMail", {})
             return {
+                cleared: [
+                    expired.cleared >= 2,
+                    ids0.map(heldId => lib.row("mantle.forum.ForumHeldMail", {heldId})).every(row => !row.senderAddress && !row.subject)
+                ],
                 first,
                 second,
                 waiting: waiting.map(row => row.state + " " + row.targetType).sort(),
@@ -361,13 +418,14 @@ feature(
                 posted: posts(ids.list)
                     .filter(post => /MLS-HELD/.test(post.body))
                     .map(post => post.fromPartyId + " " + post.visibility + " " + post.subject),
-                after: held("newcomer@held.test").map(row => row.state + " " + (row.body == null)),
+                after: ids0.map(heldId => lib.row("mantle.forum.ForumHeldMail", {heldId})).map(row => row.state + " " + (row.body == null)),
                 queueAfter: lib
                     .op("MLS_OWNER", SITE, "findReviews", {contactListId: ids.list})
                     .reviewList.filter(review => review.targetType === "mail").length
             }
         },
-        then({first, second, waiting, item, elsewhere, wrong, unknown, postedBefore, posted, after, queueAfter}) {
+        then({cleared, first, second, waiting, item, elsewhere, wrong, unknown, postedBefore, posted, after, queueAfter}) {
+            cleared == [true, true]
             first.result == "held"
             first.notice == true
             // one reply an address a day
@@ -462,9 +520,10 @@ feature(
                     folderKindEnumId
                 })
             // stored as viewed, so the rule of a received message (which runs after its commit) does not also take it
-            const stored = (emailMessageId, emailFolderId, subject) =>
+            const stored = (emailMessageId, emailFolderId, subject, emailAccountId = "MLS_FORUM_ACCOUNT") =>
                 lib.make("moqui.basic.email.EmailMessage", {
                     emailMessageId,
+                    emailAccountId,
                     statusId: "ES_VIEWED",
                     emailFolderId,
                     fromAddress: "mls_member@smithy.test",
@@ -481,11 +540,26 @@ feature(
             folder("MLS_INBOX", "EfkInbox")
             stored("MLS_JUNK_MESSAGE", "MLS_JUNK", "Junk offer")
             stored("MLS_INBOX_MESSAGE", "MLS_INBOX", "Inbox words")
+            // the same message in a user's own synced mailbox, whose header fields its owner writes, is not the forum's
+            stored("MLS_USER_MESSAGE", "MLS_JUNK", "Mine", "MLS_USER_ACCOUNT")
             lib.settled(SITE, "MLS_MEMBER")
             const junk = lib.run("mantle.forum.DeliveryServices.process#JunkInbound", {emailMessageId: "MLS_JUNK_MESSAGE"}).result
             const post = posts(ids.list).find(row => /MLS-JUNK/.test(row.body))
             return {
                 junk,
+                user: lib.run("mantle.forum.DeliveryServices.process#JunkInbound", {emailMessageId: "MLS_USER_MESSAGE"}).result,
+                // and so for the email rule of an Inbox message in it
+                userRule: lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                    emailAccountId: "MLS_USER_ACCOUNT",
+                    emailMessageId: null,
+                    headers: {
+                        "delivered-to": "dev@" + LISTS,
+                        "message-id": "<mls-user-rule@mls.test>",
+                        "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                    },
+                    fields: {from: "mls_member@smithy.test", subject: "Mine too", toList: ["dev@" + LISTS]},
+                    bodyPartList: [{contentType: "text/plain", contentText: "MLS-USER-RULE"}]
+                }).result,
                 inbox: lib.run("mantle.forum.DeliveryServices.process#JunkInbound", {emailMessageId: "MLS_INBOX_MESSAGE"}).result,
                 rule: lib.run("mantle.forum.DeliveryServices.handle#StoredEmail", {
                     emailMessageId: "MLS_INBOX_MESSAGE",
@@ -499,8 +573,10 @@ feature(
                 }).reasonFamily
             }
         },
-        then({junk, inbox, rule, post, family}) {
+        then({junk, user, userRule, inbox, rule, post, family}) {
             junk.result == "pending"
+            user.handled == false
+            userRule.handled == false
             inbox.handled == false
             rule == false
             post == "Junk offer pending"
@@ -508,3 +584,132 @@ feature(
         }
     }
 )
+
+feature("only the trusted gateway's Authentication-Results authenticate a sender: quoted strings, comments and a method's first result", {
+    when() {
+        const check = value => sys(() => forum().gatewayAuthenticated([value], "bob@sender.test"))
+        return {
+            plain: check("gw.example.test; dmarc=pass header.from=sender.test"),
+            spaced: check("gw.example.test; dkim=pass header . d=sender.test"),
+            quotedId: check('"gw.example.test" 1; dkim=pass header.i=@sender.test'),
+            otherServer: check("mx.elsewhere.test; dmarc=pass header.from=sender.test"),
+            inQuotes: check('gw.example.test; dkim=fail reason="x; dmarc=pass header.from=sender.test" header.d=sender.test'),
+            inComment: check("gw.example.test (wrapped; dmarc=pass header.from=sender.test); spf=pass smtp.mailfrom=sender.test"),
+            second: check("gw.example.test; dmarc=fail header.from=sender.test; dmarc=pass header.from=sender.test"),
+            otherDomain: check("gw.example.test; dmarc=pass header.from=evil.test"),
+            unset: withProperty("smtp_authserv_id", null, () => check("gw.example.test; dmarc=pass header.from=sender.test"))
+        }
+    },
+    then(out) {
+        out == {
+            plain: true,
+            spaced: true,
+            quotedId: true,
+            otherServer: false,
+            inQuotes: false,
+            inComment: false,
+            second: false,
+            otherDomain: false,
+            unset: false
+        }
+    }
+})
+
+feature("an archive goes only into a list, and a message over the byte cap is passed and counted; an author's handle is no reserved word", {
+    when() {
+        const location = "runtime://tmp/mantle-mbox-import/mls-cap.mbox"
+        const message = (from, id, subject, body) =>
+            "From " + from + " Mon Jan  1 10:00:00 2024\nFrom: Git <" + from + ">\nMessage-ID: <" + id + "@cap.test>\nSubject: " +
+            subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\n" + body + "\n\n"
+        ec.resource
+            .getLocationReference(location)
+            .putText(
+                message("git@cap.test", "c1", "MLS cap one", "A short one.") +
+                    message("git@cap.test", "c2", "MLS cap two", "Long text. ".repeat(200)) +
+                    message("git@cap.test", "c3", "MLS cap three", "Another short one.")
+            )
+        const input = {contactListId: ids.list, archiveName: "mls-cap.mbox", checksum: ec.resource.digest(location, "sha256")}
+        return withProperty("pass_mbox_max_message_bytes", "1000", () => {
+            const notList = lib.op("MLS_OWNER", SITE, "importMbox", {...input, contactListId: ids.plain})
+            const started = lib.op("MLS_OWNER", SITE, "importMbox", input)
+            for (let turn = 0; turn < 10; turn++) {
+                lib.run("mantle.forum.OperationServices.advance#Run", {runId: started.runId, budget: 50})
+                if (lib.row("mantle.forum.ForumJobRun", {runId: started.runId}).state !== "pending") break
+            }
+            const report = lib.op("MLS_OWNER", SITE, "getMboxImport", {importId: started.importId}).import.report
+            const author = list("mantle.forum.ForumPostSearch", {siteId: SITE, contactListId: ids.list}).find(post =>
+                /A short one/.test(post.body)
+            )
+            return {
+                notList: notList.kind,
+                report: [report.messages, report.oversize],
+                handle: lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: author.fromPartyId}).handle
+            }
+        })
+    },
+    then({notList, report, handle}) {
+        notList == "Unprocessable"
+        report == [2, 1]
+        handle != "git"
+        handle.startsWith("git-") == true
+    }
+})
+
+feature("a reply to a list's message, by its reply address or by In-Reply-To, is a post in that topic", {
+    when() {
+        const to = "dev@" + LISTS
+        const from = "mls_member@smithy.test"
+        const sent = (address, subject, text, more = {}) =>
+            lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                emailMessageId: null,
+                headers: {
+                    "delivered-to": address,
+                    "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
+                    "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                    ...more
+                },
+                fields: {from, subject, toList: [address]},
+                bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}]
+            }).result
+        lib.settled(SITE, "MLS_MEMBER")
+        const started = sent(to, "Replies by mail", "MLS-REPLY-ROOT")
+        const root = posts(ids.list).find(post => String(post.body).includes("MLS-REPLY-ROOT")).rootCommEventId
+        // the reply address a notice of the topic carries for this member
+        const address = sys(() => forum().replyAddress(SITE, root, ids.list, "MLS_MEMBER", root))
+        lib.settled(SITE, "MLS_MEMBER")
+        const byToken = sent(address, "Re: Replies by mail", "MLS-REPLY-TOKEN")
+        // a notice of the topic mailed to this member, its Message-ID the provider's, answered by In-Reply-To
+        const outboxId = lib.make("mantle.forum.ForumOutbox", {
+            siteId: SITE,
+            communicationEventId: root,
+            eventType: "post",
+            state: "done",
+            createdAt: ec.user.nowTimestamp
+        }).outboxId
+        lib.make("mantle.forum.ForumDelivery", {
+            outboxId,
+            siteId: SITE,
+            partyId: "MLS_MEMBER",
+            channel: "email",
+            state: "sent",
+            attempts: 1,
+            revision: 1,
+            providerId: "<mls-notice-1@mls.test>"
+        })
+        lib.settled(SITE, "MLS_MEMBER")
+        const byReference = sent(to, "Re: Replies by mail", "MLS-REPLY-REFERENCE", {"in-reply-to": "<mls-notice-1@mls.test>"})
+        const reply = marker => posts(ids.list).find(post => String(post.body).includes(marker))
+        return {started, byToken, byReference, root, viaToken: reply("MLS-REPLY-TOKEN"), viaReference: reply("MLS-REPLY-REFERENCE")}
+    },
+    then({started, byToken, byReference, root, viaToken, viaReference}) {
+        started.result == "posted"
+        byToken.result == "posted"
+        byReference.result == "posted"
+        root != null
+        viaToken.rootCommEventId == root
+        viaToken.communicationEventId != root
+        viaToken.fromPartyId == "MLS_MEMBER"
+        viaReference.rootCommEventId == root
+        viaReference.communicationEventId != root
+    }
+})

@@ -72,6 +72,56 @@ const TOKEN_WRITES = [
     'requestOrderCancel',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
+    // IronStone Sales P13: a quote link's acceptance or decline (input.token)
+    'respondSalesQuote',
+    // IronStone Marketing P7: a subscription request (anonymous: PASS's request key, its limits and the neutral receipt bound it)
+    // and its confirmation link's POST (input.token)
+    'requestSubscription',
+    'verifySubscription',
+    // IronStone Marketing P12: a form's answer (anonymous for a public publication: PASS's request key, its limits and the neutral
+    // receipt bound it; an invitation's link with input.token)
+    'submitMarketingForm',
+    // IronStone Marketing P15: a tracking event of the redirect, the pixel or a page carrying a code (anonymous: the authority's limits
+    // per client and code and per site bound it, and its answer is the same; a personalized link's or pixel's input.token)
+    'recordTrackingEvent',
+    // IronStone Marketing P17: a registration's reservation (anonymous: PASS's request key and the authority's limits bound it) and
+    // its completion, payment, read and cancellation by its capability (input.token) or the provider's return (input.key)
+    'reserveRegistration',
+    'completeRegistration',
+    'startRegistrationPayment',
+    // the provider's posted form of a pending payment, by the capability (the user's call, Nov 15)
+    'getRegistrationPaymentForm',
+    'getRegistration',
+    'cancelRegistration',
+]
+/* The operations an installed app's login key may call (mr-moqui plans/design-dev-aide.md §21.4 to §21.8: the Dev AIDE
+   connected to a group server by the app sign-in, /sso/appToken): its merge requests, fork, agreement, review threads
+   (getMergeRequestChanges answers them) and reviews, pipeline runs and their re-runs, and issues. A request whose user
+   came by any other login key (an access token, a session's key, a scoped key) calls no PASS operation (mr-pass
+   plan/design-smithy.md §5.5); the key's account has its normal rights, and a write is idempotent by its operationId as
+   a page's is. */
+const APP_KEY_OPERATIONS = [
+    'findMergeRequests',
+    'getMergeRequest',
+    'createMergeRequest',
+    'forkRepository',
+    'getAgreement',
+    'getMergeRequestChanges',
+    'createReviewComment',
+    'resolveReviewThread',
+    // §21.4 a review (approve, comment, request changes); merging stays on the server's page
+    'submitReview',
+    // §21.5 the checks: runs and their jobs read, a run re-run and a job retried by who may
+    'findPipelineRuns',
+    'getPipelineRun',
+    'getJobRun',
+    'getJobLog',
+    'rerunPipelineRun',
+    'retryJobRun',
+    // §21.6 the repository's issues: listed, read, and filed by Quick create
+    'findIssues',
+    'getIssue',
+    'createIssue',
 ]
 /* Reads only a registered frontend makes over its authority connection, never a browser (Shop P2: a theme release's
    manifest and files, which a remote frontend verifies and renders). */
@@ -97,6 +147,14 @@ const DOWNLOADS = [
     'getShopThemeAsset',
     // Smithy (mr-pass plan/design-smithy.md §15.2): a tree as a zip or tar.gz, a file the framework wrote
     'downloadArchive',
+    // IronStone Sales P13: an issued quote's PDF
+    'getSalesQuoteDocument',
+    // IronStone Sales P17: an order's confirmation as placed
+    'getSalesOrderDocument',
+    // Smithy DG5 (§15.6): a run's artifact or report
+    'downloadArtifact',
+    // Smithy DG7 (§15.8): a release's file
+    'downloadReleaseAsset',
 ]
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
@@ -190,6 +248,17 @@ const REASONS = [
     'notBuilt',
     // Smithy DG2: a credential change by an account with no password to give again needs a fresh sign-in
     'recentSignInRequired',
+    // IronStone Sales P13: a quote above the seller's threshold is accepted signed in; a quote answered already
+    'acceptanceSignInRequired',
+    'responseRecorded',
+    // Smithy DG6: a repository a moderator hid is not forked (design-smithy §12.3)
+    'repositoryHidden',
+    // Smithy DG8: the GitHub import (design-smithy §15.9)
+    'sourceRefused',
+    'importActive',
+    'numbersTaken',
+    // Smithy F6: a push mirror's new address, username or host key without its secret again
+    'secretRequired',
 ]
 const CODED = /^([A-Z][A-Z0-9_]+|[a-z][a-zA-Z0-9]+)(?:\[([A-Za-z][A-Za-z0-9_.]{0,63})\])?: ([^]*)$/
 /* Text a framework failure carries rather than a refusal a service wrote: a database or script error, a qualified entity or
@@ -234,6 +303,14 @@ function asSystem(work) {
         if (!was) ec.artifactExecution.enableAuthz()
     }
 }
+/* The kind of login key the request's header login used, as the framework tells it (ec.user.loginKeyKind): device (an
+   installed app's: a UserLoginKey with a deviceName, as /sso/appToken and a REST login with deviceName make it), token
+   (an access token: a description) or session (getLoginKey's); null for any other login, and when the request names no
+   key. A scoped key (create#UserScopedKey's) never reaches here: only its one service's login takes it. */
+function keyKind(key) {
+    if (!key || !ec.user.userId) return null
+    return ec.user.loginKeyKind || null
+}
 const callService = (name, input) =>
     ec.service.sync().throwOnError(true).name(name).parameters({ input }).call()
         .result
@@ -272,8 +349,11 @@ function envelope(error) {
 }
 /* One operation. p: {operation, siteId, input, delegation (the bearer credential), clientId, clientSecret,
    clientVerified (the transport authenticated the client: the gRPC listener's secret or the edge link), visitorAddress
-   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token)}.
-   Answers {result} (with download: {location, contentType, filename, disposition} for a file) or {error}. */
+   (rate limits only), file (an upload), sessionChecked (the servlet checked the browser session's CSRF token, or the
+   request came with a login key), headerKey (the login key of the request's api_key or login_key header), headerLogin
+   (the session's user came by such a header)}.
+   Answers {result} (with download: {location, contentType, filename, disposition} for a file, or sent: true when the
+   operation sent the file as the response itself) or {error}. */
 function handle(p) {
     // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
     // limit key, and the client the transport authenticated (never a flag in a service's input)
@@ -294,6 +374,16 @@ function run(p) {
         clientId = String(p.clientId || ''),
         input = { ...(p.input || {}) }
     if (!siteId) fail('NotFound', 'Resource not found')
+    // A user who came by a login key calls only the installed app's operations, and only with a device's key: an access
+    // token is for git and the framework's REST (design-smithy §5.5), and a session a key made carries no more
+    if (
+        (p.headerKey || p.headerLogin) &&
+        (keyKind(p.headerKey) !== 'device' || !APP_KEY_OPERATIONS.includes(operation))
+    )
+        fail(
+            'Unauthorized',
+            "accessDenied: A login key calls only an installed app's operations, and an access token none; sign in to the site",
+        )
     const registered =
         !!clientId &&
         account().clientRegistered(
@@ -359,7 +449,9 @@ function run(p) {
     if (DOWNLOADS.includes(operation)) {
         const file = result.attachment || result.export || result.file
         // the file's place stays here; the transport streams it
-        const { location, range, ...shown } = result
+        const { location, range, sent, ...shown } = result
+        // Smithy DG5: a run's artifact the engine sent as this request's response (send#RunArtifact): nothing to stream
+        if (sent === true) return { result: shown, sent: true }
         return {
             result: shown,
             download: {
@@ -464,6 +556,9 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     SSO_ACTIONS,
     // Shop P4: the list PassApi.js and PASS's Transport.js keep equal
     TOKEN_WRITES,
+    // the Dev AIDE's operations by an installed app's key, and the kind of a key
+    APP_KEY_OPERATIONS,
+    keyKind,
     // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
     downloadCache,
 })

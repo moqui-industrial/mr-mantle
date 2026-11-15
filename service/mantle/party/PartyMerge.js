@@ -14,13 +14,17 @@
 // - of one kind, a person with a person and an organization with an organization;
 // - of one owner organization: two parties owned by different organizations (Party.ownerPartyId, neither _NA_) are refused;
 // - the merged party's opportunities and agreements of the owner organization only (a cross-organization dependency is refused,
-//   never moved), and for a Sales merger its orders with the organizations of their scope only.
+//   never moved), and for a Sales merger its orders with the organizations of their scope only;
+// - no active automation enrollment, live event registration of an occurrence not ended or recipient waiting in a send of the
+//   merged party (impl-marketing P19, F82: ENROLLMENT_ACTIVE, ENROLLMENT_CONFLICT, REGISTRATION_ACTIVE, RECIPIENT_PENDING;
+//   mantle/marketing/MarketingPartyMerge.js, which also moves Marketing's rows after merge#Parties' own moves).
 // Refusals carry reason codes (EntityLib.js denied). merge#Parties moves what it may (ExternalAccessContact, agreements and their
 // parties, an opportunity's account and parties) after these checks.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {one, denied} = lib
 const access = lib.access
 const salesAccess = () => ec.resource.script("component://mr-mantle/service/mantle/sales/SalesAccess.js")
+const marketingMerge = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingPartyMerge.js")
 
 const sharedOwner = "_NA_"
 const ownerOf = party => party.ownerPartyId || sharedOwner
@@ -73,6 +77,9 @@ function rules(to, from, admitted) {
                 "Party " + from.partyId + " has opportunities or agreements of another organization and is not merged"
             )
     }
+    // Marketing P19 (impl-marketing F82; design-marketing §10): an active enrollment, a live registration of an occurrence not ended
+    // and a recipient still waiting in a send refuse the merge, naming the record (MarketingPartyMerge.js)
+    marketingMerge().refusals(from.partyId, to.partyId)
     if (admitted.by === "sales") {
         // the merged party's orders, invoices and payments with an internal organization outside the Sales merger's scope
         // (read without the caller's filters, as merge#Parties moves them)

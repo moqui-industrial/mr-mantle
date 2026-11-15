@@ -70,7 +70,7 @@ kit => {
     /* An account by its profile, when the caller is shown that profile. */
     function profileView(siteId, partyId) {
         const profile = partyId ? one(S + "PublicSiteProfile", {siteId, partyId}) : null
-        return profile && core.profileShown(profile, core.actor())
+        return profile && core.authorShown(profile, core.actor())
             ? {handle: profile.handle, displayName: profile.displayName || "", avatarUrl: null}
             : null
     }
@@ -159,7 +159,7 @@ kit => {
             repositoryPath: r.repo.repositoryPath,
             title: mr.title || "",
             state: STATES[mr.statusId] || "closed",
-            author: author ? {...author, imported: false} : null,
+            author: author ? {...author, imported: core.placeholder(siteId, row.authorPartyId)} : null,
             // a fork's path when the caller may view the fork; the target's own for a branch of it
             sourceRepositoryPath: mr.sourceRepositoryId
                 ? source && source.siteId === siteId && core.repositoryViewable(source, core.actor())
@@ -236,22 +236,37 @@ kit => {
             core.actor()
         )
         const view = agreement().view(r, held)
-        // what keeps it from merging: the host's reasons, and Smithy's own
-        const missingList = Array.from(out.missingList || [])
-        if (view.required && view.state !== "signed") missingList.push("The contributor agreement is not signed")
-        return {
-            mergeRequest: requestView(r, held, {
-                approvalCount: Number(out.approvalCount || 0),
-                checkState: out.checkState || null
-            }),
-            reviewerList: reviewerViews(p.siteId, out.reviewerList),
-            checkList: Array.from(out.checkList || []).map(check => ({
+        // the checks of its head with the pipeline runs they came from (DG5), and the required ones not reported yet
+        const checks = kit.pipelines.mergeChecks(
+            r,
+            mr,
+            Array.from(out.checkList || []).map(check => ({
                 context: check.context,
                 state: check.state,
                 description: check.description || "",
                 targetUrl: check.targetUrl || null,
                 required: rules.requiredStatusContexts.includes(check.context)
             })),
+            rules.requiredStatusContexts
+        )
+        // what keeps it from merging: the host's reasons, and Smithy's own
+        const missingList = Array.from(out.missingList || [])
+        if (view.required && view.state !== "signed") missingList.push("The contributor agreement is not signed")
+        if (checks.ciFileChanged)
+            missingList.push(
+                "Its ci.xml is not the target branch's (or could not be compared), and the required ci/ checks ran the jobs it defines: a Maintainer merges it"
+            )
+        const capable = capabilities(r, held, rules)
+        if (checks.requiredRole && r.rank < RANK[checks.requiredRole]) capable.canMerge = false
+        return {
+            mergeRequest: requestView(r, held, {
+                approvalCount: Number(out.approvalCount || 0),
+                checkState: out.checkState || null
+            }),
+            reviewerList: reviewerViews(p.siteId, out.reviewerList),
+            checkList: checks.checkList,
+            runList: checks.runList,
+            ciFileChanged: checks.ciFileChanged,
             missingList,
             branchRules: {
                 protected: rules.protected,
@@ -264,7 +279,7 @@ kit => {
             },
             agreement: view,
             linkedIssues: linked,
-            capabilities: capabilities(r, held, rules),
+            capabilities: capable,
             pending: held.pending
         }
     }
@@ -359,16 +374,23 @@ kit => {
                 )
         }
         const mergeRequestList = []
+        const apps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
         for (const mr of shown) {
             const r = byRepository.get(mr.repositoryId)
             const held = heldRequest(r, mr, a)
-            if (held)
-                mergeRequestList.push(
-                    requestView(r, held, {
-                        approvalCount: OPEN.includes(mr.statusId) ? approvalsOf(mr.mergeRequestId) : null,
-                        checkState: (states.get(mr.repositoryId) || {})[mr.headCommitId] || null
-                    })
-                )
+            if (!held) continue
+            const view = requestView(r, held, {
+                approvalCount: OPEN.includes(mr.statusId) ? approvalsOf(mr.mergeRequestId) : null,
+                checkState: (states.get(mr.repositoryId) || {})[mr.headCommitId] || null
+            })
+            // the stable shape a client such as the Dev AIDE reads (design-dev-aide §21.4): number, title, state,
+            // authorHandle and url, the page on the site's canonical host (null with none)
+            mergeRequestList.push({
+                ...view,
+                number: view.mergeRequestNum,
+                authorHandle: view.author?.handle || null,
+                url: apps.pageUrl(r.repo.siteId, "smithy", "/" + r.repo.repositoryPath + "/-/merge-requests/" + view.mergeRequestNum)
+            })
         }
         return {mergeRequestList, counts, nextCursor: found.length > pg.limit ? pg.next(pg.offset + pg.limit) : null}
     }
@@ -583,6 +605,8 @@ kit => {
        the gate refuses outright closes the merge request and leaves it hidden, and its author is told by the page's
        own refusal or sees nothing opened; too soon after another post, it is held. */
     function ensure(mergeRequestId) {
+        // a merge request the GitHub import is making (SmithyImport.js): its row and conversation are the import's own
+        if (mergeRequestId && ec.context.sharedMap["mantle.smithy.importingRepositoryId"]) return null
         const mr = mergeRequestId ? one(GMR, {mergeRequestId}, true) : null
         if (!mr) return null
         const had = one(SMR, {mergeRequestId})
@@ -936,7 +960,7 @@ kit => {
             // a thread Projects wrote before the merge request had a conversation is answered there
             if (!one(F + "ForumPostState", {communicationEventId: c.threadId})) invalid("That thread is answered in Projects")
             const made = post(siteId, row, c.body, c.sourceFormat, operationId, c.threadId)
-            return {postId: made.postId, threadId: c.threadId, state: made.state}
+            return {postId: made.postId, threadId: c.threadId, state: made.state, held: made.state === "pending"}
         }
         const path = text(c.path)
         const line = side => (c[side] == null || c[side] === "" ? null : Number(c[side]))
@@ -965,7 +989,8 @@ kit => {
             lineText: lineText.slice(0, 255) || null,
             outdated: "N"
         })
-        return {postId: made.postId, threadId: made.postId, state: made.state}
+        // held: the gate holds the post for a moderator (its author sees it, the thread list does not yet)
+        return {postId: made.postId, threadId: made.postId, state: made.state, held: made.state === "pending"}
     }
     methods.createReviewComment = p => {
         const {held} = requestWrite(p, false)
@@ -1092,6 +1117,9 @@ kit => {
             .map(check => check.context)
         const failing = rules.requiredStatusContexts.filter(context => !passed.includes(context))
         if (failing.length) invalid("checksRequired: Checks not passed: " + failing.join(", "))
+        // a head that changes ci.xml wrote the jobs its required checks ran: a Maintainer merges it (DG5)
+        if (rules.requiredStatusContexts.some(context => context.startsWith("ci/")) && kit.pipelines.ciFileChanged(r, mr))
+            core.requireRole(r, "SmrMaintainer")
         if (approvalsOf(mr.mergeRequestId) < rules.requiredApprovals)
             invalid("The branch rules ask for " + rules.requiredApprovals + " approvals")
         // the source branch goes only when the caller could delete it: a Developer of the source repository (a fork's
@@ -1156,6 +1184,8 @@ kit => {
         return receipt(p, "forkRepository", () => {
             const s = core.settings(p.siteId)
             if (r.git.archivedDate) archived()
+            // hidden code is not copied again: its Owners and the site's staff still see it, and nobody forks it
+            if (r.hidden) fail("Conflict", "repositoryHidden: This repository is hidden by a moderator and is not forked")
             if (r.git.repositoryKind === "remote") invalid("policyRefused: A mirror of another server is not forked")
             // a repository that is not public is forked by who works in it: a copy of its code is theirs to keep in step
             if (r.visibility !== 1) core.requireRole(r, "SmrDeveloper")
@@ -1200,7 +1230,10 @@ kit => {
             })
             forum.gateCommit(gated)
             forum.audit(p.siteId, null, "repository", made.repositoryId, "forkRepository", r.repo.repositoryPath, null, 1)
-            return made
+            // where the fork clones (the framework's addresses, as get#GitCloneUrls gives them), so a client adds it as a
+            // remote (design-dev-aide §21.4)
+            const urls = hosted(GIT + "get#GitCloneUrls", {repositoryId: made.repositoryId}).out || {}
+            return {...made, cloneUrls: {httpsUrl: urls.httpsUrl || null, sshUrl: urls.sshUrl || null}}
         })
     }
     methods.findForks = p => {

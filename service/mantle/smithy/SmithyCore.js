@@ -61,7 +61,8 @@ const MAX_GROUP_DEPTH = 4
    what a rename, a narrowing and a quota read walk. */
 const GROUP_REPOSITORY_LIMIT = 1000
 /* Smithy's own first segments and the default base of each PASS app (mr-pass service/pass/Apps.js, which the
-   authority cannot read), which no group path or handle takes, so a mount made later shadows none. */
+   authority cannot read), which no group path or handle takes, so a mount made later shadows none. The framework's own
+   segments (git, the sign-in and asset paths...) are not copied here: PublicApps.reservedPaths reads the framework's list. */
 const reservedNames = [
     "forum",
     "account",
@@ -70,13 +71,16 @@ const reservedNames = [
     "billing",
     "supplier",
     "support",
+    // IronStone Sales P13: PASS Sales' default base
+    "sales",
+    // IronStone Marketing P7: PASS Marketing's default base
+    "marketing",
     "shop",
     "code",
     "explore",
     "search",
     "new",
     "import",
-    "git",
     "admin",
     "api",
     "help",
@@ -86,7 +90,6 @@ const reservedNames = [
     "releases",
     "security",
     "settings",
-    "login",
     "logout",
     "register",
     "robots.txt",
@@ -221,7 +224,11 @@ const SETTING_DEFAULTS = {
     groupLfsBytes: 5368709120,
     groupRunnerMinutes: 2000,
     maxEditBytes: 1048576,
-    repositoryKind: "db"
+    repositoryKind: "db",
+    // DG5: when an outside pipeline run waits for a Maintainer's approval (first, always, never)
+    outsideRunApproval: "first",
+    // the most jobs an outside pipeline run may have
+    outsideRunMaxJobs: 10
 }
 /* A site's Smithy settings, each its default where the row, or its field, is empty; row is the SmithySite or null. */
 function settings(siteId) {
@@ -407,7 +414,8 @@ function repositoryRights(repo, a, depth = 0) {
               forkCeiling(repo.repositoryId)
           )
         : 3
-    const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt))
+    // a fork of a hidden repository is hidden with it (to all but the fork's own Owners and the site's staff)
+    const hidden = !!repo.hiddenAt || (!!whole && whole.some(g => !!g.hiddenAt)) || forkHidden(repo.repositoryId)
     return {
         repo,
         chain: whole || [],
@@ -447,9 +455,27 @@ function forkCeiling(repositoryId, depth = 0) {
         )
     })
 }
+/* Whether a repository a hosted repository was forked from (its parent, the parent's parent...) is hidden, it or a group
+   above it: a fork shares the hidden code, so it is hidden too. False for one that is no fork, or whose parent Smithy
+   does not keep. */
+function forkHidden(repositoryId, depth = 0) {
+    return remember("forkHidden|" + repositoryId, () => {
+        const parentId = one("moqui.resource.GitRepository", {repositoryId})?.forkOfRepositoryId
+        const parent = parentId && depth < 8 ? one(M + "SmithyRepository", {repositoryId: parentId}) : null
+        if (!parent) return false
+        if (parent.hiddenAt || (parent.groupId && (groupChain(parent.groupId) || []).some(g => !!g.hiddenAt))) return true
+        return forkHidden(parentId, depth + 1)
+    })
+}
 /* Whether an actor may view a repository of a list, without reading its role rows when it is public in effect. */
 function repositoryViewable(repo, a) {
-    if (repo.groupId && !repo.hiddenAt && visibilityRank(repo.visibilityEnumId) === 1 && forkCeiling(repo.repositoryId) === 1) {
+    if (
+        repo.groupId &&
+        !repo.hiddenAt &&
+        visibilityRank(repo.visibilityEnumId) === 1 &&
+        forkCeiling(repo.repositoryId) === 1 &&
+        !forkHidden(repo.repositoryId)
+    ) {
         const group = one(M + "SmithyGroup", {groupId: repo.groupId})
         const rights = group && group.siteId === repo.siteId ? groupRights(group, a) : null
         if (rights && rights.canView && rights.visibility === 1 && !rights.hidden) return true
@@ -472,6 +498,25 @@ function rights(repositoryId, userId) {
         rank,
         confirmed: !!a.userId && confirmedAddress().confirmed(a.userId)
     }
+}
+/* The accounts that are a repository's Maintainers or Owners now, for a notice: the parties of an active Maintainer or
+   Owner row of the repository or its groups and its owner, each account counted as rights() counts it (not
+   suspended, the role in effect), without those in exclude; at most 100. */
+function maintainerUserIds(repositoryId, exclude = []) {
+    const repo = repositoryId ? one(M + "SmithyRepository", {repositoryId}) : null
+    if (!repo) return []
+    const parties = new Set(repo.ownerPartyId ? [repo.ownerPartyId] : [])
+    const holders = (entity, key) => {
+        for (const row of rows(entity, key, 200)) if ((RANK[row.roleEnumId] || 0) >= RANK.SmrMaintainer) parties.add(row.partyId)
+    }
+    holders(M + "SmithyRepositoryParty", {repositoryId})
+    for (const group of (repo.groupId && groupChain(repo.groupId)) || []) holders(M + "SmithyGroupParty", {groupId: group.groupId})
+    const userIds = []
+    for (const partyId of Array.from(parties).slice(0, 200))
+        for (const account of rows("moqui.security.UserAccount", {partyId}, 5))
+            if (!exclude.includes(account.userId) && userIds.length < 100 && rights(repositoryId, account.userId).rank >= RANK.SmrMaintainer)
+                userIds.push(account.userId)
+    return userIds
 }
 /* A group of a site as the caller holds it, or Not Found. */
 function group(groupId, siteId) {
@@ -565,14 +610,25 @@ const scopeAbove = (kind, row) => {
     const groupId = kind === "group" ? row.parentGroupId : row.groupId
     return groupId ? ensureGroupCategory(groupId) : null
 }
-/* Who may hide a repository or a group they view, and decides a report on it: the site's staff (owners, moderators, and
-   an operator on a page), and an Owner of a group above it. Never by a role on the target itself. r: its rights for a. */
+/* Who may hide a repository or a group (design §12.3): the site's staff (owners, moderators, and an operator on a page)
+   anything, whether or not they may view it (what it holds stays governed by the view rule); and an Owner of a group
+   above it who views it. Never by a role on the target itself. r: its rights for a. */
 function mayHide(kind, r, a) {
-    if (!r.canView) return false
     if (r.access.staff) return true
-    if (!a.partyId || r.access.suspended) return false
+    if (!r.canView || !a.partyId || r.access.suspended) return false
     const above = kind === "group" ? r.chain.slice(1) : r.chain
     return above.length > 0 && groupRank(above, a.partyId)[0] >= RANK.SmrOwner
+}
+/* Who decides a report on a repository or a group: the site's staff, every report whatever its scope; and a moderator of
+   the scope above it (the category of the group above) who views it and holds no Owner rank on it. An Owner of a group
+   above is an Owner of the target too, so a target's owners never decide a report on what they own. Its decision may
+   hide the target. row: the target's row; r: its rights for a. */
+function decidesReport(kind, row, r, a) {
+    if (r.access.staff) return true
+    if (!r.canView || !a.partyId || r.access.suspended || r.rank >= RANK.SmrOwner) return false
+    const groupId = kind === "group" ? row.parentGroupId : row.groupId
+    const scope = groupId ? one(M + "SmithyGroup", {groupId})?.contactListId : null
+    return !!scope && !!forum.categoryAccess(scope, a.partyId)?.canModerate
 }
 /* The rights an actor holds on a repository or a group by its id and kind, with its row; null for none of the site. */
 function targetRights(siteId, kind, targetId, a) {
@@ -793,6 +849,12 @@ function profileShown(profile, a) {
     const access = siteAccess(profile.siteId, a)
     return profile.discoverability === "public" || (profile.discoverability === "members" && access.joined)
 }
+/* Whether a profile is shown as the author of a record the caller reads: as profileShown, and a placeholder of the
+   GitHub import (§18.2), which is no member and not discoverable (no handle page, list or search names it) but is shown
+   with what it wrote. */
+function authorShown(profile, a) {
+    return profileShown(profile, a) || (!!profile && placeholder(profile.siteId, profile.partyId))
+}
 /* Whether a handle's page is there for the caller: by its profile, or by a repository of its namespace that the caller
    may view. */
 function accountShown(profile, a) {
@@ -818,6 +880,22 @@ function compatibilitySection(rest) {
     if (word === "releases" && more[0] === "tag" && more.length > 1) return "releases/" + more.slice(1).join("/")
     return null
 }
+/* A GitHub form after a repository's path as its section in Smithy, for that repository: GitHub numbers issues and pull
+   requests in one sequence, and an import keeps both, so an issue number that is no issue here but a merge request's is
+   the merge request (§8.4: #n is an issue first, then a merge request). */
+function githubSection(repo, rest) {
+    const section = compatibilitySection(rest)
+    const number = /^issues\/([1-9][0-9]{0,8})$/.exec(section || "")
+    if (
+        number &&
+        !one(M + "SmithyIssue", {repositoryId: repo.repositoryId, issueNumber: Number(number[1])}) &&
+        find("moqui.resource.GitMergeRequest", {repositoryId: repo.repositoryId, mergeRequestNum: Number(number[1])}).count() > 0
+    )
+        return "merge-requests/" + number[1]
+    return section
+}
+/* Whether an account of a site is a placeholder of the GitHub import (§18.2): shown with an imported mark. */
+const placeholder = (siteId, partyId) => !!partyId && one(M + "SmithyAccount", {siteId, partyId})?.placeholder === "Y"
 /* resolveSmithyPath: what the name segments of a page's path are, by the lookups of §4.4 step 4 in their order, each
    within the site. The path comes as typed: the names being tested are lowered, the rest keeps its case, and a .git
    suffix is dropped only from the segment that ends a whole repository path. What the caller may not view is Not Found,
@@ -891,7 +969,7 @@ function resolvePath(siteId, path) {
     if (lowered.length >= 3)
         for (let length = Math.min(lowered.length - 1, MAX_GROUP_DEPTH + 1); length >= 2; length--) {
             const target = viewableRepository(lowered.slice(0, length).join("/"))
-            const section = target ? compatibilitySection(given.slice(length)) : null
+            const section = target ? githubSection(target, given.slice(length)) : null
             if (section) return answer({kind: "redirect", redirectPath: target.repositoryPath + "/-/" + section})
         }
     return missing()
@@ -938,6 +1016,7 @@ function resolvePath(siteId, path) {
     repositoryRights,
     repositoryViewable,
     rights,
+    maintainerUserIds,
     group,
     repository,
     requireRole,
@@ -947,8 +1026,11 @@ function resolvePath(siteId, path) {
     splitRefPath,
     refOf,
     profileShown,
+    authorShown,
     accountShown,
     resolvePath,
+    githubSection,
+    placeholder,
     actorOfParty,
     ensureGroupCategory,
     ensureAccountCategory,
@@ -956,6 +1038,8 @@ function resolvePath(siteId, path) {
     scopeCategory,
     scopeAbove,
     mayHide,
+    decidesReport,
+    forkHidden,
     targetRights,
     setHidden,
     hiddenByStaff,

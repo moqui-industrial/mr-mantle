@@ -5,7 +5,8 @@
 // revision goes on; an unknown outcome stays unknown and makes no new attempt or key; a placement that fails after the
 // provider's success keeps the payment and its attempt, and the job places it later; a promotion past its limit at the
 // freeze is reviewRequired; nothing due skips the gateway; the store's opt-ins are offered unchecked and a guest's waits
-// for the receipt's link (Commerce P9 follow-up). Standalone: spec-local organization, store, site, gateways and
+// for the receipt's link (Commerce P9 follow-up); a frontend's visitor key kept as its digest at the freeze, no part of the
+// submit's identity and cleared before the placement once it may no longer be kept (Marketing follow-up 4 review). Standalone: spec-local organization, store, site, gateways and
 // products. Run: ./moq test mr-mantle --spec ShopCheckout
 const CART = "mantle.order.ShopCartServices."
 const CHECKOUT = "mantle.order.ShopCheckoutServices."
@@ -715,5 +716,70 @@ feature("the store's opt-ins are offered unchecked; a guest's choice waits until
         none.row.optInPending != "Y"
         !noneLink.confirmUrl
         !otherLink.confirmUrl
+    }
+})
+
+// Marketing follow-up 4 review: a frontend's visitor key is kept as its digest at the freeze where the seller's policy keeps keys,
+// is no part of the submit's identity (a retry with another key is the same submit), and is cleared before place#Order when it
+// may no longer be kept (the policy ended between the submit and the provider's return); a malformed key is dropped, never refused
+feature("a checkout's visitor key: its digest kept at the freeze, not the submit's identity, read again before the placement", {
+    when() {
+        const policyId = prefix + "_MKT_POLICY"
+        const key = "ShcoVisitorKey_0123456789ab"
+        system(() =>
+            make("mantle.marketing.campaign.MarketingPolicy", {
+                marketingPolicyId: policyId,
+                organizationPartyId: ids.org,
+                fromDate: new Date(Date.now() - 60000),
+                visitorKeys: "Y"
+            })
+        )
+        try {
+            const {token, view} = readyCart(ids.mug, 1, {physical: true})
+            const send = visitorKey =>
+                checkout("submit#Checkout", {
+                    token,
+                    expectedRevision: view.checkout.revision,
+                    operationId: "shco-visitor-0001",
+                    visitorKey
+                })
+            const submitted = send(key)
+            const row = checkoutRow(token)
+            const frozen = one("mantle.order.OrderHeader", {orderId: row.orderId}).marketingVisitorKeyHash
+            const retried = send("ShcoAnotherVisitor_0123456789")
+            const afterRetry = one("mantle.order.OrderHeader", {orderId: row.orderId}).marketingVisitorKeyHash
+            // the policy ends before the provider's return: the placement keeps no digest
+            system(() => call("update#mantle.marketing.campaign.MarketingPolicy", {marketingPolicyId: policyId, thruDate: new Date()}))
+            const result = returned(submitted.result?.checkout.reference, submitted.result?.returnKey)
+            const placed = one("mantle.order.OrderHeader", {orderId: row.orderId})
+            // a malformed key on a free item's submit (placed by the submit): no refusal, no digest
+            const added = op(CART + "add#CartItem", {productId: ids.free, quantity: "1"})
+            checkout("begin#Checkout", {token: added.result.token})
+            checkout("set#CheckoutContact", {token: added.result.token, emailAddress: "vk@shco.example.test", name: "Vic Key"})
+            const free = checkout("get#Checkout", {token: added.result.token}).result
+            const malformed = checkout("submit#Checkout", {
+                token: added.result.token,
+                expectedRevision: free.checkout.revision,
+                visitorKey: "not a key; drop"
+            })
+            const freeOrder = one("mantle.order.OrderHeader", {orderId: checkoutRow(added.result.token).orderId})
+            return {key, submitted, frozen, retried, afterRetry, result, placed, malformed, freeOrder}
+        } finally {
+            system(() => ec.entity.find("mantle.marketing.campaign.MarketingPolicy").condition({marketingPolicyId: policyId}).deleteAll())
+        }
+    },
+    then(r) {
+        r.submitted.result.checkout.state == "paymentPending"
+        r.frozen == String(ec.resource.digestText("mkt-visitor:" + r.key, "sha256"))
+        r.frozen != r.key
+        // the retry with another key is the same submit, answered again, and changes nothing kept
+        r.retried.result.alreadyApplied == true
+        r.afterRetry == r.frozen
+        // placed, with the digest cleared once the policy no longer keeps keys
+        r.result.result.checkout.state == "completed"
+        r.placed.placedDate != null
+        r.placed.marketingVisitorKeyHash == null
+        r.malformed.result.checkout.state == "completed"
+        r.freeOrder.marketingVisitorKeyHash == null
     }
 })
