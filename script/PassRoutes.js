@@ -312,6 +312,8 @@
     // bearer write with an invitation's token)
     ['GET', 'marketing/form', 'getMarketingForm'],
     ['POST', 'marketing/form/submission', 'submitMarketingForm'],
+    // IronStone Marketing P14: a landing page of the marketing mount (read only)
+    ['GET', 'marketing/page', 'getMarketingPage'],
     // Smithy DG1 (mr-pass plan/design-smithy.md §15.2): public read
     ['GET', 'smithy/resolve', 'resolveSmithyPath'],
     ['GET', 'smithy/home', 'getSmithyHome'],

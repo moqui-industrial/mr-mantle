@@ -22,10 +22,19 @@
 // redirects and COMMERCE_PUBLISH to publish either, and the store's scope through StoreAdmin.js: a site is worked through
 // its Shop mount's store. Every publish, withdrawal and scheduled change advances the site's generation in its
 // transaction. Refusals start with their reason code.
+//
+// IronStone Marketing P14 (impl-marketing F23; design-marketing §8 LandingPages): a site's marketing mount has pages too, a
+// storeless campaign landing page being an ordinary site page of that mount (PublicSitePage with its mount, route, locale and
+// window). Such a page is worked through the mount's organization, not a store: MarketingAccess.js's scope (a Marketing reader of
+// the organization reads it, MARKETING_CONTENT_EDIT edits and publishes it), its text a page of the organization's page space
+// (MarketingPageSpace, restrictUpdate, written only here). A page's app is its mount's, never the caller's: a Commerce designer
+// cannot edit a Marketing page nor a Marketing author a Shop's. Themes, policy roles, menus and redirects stay Commerce's: a
+// landing page takes the site's default page template and no policy role.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const stores = ec.resource.script("component://mr-mantle/service/mantle/product/StoreAdmin.js")
 const publicApps = ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
 const merchandising = () => ec.resource.script("component://mr-mantle/service/mantle/product/StoreMerchandising.js")
+const marketingAccess = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingAccess.js")
 const {find, one, rows, call, access} = lib
 const P = "mantle.public."
 const PAGE = P + "PublicSitePage"
@@ -37,6 +46,7 @@ const REDIRECT = P + "PublicSiteRedirect"
 const SPACE = "moqui.resource.wiki.WikiSpace"
 const WIKI_PAGE = "moqui.resource.wiki.WikiPage"
 const STORE_SPACE = "mantle.product.store.ProductStoreWikiSpace"
+const ORG_SPACE = "mantle.marketing.content.MarketingPageSpace"
 const WIKI = "org.moqui.resource.WikiServices."
 
 // ===== tables =====
@@ -159,6 +169,12 @@ function roleOf(value) {
     if (!Object.hasOwn(policyRoles, role)) refuse("VALUE_INVALID", "Choose a policy role: delivery, returns, privacy or terms")
     return role
 }
+// A landing page (P14) takes the site's default page template and no policy role: a value for either is refused.
+function landingOnly(value, what) {
+    if (!text(value)) return null
+    if (what === "role") refuse("ROLE_RESERVED", "Policy pages are a store's; a landing page has no policy role")
+    refuse("TEMPLATE_UNKNOWN", "A landing page takes the site's default page template")
+}
 // A social image: an https address or a path of the site, nothing that leaves its attribute.
 function imageUrlOf(value) {
     const url = text(value)
@@ -170,6 +186,14 @@ function imageUrlOf(value) {
 }
 
 // ===== scope =====
+// The apps whose mounts have pages (Marketing P14, F23), each with the permissions that edit and publish them. A Shop's pages are
+// read with COMMERCE_VIEW (StoreAdmin.js's scope), a Marketing mount's by a Marketing reader (MarketingAccess.js's scope).
+const pageApps = {
+    shop: {edit: "COMMERCE_THEME_EDIT", publish: "COMMERCE_PUBLISH"},
+    marketing: {edit: "MARKETING_CONTENT_EDIT", publish: "MARKETING_CONTENT_EDIT"}
+}
+// The scope of a Shop's pages is StoreAdmin's; a Marketing mount's is {pageApp, marketing} (MarketingAccess.js's).
+const appOf = s => s?.pageApp || "shop"
 // The user's scope with one of the permissions (and COMMERCE_VIEW, StoreAdmin's scope).
 function scopeWith(permissions) {
     const s = stores.scope()
@@ -177,39 +201,68 @@ function scopeWith(permissions) {
         refuse("PERMISSION_DENIED", permissions.join(" or ") + " is required")
     return s
 }
-// A site worked through its Shop mount's store in the user's scope: {site, mount, store}. A site with no Shop mount, or one
-// whose store the user does not work, is not available.
-function siteOf(s, siteId, forUpdate = false) {
+// The user's scope for an app's pages, with what they need of them (null to read, edit or publish).
+function appScope(app, need) {
+    if (!Object.hasOwn(pageApps, app || "")) refuse("VALUE_INVALID", "Pages are a Shop's or a Marketing mount's")
+    const permission = need ? pageApps[app][need] : null
+    if (app === "shop") return scopeWith(permission ? [permission] : [])
+    const marketing = marketingAccess().scope()
+    if (!marketing.capabilities.anyRead) refuse("PERMISSION_DENIED", "A Marketing reader works landing pages")
+    if (permission && !access.has(permission)) refuse("PERMISSION_DENIED", permission + " is required")
+    return {pageApp: "marketing", marketing}
+}
+// What the user may do with an app's pages.
+const appCan = app => ({edit: access.has(pageApps[app].edit), publish: access.has(pageApps[app].publish)})
+// A site worked through its mount of the scope's app in the user's scope: {site, mount, store, organizationPartyId}. A Shop mount
+// through its store (one the user does not work is not available), a Marketing mount through its organization (one outside the
+// user's Marketing scope is not available). A site with no such mount is not available. mountRow names the mount (a page's).
+function siteOf(s, siteId, forUpdate = false, mountRow = null) {
+    const app = appOf(s)
     const site = siteId ? find(SITE, {siteId}).forUpdate(forUpdate).one() : null
-    const mount = site ? rows(SITE_APP, {siteId, app: "shop"})[0] : null
-    if (!mount || !mount.targetId) refuse("RECORD_UNAVAILABLE", "Site " + (siteId || "") + " is not available")
+    const mount = site ? mountRow || rows(SITE_APP, {siteId, app})[0] : null
+    if (!mount || mount.app !== app || !mount.targetId) refuse("RECORD_UNAVAILABLE", "Site " + (siteId || "") + " is not available")
+    if (app === "marketing") {
+        if (!marketingAccess().covers(s.marketing, mount.targetId))
+            refuse("RECORD_UNAVAILABLE", "Site " + siteId + " is not available")
+        return {site, mount, store: null, organizationPartyId: mount.targetId}
+    }
     try {
-        return {site, mount, store: stores.storeOf(s, mount.targetId)}
+        const store = stores.storeOf(s, mount.targetId)
+        return {site, mount, store, organizationPartyId: store.organizationPartyId}
     } catch (error) {
         refuse("RECORD_UNAVAILABLE", "Site " + siteId + " is not available")
     }
 }
-// The sites of the user's stores: the sites whose Shop mount targets a store in scope.
-function scopeSiteIds(s) {
-    const storeIds = Array.from(stores.storeQuery(s).selectField("productStoreId").list()).map(row => row.productStoreId)
-    if (!storeIds.length) return []
-    return Array.from(
-        new Set(
-            Array.from(find(SITE_APP).condition("app", "shop").condition("targetId", "in", storeIds).list()).map(
-                row => row.siteId
-            )
-        )
-    )
+// The mounts of the scope's app on the user's sites: a Shop mount targeting a store in scope, a Marketing mount targeting an
+// organization in scope.
+function scopeMounts(s) {
+    const app = appOf(s)
+    let targetIds
+    if (app === "marketing") targetIds = marketingAccess().organizationIds(s.marketing)
+    else targetIds = Array.from(stores.storeQuery(s).selectField("productStoreId").list()).map(row => row.productStoreId)
+    if (!targetIds.length) return []
+    return Array.from(find(SITE_APP).condition("app", app).condition("targetId", "in", targetIds).list())
 }
-// A page of Commerce's (one with a mount; the Forum's role pages are Forum.js's), in the user's scope.
-function pageOf(s, sitePageId, forUpdate = false) {
+// The sites of the user's stores (or, for Marketing, organizations): the sites with a mount of the app in scope.
+const scopeSiteIds = s => Array.from(new Set(scopeMounts(s).map(row => row.siteId)))
+// A page of a mount (the Forum's role pages, with none, are Forum.js's) in the user's scope for its mount's app, with what they
+// need of it: {page, site, mount, store, organizationPartyId, s}. A page the user cannot read (another app's or outside their
+// scope) is not available; one they read but may not change is refused for the permission.
+function pageOf(sitePageId, need = null, forUpdate = false) {
     const page = sitePageId ? find(PAGE, {sitePageId}).forUpdate(forUpdate).one() : null
-    if (!page || !page.appMountId) refuse("RECORD_UNAVAILABLE", "Page " + (sitePageId || "") + " is not available")
+    const mount = page?.appMountId ? one(SITE_APP, {siteId: page.siteId, appMountId: page.appMountId}) : null
+    const unavailable = () => refuse("RECORD_UNAVAILABLE", "Page " + (sitePageId || "") + " is not available")
+    if (!page || !mount || !Object.hasOwn(pageApps, mount.app || "")) unavailable()
+    let found
     try {
-        return Object.assign({page}, siteOf(s, page.siteId))
+        const s = appScope(mount.app, null)
+        found = Object.assign({page, s}, siteOf(s, page.siteId, false, mount))
     } catch (error) {
-        refuse("RECORD_UNAVAILABLE", "Page " + sitePageId + " is not available")
+        unavailable()
     }
+    const permission = need ? pageApps[mount.app][need] : null
+    if (permission && !access.has(permission)) refuse("PERMISSION_DENIED", permission + " is required")
+    return found
 }
 // Advance a site's generation in the caller's transaction; the new generation.
 function advance(siteId) {
@@ -259,6 +312,42 @@ function pageSpaceOf(store, create) {
     })
     return one(SPACE, {wikiSpaceId})
 }
+// An organization's page space for its landing pages (Marketing P14): its current MarketingPageSpace, made with restrictUpdate when
+// it has none and create is set; a space without restrictUpdate is refused, as a store's is.
+function organizationSpaceOf(organizationPartyId, create) {
+    const binding = rows(ORG_SPACE, {organizationPartyId})
+        .filter(row => lib.active(row))
+        .sort((a, b) => (ms(b.fromDate) || 0) - (ms(a.fromDate) || 0))[0]
+    if (binding) {
+        const space = one(SPACE, {wikiSpaceId: binding.wikiSpaceId})
+        if (!space) refuse("SPACE_UNAVAILABLE", "The organization's page space " + binding.wikiSpaceId + " is missing")
+        if (space.restrictUpdate !== "Y")
+            refuse(
+                "SPACE_NOT_RESTRICTED",
+                "The organization's page space " + space.wikiSpaceId + " lets anyone change its pages; restrict its updates first"
+            )
+        return space
+    }
+    if (!create) return null
+    const organization = one("mantle.party.Organization", {partyId: organizationPartyId})
+    const wikiSpaceId = "SP" + ec.entity.sequencedIdPrimary(SPACE, null, null)
+    asSystem(() =>
+        call(WIKI + "create#WikiSpace", {
+            wikiSpaceId,
+            description: "Landing pages of " + (organization?.organizationName || organizationPartyId),
+            restrictView: "N",
+            restrictUpdate: "Y",
+            allowAnyHtml: "N",
+            wikiType: "md",
+            addCreator: false
+        })
+    )
+    asSystem(() => call("create#" + ORG_SPACE, {organizationPartyId, fromDate: nowMs(), wikiSpaceId}))
+    return one(SPACE, {wikiSpaceId})
+}
+// The page space of a page's site and mount: the store's for a Shop page, the organization's for a Marketing one.
+const spaceFor = (found, create) =>
+    found.store ? pageSpaceOf(found.store, create) : organizationSpaceOf(found.organizationPartyId, create)
 // One wiki write into a store's page space, as the system (`ec.artifactExecution.runAsSystem`: no user, authorization
 // off, the caller's transaction; Commerce F72): the space has restrictUpdate, so the user has no right to write it, and
 // get#WikiPageAccess admits a write with no user and authorization off. The caller has made its own permission and store
@@ -334,7 +423,7 @@ function menuReferences(siteId, sitePageId) {
 function pageRow(page, site, mount, can) {
     const at = nowMs()
     const state = stateOf(page, at)
-    const url = page.routePath ? publicApps.pageUrl(page.siteId, "shop", "/pages/" + page.routePath) : null
+    const url = page.routePath ? publicApps.pageUrl(page.siteId, mount?.app || "shop", "/pages/" + page.routePath) : null
     return {
         sitePageId: page.sitePageId,
         siteId: page.siteId,
@@ -378,6 +467,7 @@ function pageRow(page, site, mount, can) {
         publishedText: page.publishedByUserId ? userText(page.publishedByUserId) + ", " + lib.dateText(page.publishedDate) : "",
         publicUrl: url,
         lastUpdatedStamp: page.lastUpdatedStamp,
+        app: mount?.app || "shop",
         canEdit: !!can?.edit,
         canPublish: !!can?.publish
     }
@@ -385,23 +475,35 @@ function pageRow(page, site, mount, can) {
 
 // ===== find#SitePages, get#SitePageHistory =====
 // find#SitePages: Commerce's pages of the sites of the user's stores (one site, or every one), by title or route ignoring
-// case, locale, role and state, a page at a time; with sitePageId, that page alone. COMMERCE_VIEW.
+// case, locale, role and state, a page at a time; with sitePageId, that page alone. COMMERCE_VIEW. With app marketing (P14) the
+// landing pages of the sites whose marketing mount targets an organization of the user's Marketing scope, for a Marketing reader.
 function findSitePages(p) {
-    const s = scopeWith([])
-    const can = {edit: access.has("COMMERCE_THEME_EDIT"), publish: access.has("COMMERCE_PUBLISH")}
     if (p.sitePageId) {
-        const {page, site, mount} = pageOf(s, p.sitePageId)
-        const row = pageRow(page, site, mount, can)
+        const {page, site, mount} = pageOf(p.sitePageId)
+        const row = pageRow(page, site, mount, appCan(mount.app))
         row.menuReferences = menuReferences(page.siteId, page.sitePageId)
         row.wikiSpaceId = one(WIKI_PAGE, {wikiPageId: page.wikiPageId})?.wikiSpaceId || null
         return {pages: [row], pagesCount: 1}
     }
-    const siteIds = p.siteId ? [siteOf(s, p.siteId).site.siteId] : scopeSiteIds(s)
-    if (!siteIds.length) return lib.pageList([], p, "pages")
+    const app = text(p.app) || "shop"
+    const s = appScope(app, null)
+    const can = appCan(app)
+    // the app's mounts: only their pages (a site may have a Shop and a Marketing mount)
+    const mounts = p.siteId ? [siteOf(s, p.siteId).mount] : scopeMounts(s)
+    if (!mounts.length) return lib.pageList([], p, "pages")
     const factory = ec.entity.conditionFactory
     const now = ec.user.nowTimestamp
+    const ofMounts = factory.makeCondition(
+        mounts.map(mount =>
+            factory.makeCondition(
+                [factory.makeCondition("siteId", "equals", mount.siteId), factory.makeCondition("appMountId", "equals", mount.appMountId)],
+                "and"
+            )
+        ),
+        "or"
+    )
     const build = () => {
-        let query = find(PAGE).condition("siteId", "in", siteIds).condition("appMountId", "is-not-null", null)
+        let query = find(PAGE).condition(ofMounts)
         const term = text(p.term)
         if (term) {
             const like = "%" + term.replace(/[\\%_]/g, c => "\\" + c) + "%"
@@ -446,13 +548,13 @@ function findSitePages(p) {
     const count = build().count()
     const found = lib.page(build().orderBy("siteId").orderBy("routePath").orderBy("locale"), p, "pageRows", count)
     const sites = {}
-    const mounts = {}
+    const mountRows = {}
     const pages = found.rows.map(page => {
         if (!(page.siteId in sites)) {
             sites[page.siteId] = one(SITE, {siteId: page.siteId})
-            mounts[page.siteId] = rows(SITE_APP, {siteId: page.siteId, app: "shop"})[0] || {}
+            mountRows[page.siteId] = mounts.find(mount => mount.siteId === page.siteId) || {}
         }
-        return pageRow(page, sites[page.siteId], mounts[page.siteId], can)
+        return pageRow(page, sites[page.siteId], mountRows[page.siteId], can)
     })
     return Object.assign(lib.pageList(pages, {pageSize: found.pageSize}, "pages"), {
         pagesCount: count,
@@ -466,8 +568,7 @@ function findSitePages(p) {
 // get#SitePageHistory: the page's saved versions (newest first, which one is published and which scheduled) and its
 // binding's publication activity from the audit log (who changed the route, version or window, when, and why).
 function getSitePageHistory(p) {
-    const s = scopeWith([])
-    const {page} = pageOf(s, p.sitePageId)
+    const {page} = pageOf(p.sitePageId)
     const wiki = wikiOf(page)
     const history = asSystem(() => call(WIKI + "get#WikiPageHistory", {wikiPageId: wiki.wikiPageId}))
     const versions = Array.from(history.versionList || [])
@@ -505,11 +606,13 @@ function getSitePageHistory(p) {
 // page space), a page's binding fields (on a published or scheduled page a publication: COMMERCE_PUBLISH and
 // expectedRevision, the publicationRevision advanced, and on a published one the site's generation), or a
 // new version of its text (pageText, versionNote; with baseVersionName a page saved since by someone else is answered
-// conflict, not overwritten). Saving text never changes the live page: publish#SitePage does. COMMERCE_THEME_EDIT.
+// conflict, not overwritten). Saving text never changes the live page: publish#SitePage does. COMMERCE_THEME_EDIT; a landing page
+// of a Marketing mount (P14: a new one with app marketing) MARKETING_CONTENT_EDIT and the mount's organization.
 function storeSitePage(p) {
-    const s = scopeWith(["COMMERCE_THEME_EDIT"])
-    if (!p.sitePageId) return createSitePage(s, p)
-    const {page, site, mount, store} = pageOf(s, p.sitePageId, true)
+    if (!p.sitePageId) return createSitePage(appScope(text(p.app) || "shop", "edit"), p)
+    const found = pageOf(p.sitePageId, "edit", true)
+    const {page, site, mount, store} = found
+    const app = mount.app
     stale(p, page)
     const values = {}
     if (given(p, "title")) {
@@ -518,8 +621,9 @@ function storeSitePage(p) {
     }
     if (given(p, "routePath")) values.routePath = routeOf(p.routePath)
     if (given(p, "locale")) values.locale = localeOf(p.locale)
-    if (given(p, "templateKey")) values.templateKey = templateOf(p.templateKey, site, mount, store)
-    if (given(p, "pageRole")) values.pageRole = roleOf(p.pageRole)
+    if (given(p, "templateKey"))
+        values.templateKey = app === "shop" ? templateOf(p.templateKey, site, mount, store) : landingOnly(p.templateKey, "template")
+    if (given(p, "pageRole")) values.pageRole = app === "shop" ? roleOf(p.pageRole) : landingOnly(p.pageRole, "role")
     if (given(p, "seoTitle")) values.seoTitle = textOf(p.seoTitle, 255, "An SEO title")
     if (given(p, "seoDescription")) values.seoDescription = textOf(p.seoDescription, 500, "An SEO description")
     if (given(p, "socialImageUrl")) values.socialImageUrl = imageUrlOf(p.socialImageUrl)
@@ -535,18 +639,20 @@ function storeSitePage(p) {
         if (next.pageRole && next.pageRole !== page.pageRole && rows(PAGE, {siteId: page.siteId, pageRole: next.pageRole}).length)
             refuse("ROLE_TAKEN", "The site has a " + policyRoles[next.pageRole] + " page already")
         // A live or scheduled page's binding is what the site shows (or will at its date): changing it is a publication
-        // (design §1.1), so it takes COMMERCE_PUBLISH and the page's publicationRevision as read, and advances it.
+        // (design §1.1), so it takes COMMERCE_PUBLISH (a landing page MARKETING_CONTENT_EDIT) and the page's publicationRevision as
+        // read, and advances it.
         const live = stateOf(page) === "published"
         const update = {sitePageId: page.sitePageId, changeReason: stores.reason(p, false)}
         if (live || page.scheduledFromDate) {
-            if (!access.has("COMMERCE_PUBLISH"))
+            if (!access.has(pageApps[app].publish))
                 refuse(
                     "PERMISSION_DENIED",
                     "The page is " +
                         (live ? "published" : "scheduled") +
                         ": changing its " +
                         changed.join(", ") +
-                        " needs COMMERCE_PUBLISH"
+                        " needs " +
+                        pageApps[app].publish
                 )
             if (
                 p.expectedRevision == null ||
@@ -563,7 +669,7 @@ function storeSitePage(p) {
         if (live) generation = advance(page.siteId)
     }
     let saved = null
-    if (given(p, "pageText")) saved = savePageText(page, store, p)
+    if (given(p, "pageText")) saved = savePageText(page, found, p)
     const after = one(PAGE, {sitePageId: page.sitePageId})
     return Object.assign(
         {sitePageId: page.sitePageId, changed, generation, page: pageRow(after, site, mount, {edit: true})},
@@ -575,13 +681,16 @@ function stale(p, row) {
         refuse("REVISION_STALE", "Changed by someone else since it was read; reload")
 }
 function createSitePage(s, p) {
-    const {site, mount, store} = siteOf(s, p.siteId)
-    if (p.appMountId && p.appMountId !== mount.appMountId) refuse("VALUE_INVALID", "A store page is on the site's Shop")
+    const found = siteOf(s, p.siteId)
+    const {site, mount, store} = found
+    const shop = appOf(s) === "shop"
+    if (p.appMountId && p.appMountId !== mount.appMountId)
+        refuse("VALUE_INVALID", shop ? "A store page is on the site's Shop" : "A landing page is on the site's Marketing mount")
     const title = textOf(p.title, 255, "A title")
     if (!title) refuse("VALUE_INVALID", "A page has a title")
     const routePath = routeOf(p.routePath)
     const locale = localeOf(p.locale)
-    const pageRole = roleOf(p.pageRole)
+    const pageRole = shop ? roleOf(p.pageRole) : landingOnly(p.pageRole, "role")
     const values = {
         siteId: site.siteId,
         appMountId: mount.appMountId,
@@ -589,7 +698,7 @@ function createSitePage(s, p) {
         locale,
         title,
         pageRole,
-        templateKey: templateOf(p.templateKey, site, mount, store),
+        templateKey: shop ? templateOf(p.templateKey, site, mount, store) : landingOnly(p.templateKey, "template"),
         seoTitle: textOf(p.seoTitle, 255, "An SEO title"),
         seoDescription: textOf(p.seoDescription, 500, "An SEO description"),
         socialImageUrl: imageUrlOf(p.socialImageUrl)
@@ -598,7 +707,7 @@ function createSitePage(s, p) {
         refuse("ROUTE_TAKEN", "Another page of the site has the route " + routePath + (locale ? " in " + locale : ""))
     if (pageRole && rows(PAGE, {siteId: site.siteId, pageRole}).length)
         refuse("ROLE_TAKEN", "The site has a " + policyRoles[pageRole] + " page already")
-    const space = pageSpaceOf(store, true)
+    const space = spaceFor(found, true)
     const sitePageId = ec.entity.sequencedIdPrimary(PAGE, null, null)
     const pageText = p.pageText != null && String(p.pageText) !== "" ? String(p.pageText) : "# " + title + "\n"
     const written = asSpaceWriter(userId =>
@@ -630,10 +739,10 @@ function createSitePage(s, p) {
     }
 }
 // A new version of a page's text, as the editing user.
-function savePageText(page, store, p) {
+function savePageText(page, found, p) {
     const wiki = wikiOf(page)
-    const space = pageSpaceOf(store, false)
-    if (!space || space.wikiSpaceId !== wiki.wikiSpaceId) refuse("SPACE_UNAVAILABLE", "The page is not in the store's page space")
+    const space = spaceFor(found, false)
+    if (!space || space.wikiSpaceId !== wiki.wikiSpaceId) refuse("SPACE_UNAVAILABLE", "The page is not in its site's page space")
     const current = currentVersionOf(wiki)
     if (p.baseVersionName && !(p.force === true || p.force === "true") && current && current !== p.baseVersionName) {
         // who saved last: the page's newest history row (a save as the system names its user there), else the file's
@@ -669,10 +778,11 @@ function savePageText(page, store, p) {
 // page's published wiki version and the binding's in one transaction and the site's generation advances; later: it waits,
 // scheduled, for the publication job), withdraw the live page (its menus named; with menus, confirmReferences), or cancel a
 // scheduled publication. expectedRevision is the binding's publicationRevision; operationKey answers a retry with the
-// first result. With previewOnly, what it would do and nothing written. COMMERCE_PUBLISH.
+// first result. With previewOnly, what it would do and nothing written. COMMERCE_PUBLISH; a landing page MARKETING_CONTENT_EDIT
+// (P14).
 function publishSitePage(p) {
-    const s = scopeWith(["COMMERCE_PUBLISH"])
-    const {page, site, mount, store} = pageOf(s, p.sitePageId, true)
+    const found = pageOf(p.sitePageId, "publish", true)
+    const {page, site, mount, store} = found
     const action = text(p.publishAction) || "publish"
     if (!["publish", "withdraw", "cancel"].includes(action)) refuse("VALUE_INVALID", "Choose publish, withdraw or cancel")
     const wiki = wikiOf(page)
@@ -687,11 +797,11 @@ function publishSitePage(p) {
             versionName,
             scheduled: fromDate != null && fromDate > nowMs(),
             menuReferences: references,
-            publicUrl: page.routePath ? publicApps.pageUrl(page.siteId, "shop", "/pages/" + page.routePath) : null,
+            publicUrl: page.routePath ? publicApps.pageUrl(page.siteId, mount.app, "/pages/" + page.routePath) : null,
             generation: Number(site.generation || 0),
             nextGeneration: Number(site.generation || 0) + 1
         }
-    const op = lib.operation(p, "SitePagePublish", store.organizationPartyId, {
+    const op = lib.operation(p, "SitePagePublish", found.organizationPartyId, {
         sitePageId: page.sitePageId,
         action,
         versionName,
@@ -1678,8 +1788,7 @@ function runScheduledSitePublication(p) {
             return {result: {ok: true, skipped: true}}
         try {
             const generation = asAuthor(page.scheduledByUserId, () => {
-                const s = scopeWith(["COMMERCE_PUBLISH"])
-                const {store} = pageOf(s, page.sitePageId)
+                const {store} = pageOf(page.sitePageId, "publish")
                 const versionName = versionOf(wikiOf(page), page.scheduledVersionName)
                 if (routeTaken(page, page.siteId, page.appMountId, page.routePath, page.locale))
                     refuse("ROUTE_TAKEN", "Another page of the site has the route " + page.routePath)

@@ -1126,6 +1126,100 @@ along with this software (see the LICENSE.md file). If not, see
     </extend-entity>
     <!-- ===== end of Marketing P12 ===== -->
 
+    <!-- ===== Marketing P14: content, blog posts and landing pages (impl-marketing P14; design-marketing §8 Content, ContentDetail,
+        BlogPosts, BlogPostDetail, LandingPages, §14.1 CampaignContent) ===== -->
+    <!-- A campaign's planned use of content (design §14.1 CampaignContent; mantle.marketing.MarketingContentServices): a dated, typed
+        link to a blog post (WikiBlog), a landing or site page (PublicSitePage), a wiki page or a campaign file (CampaignAsset), with
+        its use and intended date. The content and its publication stay with their owner: a link publishes nothing, and its
+        organization is its campaign's. Ended, never deleted. -->
+    <entity entity-name="CampaignContent" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignContentId" type="id" is-pk="true"/>
+        <field name="marketingCampaignId" type="id"/>
+        <field name="organizationPartyId" type="id"><description>The campaign's organization</description></field>
+        <field name="contentKindEnumId" type="id"/>
+        <field name="wikiBlogId" type="id"/>
+        <field name="sitePageId" type="id"/>
+        <field name="wikiPageId" type="id"><description>A wiki page (CckWikiPage); for a blog post its page when linked</description></field>
+        <field name="campaignAssetId" type="id"/>
+        <field name="useText" type="text-medium" enable-audit-log="update"><description>What the campaign uses it for (a landing page,
+            a newsletter article)</description></field>
+        <field name="intendedDate" type="date-time" enable-audit-log="update"><description>When the campaign means to use it: a plan,
+            never a release instruction</description></field>
+        <field name="fromDate" type="date-time"/>
+        <field name="thruDate" type="date-time" enable-audit-log="update"/>
+        <field name="createdByUserId" type="id"/>
+        <relationship type="one" related="mantle.marketing.campaign.MarketingCampaign"/>
+        <relationship type="one" title="CampaignContentKind" related="moqui.basic.Enumeration">
+            <key-map field-name="contentKindEnumId"/></relationship>
+        <relationship type="one-nofk" related="moqui.resource.wiki.WikiBlog"/>
+        <relationship type="one-nofk" related="mantle.public.PublicSitePage"/>
+        <relationship type="one-nofk" related="moqui.resource.wiki.WikiPage"/>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.CampaignAsset"/>
+        <index name="CMP_CONTENT_CAMPAIGN"><index-field name="marketingCampaignId"/></index>
+        <index name="CMP_CONTENT_BLOG"><index-field name="wikiBlogId"/></index>
+        <index name="CMP_CONTENT_PAGE"><index-field name="sitePageId"/></index>
+        <seed-data>
+            <moqui.basic.EnumerationType description="Campaign Content Kind" enumTypeId="CampaignContentKind"/>
+            <moqui.basic.Enumeration description="Blog post" enumId="CckBlogPost" enumTypeId="CampaignContentKind" sequenceNum="1"/>
+            <moqui.basic.Enumeration description="Landing page" enumId="CckSitePage" enumTypeId="CampaignContentKind" sequenceNum="2"/>
+            <moqui.basic.Enumeration description="Wiki page" enumId="CckWikiPage" enumTypeId="CampaignContentKind" sequenceNum="3"/>
+            <moqui.basic.Enumeration description="File" enumId="CckFile" enumTypeId="CampaignContentKind" sequenceNum="4"/>
+        </seed-data>
+    </entity>
+    <!-- An organization's page space for its storeless landing pages (the site page services' marketing mount, F23; as a store's
+        ProductStoreWikiSpace PstFull is for its Shop pages): a wiki space with restrictUpdate that only the site page services write,
+        made when the organization's first landing page is. Dated; the newest current row is the space. -->
+    <entity entity-name="MarketingPageSpace" package="mantle.marketing.content" cache="never">
+        <field name="organizationPartyId" type="id" is-pk="true"/>
+        <field name="fromDate" type="date-time" is-pk="true"/>
+        <field name="thruDate" type="date-time"/>
+        <field name="wikiSpaceId" type="id"/>
+        <relationship type="one" title="Organization" related="mantle.party.Party"><key-map field-name="organizationPartyId"
+                related="partyId"/></relationship>
+        <relationship type="one" related="moqui.resource.wiki.WikiSpace"/>
+    </entity>
+    <!-- Newsletter assembly (design §8 ContentDetail Distribution): a send that takes the approved posts of a blog category as of its
+        preparation names the category; the preparation records each post it took with the page version it read
+        (CampaignSendPost), so the send's content stays what was approved then. A send sets neither WikiBlog.publishDate nor a page's
+        published version, and WikiBlogCategory.sentDate is not its record. -->
+    <extend-entity entity-name="CampaignSend" package="mantle.marketing.campaign">
+        <field name="postCategoryId" type="id" enable-audit-log="update"><description>The blog category (WikiPageCategory) whose
+            approved posts the preparation adds to the body</description></field>
+        <field name="campaignContentId" type="id"><description>The content link the send was drafted from (ContentDetail's
+            Distribution)</description></field>
+        <relationship type="one-nofk" title="PostCategory" related="moqui.resource.wiki.WikiPageCategory">
+            <key-map field-name="postCategoryId" related="wikiPageCategoryId"/></relationship>
+        <relationship type="one-nofk" related="mantle.marketing.campaign.CampaignContent"/>
+        <index name="CMP_SEND_CONTENT"><index-field name="campaignContentId"/></index>
+    </extend-entity>
+    <entity entity-name="CampaignSendPost" package="mantle.marketing.campaign" cache="never">
+        <field name="campaignSendId" type="id" is-pk="true"/>
+        <field name="preparedRevision" type="number-integer" is-pk="true"/>
+        <field name="wikiBlogId" type="id" is-pk="true"/>
+        <field name="wikiPageId" type="id"/>
+        <field name="versionName" type="text-short"><description>The page's published version the preparation read</description></field>
+        <field name="title" type="text-medium"/>
+        <field name="publishDate" type="date-time"/>
+        <field name="sequenceNum" type="number-integer"/>
+        <field name="preparedDate" type="date-time"/>
+        <relationship type="one" related="mantle.marketing.campaign.CampaignSend"/>
+        <relationship type="one-nofk" related="moqui.resource.wiki.WikiBlog"/>
+        <index name="CMP_SEND_POST_BLOG"><index-field name="wikiBlogId"/></index>
+    </entity>
+    <!-- The blog posts of wiki spaces (find#BlogPosts): each WikiBlog with its page's space, path, published version and view
+        restriction, one row a post (WikiBlogFindView joins its categories, a row each, and leaves out a post with none). -->
+    <view-entity entity-name="BlogPostView" package="mantle.marketing.content">
+        <member-entity entity-alias="WKBG" entity-name="moqui.resource.wiki.WikiBlog"/>
+        <member-entity entity-alias="WKPG" entity-name="moqui.resource.wiki.WikiPage" join-from-alias="WKBG">
+            <key-map field-name="wikiPageId"/></member-entity>
+        <alias-all entity-alias="WKBG"/>
+        <alias entity-alias="WKPG" name="wikiSpaceId"/>
+        <alias entity-alias="WKPG" name="pagePath"/>
+        <alias entity-alias="WKPG" name="publishedVersionName"/>
+        <alias entity-alias="WKPG" name="restrictView"/>
+    </view-entity>
+    <!-- ===== end of Marketing P14 ===== -->
+
     <!-- ========================================================= -->
     <!-- mantle.marketing.contact -->
     <!-- ========================================================= -->
