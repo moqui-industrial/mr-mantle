@@ -797,7 +797,10 @@ along with this software (see the LICENSE.md file). If not, see
             it, or, for an account of their organization, a Sales manager or administrator; two parties of one kind and one owner
             organization; the merged party's opportunities and agreements of that organization only. Refusals carry reason codes
             (PERMISSION_DENIED, PARTY_KIND_MISMATCH, ORGANIZATION_MISMATCH, DEPENDENCY_OTHER_ORGANIZATION,
-            DEPENDENCY_UNAVAILABLE).</description>
+            DEPENDENCY_UNAVAILABLE); Marketing's (impl-marketing P19): an active automation enrollment, a live registration of an
+            occurrence not ended or a recipient waiting in a send of the merged party (ENROLLMENT_ACTIVE, ENROLLMENT_CONFLICT,
+            REGISTRATION_ACTIVE, RECIPIENT_PENDING); its list memberships and consent move with a withdrawal kept where the two
+            parties disagree.</description>
         <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromIntRole">
@@ -1042,14 +1045,19 @@ along with this software (see the LICENSE.md file). If not, see
                 if (requestCount) ec.message.addMessage(`Moved ${requestCount} Request parties from Party ${fromPartyId} to ${toPartyId}`)
                 commPartyCount = moveKeyed("mantle.party.communication.CommunicationEventParty", "partyId")
                 if (commPartyCount) ec.message.addMessage(`Moved ${commPartyCount} Communication Event parties from Party ${fromPartyId} to ${toPartyId}`)
-                listCount = moveKeyed("mantle.marketing.contact.ContactListParty", "partyId")
-                if (listCount) ec.message.addMessage(`Moved ${listCount} Contact List memberships from Party ${fromPartyId} to ${toPartyId}`)
-
-                // PartyConsent (the consent history, kept whole: the merged party's latest rows are as current as the
-                // to Party's) and the unsubscribe link tokens
-                consentCount = moveAll("mantle.party.PartyConsent", "partyId", "partyId")
-                if (consentCount) ec.message.addMessage(`Moved ${consentCount} Consent records from Party ${fromPartyId} to ${toPartyId}`)
-                moveAll("mantle.marketing.contact.ContactListToken", "partyId", "partyId")
+                // Marketing P19 (impl-marketing F82, X15; mantle/marketing/MarketingPartyMerge.js): list memberships, where both
+                // parties are current on one list keeping the more restrictive state (a withdrawal wins); the consent history, with a
+                // withdrawal recorded for the to Party where the from Party's withdrawal would otherwise be undone by a later grant;
+                // the unsubscribe link tokens, explicit segment members (an exclusion wins), subscription requests, import rows,
+                // campaign recipients, automation events and ended enrollments, campaign people, event registrations, reservations,
+                // attendance and form submissions (the guards above refused an active enrollment or registration and a waiting
+                // recipient)
+                const marketingMoved = ec.resource.script('component://mr-mantle/service/mantle/marketing/MarketingPartyMerge.js').move(fromPartyId, toPartyId)
+                if (marketingMoved.memberships) ec.message.addMessage(`Moved ${marketingMoved.memberships} Contact List memberships from Party ${fromPartyId} to ${toPartyId}`)
+                if (marketingMoved.membershipsKept) ec.message.addMessage(`Kept ${marketingMoved.membershipsKept} unsubscriptions of Party ${fromPartyId} on Party ${toPartyId}'s memberships`)
+                if (marketingMoved.consents) ec.message.addMessage(`Moved ${marketingMoved.consents} Consent records from Party ${fromPartyId} to ${toPartyId}`)
+                if (marketingMoved.consentsKept) ec.message.addMessage(`Kept ${marketingMoved.consentsKept} consent withdrawals of Party ${fromPartyId} for Party ${toPartyId}`)
+                if (marketingMoved.segmentMembers + marketingMoved.records) ec.message.addMessage(`Moved ${marketingMoved.segmentMembers + marketingMoved.records} Marketing records from Party ${fromPartyId} to ${toPartyId}`)
 
                 // ContactBookParty: in a book the to Party is already in, its current row stays (a favorite if either was)
                 // and the from Party's current row is removed; every other row moves

@@ -496,7 +496,25 @@ const associationKinds = {
         organization: sourceId => {
             const promotion = one("mantle.product.store.ProductStorePromotion", {storePromotionId: sourceId})
             const store = promotion ? one("mantle.product.store.ProductStore", {productStoreId: promotion.productStoreId}) : null
-            return store ? {owner: store.organizationPartyId, label: promotion.promotionName || promotion.storePromotionId} : null
+            return store
+                ? {owner: store.organizationPartyId, label: promotion.itemDescription || promotion.storePromotionId}
+                : null
+        },
+        // P19 (design §7; owner contract Commerce): a promotion is linked or unlinked only by a caller who may change it, Commerce's
+        // COMMERCE_PROMOTION_EDIT and the store's scope (StorePromotions' own check), beside the campaign's edit; another store's
+        // promotion answers as a missing one
+        guard: sourceId => {
+            if (!lib.access.has("COMMERCE_PROMOTION_EDIT") || !lib.access.has("COMMERCE_VIEW"))
+                denied("PERMISSION_DENIED", "Linking a store promotion needs Commerce's promotion permission")
+            const promotion = one("mantle.product.store.ProductStorePromotion", {storePromotionId: sourceId})
+            const stores = ec.resource.script("component://mr-mantle/service/mantle/product/StoreAdmin.js")
+            try {
+                stores.storeOf(stores.scope("view"), promotion?.productStoreId)
+            } catch (error) {
+                if (lib.reasonCode(error) === "RECORD_UNAVAILABLE")
+                    denied("RECORD_UNAVAILABLE", "Promotion " + sourceId + " is not available")
+                throw error
+            }
         }
     },
     CakForm: {
@@ -521,6 +539,7 @@ function storeAssociation(p) {
         const link = one(ASSOCIATION, {campaignAssociationId: text(p.campaignAssociationId)})
         if (!link || link.marketingCampaignId !== row.marketingCampaignId || !lib.active(link))
             denied("RECORD_UNAVAILABLE", "That link is not a current link of the campaign")
+        associationKinds[link.associationKindEnumId]?.guard?.(link.sourceId)
         call("update#" + ASSOCIATION, {campaignAssociationId: link.campaignAssociationId, thruDate: ec.user.nowTimestamp})
         return {campaignAssociationId: link.campaignAssociationId}
     }
@@ -528,6 +547,7 @@ function storeAssociation(p) {
     const kindId = text(p.associationKindEnumId)
     if (!Object.hasOwn(associationKinds, kindId)) denied("KIND_UNAVAILABLE", "A campaign cannot link this kind of record yet")
     const sourceId = text(p.sourceId)
+    if (sourceId) associationKinds[kindId].guard?.(sourceId)
     const found = sourceId ? associationKinds[kindId].organization(sourceId) : null
     // another organization's record answers as a missing one (P2 review: a distinct answer told which ids exist elsewhere)
     if (!found || found.owner !== row.organizationPartyId)
@@ -550,6 +570,60 @@ function storeAssociation(p) {
         createdByUserId: ec.user.userId
     }).campaignAssociationId
     return {campaignAssociationId}
+}
+
+// ===== find#CampaignAssociations (P19) =====
+// The current campaign links of one record (a store promotion on PromotionDetail): each campaign of the caller's Marketing scope that
+// links it, with whether the caller may end the link (the campaign's editor, and the kind's own guard: Commerce's promotion
+// permission for a promotion). A campaign outside the scope is left out.
+function findAssociations(p) {
+    const userScope = reader()
+    const kindId = text(p.associationKindEnumId)
+    if (!Object.hasOwn(associationKinds, kindId)) denied("KIND_UNAVAILABLE", "A campaign cannot link this kind of record")
+    const sourceId = text(p.sourceId)
+    const links = sourceId ? rows(ASSOCIATION, {associationKindEnumId: kindId, sourceId}).filter(link => lib.active(link)) : []
+    const campaigns = Object.fromEntries(
+        (links.length
+            ? Array.from(
+                  find(CAMPAIGN)
+                      .condition(
+                          "marketingCampaignId",
+                          "in",
+                          links.map(link => link.marketingCampaignId)
+                      )
+                      .list()
+              )
+            : []
+        ).map(row => [row.marketingCampaignId, row])
+    )
+    let guarded = true
+    try {
+        if (sourceId) associationKinds[kindId].guard?.(sourceId)
+    } catch (error) {
+        guarded = false
+    }
+    const edit = !!userScope.capabilities.campaignEdit && guarded
+    return {
+        links: links
+            .filter(
+                link =>
+                    campaigns[link.marketingCampaignId] &&
+                    marketingAccess.covers(userScope, campaigns[link.marketingCampaignId].organizationPartyId)
+            )
+            .map(link => {
+                const campaign = campaigns[link.marketingCampaignId]
+                return {
+                    campaignAssociationId: link.campaignAssociationId,
+                    marketingCampaignId: campaign.marketingCampaignId,
+                    campaignName: campaign.campaignName || campaign.marketingCampaignId,
+                    statusText: statusText[campaign.statusId] || campaign.statusId,
+                    purpose: link.purpose || "",
+                    fromDateText: lib.dateText(link.fromDate),
+                    canEnd: edit && openStatuses.includes(campaign.statusId)
+                }
+            }),
+        canLink: edit
+    }
 }
 
 // ===== the flow: start, complete, cancel =====
@@ -914,6 +988,7 @@ const operations = {
     storeBudget,
     storeParty,
     storeAssociation,
+    findAssociations,
     transition,
     duplicate,
     get,

@@ -988,3 +988,111 @@ feature("the shared book its only manager owns is listed and handed to a colleag
         shares.includes(`${blakeUserId}:CbpManage`) && !shares.some((share) => share.startsWith(averyUserId + ":"))
     },
 })
+
+feature("merge#Parties keeps either party's withdrawals and refuses an active enrollment, registration or waiting recipient (impl-marketing P19, F82)", {
+    when() {
+        at(40)
+        const P = "mantle.party.PartyServices."
+        const toId = call(P + "create#Person", { firstName: "Keptmkt", lastName: "Merge" }).partyId
+        const fromId = call(P + "create#Person", { firstName: "Gonemkt", lastName: "Merge" }).partyId
+        // one address on both parties, as two contact mechanisms (the merge attaches no duplicate, so the kept party's is the one)
+        const email = (partyId) => {
+            const contactMechId = call("create#mantle.party.contact.ContactMech", { contactMechTypeEnumId: "CmtEmailAddress",
+                    infoString: partyId === toId ? "kept.merge@example.com" : "Kept.Merge@example.com" }).contactMechId
+            call("create#mantle.party.contact.PartyContactMech", { partyId, contactMechId, contactMechPurposeId: "EmailPrimary", fromDate: ec.user.nowTimestamp })
+            return contactMechId
+        }
+        const toMech = email(toId)
+        const fromMech = email(fromId)
+        const consent = (partyId, statusId, values) => call("mantle.party.ConsentServices.record#PartyConsent", Object.assign({ partyId,
+                purposeEnumId: "PcpMarketingEmail", statusId, sourceEnumId: "PcsStaff" }, values))
+        // the list: the merged party unsubscribed, the kept party accepted later; a second list the kept party is not on
+        call("create#mantle.marketing.contact.ContactList", { contactListId: "CBK_MKT_LIST", contactListName: "Merge newsletter" })
+        call("create#mantle.marketing.contact.ContactList", { contactListId: "CBK_MKT_LIST2", contactListName: "Merge offers" })
+        at(41)
+        call("create#mantle.marketing.contact.ContactListParty", { contactListId: "CBK_MKT_LIST", partyId: fromId, fromDate: ec.user.nowTimestamp,
+                statusId: "CLPT_UNSUBSCRIBED" })
+        call("create#mantle.marketing.contact.ContactListParty", { contactListId: "CBK_MKT_LIST2", partyId: fromId, fromDate: ec.user.nowTimestamp,
+                statusId: "CLPT_ACCEPTED" })
+        // the merged party withdrew the address for Retail and tracking everywhere; the kept party granted both later
+        consent(fromId, "PconWithdrawn", { contactMechId: fromMech, organizationPartyId: "ORG_ZIZI_RETAIL" })
+        consent(fromId, "PconWithdrawn", { purposeEnumId: "PcpTracking" })
+        // P19 review: the kept party withdrew SMS, the merged party granted it later (the kept party's withdrawal wins too)
+        consent(toId, "PconWithdrawn", { purposeEnumId: "PcpSms" })
+        // P19 review: both parties on a third list at one timestamp, the kept party's row since ended (the merged row is not dropped)
+        call("create#mantle.marketing.contact.ContactList", { contactListId: "CBK_MKT_LIST3", contactListName: "Merge events" })
+        call("create#mantle.marketing.contact.ContactListParty", { contactListId: "CBK_MKT_LIST3", partyId: fromId, fromDate: ec.user.nowTimestamp,
+                statusId: "CLPT_UNSUBSCRIBED" })
+        call("create#mantle.marketing.contact.ContactListParty", { contactListId: "CBK_MKT_LIST3", partyId: toId, fromDate: ec.user.nowTimestamp,
+                thruDate: new Date(effectiveTime + 41 * minute + 1000), statusId: "CLPT_ACCEPTED" })
+        call("create#mantle.marketing.segment.MarketSegment", { marketSegmentId: "CBK_MKT_SEG", description: "Merge segment" })
+        call("create#mantle.marketing.segment.MarketSegmentParty", { marketSegmentId: "CBK_MKT_SEG", partyId: fromId, roleTypeId: "_NA_",
+                fromDate: ec.user.nowTimestamp, memberKindEnumId: "MspExclude" })
+        call("create#mantle.marketing.segment.MarketSegmentParty", { marketSegmentId: "CBK_MKT_SEG", partyId: toId, roleTypeId: "_NA_",
+                fromDate: ec.user.nowTimestamp, memberKindEnumId: "MspInclude" })
+        at(42)
+        call("create#mantle.marketing.contact.ContactListParty", { contactListId: "CBK_MKT_LIST", partyId: toId, fromDate: ec.user.nowTimestamp,
+                statusId: "CLPT_ACCEPTED" })
+        consent(toId, "PconGranted", { contactMechId: toMech, organizationPartyId: "ORG_ZIZI_RETAIL" })
+        consent(toId, "PconGranted", { purposeEnumId: "PcpTracking" })
+        consent(fromId, "PconGranted", { purposeEnumId: "PcpSms" })
+        // P19 review: a recipient waiting in a scheduled send
+        call("create#mantle.marketing.campaign.CampaignSend", { campaignSendId: "CBK_MKT_SEND", statusId: "CsScheduled" })
+        call("create#mantle.marketing.campaign.CampaignRecipient", { campaignRecipientId: "CBK_MKT_RCPT", campaignSendId: "CBK_MKT_SEND",
+                partyId: fromId, statusId: "CrsSelected" })
+        // an active enrollment, then a confirmed place on an occurrence still to come
+        call("create#mantle.marketing.automation.MarketingAutomation", { marketingAutomationId: "CBK_MKT_AUTO", automationName: "Merge drip" })
+        call("create#mantle.marketing.automation.AutomationEnrollment", { automationEnrollmentId: "CBK_MKT_ENR", marketingAutomationId: "CBK_MKT_AUTO",
+                partyId: fromId, sourceKey: "staff:1", statusId: "AenActive" })
+        call("create#mantle.work.registration.EventRegistrationPolicy", { registrationPolicyId: "CBK_MKT_OFFER",
+                occurrenceStart: new Date(effectiveTime + dayMillis), occurrenceEnd: new Date(effectiveTime + dayMillis + 3600000) })
+        call("create#mantle.work.registration.EventRegistration", { registrationId: "CBK_MKT_REG", registrationPolicyId: "CBK_MKT_OFFER",
+                attendeePartyId: fromId, statusId: "EvrConfirmed" })
+        at(43)
+        const merge = () => errorOf("mantle.party.DuplicateServices.merge#Parties", { toPartyId: toId, fromPartyId: fromId })
+        const enrolled = merge()
+        call("update#mantle.marketing.automation.AutomationEnrollment", { automationEnrollmentId: "CBK_MKT_ENR", statusId: "AenCompleted" })
+        const registered = merge()
+        // the occurrence is over: the place is history and moves
+        call("update#mantle.work.registration.EventRegistrationPolicy", { registrationPolicyId: "CBK_MKT_OFFER",
+                occurrenceStart: new Date(effectiveTime - dayMillis), occurrenceEnd: new Date(effectiveTime - dayMillis + 3600000) })
+        const waiting = merge()
+        call("update#mantle.marketing.campaign.CampaignSend", { campaignSendId: "CBK_MKT_SEND", statusId: "CsCancelled" })
+        const merged = merge()
+        const memberships = Array.from(ec.entity.find("mantle.marketing.contact.ContactListParty").condition("partyId", toId)
+                .orderBy("contactListId").orderBy("fromDate").list()).map((row) => `${row.contactListId}:${row.statusId}:${row.thruDate ? "ended" : "current"}`)
+        const consents = Array.from(ec.entity.find("mantle.party.PartyConsent").condition("partyId", toId).orderBy("-consentDate")
+                .orderBy("-partyConsentId").list())
+        const states = ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingEligibility.js")
+        return {
+            enrolled, registered, waiting, merged, memberships,
+            left: countOf("mantle.marketing.contact.ContactListParty", { partyId: fromId }) + countOf("mantle.party.PartyConsent", { partyId: fromId })
+                + countOf("mantle.marketing.segment.MarketSegmentParty", { partyId: fromId }),
+            kept: Array.from(ec.entity.find("mantle.party.PartyConsent").condition("partyId", toId).condition("sourceEnumId", "PcsMerge")
+                    .orderBy("purposeEnumId").list()).map((row) => `${row.purposeEnumId}:${row.contactMechId === toMech ? "kept address" : row.contactMechId || "party"}`),
+            emailWithdrawn: states.purposeState(consents, "PcpMarketingEmail", toMech, "ORG_ZIZI_RETAIL").withdrawn,
+            trackingWithdrawn: states.purposeState(consents, "PcpTracking", toMech, "ORG_ZIZI_RETAIL").withdrawn,
+            smsWithdrawn: states.purposeState(consents, "PcpSms", null, "ORG_ZIZI_RETAIL").withdrawn,
+            segment: ec.entity.find("mantle.marketing.segment.MarketSegmentParty").condition("marketSegmentId", "CBK_MKT_SEG").condition("partyId", toId)
+                    .one()?.memberKindEnumId,
+            enrollment: ec.entity.find("mantle.marketing.automation.AutomationEnrollment").condition("automationEnrollmentId", "CBK_MKT_ENR").one().partyId == toId,
+            registration: ec.entity.find("mantle.work.registration.EventRegistration").condition("registrationId", "CBK_MKT_REG").one().attendeePartyId == toId,
+        }
+    },
+    then({ enrolled, registered, waiting, merged, memberships, left, kept, emailWithdrawn, trackingWithdrawn, smsWithdrawn, segment, enrollment,
+            registration }) {
+        enrolled.includes("ENROLLMENT_ACTIVE") && enrolled.includes("CBK_MKT_ENR")
+        registered.includes("REGISTRATION_ACTIVE") && registered.includes("CBK_MKT_REG")
+        waiting.includes("RECIPIENT_PENDING") && waiting.includes("CBK_MKT_SEND")
+        merged == null
+        // the kept party's newer acceptance takes the merged party's unsubscription; the merged row moves ended, as history; on the
+        // third list the merged party's current unsubscription moves beside the kept party's ended row of the same timestamp
+        memberships == ["CBK_MKT_LIST:CLPT_UNSUBSCRIBED:ended", "CBK_MKT_LIST:CLPT_UNSUBSCRIBED:current", "CBK_MKT_LIST2:CLPT_ACCEPTED:current",
+                "CBK_MKT_LIST3:CLPT_ACCEPTED:ended", "CBK_MKT_LIST3:CLPT_UNSUBSCRIBED:current"]
+        left == 0
+        kept == ["PcpMarketingEmail:kept address", "PcpSms:party", "PcpTracking:party"]
+        emailWithdrawn && trackingWithdrawn && smsWithdrawn
+        segment == "MspExclude"
+        enrollment && registration
+    },
+})
