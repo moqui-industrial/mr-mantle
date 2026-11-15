@@ -240,8 +240,13 @@ feature("an approved order becomes a monthly base: a template every reader leave
         const listed = as(users.keeper, svc + "find#RecurringSalesOrders", {}).recurrenceList || []
         const listedB = as(users.keeperB, svc + "find#RecurringSalesOrders", {}).recurrenceList || []
         const orders = as(users.reader, "mantle.sales.SalesWorkspaceServices.find#SalesOrders", {list: "recent"}).orderList || []
+        // the account by its id: the list holds every shared account too (owner _NA_), 20 a page by name, and other specs' shared
+        // accounts sort before "Account a" in a full run
         const accounts =
-            as(users.reader, "mantle.sales.SalesWorkspaceServices.find#Accounts", {organizationPartyId: f.orgA}).accountList || []
+            as(users.reader, "mantle.sales.SalesWorkspaceServices.find#Accounts", {
+                organizationPartyId: f.orgA,
+                text: f.accounts.a
+            }).accountList || []
         const openOrders = accounts.find(row => row.partyId == f.accounts.a)?.openOrderCount
         // the review's readers: a customer's finance lists the order and not its base; a bulk part status change passes the base by
         const finance = as(users.receivables, "mantle.account.CustomerFinanceServices.get#CustomerFinance", {
