@@ -87,7 +87,9 @@ along with this software (see the LICENSE.md file). If not, see
             an events manager (MARKETING_EVENT_MANAGE) who may edit the event (its organizer or an editor of its calendar,
             EVENT_EDIT_REQUIRED otherwise); the same organization again changes nothing, another is ORGANIZATION_FIXED. With
             marketingCampaignId, the event's link to an open campaign of that organization (CampaignAssociation CakEvent, made
-            once). Called after mantle.work.EventServices.create#Event by NewEvent.</description>
+            once) through mantle.marketing.CampaignServices.store#CampaignAssociation, a change of the campaign: the caller also
+            holds MARKETING_CAMPAIGN_EDIT (CAMPAIGN_EDIT_REQUIRED otherwise). Called after mantle.work.EventServices.create#Event
+            by NewEvent.</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <parameter name="organizationPartyId"/>
@@ -178,7 +180,7 @@ along with this software (see the LICENSE.md file). If not, see
             DbfpRegistration) of the organization (FORM_INVALID, FORM_NOT_PUBLISHED), kept as the offer's publication of purpose
             registration (Commons' FormPublication: anonymous, on the offer's site, open while the offer is; a new form closes the
             earlier one, an empty formId ends them), whom they are for (ErqAttendee, ErqBuyer) and the consent text a registrant
-            accepts with them. MARKETING_EVENT_MANAGE in the event's organization.</description>
+            accepts with them (a change after publication raises termsRevision). MARKETING_EVENT_MANAGE in the event's organization.</description>
         <in-parameters>
             <parameter name="registrationPolicyId" required="true"/>
             <parameter name="expectedRevision"/>

@@ -1,6 +1,6 @@
 // Event registration setup (impl-marketing P16; design-marketing §9 Events, RegistrationSetup, §13 Event; mantle.work.EventRegistrationServices
-// over EventRegistrations.js): an events manager who may edit a calendar event offers its registration for an organization and links a
-// campaign, a reader, another organization's manager and a manager who may not edit the event kept out; capacity is never set below the
+// over EventRegistrations.js): an events manager who may edit a calendar event offers its registration for an organization, its
+// campaign link only with the campaign's edit (CampaignServices store#CampaignAssociation), a reader, another organization's manager and a manager who may not edit the event kept out; capacity is never set below the
 // places held or confirmed, one occurrence's seats not another's; a paid ticket is not published without a payment gateway, a stale
 // revision is refused, and the published offer's public view names nothing internal. Standalone: spec-local organizations, users, a site,
 // a sending profile, a ticket product and its price.
@@ -57,16 +57,11 @@ function places(registrationPolicyId, ticketTypeId, states) {
     )
 }
 // a public operation as the anonymous request: its result, or {kind} of its refusal
-function visitor(input) {
+function visitor(input, service = "mantle.marketing.MarketingPortalServices.get#Event") {
     logout()
     ec.message.pushErrors()
     try {
-        const out = ec.service
-            .sync()
-            .throwOnError(true)
-            .name("mantle.marketing.MarketingPortalServices.get#Event")
-            .parameters({input})
-            .call()
+        const out = ec.service.sync().throwOnError(true).name(service).parameters({input}).call()
         return out.result
     } catch (error) {
         return {kind: error.moquiErrorKind || "error", message: String(error.message)}
@@ -153,6 +148,8 @@ spec({
             users.other = user(prefix, "other", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
             users.managerB = user(prefix, "managerB", [orgB], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
             users.author = user(prefix, "author", [orgA], ["MARKETING_VIEW", "MARKETING_CAMPAIGN_EDIT"])
+            users.content = user(prefix, "content", [orgA], ["MARKETING_VIEW", "MARKETING_CONTENT_EDIT"])
+            users.lead = user(prefix, "lead", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE", "MARKETING_CAMPAIGN_EDIT"])
         })
         ids.campaign = campaign(users.author, orgA, {campaignName: "Events spring"})
         ids.webinar = event(users.manager, "Spring webinar")
@@ -168,20 +165,37 @@ spec({
 })
 
 feature(
-    "an events manager who may edit the event offers it with a campaign; a reader, another organization and a non-editor are kept out",
+    "an events manager who may edit the event offers it; the campaign link asks the campaign's edit; a reader, another organization and a non-editor are kept out",
     {
         when() {
             const own = event(users.manager, "Garden evening")
             const reader = as(users.reader, E + "store#RegistrationEvent", {workEffortId: own, organizationPartyId: orgA})
             const notEditor = as(users.other, E + "store#RegistrationEvent", {workEffortId: own, organizationPartyId: orgA})
             const otherOrg = as(users.manager, E + "store#RegistrationEvent", {workEffortId: own, organizationPartyId: orgB})
-            const adopted = as(users.manager, E + "store#RegistrationEvent", {
+            // the campaign link is a change of the campaign: an events manager without its edit is refused and nothing is kept
+            const noCampaignEdit = as(users.manager, E + "store#RegistrationEvent", {
                 workEffortId: own,
                 organizationPartyId: orgA,
                 marketingCampaignId: ids.campaign
             })
-            const again = as(users.manager, E + "store#RegistrationEvent", {
-                workEffortId: own,
+            const keptNothing = !row("mantle.work.registration.RegistrationEvent", {workEffortId: own})
+            const adopted = as(users.manager, E + "store#RegistrationEvent", {workEffortId: own, organizationPartyId: orgA})
+            const again = as(users.manager, E + "store#RegistrationEvent", {workEffortId: own, organizationPartyId: orgA})
+            // the campaign's author links it (C.store#CampaignAssociation, CakEvent by the event's organization)
+            const authorLink = as(users.author, "mantle.marketing.CampaignServices.store#CampaignAssociation", {
+                marketingCampaignId: ids.campaign,
+                associationKindEnumId: "CakEvent",
+                sourceId: own
+            })
+            // an events manager who also edits campaigns offers an event of theirs with its campaign link, once
+            const led = event(users.lead, "Seed swap")
+            const withCampaign = as(users.lead, E + "store#RegistrationEvent", {
+                workEffortId: led,
+                organizationPartyId: orgA,
+                marketingCampaignId: ids.campaign
+            })
+            const linkedAgain = as(users.lead, E + "store#RegistrationEvent", {
+                workEffortId: led,
                 organizationPartyId: orgA,
                 marketingCampaignId: ids.campaign
             })
@@ -190,20 +204,47 @@ feature(
             const byCampaign = as(users.reader, E + "find#Events", {marketingCampaignId: ids.campaign})
             const offer = as(users.manager, E + "store#RegistrationPolicy", {workEffortId: own, totalSeats: 10})
             const readerOffer = as(users.reader, E + "store#RegistrationPolicy", {workEffortId: own, totalSeats: 10})
-            return {reader, notEditor, otherOrg, adopted, again, fromB, readB, byCampaign, offer, readerOffer, own}
+            return {
+                reader,
+                notEditor,
+                otherOrg,
+                noCampaignEdit,
+                keptNothing,
+                adopted,
+                again,
+                authorLink,
+                withCampaign,
+                linkedAgain,
+                fromB,
+                readB,
+                byCampaign,
+                offer,
+                readerOffer,
+                own,
+                led
+            }
         },
-        then({reader, notEditor, otherOrg, adopted, again, fromB, readB, byCampaign, offer, readerOffer, own}) {
-            code(reader) == "PERMISSION_DENIED"
-            code(notEditor) == "EVENT_EDIT_REQUIRED"
-            code(otherOrg) == "ORGANIZATION_DENIED"
-            adopted.refusal == "" && adopted.created && !!adopted.campaignAssociationId
-            again.refusal == "" && !again.created && again.campaignAssociationId == adopted.campaignAssociationId
-            code(fromB) == "RECORD_UNAVAILABLE"
-            code(readB) == "RECORD_UNAVAILABLE"
-            byCampaign.refusal == "" && byCampaign.eventList.map(found => found.workEffortId).join() == own
-            byCampaign.eventList[0].campaignText == "Events spring"
-            offer.refusal == "" && !!offer.registrationPolicyId
-            code(readerOffer) == "PERMISSION_DENIED"
+        then(r) {
+            code(r.reader) == "PERMISSION_DENIED"
+            code(r.notEditor) == "EVENT_EDIT_REQUIRED"
+            code(r.otherOrg) == "ORGANIZATION_DENIED"
+            code(r.noCampaignEdit) == "CAMPAIGN_EDIT_REQUIRED" && r.keptNothing
+            r.adopted.refusal == "" && r.adopted.created && !r.adopted.campaignAssociationId
+            r.again.refusal == "" && !r.again.created
+            r.authorLink.refusal == "" && !!r.authorLink.campaignAssociationId
+            r.withCampaign.refusal == "" && r.withCampaign.created && !!r.withCampaign.campaignAssociationId
+            r.linkedAgain.refusal == "" && !r.linkedAgain.created
+            r.linkedAgain.campaignAssociationId == r.withCampaign.campaignAssociationId
+            code(r.fromB) == "RECORD_UNAVAILABLE"
+            code(r.readB) == "RECORD_UNAVAILABLE"
+            r.byCampaign.refusal == "" &&
+                r.byCampaign.eventList
+                    .map(found => found.workEffortId)
+                    .sort()
+                    .join() == [r.own, r.led].sort().join()
+            r.byCampaign.eventList[0].campaignText == "Events spring"
+            r.offer.refusal == "" && !!r.offer.registrationPolicyId
+            code(r.readerOffer) == "PERMISSION_DENIED"
         }
     }
 )
@@ -315,6 +356,32 @@ feature(
                 productId: prefix + "_TICKET"
             })
             as(users.manager, E + "store#TicketType", {registrationPolicyId: id, ticketName: "Guest"})
+            // registration questions a content author built and published; a survey of the organization is not registration questions
+            const formOf = (purposeEnumId, description) => {
+                const form = as(users.content, "mantle.party.FormDefinitionServices.create#Form", {
+                    purposeEnumId,
+                    organizationPartyId: orgA,
+                    description
+                })
+                as(users.content, "mantle.party.FormDefinitionServices.save#FormField", {
+                    formId: form.formId,
+                    title: "Dietary needs",
+                    fieldTypeEnumId: "DBFFT_text-line",
+                    audienceEnumId: "CfaCustomer"
+                })
+                as(users.content, "mantle.party.FormDefinitionServices.publish#Form", {formId: form.formId})
+                return form.formId
+            }
+            const surveyForm = as(users.manager, E + "store#RegistrationForm", {
+                registrationPolicyId: id,
+                expectedRevision: revision(id),
+                formId: formOf("DbfpSurvey", "Spec survey")
+            })
+            const questions = as(users.manager, E + "store#RegistrationForm", {
+                registrationPolicyId: id,
+                expectedRevision: revision(id),
+                formId: formOf("DbfpRegistration", "Spec registration")
+            })
             const noGateway = as(users.manager, E + "publish#Registration", {
                 registrationPolicyId: id,
                 expectedRevision: revision(id)
@@ -334,14 +401,74 @@ feature(
                 expectedRevision: revision(id)
             })
             const view = visitor({siteId: site, registrationPolicyId: id})
+            // the offer's question publication: the offer's own, of its organization, open with it, and never answered on SubmitForm
+            const publication = row("mantle.party.FormPublication", {publicationId: questions.formPublicationId})
+            const formPage = visitor(
+                {siteId: site, publicationId: questions.formPublicationId},
+                "mantle.marketing.MarketingPortalServices.get#Form"
+            )
+            // the terms a registration accepts: a change of the terms or of the questions' consent after publication is a new revision
+            as(users.manager, E + "store#RegistrationPolicy", {
+                registrationPolicyId: id,
+                expectedRevision: revision(id),
+                termsText: "Seats are held for 20 minutes."
+            })
+            as(users.manager, E + "store#RegistrationForm", {
+                registrationPolicyId: id,
+                expectedRevision: revision(id),
+                consentText: "I accept the workshop's terms."
+            })
+            const termsRevision = Number(
+                row("mantle.work.registration.EventRegistrationPolicy", {registrationPolicyId: id}).termsRevision
+            )
             const otherSite = visitor({siteId: prefix + "_NONE", registrationPolicyId: id})
             const closed = as(users.manager, E + "close#Registration", {registrationPolicyId: id, expectedRevision: revision(id)})
             const closedView = visitor({siteId: site, registrationPolicyId: id})
             const links = rows("mantle.work.effort.WorkEffortProduct", {workEffortId: ids.webinar, productId: prefix + "_TICKET"})
-            return {otherProduct, paid, noGateway, draftView, stale, published, view, otherSite, closed, closedView, links}
+            return {
+                otherProduct,
+                paid,
+                surveyForm,
+                questions,
+                noGateway,
+                draftView,
+                stale,
+                published,
+                view,
+                publication,
+                formPage,
+                termsRevision,
+                otherSite,
+                closed,
+                closedView,
+                links
+            }
         },
-        then({otherProduct, paid, noGateway, draftView, stale, published, view, otherSite, closed, closedView, links}) {
+        then({
+            otherProduct,
+            paid,
+            surveyForm,
+            questions,
+            noGateway,
+            draftView,
+            stale,
+            published,
+            view,
+            publication,
+            formPage,
+            termsRevision,
+            otherSite,
+            closed,
+            closedView,
+            links
+        }) {
             code(otherProduct) == "PRODUCT_INVALID"
+            code(surveyForm) == "FORM_INVALID"
+            questions.refusal == "" && !!questions.formPublicationId
+            publication.purposeEnumId == "FppRegistration" && publication.organizationPartyId == orgA
+            publication.contextId == published.registrationPolicyId && publication.siteId == site && publication.fromDate != null
+            formPage.kind == "NotFound"
+            termsRevision == 2
             paid.refusal == ""
             links.length == 1 && links[0].typeEnumId == "WeptSales"
             code(noGateway) == "NOT_READY" && noGateway.refusal.includes("payment gateway")

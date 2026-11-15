@@ -601,7 +601,9 @@ function publicationOfPage(p, organizationPartyId) {
         !forms().PUBLICATION_PURPOSES.includes(row.purposeEnumId) ||
         row.organizationPartyId !== organizationPartyId ||
         row.siteId !== p.siteId ||
-        publications().stateOf(row) !== "open"
+        publications().stateOf(row) !== "open" ||
+        // P16 review: an event offer's registration questions are answered with a registration (P17), never on this page alone
+        row.contextEntityName === "mantle.work.registration.EventRegistrationPolicy"
     )
         unavailable()
     const form = one("moqui.screen.form.DbForm", {formId: row.formId})

@@ -4,7 +4,8 @@
 // - An event is the Commons calendar's WorkEffort (WetEvent), edited only under the calendar's rules (EventServices
 //   check#EventAccess: its organizer or an editor of a calendar it is in). Registration adds the organization that offers it
 //   (RegistrationEvent, impl-marketing F107): made once by an events manager (MARKETING_EVENT_MANAGE) of that organization who may
-//   edit the event, with a campaign link (CampaignAssociation CakEvent) to an open campaign of the organization when one is named.
+//   edit the event; its campaign link (CampaignAssociation CakEvent) is the campaign's change, made through CampaignServices
+//   store#CampaignAssociation for a caller who may also edit the campaign (MARKETING_CAMPAIGN_EDIT).
 // - An offer (EventRegistrationPolicy) is one occurrence's: an event that does not repeat has one, a series one per occurrence
 //   chosen by the start its rule gives it, never one seat count shared across its dates. Its seats are what every ticket type
 //   shares; a ticket type may hold fewer. Capacity is never set below the places that take a seat now (held, pending the
@@ -43,7 +44,6 @@ const WORK_EFFORT = "mantle.work.effort.WorkEffort"
 const CAMPAIGN = "mantle.marketing.campaign.MarketingCampaign"
 const ASSOCIATION = "mantle.marketing.campaign.CampaignAssociation"
 const PUBLICATION = "mantle.party.FormPublication"
-const openCampaignStatuses = ["MKTG_CAMP_PLANNED", "MKTG_CAMP_APPROVED", "MKTG_CAMP_INPROGRESS"]
 // the places that take a seat (P17 writes them): held (until its hold ends), pending the seller's approval, confirmed
 const SEAT_STATES = ["EvrHeld", "EvrPending", "EvrConfirmed"]
 const stateTexts = {ErpDraft: "Draft", ErpPublished: "Published", ErpClosed: "Closed"}
@@ -600,7 +600,8 @@ function getEventSetup(p) {
                 campaigns.map(link => link.campaignName)
             ),
             {
-                description: workEffort.description || "",
+                // the event's own notes follow the calendar's visibility (P16 review): its name, dates and place are the offer's
+                description: access.canView ? workEffort.description || "" : "",
                 repeats: repeats(workEffort),
                 online: !blank(workEffort.infoUrl),
                 cancelled: workEffort.statusId === "WeCancelled",
@@ -619,7 +620,7 @@ function getEventSetup(p) {
 // ===== store#RegistrationEvent =====
 // The organization an event's registration is offered by, and its campaign link: an events manager of the organization who may edit
 // the event (the calendar's own rule) adopts it once; the same organization again changes nothing, another is refused. A campaign
-// named is an open campaign of the organization, linked once (CakEvent).
+// named is linked once (CakEvent) by the campaign's own service, for a caller who may edit the campaign.
 function storeRegistrationEvent(p) {
     const userScope = manageScope()
     const workEffortId = text(p.workEffortId)
@@ -651,30 +652,18 @@ function storeRegistrationEvent(p) {
     }
     const orgId = existing?.organizationPartyId || organizationPartyId
     let campaignAssociationId = null
+    // the campaign link is a change of the campaign (design §9 NewEvent: C.store#CampaignAssociation): its own service asks the
+    // campaign's edit permission in its organization, an open campaign and an event of that organization, and links it once; an
+    // events manager without it offers the event and an author links it (P16 review)
     if (!blank(p.marketingCampaignId)) {
-        const campaign = one(CAMPAIGN, {marketingCampaignId: text(p.marketingCampaignId)})
-        if (!campaign || campaign.organizationPartyId !== orgId)
-            denied(
-                "RECORD_UNAVAILABLE",
-                "Campaign " + p.marketingCampaignId + " is not available; an event links a campaign of its organization"
-            )
-        if (!openCampaignStatuses.includes(campaign.statusId))
-            denied("CAMPAIGN_CLOSED", "Campaign " + (campaign.campaignName || campaign.marketingCampaignId) + " is closed")
-        const link = rows(ASSOCIATION, {
-            marketingCampaignId: campaign.marketingCampaignId,
+        if (!userScope.capabilities.campaignEdit)
+            denied("CAMPAIGN_EDIT_REQUIRED", "Linking the event to a campaign is a change of the campaign; ask its author")
+        campaignAssociationId = call("mantle.marketing.CampaignServices.store#CampaignAssociation", {
+            marketingCampaignId: text(p.marketingCampaignId),
             associationKindEnumId: "CakEvent",
-            sourceId: workEffortId
-        }).find(row => lib.active(row))
-        campaignAssociationId = link
-            ? link.campaignAssociationId
-            : call("create#" + ASSOCIATION, {
-                  marketingCampaignId: campaign.marketingCampaignId,
-                  associationKindEnumId: "CakEvent",
-                  sourceId: workEffortId,
-                  purpose: "Event",
-                  fromDate: ec.user.nowTimestamp,
-                  createdByUserId: ec.user.userId
-              }).campaignAssociationId
+            sourceId: workEffortId,
+            purpose: "Event"
+        }).campaignAssociationId
     }
     return {workEffortId, organizationPartyId: orgId, campaignAssociationId, created: !existing}
 }
@@ -986,6 +975,13 @@ function storeRegistrationForm(p) {
         }
     }
     values.policyRevision = Number(policy.policyRevision || 1) + 1
+    // the consent text is part of the terms a registrant accepts: a change after publication is a new terms revision (P16 review)
+    if (
+        policy.publishedDate &&
+        values.consentText !== undefined &&
+        String(values.consentText ?? "") !== String(policy.consentText ?? "")
+    )
+        values.termsRevision = Number(policy.termsRevision || 0) + 1
     call("update#" + POLICY, Object.assign({registrationPolicyId: policy.registrationPolicyId}, values))
     const after = one(POLICY, {registrationPolicyId: policy.registrationPolicyId})
     return {registrationPolicyId: policy.registrationPolicyId, formPublicationId: after.formPublicationId || null}
