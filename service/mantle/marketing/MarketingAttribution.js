@@ -10,8 +10,10 @@
 //   (the link's days, else 30), before the order was placed; a tie goes to the lower tracking code id. Eligible: a click or a page
 //   visit of a link of the seller's organization, never a known automated fetch and never an open. The identity: the order's local
 //   visit (OrderHeader.visitId, the browser's session on the authority) and the visitor keys that visit's events carried (the same
-//   first-party key, set only where the organization's policy or the recipient's consent allows it), and the customer as a send
-//   recipient who allows tracking (PcpTracking) now. Nothing is inferred across devices: an order with none of these is
+//   first-party key, set only where the organization's policy or the recipient's consent allows it), the visitor key's digest a
+//   frontend's checkout kept with the order (OrderHeader.marketingVisitorKeyHash, follow-up 4: a remote PASS's checkout has no
+//   local visit; kept only where an event would have kept the key, never for a customer who withdrew tracking), and the customer as
+//   a send recipient who allows tracking (PcpTracking) now. Nothing is inferred across devices: an order with none of these is
 //   unattributed, unless its source opportunity (SalesOpportunityOrder) names a campaign of the seller.
 // - Tracking consent is read when deciding (P20 review): an event recorded for a recipient who no longer allows tracking is no
 //   evidence, whatever path finds it, and an order whose customer has withdrawn tracking with the seller is attributed by no tracking
@@ -84,24 +86,12 @@ function eventsWhere(organizationPartyId, fromDate, placedDate, field, values) {
             found.push(event)
     return found
 }
-// Whether a party has withdrawn tracking (PcpTracking) with the organization: their latest records first, as MarketingTracking.js
-// trackingAllowed reads them.
-function trackingWithdrawn(partyId, organizationPartyId) {
-    const consents = rows("mantle.party.PartyConsent", {partyId}).sort(
-        (a, b) =>
-            (ms(b.consentDate) ?? 0) - (ms(a.consentDate) ?? 0) ||
-            String(b.partyConsentId).localeCompare(String(a.partyConsentId))
-    )
-    return ec.resource
-        .script("component://mr-mantle/service/mantle/marketing/MarketingEligibility.js")
-        .purposeState(consents, "PcpTracking", null, organizationPartyId).withdrawn
-}
-// The order's eligible tracking events: by its local visit and the keys that visit carried, and by its customer as a recipient who
-// allows tracking now; none for a customer who has withdrawn tracking, and never an event of a recipient who no longer allows it.
-// Each with its identity (visit, visitorKey, recipient).
+// The order's eligible tracking events: by its local visit and the keys that visit carried, by the visitor key's digest its checkout
+// kept (follow-up 4), and by its customer as a recipient who allows tracking now; none for a customer who has withdrawn tracking,
+// and never an event of a recipient who no longer allows it. Each with its identity (visit, visitorKey, recipient).
 function identityEvents(order, part) {
     const organizationPartyId = part.vendorPartyId
-    if (part.customerPartyId && trackingWithdrawn(part.customerPartyId, organizationPartyId)) return []
+    if (part.customerPartyId && tracking().trackingWithdrawn(part.customerPartyId, organizationPartyId)) return []
     const placedDate = order.placedDate
     const fromDate = new Date(ms(placedDate) - limits.windowDays * DAY)
     const byId = new Map()
@@ -114,6 +104,12 @@ function identityEvents(order, part) {
         const keys = visited.map(event => event.visitorKeyHash).filter(Boolean)
         if (keys.length) add(eventsWhere(organizationPartyId, fromDate, placedDate, "visitorKeyHash", keys), "visitorKey")
     }
+    // follow-up 4: the visitor key's digest a frontend's checkout kept with the order (a remote PASS has no local visit)
+    if (order.marketingVisitorKeyHash)
+        add(
+            eventsWhere(organizationPartyId, fromDate, placedDate, "visitorKeyHash", [order.marketingVisitorKeyHash]),
+            "visitorKey"
+        )
     if (part.customerPartyId && tracking().trackingAllowed(part.customerPartyId, null, organizationPartyId)) {
         const recipientIds = Array.from(
             find(RECIPIENT, {partyId: part.customerPartyId, tracked: "Y"})

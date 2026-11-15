@@ -1460,6 +1460,8 @@
             'operationId',
             'optIns',
             'recurringConsent',
+            // Marketing follow-up 4: the frontend's first-party visitor key; the authority keeps only its digest, where allowed
+            'visitorKey',
         ],
     },
     getCheckoutPaymentResult: {
