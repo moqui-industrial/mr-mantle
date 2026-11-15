@@ -982,6 +982,7 @@ feature(
                 paidInvoices,
                 paidTotal: paidInvoices.length ? invoiceTotal(paidInvoices[0]) : null,
                 paidStatus: paidPayment.statusId,
+                paidInvoice: paidInvoices.length ? row("mantle.account.invoice.Invoice", {invoiceId: paidInvoices[0]}) : null,
                 again,
                 authorized,
                 cancelled,
@@ -1001,6 +1002,9 @@ feature(
         then(r) {
             r.paidInvoices.length == 1 && toDecimal(r.paidTotal).eq(toDecimal("84.80"))
             r.paidStatus == "PmntDelivered"
+            // the spec's organizations have no posting set up, so Accounting refuses the invoice's finalization: the invoice and the
+            // capture are kept (the finalization in a transaction of its own), the payment left for Accounting to apply
+            r.paidInvoice.statusId == "InvoiceInProcess"
             r.again.length == 0
             r.authorized == "PmntAuthorized"
             r.cancelled.registration.places.some(place => place.statusId == "EvrCancelled")
@@ -1014,6 +1018,47 @@ feature(
         }
     }
 )
+
+// follow-up 1 review: an approval whose invoice did not run (here approved without the order's services, so no SECA ran; as a
+// capture that failed at the approval) is invoiced by the job while the payment is only authorized, once
+feature("the job invoices an approved ticket order its approval did not invoice, and captures its payment", {
+    when() {
+        freshLimits()
+        const reserved = reserve(siteB, ids.split.registrationPolicyId, ids.split.ticketTypeId, 1, "retry@mkrg.example.test")
+        complete(siteB, reserved.token, ["Retry"])
+        pay(siteB, reserved.token)
+        returned(siteB, reserved.token)
+        const reservation = reservationOf(reserved.reference)
+        system(() => {
+            for (const entityName of ["mantle.order.OrderPart", "mantle.order.OrderHeader"])
+                for (const value of Array.from(ec.entity.find(entityName).condition({orderId: reservation.orderId}).list())) {
+                    value.statusId = "OrderApproved"
+                    value.update()
+                }
+        })
+        const before = billedInvoices(reservation.orderId)
+        const authorized = row(P, {paymentId: reservation.paymentId}).statusId
+        const first = runHolds()
+        const second = runHolds()
+        const invoices = billedInvoices(reservation.orderId)
+        return {
+            before,
+            authorized,
+            first,
+            second,
+            invoices,
+            captured: row(P, {paymentId: reservation.paymentId}).statusId
+        }
+    },
+    then(r) {
+        r.before.length == 0
+        r.authorized == "PmntAuthorized"
+        r.first.invoiced == 1
+        r.second.invoiced == 0
+        r.invoices.length == 1
+        r.captured == "PmntDelivered"
+    }
+})
 
 feature(
     "a buyer's cancellation follows the accepted terms' rule: its refund before the deadline, none or refused after; staff override with a reason",

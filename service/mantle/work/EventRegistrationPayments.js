@@ -636,6 +636,7 @@ function invoiceOrder(p) {
     const order = orderId ? one("mantle.order.OrderHeader", {orderId}) : null
     if (!order || order.orderPurposeEnumId !== "OrpEventRegistration") return {invoiceIds: []}
     const invoiceIds = []
+    const partOfInvoice = new Map()
     for (const listed of rows("mantle.order.OrderPart", {orderId})) {
         ec.message.pushErrors()
         try {
@@ -657,6 +658,7 @@ function invoiceOrder(p) {
                 )
                 if (!made.invoiceId) return
                 invoiceIds.push(made.invoiceId)
+                partOfInvoice.set(made.invoiceId, part.orderPartSeqId)
                 const payment = one(P, {paymentId: kept[0].paymentId})
                 for (const row of kept)
                     places().record(row, "EraInvoiced", {
@@ -680,6 +682,24 @@ function invoiceOrder(p) {
             ec.message.popErrors()
         }
     }
+    // each new invoice finalized and the captured payment applied to it (create#FulfillmentInvoice leaves it in process, to which
+    // apply#InvoicePayment applies nothing; as Shop's finalize step and create#SalesShipmentInvoices), in a transaction of its
+    // own: a finalization Accounting refuses (its posting not set up) keeps the invoice and the capture, logged, for Accounting
+    for (const invoiceId of invoiceIds) {
+        const out = step("Registration invoice " + invoiceId, () => {
+            const invoice = find("mantle.account.invoice.Invoice", {invoiceId}).forUpdate(true).one()
+            if (invoice?.statusId === "InvoiceInProcess")
+                call("update#mantle.account.invoice.Invoice", {invoiceId, statusId: "InvoiceFinalized"})
+            call("mantle.account.PaymentServices.apply#OrderPaymentsToInvoice", {
+                orderId,
+                orderPartSeqId: partOfInvoice.get(invoiceId),
+                invoiceId
+            })
+            return {}
+        })
+        if (out.error)
+            ec.logger.error("Registration order " + orderId + " invoice " + invoiceId + " was not finalized: " + out.error)
+    }
     // a partial cancellation's refund that waited for the capture
     for (const row of rows(REGISTRATION, {orderId, refundStatusEnumId: "ErfRequested"})) {
         const out = step("Registration refund " + row.registrationId, () => refundPayment({registrationId: row.registrationId}))
@@ -692,7 +712,8 @@ function invoiceOrder(p) {
 // The attempts of registrations due for a lookup, placements to try again and refunds waiting on a capture; each apart.
 function reconcile(p) {
     let looked = 0,
-        refunded = 0
+        refunded = 0,
+        invoiced = 0
     const due = attempts().due("eventRegistration", Number(p.limit || limits.batch))
     for (const row of due) {
         const reservation = one(RESERVATION, {paymentId: row.paymentId})
@@ -721,6 +742,27 @@ function reconcile(p) {
                 "Registration " + reservation.reservationId + " placement: " + String(error?.message || error).split("\n")[0]
             )
         }
+    // approved ticket orders not invoiced (the approval's invoice failed, or its SECA never ran: it is not retried there), tried
+    // again while their payment is still only authorized; invoiceOrder bills a part once under its lock
+    const unbilled = new Set(
+        Array.from(
+            find(P, {statusId: "PmntAuthorized"})
+                .condition("orderId", "is-not-null", null)
+                .selectField("orderId")
+                .limit(limits.batch * 4)
+                .list()
+        ).map(payment => payment.orderId)
+    )
+    for (const orderId of unbilled) {
+        const order = one("mantle.order.OrderHeader", {orderId})
+        if (order?.orderPurposeEnumId !== "OrpEventRegistration" || order.statusId !== "OrderApproved") continue
+        if (find("mantle.order.OrderItemBilling", {orderId}).count() > 0) continue
+        try {
+            invoiced += invoiceOrder({orderId}).invoiceIds.length
+        } catch (error) {
+            ec.logger.error("Registration order " + orderId + " invoice: " + String(error?.message || error).split("\n")[0])
+        }
+    }
     for (const row of Array.from(find(REGISTRATION, {refundStatusEnumId: "ErfRequested"}).limit(limits.batch).list()))
         try {
             const out = step("Registration refund " + row.registrationId, () =>
@@ -730,7 +772,7 @@ function reconcile(p) {
         } catch (error) {
             ec.logger.error("Registration " + row.registrationId + " refund: " + String(error?.message || error).split("\n")[0])
         }
-    return {looked, refunded}
+    return {looked, refunded, invoiced}
 }
 
 ;({

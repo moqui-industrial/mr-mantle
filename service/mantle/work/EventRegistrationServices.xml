@@ -575,14 +575,16 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="run" noun="RegistrationHolds" authenticate="anonymous-all" allow-remote="false" operation="marketing.registration.holds.run">
         <description>The registration expiry and waitlist job (run_EventRegistrations; design §15.3), as the system: the payment attempts
             of registrations due for a lookup looked up and applied (a success while held pends the places and places the order, a
-            success after the hold ended is left for review, never a seat), failed placements tried again (five times), refunds
-            waiting on a capture handed over; then each ended hold expired once and each offer's waitlist offered in order with a
+            success after the hold ended is left for review, never a seat), failed placements tried again (five times), approved ticket
+            orders not yet invoiced invoiced again while their payment is only authorized (follow-up 1 review), refunds waiting on
+            a capture handed over; then each ended hold expired once and each offer's waitlist offered in order with a
             hold of its own (the waiting places of an occurrence that started end). Each item in a transaction of its own; one that
             fails is logged and the rest go on.</description>
         <in-parameters><parameter name="limit" type="Integer"/></in-parameters>
         <out-parameters>
             <parameter name="looked" type="Integer"/>
             <parameter name="refunded" type="Integer"/>
+            <parameter name="invoiced" type="Integer"/>
             <parameter name="expired" type="Integer"/>
             <parameter name="offered" type="Integer"/>
         </out-parameters>
@@ -591,6 +593,7 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="held" from="ec.resource.script('component://mr-mantle/service/mantle/work/EventRegistrationPlaces.js').execute('expireHolds', context)"/>
             <set field="looked" from="paid.looked"/>
             <set field="refunded" from="paid.refunded"/>
+            <set field="invoiced" from="paid.invoiced"/>
             <set field="expired" from="held.expired"/>
             <set field="offered" from="held.offered"/>
         </actions>
