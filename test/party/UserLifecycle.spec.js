@@ -254,7 +254,21 @@ feature("a future end date is the account's terminateDate, so sign-in stops at t
 
 feature("one organization's removal ends its relationships and keeps the other's access; the operation stays readable there", {
     when() {
-        return as(operator(), () => {
+        // a removal that ends the account's memberships now (its last organization) ends its sessions: without a sign-in in the
+        // last five minutes it is refused whole
+        const staleRemoval = as(
+            operator(),
+            () =>
+                result(S + "start#Lifecycle", {
+                    userId: users.Heir,
+                    kind: "removeOrganization",
+                    organizationPartyId: orgId,
+                    reason: "Stale"
+                }),
+            true
+        )
+        const staleRemovalOperations = rows("mantle.party.UserLifecycleOperation", {userId: users.Heir}).length
+        return Object.assign({staleRemoval, staleRemovalOperations}, as(operator(), () => {
             const preview = result(S + "preview#Lifecycle", {
                 userId: users.Shared,
                 kind: "removeOrganization",
@@ -282,9 +296,10 @@ feature("one organization's removal ends its relationships and keeps the other's
                 read: result(S + "get#Lifecycle", {operationId: started.operationId}),
                 account: result(S + "get#Account", {userId: users.Shared})
             }
-        })
+        }))
     },
-    then({preview, started, read, account}) {
+    then({staleRemoval, staleRemovalOperations, preview, started, read, account}) {
+        staleRemoval.applied == false && staleRemoval.reasonCode == "REAUTH_REQUIRED" && staleRemovalOperations == 0
         preview.allowed == true && preview.endsMemberships == false && preview.movesResources == false
         started.applied == true && started.statusId == "UlopCompleted"
         const relationships = rows("mantle.party.PartyRelationship", {fromPartyId: parties.Shared})

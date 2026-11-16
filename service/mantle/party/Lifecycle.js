@@ -93,8 +93,8 @@ const stamp = row => String(ms(row?.lastUpdatedStamp) ?? "")
 const openAt = (row, at = nowMs()) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 const refused = (reasonCode, reason, extra = {}) => Object.assign({applied: false, reasonCode, reason}, extra)
 const timeText = value => (value == null ? "" : ec.l10n.format(Number(value), "yyyy-MM-dd HH:mm"))
-// An administrator's revocation of another account's access (keys, tokens, app passwords, SSH keys; the framework's
-// revoke#AccountAccess beyond sessions) needs their own sign-in, or a confirmation, in the last five minutes
+// An administrator's revocation of another account's access (sessions, keys, tokens, app passwords, SSH keys; the framework's
+// revoke#AccountAccess and revoke#Sessions) needs their own sign-in, or a confirmation, in the last five minutes
 // (org.moqui.sso.RecentAuthServices.require#RecentAuth, which leaves "Confirm it is you" and the X-Moqui-Reauth header so the
 // form asks and sends again). Asked before an operation starts, so it is refused whole rather than left half done; a caller with
 // authorization disabled (a scheduled step) passes.
@@ -103,6 +103,12 @@ function recentAuthRefusal() {
     const out = ec.service.sync().name("org.moqui.sso.RecentAuthServices.require#RecentAuth").call()
     if (out?.recent) return null
     return refused("REAUTH_REQUIRED", "Confirm it is you: sign in again to revoke another account's access")
+}
+// Whether the caller signed in, or confirmed who they are, in the last five minutes (no error when not), or runs with
+// authorization disabled.
+function recentSignIn() {
+    if (ec.artifactExecution.authzDisabled()) return true
+    return !!ec.service.sync().name("org.moqui.sso.RecentAuthServices.check#RecentAuth").call()?.recent
 }
 function requirePermission(permission) {
     if (!ec.user.userId) denied("SIGN_IN", "Sign in to administer identities")
@@ -530,7 +536,8 @@ function startLifecycle(p) {
     if (text(p.expectedRevision) && text(p.expectedRevision) !== stamp(account))
         return refused("REVISION_CHANGED", "The account changed since you read it; reload it", {revision: stamp(account)})
     if (!planned.allowed) return refused(planned.reasonCode, planned.reason)
-    if (kind === "disable" && !planned.future) {
+    // a step that ends the account's access at once: a disable now, or a removal now that ends its memberships (sessions)
+    if (!planned.future && (kind === "disable" || (kind === "removeOrganization" && planned.endsMemberships))) {
         const reauth = recentAuthRefusal()
         if (reauth) return reauth
     }
@@ -799,7 +806,7 @@ function retryLifecycleStep(p) {
         }
         const path = pathRefusal(operation, step.stepKind)
         if (path) return path
-        if (step.stepKind === "revokeAccess") {
+        if (step.stepKind === "revokeAccess" || step.stepKind === "revokeSessions") {
             const reauth = recentAuthRefusal()
             if (reauth) return reauth
         }
@@ -1323,10 +1330,14 @@ function requestAccessEnd(p) {
             reason: "Works for " + elsewhere.map(partyName).join(", ") + ": the account's access stays"
         })
     else {
-        const held = runNow ? frameworkIdentity().heldBeyond(account.userId) : null
         const kindsInOrder = at > nowMs() ? ["endMemberships"] : ["revokeSessions", "endMemberships"]
+        // ending the sessions now needs the operator's sign-in in the last five minutes (require#RecentAuth in
+        // revoke#AccountAccess); without it the account's steps wait for an operator, as for an HR editor without identity
+        // rights, and the separation itself is never refused
+        const accessNow = runNow && (!kindsInOrder.includes("revokeSessions") || recentSignIn())
+        const held = accessNow ? frameworkIdentity().heldBeyond(account.userId) : null
         for (const stepKind of kindsInOrder) {
-            const path = runNow && !held ? pathRefusal(operation, stepKind) : null
+            const path = accessNow && !held ? pathRefusal(operation, stepKind) : null
             record(
                 stepKind,
                 held
@@ -1337,7 +1348,7 @@ function requestAccessEnd(p) {
                       }
                     : path
                       ? {statusId: "UlstFailed", reasonCode: path.reasonCode, reason: path.reason}
-                      : stepOutcome(operation, stepKind, runNow, reasonText)
+                      : stepOutcome(operation, stepKind, accessNow, reasonText)
             )
         }
     }
