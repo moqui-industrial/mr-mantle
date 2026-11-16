@@ -16,7 +16,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="PartyPaymentMethodInfo">
         <description>A party's payment method for its edit form: refused for a method another party owns (the partyId given is
-            the owner's), and the card's security code is never answered.</description>
+            the owner's), and the card's security code is never answered. The whole card and bank account numbers are
+            answered only to the owner's own user and to a holder of CARD_NUMBER_EDIT (the edit form's permission to change a
+            stored number) or PAYMENT_EDIT (fullNumbers true); anyone else gets maskedCardNumber and maskedAccountNumber
+            only, and the form shows those, not an input.</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="paymentMethodId"/>
@@ -30,6 +33,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="bankAccount" type="Map"/>
             <parameter name="bankAccountTypeEnum" type="Map"/>
             <parameter name="isBankAccount" type="Boolean"/>
+            <parameter name="maskedAccountNumber"/>
 
             <parameter name="creditCard" type="Map"/>
             <parameter name="creditCardTypeEnum" type="Map"/>
@@ -44,8 +48,12 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="telecomNumber" type="Map"/>
             <parameter name="emailContactMechId"/>
             <parameter name="emailAddress"/>
+            <parameter name="fullNumbers" type="Boolean"/>
         </out-parameters>
         <actions>
+            <!-- the whole numbers only for the owner or a payment editor (SEC-BAP-04) -->
+            <set field="fullNumbers" from="(ec.user.userAccount?.partyId != null &amp;&amp; ec.user.userAccount.partyId == partyId)
+                     || ec.user.hasPermission('CARD_NUMBER_EDIT') || ec.user.hasPermission('PAYMENT_EDIT')"/>
             <if condition="paymentMethodId">
                 <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
                 <!-- the partyId names the owner: another party's method is not answered (SEC-BAP-04) -->
@@ -60,15 +68,18 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="paymentMethod">
                 <set field="bankAccount" from="paymentMethod['mantle.account.method.BankAccount']"/>
                 <set field="bankAccountTypeEnum" from="bankAccount?.['BankAccountType#moqui.basic.Enumeration']"/>
+                <set field="maskedAccountNumber" from="bankAccount?.accountNumber ? '•••• ' + String(bankAccount.accountNumber).slice(-4) : ''"/>
+                <set field="bankAccount" from="bankAccount ? Object.fromEntries(Object.entries(bankAccount.getMap()).filter(([name]) => fullNumbers || name !== 'accountNumber')) : null"/>
 
                 <set field="creditCard" from="paymentMethod['mantle.account.method.CreditCard']"/>
+                <set field="creditCardTypeEnum" from="creditCard?.['CreditCardType#moqui.basic.Enumeration']"/>
                 <!-- the security code is never answered (SEC-BAP-04) -->
                 <set field="creditCard" from="creditCard ? Object.fromEntries(Object.entries(creditCard.getMap()).filter(([name]) => name !== 'cardSecurityCode')) : null"/>
-                <set field="creditCardTypeEnum" from="creditCard?.['CreditCardType#moqui.basic.Enumeration']"/>
                 <set field="expireMonth" from="creditCard?.expireDate ? creditCard.expireDate.substring(0, creditCard.expireDate.indexOf('/')) : null"/>
                 <set field="expireYear" from="creditCard?.expireDate ? creditCard.expireDate.substring(creditCard.expireDate.indexOf('/')+1) : null"/>
                 <set field="cardNumber" from="creditCard?.cardNumber"/>
                 <set field="maskedCardNumber" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
+                <if condition="creditCard &amp;&amp; !fullNumbers"><script>delete creditCard.cardNumber</script></if>
 
                 <!-- TODO: support other payment method types -->
 
@@ -85,6 +96,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="get" noun="PartyPaymentMethodInfoList">
+        <description>A party's payment methods for a list: the card and bank account numbers are masked (maskedCardNumber,
+            maskedAccountNumber; no cardNumber, accountNumber or cardSecurityCode), whoever asks (SEC-BAP-04).</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="paymentMethodTypeEnumId"/>
@@ -98,6 +111,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <parameter name="bankAccount" type="Map"/>
                 <parameter name="bankAccountTypeEnum" type="Map"/>
                 <parameter name="isBankAccount" type="Boolean"/>
+                <parameter name="maskedAccountNumber"/>
 
                 <parameter name="creditCard" type="Map"/>
                 <parameter name="creditCardTypeEnum" type="Map"/>
@@ -127,19 +141,23 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="infoMap" from="{paymentMethodId:paymentMethod.paymentMethodId, paymentMethod:paymentMethod,
                         paymentMethodTypeEnumId:paymentMethod.paymentMethodTypeEnumId}"/>
 
-                <set field="infoMap.bankAccount" from="paymentMethod['mantle.account.method.BankAccount']"/>
-                <set field="infoMap.bankAccountTypeEnum" from="infoMap.bankAccount?.['BankAccountType#moqui.basic.Enumeration']"/>
+                <set field="bankAccount" from="paymentMethod['mantle.account.method.BankAccount']"/>
+                <set field="infoMap.bankAccountTypeEnum" from="bankAccount?.['BankAccountType#moqui.basic.Enumeration']"/>
+                <!-- a list answers the account number masked (SEC-BAP-04) -->
+                <set field="infoMap.maskedAccountNumber" from="bankAccount?.accountNumber ? '•••• ' + String(bankAccount.accountNumber).slice(-4) : ''"/>
+                <set field="infoMap.bankAccount" from="bankAccount ? Object.fromEntries(Object.entries(bankAccount.getMap()).filter(([name]) => name !== 'accountNumber')) : null"/>
                 <set field="infoMap.isBankAccount" from="paymentMethod.paymentMethodTypeEnumId == 'PmtBankAccount'"/>
 
                 <set field="creditCard" from="paymentMethod['mantle.account.method.CreditCard']"/>
-                <!-- the security code is never answered (SEC-BAP-04) -->
+                <set field="infoMap.creditCardTypeEnum" from="creditCard?.['CreditCardType#moqui.basic.Enumeration']"/>
+                <!-- the security code is never answered, and a list answers the card number masked (SEC-BAP-04) -->
                 <set field="creditCard" from="creditCard ? Object.fromEntries(Object.entries(creditCard.getMap()).filter(([name]) => name !== 'cardSecurityCode')) : null"/>
                 <set field="infoMap.creditCard" from="creditCard"/>
-                <set field="infoMap.creditCardTypeEnum" from="creditCard?.['CreditCardType#moqui.basic.Enumeration']"/>
                 <set field="infoMap.expireMonth" from="creditCard?.expireDate ? creditCard.expireDate.substring(0, creditCard.expireDate.indexOf('/')) : null"/>
                 <set field="infoMap.expireYear" from="creditCard?.expireDate ? creditCard.expireDate.substring(creditCard.expireDate.indexOf('/')+1) : null"/>
                 <set field="cardNumber" from="creditCard?.cardNumber"/>
                 <set field="infoMap.maskedCardNumber" from="cardNumber ? '*'.repeat(Math.max(cardNumber.length - 4, 0)) + cardNumber.substring(cardNumber.length - 4, cardNumber.length) : ''"/>
+                <if condition="creditCard"><script>delete creditCard.cardNumber</script></if>
                 <set field="infoMap.isCreditCard" from="paymentMethod.paymentMethodTypeEnumId == 'PmtCreditCard'"/>
 
                 <!-- TODO: support other payment method types -->
