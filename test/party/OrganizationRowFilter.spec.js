@@ -1,7 +1,9 @@
 // The organization row filter of business datasets (mantle.party.PartyServices.get#OrganizationRowFilter, the report engine's
 // ReportScopePolicy MantleOrganization; BOSS impl-insights P3, F11): the viewer's organizations on the field the dataset names,
 // the active one alone when set, a child organization with its parent, nothing for a viewer of no organization, every
-// organization for a system administrator. New spec, no Groovy original.
+// organization for a system administrator. A finance administrator (ACCOUNTING_ADMIN) is bound to their own organizations
+// in Accounting's scope and active organization; every internal one takes ACCOUNTING_ALL_ORGANIZATIONS (SEC-BOS-02). New spec,
+// no Groovy original.
 const FILTER = "mantle.party.PartyServices.get#OrganizationRowFilter"
 const dayMillis = 86400000
 const users = {}
@@ -149,7 +151,8 @@ feature("nothing for a user of no organization, everything for a system administ
 
 feature("a finance administrator's active organization outside their own widens nothing", {
     when() {
-        // ACCOUNTING_ADMIN may select any internal organization for Accounting's scope (get#PartyOrganizationInfo); the dataset
+        // with ACCOUNTING_ALL_ORGANIZATIONS a finance administrator selects any internal organization (get#PartyOrganizationInfo);
+        // the dataset
         // filter keeps to the user's own organizations, here none
         const past = Date.now() - dayMillis
         call("create#moqui.security.UserGroup", {userGroupId: "ORF_FINANCE", description: "Row filter finance"})
@@ -171,5 +174,52 @@ feature("a finance administrator's active organization outside their own widens 
     then({selected}) {
         selected.field == null
         selected.bool.none.length == 1
+    }
+})
+
+// SEC-BOS-02: ACCOUNTING_ADMIN works in the holder's own organizations, and an active organization outside them is dropped;
+// ACCOUNTING_ALL_ORGANIZATIONS (ADMIN's in the seed) opens every internal organization and lets one be selected
+feature("a finance administrator is bound to their own organizations; every organization takes ACCOUNTING_ALL_ORGANIZATIONS", {
+    when() {
+        const past = Date.now() - dayMillis
+        const partyId = call("mantle.party.PartyServices.create#Person", {firstName: "orf.finance", lastName: "RowFilter"}).partyId
+        const userId = call("mantle.party.PartyServices.create#PartyUserAccount", {
+            partyId,
+            emailAddress: "orf.finance@example.com",
+            username: "orf.finance",
+            newPassword: "moqui1!!",
+            newPasswordVerify: "moqui1!!"
+        }).userId
+        call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtEmployee", fromPartyId: partyId,
+            fromRoleTypeId: "Employee", toPartyId: "ORF_A", toRoleTypeId: "OrgInternal", fromDate: past})
+        call("create#moqui.security.UserGroupMember", {userGroupId: "ORF_FINANCE", userId, fromDate: past})
+        const scopeAs = () => {
+            login("orf.finance", "moqui1!!")
+            ec.user.setPreference("ACTIVE_ORGANIZATION", "ORF_B")
+            const policy = ec.resource.script("component://mr-mantle/service/mantle/ledger/AccountingPolicy.js")
+            const a = policy.access("admin")
+            const out = {ids: Array.from(a.organizationPartyIds).sort(), active: a.activeOrganizationPartyId,
+                info: call("mantle.party.PartyServices.get#PartyOrganizationInfo", {}).activeOrgId || null}
+            ec.user.setPreference("ACTIVE_ORGANIZATION", null)
+            login("john.doe")
+            ec.artifactExecution.disableAuthz()
+            return out
+        }
+        const own = scopeAs()
+        call("create#moqui.security.UserGroupPermission", {userGroupId: "ORF_FINANCE", userPermissionId: "ACCOUNTING_ALL_ORGANIZATIONS",
+            fromDate: past})
+        const every = scopeAs()
+        const seeded = ec.entity.find("moqui.security.UserGroupPermission").condition("userPermissionId", "ACCOUNTING_ALL_ORGANIZATIONS")
+            .condition("userGroupId", "ADMIN").count()
+        return {own, every, seeded}
+    },
+    then({own, every, seeded}) {
+        own.ids.join() == "ORF_A,ORF_C"
+        own.active == null
+        own.info == null
+        every.ids.includes("ORF_A") && every.ids.includes("ORF_B")
+        every.active == "ORF_B"
+        every.info == "ORF_B"
+        seeded == 1
     }
 })

@@ -32,6 +32,8 @@ function capabilities() {
     const out = {
         systemAdmin: domain.systemAdmin(),
         admin,
+        // every internal organization (ACCOUNTING_ALL_ORGANIZATIONS, ADMIN's): reads nothing by itself (SEC-BOS-02)
+        allOrganizations: has("ACCOUNTING_ALL_ORGANIZATIONS"),
         glPost: has("ACCOUNTING_GL_POST"),
         reportRead: has("ACCOUNTING_VIEW"),
         arRead: has("RECEIVABLE_VIEW"),
@@ -75,12 +77,13 @@ function capabilities() {
     ].some(Boolean)
     return out
 }
-// A scope's organizations. A narrow capability (bankReconcile) opens only the scope that names it, not every read.
+// A scope's organizations: every internal one for ACCOUNTING_ALL_ORGANIZATIONS, else the user's own, a finance administrator's
+// (ACCOUNTING_ADMIN) too. A narrow capability (bankReconcile) opens only the scope that names it, not every read.
 function access(need = "read") {
     const c = capabilities()
     if (!c.read && !(need === "bankReconcile" && c.bankReconcile)) denied("ACCESS_DENIED", "Accounting access is required")
     let ids, activeId
-    if (c.admin) {
+    if (c.allOrganizations) {
         ids = Array.from(find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).selectField("partyId").list()).map(
             r => r.partyId
         )

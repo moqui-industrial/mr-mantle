@@ -650,14 +650,15 @@ function getProposals(p) {
     }
 }
 // Exchange rates are global UomConversion rows, so every writer of an active rate (store#Rate, the CSV import, an accepted
-// proposal) needs finance administration of every organization: ACCOUNTING_ADMIN, which AccountingPolicy scopes to
-// every internal organization, or a system administrator; never a capability limited to some organizations (F420).
+// proposal) needs finance administration of every organization: ACCOUNTING_ADMIN with ACCOUNTING_ALL_ORGANIZATIONS (with which
+// AccountingPolicy scopes it to every internal organization), or a system administrator; never a capability limited to some
+// organizations (F420).
 function ratesAdmin() {
     const domain = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
     if (!(domain.systemAdmin() || lib.capabilities().admin))
         denied("PERMISSION_DENIED", "Exchange rates are shared by every organization: finance administration is required")
-    // ACCOUNTING_ADMIN covers every internal organization today, so this cannot fail yet; it guards a future
-    // organization-limited finance administrator, who must not set the rates every organization posts at
+    // an organization-limited finance administrator (ACCOUNTING_ADMIN without ACCOUNTING_ALL_ORGANIZATIONS, SEC-BOS-02) must not
+    // set the rates every organization posts at
     const internal = find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).count()
     if (!domain.systemAdmin() && lib.access("admin").organizationPartyIds.length < internal)
         denied("PERMISSION_DENIED", "Exchange rates need finance administration of every organization")

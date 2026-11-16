@@ -16,11 +16,12 @@
 // the employer (organizationPartyId given, else the person's employers at the date: a PrtEmployee relationship in effect), by the
 // same rules, then the shared rows (no organization), which are every row before P10's review, so production's lookup is
 // unchanged where no organization keeps its own. Accounting maintains the rows by organization as it scopes finance
-// administration (AccountingPolicy.scope with admin: every internal organization, the active one when chosen); a shared row is
+// administration (AccountingPolicy.access: every internal organization with ACCOUNTING_ALL_ORGANIZATIONS, else the user's own, the
+// active one when chosen); a shared row is
 // every organization's, so it is changed only by finance administration working for every organization (no active
 // organization chosen) or the system administrator, as a shared pay grade needs PEOPLE_ALL_ORGANIZATIONS. Accounting's readers,
 // payroll and those who manage project money read the shared rows and those of their organizations (every organization for
-// ACCOUNTING_ADMIN or PEOPLE_ALL_ORGANIZATIONS).
+// ACCOUNTING_ALL_ORGANIZATIONS or PEOPLE_ALL_ORGANIZATIONS).
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const {find, one, rows, denied} = lib
 
@@ -96,13 +97,13 @@ function requireAdmin() {
         denied("PERMISSION_DENIED", "Only finance administration (ACCOUNTING_ADMIN) changes labor costing rates")
 }
 // The organizations whose rows the reader sees beside the shared ones: every one (all) for the system administrator,
-// ACCOUNTING_ADMIN (Accounting's finance administration is every internal organization) or PEOPLE_ALL_ORGANIZATIONS, else the
-// user's own organizations.
+// ACCOUNTING_ALL_ORGANIZATIONS or PEOPLE_ALL_ORGANIZATIONS, else the user's own organizations (SEC-BOS-02: ACCOUNTING_ADMIN alone
+// is the user's own).
 function readOrganizations() {
     if (
         ec.user.userId &&
         (ec.user.isInGroup("ADMIN") ||
-            ec.user.hasPermission("ACCOUNTING_ADMIN") ||
+            ec.user.hasPermission("ACCOUNTING_ALL_ORGANIZATIONS") ||
             ec.user.hasPermission("PEOPLE_ALL_ORGANIZATIONS"))
     )
         return {all: true, ids: []}
@@ -110,7 +111,8 @@ function readOrganizations() {
     return {all: false, ids: Array.from(info?.userOrgIds || [])}
 }
 // Who changes a row of an organization (organizationPartyId) or a shared one (none): finance administration (ACCOUNTING_ADMIN)
-// with the organization in its Accounting scope (AccountingPolicy.scope admin: every internal organization, narrowed to the
+// with the organization in its Accounting scope (AccountingPolicy.access: every internal organization with
+// ACCOUNTING_ALL_ORGANIZATIONS, else the user's own, narrowed to the
 // active one when chosen); a shared row with every organization in that scope (no active organization) or the system
 // administrator. writeScope answers without refusing, for the lists; requireWrite refuses (PERMISSION_DENIED, ORGANIZATION_DENIED).
 function writeScope() {

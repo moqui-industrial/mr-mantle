@@ -2,6 +2,11 @@
 <!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
 <entity-facade-xml type="seed">
     <moqui.security.UserPermission userPermissionId="ACCOUNTING_ADMIN" description="Accounting Admin"/>
+    <!-- Accounting's scope in every internal organization, which reads and changes nothing by itself (as PEOPLE_ALL_ORGANIZATIONS
+        and SALES_ALL_ORGANIZATIONS): without it a finance administrator (ACCOUNTING_ADMIN) works in the organizations they work
+        for, and selects only one of those as active. ADMIN's alone (the user's call of Nov 16, 2026, SEC-BOS-02). -->
+    <moqui.security.UserPermission userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" description="Accounting in every organization"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="ACCOUNTING_ALL_ORGANIZATIONS" fromDate="0"/>
     <moqui.security.UserPermission userPermissionId="BANK_RECONCILE" description="Bank Reconcile"/>
     <moqui.security.UserPermission userPermissionId="BUDGET_APPROVE" description="Budget Approve"/>
     <moqui.security.UserPermission userPermissionId="BUDGET_EDIT" description="Budget Edit"/>

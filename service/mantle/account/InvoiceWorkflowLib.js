@@ -65,7 +65,8 @@ function organization(organizationPartyId, permission, lock = false) {
     if (!organizationPartyId || !one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}))
         denied("ORGANIZATION_REQUIRED", "Choose an internal organization")
     if (!access.systemAdmin()) {
-        const financeAdmin = has("ACCOUNTING_ADMIN")
+        // every internal organization only with ACCOUNTING_ALL_ORGANIZATIONS, never by ACCOUNTING_ADMIN alone (SEC-BOS-02)
+        const financeAdmin = has("ACCOUNTING_ALL_ORGANIZATIONS")
         const scope = call("mantle.party.PartyServices.get#PartyOrganizationInfo", {partyId: ec.user.userAccount?.partyId})
         const permitted = Array.from(scope.userOrgIds || [])
         const selected = ec.user.getPreference("ACTIVE_ORGANIZATION") || scope.activeOrgId || null
