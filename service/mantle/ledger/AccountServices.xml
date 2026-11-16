@@ -64,6 +64,19 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!accountName || !/^\d+$/.test(accountCode || oldAccount?.accountCode || '')">
                 <return error="true" message="Give an account name and digits-only code"/>
             </if>
+            <!-- a new account's code is its ID too: one in use is named here, not left to the database's duplicate key, which
+                showed the user nothing (ACC-UI-034) -->
+            <if condition="!oldAccount">
+                <entity-find-count entity-name="mantle.ledger.account.GlAccount" count-field="sameCodeCount" disable-authz="true">
+                    <econditions combine="or">
+                        <econdition field-name="glAccountId" from="accountCode"/>
+                        <econdition field-name="accountCode"/>
+                    </econditions>
+                </entity-find-count>
+                <if condition="sameCodeCount &gt; 0">
+                    <return error="true" message="ACCOUNT_CODE_IN_USE: Account code ${accountCode} is already in the chart"/>
+                </if>
+            </if>
             <if condition="accountValues.parentGlAccountId">
                 <if condition="accountValues.parentGlAccountId !== oldAccount?.parentGlAccountId">
                     <script>policy.record({kind:'accounts', recordId:accountValues.parentGlAccountId,

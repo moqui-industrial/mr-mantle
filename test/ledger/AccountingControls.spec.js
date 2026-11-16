@@ -1482,6 +1482,12 @@ feature("chart accounts, assignments, classifications and periods are kept throu
             accountName: "Letters in code",
             changeReason: "Spec code",
         })
+        // a new account with a code in use is refused by name, not left to the duplicate key (ACC-UI-034)
+        const usedCode = rejected("AccountServices.store#Account", {
+            ...fields,
+            accountName: "Same code again",
+            changeReason: "Spec duplicate",
+        })
         const assignmentKey = { glAccountId: created, organizationPartyId: org }
         const assigned = native("AccountServices.store#Assignment", {
             organizationPartyId: org,
@@ -1545,9 +1551,10 @@ feature("chart accounts, assignments, classifications and periods are kept throu
         const classes = native("AccountServices.get#Classifications", { organizationPartyId: org, glAccountId: created })
         const periods = native("AccountServices.ensure#Periods", { organizationPartyId: org })
         const read = native("AccountingServices.get#Record", { kind: "accounts", recordId: created, organizationPartyId: org })
-        return { created, renamed, cycle, badCode, assigned, backwards, neither, classes, periods, read }
+        return { created, renamed, cycle, badCode, usedCode, assigned, backwards, neither, classes, periods, read }
     },
-    then({ created, renamed, cycle, badCode, assigned, backwards, neither, classes, periods, read }) {
+    then({ created, renamed, cycle, badCode, usedCode, assigned, backwards, neither, classes, periods, read }) {
+        usedCode.includes("ACCOUNT_CODE_IN_USE") && usedCode.includes("199901")
         renamed.glAccountId == created
         assigned.glAccountId == created
         cycle.includes("cycle")
