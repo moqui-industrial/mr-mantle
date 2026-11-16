@@ -392,6 +392,7 @@ function reserve(p) {
                 buyerPartyId: p.buyer.partyId,
                 // the buyer is the first attendee until the attendees are named
                 attendeePartyId: firstPlace ? p.buyer.partyId : null,
+                attendeeName: firstPlace ? text(p.buyer.name) : null,
                 statusId: waitlisted ? "EvrWaitlisted" : "EvrHeld",
                 holdExpireDate: waitlisted ? null : holdEnd,
                 waitlistDate: waitlisted ? ec.user.nowTimestamp : null,
@@ -447,7 +448,7 @@ function complete(reservation, p) {
     places.forEach((row, index) => {
         const person = people[index]
         // the buyer stays the first attendee when the name typed is theirs and no other address is given; else the typed person
-        const buyerName = partyName(reservation.buyerPartyId)
+        const buyerName = row.attendeeName || partyName(reservation.buyerPartyId)
         const party =
             index === 0 && row.attendeePartyId && !person.address && person.name.toLowerCase() === String(buyerName).toLowerCase()
                 ? {partyId: row.attendeePartyId}
@@ -467,6 +468,7 @@ function complete(reservation, p) {
         call("update#" + REGISTRATION, {
             registrationId: row.registrationId,
             attendeePartyId: party.partyId,
+            attendeeName: person.name,
             termsRevision,
             formResponseId
         })
@@ -1070,6 +1072,7 @@ function correctRegistration(p) {
     call("update#" + REGISTRATION, {
         registrationId: row.registrationId,
         attendeePartyId: party.partyId,
+        attendeeName: person.name,
         credentialDigest: null,
         credentialRevision: row.credentialDigest ? Number(row.credentialRevision || 0) + 1 : row.credentialRevision
     })

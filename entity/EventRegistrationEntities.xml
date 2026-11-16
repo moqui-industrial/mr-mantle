@@ -193,6 +193,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="registrationPolicyId" type="id"/>
         <field name="ticketTypeId" type="id"/>
         <field name="attendeePartyId" type="id"/>
+        <field name="attendeeName" type="text-medium"><description>The attendee's name as typed (the buyer's for the first place
+            until the attendees are named): the public pages and notices show it, never the stored name of the party an address
+            matched (SEC-PSS-61)</description></field>
         <field name="buyerPartyId" type="id"/>
         <field name="statusId" type="id" enable-audit-log="true"/>
         <field name="holdExpireDate" type="date-time"/>

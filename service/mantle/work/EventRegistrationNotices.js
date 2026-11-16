@@ -391,7 +391,7 @@ function buildDelivery(p) {
             eventTitle: facts.title,
             eventDate: facts.when,
             eventPlace: facts.where,
-            attendeeName: places().partyName(row.attendeePartyId),
+            attendeeName: row.attendeeName || places().partyName(row.attendeePartyId),
             ticketName: places().ticketName(row.ticketTypeId)
         })
         if (row.statusId === "EvrConfirmed" && facts.online && facts.workEffort.infoUrl)

@@ -1016,7 +1016,8 @@ function registrationView(reservation, policy, via, extra = {}) {
                 state.holdEndsMs != null && Number.isFinite(state.holdEndsMs) ? lib.dateText(new Date(state.holdEndsMs)) : "",
             places: all.map(row => ({
                 registrationId: row.registrationId,
-                attendeeName: row.attendeePartyId ? P.partyName(row.attendeePartyId) : "",
+                // the name typed, never the stored name of the party an address matched (SEC-PSS-41, SEC-PSS-61)
+                attendeeName: row.attendeeName || "",
                 ticketName: P.ticketName(row.ticketTypeId),
                 statusId: row.statusId,
                 stateText: L(P.stateTexts[row.statusId] || row.statusId),
