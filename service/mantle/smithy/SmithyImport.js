@@ -2049,8 +2049,11 @@ kit => {
             .subTopic(repositoryId)
             .userIds(userIds)
             .record(M + "SmithyRepository", repositoryId)
-            .title("The push mirror of " + (repo.repositoryPath || repositoryId) + " to " + url + " fails")
+            // the title is a template expanded with the message's fields: values go in the message, never in the text,
+            // where a path or URL holding ${...} would run as script (plans/Security-Review.md SEC-SCR-05)
+            .title("The push mirror of ${where} to ${url} fails")
             .message({
+                where: repo.repositoryPath || repositoryId,
                 repositoryId,
                 repositoryPath: repo.repositoryPath || null,
                 mirrorId: mirror.mirrorId,
