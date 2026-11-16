@@ -27,6 +27,7 @@ function fixture() {
     <mantle.party.Party partyId="SF_CUST_A" partyTypeEnumId="PtyPerson" ownerPartyId="ORG_ZIZI_RETAIL">
         <mantle.party.Person firstName="Sally" lastName="Sfixture"/>
         <mantle.party.PartyRole roleTypeId="Customer"/>
+        <mantle.party.PartyIdentification partyIdTypeEnumId="PtidSsn" idValue="SFSECRETID987"/>
     </mantle.party.Party>
     <mantle.party.Party partyId="SF_CUST_B" partyTypeEnumId="PtyOrganization" ownerPartyId="ORG_ZIZI_RETAIL">
         <mantle.party.Organization organizationName="Sfixture Wholesale"/>
@@ -124,6 +125,14 @@ feature("the feed indexed the Mantle document types and the wiki pages' text", {
         for (const documentType of ["MantleParty", "MantleProduct", "MantleFacility", "MantleWikiPage"])
             assert(documentCount("mantle", documentType, "*:*") > 0, `${documentType} has no documents`)
         documentCount("mantle", "MantleWikiPage", '"About Us"') == 1
+    },
+})
+
+// an identification number is encrypted in the database, so the party document leaves it out of the index (SEC-DAT-02)
+feature("the party document indexes no identification number", {
+    expect() {
+        documentCount("mantle", "MantleParty", "partyId:SF_CUST_A") == 1
+        documentCount("mantle", "MantleParty", "SFSECRETID987") == 0
     },
 })
 
