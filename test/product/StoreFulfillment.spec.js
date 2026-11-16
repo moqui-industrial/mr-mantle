@@ -22,8 +22,10 @@ const ids = {
     guide: prefix + "_GUIDE",
     manual: prefix + "_MANUAL",
     mug: prefix + "_MUG",
-    file: "dbresource://mantle/spec/shfu/guide.txt",
-    otherFile: "dbresource://mantle/spec/shfu/manual.txt"
+    // a download's file is in its product's content folder, where an upload puts it; nothing else is served
+    file: "dbresource://mantle/content/product/" + prefix + "_GUIDE/guide.txt",
+    otherFile: "dbresource://mantle/content/product/" + prefix + "_MANUAL/manual.txt",
+    outside: "dbresource://mantle/spec/shfu/guide.txt"
 }
 const make = (entity, values) => call("create#" + entity, values)
 const one = (entity, fields) => ec.entity.find(entity).condition(fields).disableAuthz().one()
@@ -302,9 +304,31 @@ feature("a guest's digital line is captured, invoiced, receipted and granted onc
                 }).token
         )
         const viewOnly = op(D + "get#Downloads", {orderToken: viewToken})
+        // a download row moved to a location outside its product's folder is not served, and the product service
+        // refuses to make one (SEC-PSS-01)
+        const content = one("mantle.product.ProductContent", {productId: ids.guide, productContentTypeEnumId: "PcntDownload"})
+        system(() => {
+            ec.resource.getLocationReference(ids.outside).putText("Not the product's file.")
+            call("update#mantle.product.ProductContent", {productContentId: content.productContentId, contentLocation: ids.outside})
+        })
+        const outsideIssued = op(D + "issue#Download", {orderToken: link, downloadGrantId: grantId})
+        const outsideFile = op(D + "get#DownloadFile", {downloadGrantId: grantId, downloadToken: outsideIssued.result?.downloadToken})
+        system(() => call("update#mantle.product.ProductContent", {productContentId: content.productContentId, contentLocation: ids.file}))
+        const refusedCreate = system(() => {
+            try {
+                call("mantle.product.ProductServices.create#ProductContent", {productId: ids.guide,
+                    productContentTypeEnumId: "PcntDownload", contentLocation: "component://mr-mantle/MoquiConf.xml"})
+                return "created"
+            } catch (error) {
+                ec.message.clearErrors()
+                return String(error.message || error)
+            }
+        })
         // fulfilling again changes nothing
         system(() => call(D + "fulfill#ShopOrder", {orderId: bought.orderId}))
         return {
+            outsideFile,
+            refusedCreate,
             bought,
             subjects,
             link,
@@ -345,6 +369,8 @@ feature("a guest's digital line is captured, invoiced, receipted and granted onc
         r.issued.result.downloadToken.length == 48
         r.file.result.location == ids.file
         r.file.result.range.start == 0 && r.file.result.range.end == 3
+        r.outsideFile.error.includes("NOT_AVAILABLE")
+        r.refusedCreate.includes("content folder")
         r.otherByLink.error.includes("NOT_AVAILABLE")
         r.viewOnly.error != null
         r.sessionLink.result.downloads.length == 1

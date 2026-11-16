@@ -113,10 +113,14 @@ function allDigitalShopOrder(orderId) {
     const lines = productLines(orderId)
     return lines.length > 0 && lines.every(item => plainDigital(item.productId) || paidAccess(item.productId))
 }
+// A download's file is served only from the product's own folder under the content root, where an upload puts it
+// (Content.js owned: no other scheme or store, no step out with ..); a row naming any other location is not delivered.
+const productContent = () => ec.resource.script("component://mr-mantle/service/mantle/product/Content.js")
+const servedDownload = row => !!row?.contentLocation && productContent().owned(row, productContent().config({}))
 // The files a product delivers: its current PcntDownload contents.
 const downloadContents = productId =>
     rows("mantle.product.ProductContent", {productId, productContentTypeEnumId: "PcntDownload"})
-        .filter(row => lib.active(row) && row.contentLocation)
+        .filter(row => lib.active(row) && servedDownload(row))
         .sort((a, b) => Number(a.sequenceNum || 0) - Number(b.sequenceNum || 0))
 
 // ===== fulfillment =====
@@ -516,7 +520,7 @@ function grantsReached(reached) {
 // A file's public facts: its name, type and size (from the resource), never its location.
 function fileOf(content) {
     const location = content?.contentLocation
-    if (!location) return null
+    if (!location || !servedDownload(content)) return null
     const filename = String(location).split("/").pop()
     let size = null
     let mimeType = null

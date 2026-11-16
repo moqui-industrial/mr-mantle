@@ -67,6 +67,7 @@ function access(p, edit = false) {
         owner
     })
 }
+const downloadLocationRefused = "A download's file is kept in its product's content folder: upload the file, a location is not taken"
 function owned(row, c, location = row.contentLocation) {
     const value = String(location || ""),
         roots = [
@@ -194,6 +195,10 @@ function update(p, category = false) {
         } else ref.putText(String(p.contentText))
         delete data.contentLocation
     }
+    // a download's file stays in the product's own content folder (ShopFulfillment serves no other location)
+    const merged = Object.assign({}, row, data)
+    if (c.kind === "product" && merged[c.type] === "PcntDownload" && merged.contentLocation && !owned(merged, c))
+        throw new Error(downloadLocationRefused)
     call("update#" + c.entity, data)
     return {
         [c.id]: row[c.id],
@@ -586,4 +591,4 @@ function execute(op, p) {
     if (!p[c.id] && p.contentId) p[c.id] = p.contentId
     return {list, detail, store, upload, resource, restore, translations, translate, datasheet}[op](p)
 }
-;({execute, update, revision, config, owned, safeName, get})
+;({execute, update, revision, config, owned, safeName, get, downloadLocationRefused})
