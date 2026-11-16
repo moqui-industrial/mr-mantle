@@ -347,13 +347,14 @@ methods.updateSite = (p) => {
         invalid(
             'The subscription page must be an https address or a local path',
         )
+    // a site's publishing space is one its owner administers: the space's public page (publishSitePage) and its article
+    // drafts come from it, so an owner may not name another space whose pages the wiki leaves open (SEC-PSS-42)
     if (
         p.publishingWikiSpaceId &&
-        !one('moqui.resource.wiki.WikiSpace', {
-            wikiSpaceId: p.publishingWikiSpaceId,
-        })
+        p.publishingWikiSpaceId !== s.publishingWikiSpaceId &&
+        !wikiAccess({ wikiSpaceId: p.publishingWikiSpaceId }).canAdmin
     )
-        missing()
+        invalid('Name a wiki space you administer as the publishing space')
     update(s, {
         ...Object.fromEntries(
             [
@@ -3272,23 +3273,35 @@ methods.bindMailbox = (p) => {
         }
     })
 }
-methods.publishSitePage = (p) => {
-    site(p.siteId, true)
-    if (!['guidelines', 'about'].includes(p.pageRole))
-        invalid('Invalid page role')
-    const access = ec.service
+// The wiki's access of a page or a space for the caller (canView, canUpdate, canAdmin).
+const wikiAccess = (parameters) =>
+    ec.service
         .sync()
         .throwOnError(true)
         .name('org.moqui.resource.WikiServices.get#WikiPageAccess')
-        .parameters({ wikiPageId: p.wikiPageId })
+        .parameters(parameters)
         .call()
-    if (!access.canUpdate)
-        fail('Unauthorized', 'Wiki publication access required')
-    const page = one('moqui.resource.wiki.WikiPage', {
-        wikiPageId: p.wikiPageId,
-    })
-    if (!page || !p.versionName || page.publishedVersionName !== p.versionName)
-        invalid('Select the exact currently published wiki revision')
+methods.publishSitePage = (p) => {
+    const s = site(p.siteId, true)
+    if (!['guidelines', 'about'].includes(p.pageRole))
+        invalid('Invalid page role')
+    // the page is in the site's publishing space, or in a space the caller administers (an operator); the wiki's own update
+    // rule is open to any account in an unrestricted space, so it alone does not bind a page to the site (SEC-PSS-42). One
+    // refusal for a missing page, another space, no access and another revision, so an owner learns nothing of other pages.
+    const page = p.wikiPageId
+        ? one('moqui.resource.wiki.WikiPage', { wikiPageId: p.wikiPageId })
+        : null
+    const access = page ? wikiAccess({ wikiPageId: page.wikiPageId }) : null
+    if (
+        !page ||
+        !access.canUpdate ||
+        (page.wikiSpaceId !== s.publishingWikiSpaceId && !access.canAdmin) ||
+        !p.versionName ||
+        page.publishedVersionName !== p.versionName
+    )
+        invalid(
+            "Select the exact currently published revision of a page in the site's publishing space",
+        )
     const old = one(
         S + 'PublicSitePage',
         { siteId: p.siteId, pageRole: p.pageRole },
