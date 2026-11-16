@@ -420,7 +420,10 @@ feature(
                 .message({deploymentId: ids.deploymentId, repositoryId: ids.repositoryId, statusId: "waiting-approval"})
                 .persistOnSend(true)
                 .send()
+            // Smithy's notice names its values in a fixed title template (SEC-SCR-05): the title still reads in full
+            const ownerTitle = notices("SDP_OWNER").slice(-1)[0]?.titleText || ""
             const told = {
+                ownerTitle,
                 maintainer: notices("SDP_MAINT").length - before.maintainer,
                 owner: notices("SDP_OWNER").length - before.owner,
                 requester: notices("SDP_DEV").length - before.dev,
@@ -455,6 +458,9 @@ feature(
         then({told, toldOwned, hidden}) {
             toldOwned.requester == 1
             toldOwned.owner == 1
+            told.ownerTitle.startsWith("The deployment of ")
+            told.ownerTitle.includes(" to demo waits for approval")
+            !told.ownerTitle.includes("${")
             told.maintainer == 1
             told.owner == 1
             // the requester has the engine's own notices only
