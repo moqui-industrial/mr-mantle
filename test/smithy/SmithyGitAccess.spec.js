@@ -147,16 +147,24 @@ feature("an account with no password to give again signs in again instead", {
         const history = () => ec.entity.find("moqui.security.UserLoginHistory").condition("userId", "SGA_PROVIDER").disableAuthz()
         history().deleteAll()
         const stale = add("sga-provider-1")
+        // ten minutes ago is not recent: the framework's window (require#RecentAuth) is five minutes
+        lib.make("moqui.security.UserLoginHistory", {
+            userId: "SGA_PROVIDER",
+            fromDate: new Date(Number(ec.user.nowTimestamp) - 10 * 60000),
+            successfulLogin: "Y"
+        })
+        const older = add("sga-provider-3")
         lib.make("moqui.security.UserLoginHistory", {
             userId: "SGA_PROVIDER",
             fromDate: ec.user.nowTimestamp,
             successfulLogin: "Y"
         })
-        return {stale, recent: add("sga-provider-2")}
+        return {stale, older, recent: add("sga-provider-2")}
     },
-    then({stale, recent}) {
+    then({stale, older, recent}) {
         stale.kind == "AuthenticationRequired"
         stale.reason == "recentSignInRequired"
+        older.reason == "recentSignInRequired"
         recent.fingerprint.startsWith("SHA256:")
     }
 })

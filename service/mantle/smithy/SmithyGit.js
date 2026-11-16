@@ -283,10 +283,13 @@ kit => {
 
     // ===== git access: the account's SSH keys and access tokens (§11 GitAccess) =====
     const MAX_CREDENTIALS = 20
-    const RECENT_SIGN_IN = 15 * 60000
+    // the framework's window for making a credential (org.moqui.sso.RecentAuthServices require#RecentAuth: five minutes,
+    // check#RecentAuth maxAgeSeconds 300), so Smithy and the framework's own git access pages agree
+    const RECENT_SIGN_IN = 5 * 60000
     /* Before a credential is made the account proves again who it is: with a password, the password (and the second
        factor's code where it has one), as Forum's setSiteRole asks; with none (it signs in through a provider), a
-       sign-in within the last 15 minutes, by the framework's login history. */
+       sign-in within the last five minutes, by the framework's login history (the PASS session is not the browser's, so
+       the session's own recent sign-in is not known here). */
     function reauthenticate(p) {
         const account = one("moqui.security.UserAccount", {userId: ec.user.userId})
         if (!account) fail("AuthenticationRequired", "Sign in to continue")
