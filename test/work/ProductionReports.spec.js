@@ -4,7 +4,8 @@
 // reader the costs; a work center whose calendar cannot be read is a named partition and the report is incomplete, its
 // figures left out of the totals rather than zero; each report answers its scope, as-of time and units; and a user without
 // PRODUCTION_VIEW, another organization's reader and a facility outside the scope are refused. The users are in spec-local
-// groups. The run time is the machine's runtime recorded on the shop floor (P10's record#MachineRuntime).
+// groups. The run time is the machine's runtime recorded on the shop floor (P10's record#MachineRuntime). The dashboard's WIP value of
+// a plant whose open work order has no cost yet says so, not "No open work".
 const P = "mantle.work.ProductionServices.",
     B = "mantle.product.BomServices.",
     R = "mantle.work.RoutingServices.",
@@ -577,5 +578,38 @@ feature("OEE's quality does not count held output as good: a completion of 1 goo
         center.goodQuantity == 9
         close(center.quality, 0.75)
         center.notesText.includes("Held output counts good only once it is released")
+    }
+})
+
+feature("the WIP value of a plant whose open work order has no cost yet says so", {
+    when() {
+        const idle = "PRR_IDLE_PLANT"
+        as("john.doe", () =>
+            call("create#mantle.facility.Facility", {
+                facilityId: idle,
+                facilityTypeEnumId: "FcTpWarehouse",
+                facilityName: "Idle plant",
+                ownerPartyId: org
+            })
+        )
+        const created = run("prr_planner", P + "create#ProductionOrder", {
+            operationKey: key(),
+            organizationPartyId: org,
+            productId: "PRR_FIN",
+            quantity: 2,
+            facilityId: idle
+        })
+        const released = run("prr_planner", P + "release#ProductionOrder", {
+            operationKey: key(),
+            workEffortId: created.workEffortId,
+            expectedRevision: revision(created.workEffortId)
+        })
+        const out = report("prr_finance", "ProductionDashboard", Object.assign({facilityId: idle}, period()))
+        return {created, released, wip: (out.kpis || []).find(row => row.kpiId == "wipValue") || {}}
+    },
+    then({created, released, wip}) {
+        created.error == ""
+        released.error == ""
+        wip.valueText == "1 open, nothing costed yet"
     }
 })
