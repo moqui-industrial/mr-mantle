@@ -44,6 +44,14 @@ footer { margin-top: 24pt; font-size: 9pt; color: #5b6570; }
 <#if document.methodLabel>
 <tr><th>Method</th><td>${document.methodLabel}</td></tr>
 </#if>
+<#if document.transfer>
+<tr><th>From</th><td>${document.fromMethodLabel || ''}</td></tr>
+<tr><th>To</th><td>${document.toMethodLabel || ''}</td></tr>
+</#if>
+<#if document.feeAmountText>
+<tr><th>Fee</th><td>${document.feeAmountText}</td></tr>
+<tr><th>Total paid out</th><td>${document.totalAmountText}</td></tr>
+</#if>
 <#if document.referenceNumber>
 <tr><th>Reference</th><td>${document.referenceNumber}</td></tr>
 </#if>

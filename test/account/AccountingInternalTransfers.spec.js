@@ -91,6 +91,10 @@ feature("a transfer with a fee is one payment posted on both sides through trans
         toDecimal(detail.totals.unappliedTotal).isZero()
         result.outputRows.length == 1 && result.outputRows[0].outputType == "detail"
         output.documentHtml.includes("Internal transfer")
+        // the issued detail names both methods and the fee with the total paid out, as the review did (ACC-UI-010)
+        output.documentHtml.includes("<th>From</th>") && output.documentHtml.includes("<th>To</th>")
+        output.documentHtml.includes("<th>Fee</th>") && output.documentHtml.includes("$2.00")
+        output.documentHtml.includes("<th>Total paid out</th>") && output.documentHtml.includes("$52.00")
         transfers.rows.some(row => row.paymentId === result.paymentId)
         unapplied.rows.every(row => row.paymentId !== result.paymentId)
     }

@@ -682,12 +682,18 @@ feature("a payment two lines match is applied to neither, by the rules and by ma
             autoApply: "Y"
         })
         const test = native("test#Rule", {organizationPartyId: f.org, bankMatchRuleId: rule.bankMatchRuleId})
+        // Unmatched's suggestions say why neither is applied, as the test does (ACC-UI-027)
+        const suggested = Array.from(
+            native("find#BankLines", {paymentMethodId: f.bankId, lineState: "open", withSuggestions: true, pageSize: 100}).lineRows
+        ).filter(row => String(row.fitId).startsWith("TWIN-"))
         const applied = native("apply#Rules", {organizationPartyId: f.org, paymentMethodId: f.bankId})
         native("store#Rule", {organizationPartyId: f.org, bankMatchRuleId: rule.bankMatchRuleId, ended: "Y"})
         native("match#PaymentMethodTransUnmatched", {paymentMethodId: f.bankId, lookBackDays: 10})
-        return {test, applied, paymentId, lines: ["TWIN-A", "TWIN-B"].map(fitId => line(f.bankId, fitId).paymentId)}
+        return {test, suggested, applied, paymentId, lines: ["TWIN-A", "TWIN-B"].map(fitId => line(f.bankId, fitId).paymentId)}
     },
-    then({test, applied, paymentId, lines}) {
+    then({test, suggested, applied, paymentId, lines}) {
+        suggested.length == 2
+        suggested.every(row => row.ambiguous && row.suggestionReason.includes("Another line matches the same payment"))
         test.resultRows.filter(row => row.fitId.startsWith("TWIN-")).every(row => row.ambiguous && !row.wouldApply)
         applied.appliedRows.every(row => !row.fitId.startsWith("TWIN-"))
         lines.every(id => id == null)

@@ -2714,6 +2714,8 @@ General Order Placement and eCommerce Usage
             <set field="orderId" from="cloneOut.orderId"/>
             <service-call name="update#mantle.order.OrderHeader"
                     in-map="{orderId:orderId, orderPurposeEnumId:null, recurOccurrenceDate:occurrenceDate}"/>
+            <!-- a Sales base's order ships from its part's facility, else its seller's default (impl-sales follow-up 5) -->
+            <if condition="salesBase"><script>ec.resource.script('component://mr-mantle/service/mantle/order/SalesApprovals.js').applyDefaultFacility(orderId)</script></if>
             <!-- a Sales base's order retaxed now by its own path (its seller's gateway, or its store's promotions, shipping and
                 tax), so the lines copied from the base are figured once, at this occurrence -->
             <if condition="salesBase">

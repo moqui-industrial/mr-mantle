@@ -1276,9 +1276,13 @@ kit => {
             .subTopic(repositoryId)
             .userIds(userIds)
             .record(M + "SmithyRepository", repositoryId)
-            .title("The deployment of " + where + " " + text(deployment.commitId).slice(0, 12) + " to " + environmentName + " waits for approval")
+            // the title is a template expanded with the message's fields: values go in the message, never in the text,
+            // where a name holding ${...} would run as script (plans/Security-Review.md SEC-SCR-05)
+            .title("The deployment of ${where} ${commitShort} to ${environment} waits for approval")
             .message({
                 deploymentId: deployment.deploymentId,
+                where,
+                commitShort: text(deployment.commitId).slice(0, 12),
                 repositoryId,
                 repositoryPath: repo.repositoryPath || null,
                 environment: environmentName,

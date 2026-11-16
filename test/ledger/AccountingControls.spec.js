@@ -1482,6 +1482,12 @@ feature("chart accounts, assignments, classifications and periods are kept throu
             accountName: "Letters in code",
             changeReason: "Spec code",
         })
+        // a new account with a code in use is refused by name, not left to the duplicate key (ACC-UI-034)
+        const usedCode = rejected("AccountServices.store#Account", {
+            ...fields,
+            accountName: "Same code again",
+            changeReason: "Spec duplicate",
+        })
         const assignmentKey = { glAccountId: created, organizationPartyId: org }
         const assigned = native("AccountServices.store#Assignment", {
             organizationPartyId: org,
@@ -1545,9 +1551,10 @@ feature("chart accounts, assignments, classifications and periods are kept throu
         const classes = native("AccountServices.get#Classifications", { organizationPartyId: org, glAccountId: created })
         const periods = native("AccountServices.ensure#Periods", { organizationPartyId: org })
         const read = native("AccountingServices.get#Record", { kind: "accounts", recordId: created, organizationPartyId: org })
-        return { created, renamed, cycle, badCode, assigned, backwards, neither, classes, periods, read }
+        return { created, renamed, cycle, badCode, usedCode, assigned, backwards, neither, classes, periods, read }
     },
-    then({ created, renamed, cycle, badCode, assigned, backwards, neither, classes, periods, read }) {
+    then({ created, renamed, cycle, badCode, usedCode, assigned, backwards, neither, classes, periods, read }) {
+        usedCode.includes("ACCOUNT_CODE_IN_USE") && usedCode.includes("199901")
         renamed.glAccountId == created
         assigned.glAccountId == created
         cycle.includes("cycle")
@@ -1600,12 +1607,32 @@ feature("currencies, rate imports and finance settings are read and kept through
             lastUpdatedStamp: preferences.settings.lastUpdatedStamp,
             changeReason: "Spec prefix",
         })
+        // the prefix applies to the organization's next invoice, on the standard sequence; an enforced one is refused,
+        // not kept unapplied (ACC-UI-035)
+        const prefixed = lib().call("mantle.account.InvoiceServices.create#Invoice", {
+            fromPartyId: org,
+            toPartyId: "ORG_ACME",
+            description: "Spec prefixed invoice",
+        }).invoiceId
+        const enforced = rejected("SetupServices.store#Preferences", {
+            organizationPartyId: org,
+            settings: { invoiceSequenceEnumId: "InvSqEnforced" },
+            lastUpdatedStamp: stored.settings.lastUpdatedStamp,
+            changeReason: "Spec sequence",
+        })
         const badFlag = rejected("SetupServices.store#Preferences", {
             organizationPartyId: org,
             // impl-customer-service F111: orderConfirmationOnPlace is one of the flags
             settings: { orderConfirmationOnPlace: "X" },
             lastUpdatedStamp: stored.settings.lastUpdatedStamp,
             changeReason: "Spec flag",
+        })
+        // the prefix cleared again, so the specs after this one number as before
+        native("SetupServices.store#Preferences", {
+            organizationPartyId: org,
+            settings: { invoiceIdPrefix: "" },
+            lastUpdatedStamp: native("SetupServices.get#Preferences", { organizationPartyId: org }).settings.lastUpdatedStamp,
+            changeReason: "Spec prefix cleared",
         })
         const setup = native("SetupServices.get#Context", { organizationPartyId: org })
         const term = native("SetupServices.store#SettlementTerm", {
@@ -1615,9 +1642,11 @@ feature("currencies, rate imports and finance settings are read and kept through
             termValueUomId: "TF_day",
             changeReason: "Spec term",
         })
-        return { currency, precision, badCode, imported, result, preferences, stored, badFlag, setup, term }
+        return { currency, precision, badCode, imported, result, preferences, stored, prefixed, enforced, badFlag, setup, term }
     },
-    then({ currency, precision, badCode, imported, result, preferences, stored, badFlag, setup, term }) {
+    then({ currency, precision, badCode, imported, result, preferences, stored, prefixed, enforced, badFlag, setup, term }) {
+        prefixed.startsWith("NFC") && /^NFC\d+$/.test(prefixed)
+        enforced.includes("SEQUENCE_UNAVAILABLE")
         currency.complete == true
         precision.complete == true
         lib().one("moqui.basic.Uom", { uomId: "XQZ" }).fractionDigits == 2

@@ -984,6 +984,8 @@ function respondTo(quote, p, actor) {
                 orderPartSeqId: issue.orderPartSeqId,
                 otherPartyOrderId: request.otherPartyOrderId
             })
+        // follow-up 5: a quote made before its seller had a default facility ships from it once accepted
+        approvals().applyDefaultFacility(order.orderId)
         // every placement goes through place#Order (impl-sales §2; Marketing's attribution sees it)
         call("mantle.order.OrderServices.place#Order", {orderId: order.orderId})
         // P11: the seller's option to approve an accepted net-terms order as the system while its approval setting is off, through
@@ -1072,6 +1074,8 @@ function cloneQuote(p) {
         copyItemWorkEffort: false
     })
     const orderId = cloned.orderId
+    // follow-up 5: a copy keeps the quote's facility, else takes the seller's default
+    approvals().applyDefaultFacility(orderId)
     const part = rows(PART, {orderId})[0]
     for (const row of rows(PART_PARTY, {orderId, roleTypeId: salesAccess.quoteRoles.owner}))
         call("delete#" + PART_PARTY, {

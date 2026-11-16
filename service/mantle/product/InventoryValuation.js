@@ -155,7 +155,9 @@ function stockOf(org, afterDay, p = {}) {
             earlierCost[event.assetId] = event.previousUnitCost
     const byProduct = {}
     let total = toDecimal(0),
-        otherCurrency = false
+        otherCurrency = false,
+        unpricedQuantity = toDecimal(0),
+        unpricedCount = 0
     for (const asset of assets) {
         const entry =
             byProduct[asset.productId] ||
@@ -169,6 +171,11 @@ function stockOf(org, afterDay, p = {}) {
             entry.otherCurrency = otherCurrency = true
             continue
         }
+        // stock with no cost is counted at none, so a summary that agrees says how much it leaves out (ACC-UI-013)
+        if (cost == null && quantity.compare(0) !== 0) {
+            unpricedQuantity = unpricedQuantity.add(quantity)
+            unpricedCount++
+        }
         const value = quantity.multiply(toDecimal(cost ?? 0))
         entry.value = entry.value.add(value)
         total = total.add(value)
@@ -177,7 +184,7 @@ function stockOf(org, afterDay, p = {}) {
             if (entry.maxCost == null || toDecimal(cost).compare(entry.maxCost) > 0) entry.maxCost = toDecimal(cost)
         }
     }
-    return {currency, byProduct, total: money(total, currency), otherCurrency, complete}
+    return {currency, byProduct, total: money(total, currency), otherCurrency, unpricedQuantity, unpricedCount, complete}
 }
 // The ledger conditions of a valuation's filters: a product, and for a facility the organization's assets there (stock
 // postings name their asset; few name a facility).
@@ -227,6 +234,8 @@ function tieOut(org, afterDay, p = {}) {
         wipBalance,
         difference: stock.complete ? stock.total.subtract(inventoryBalance) : null,
         otherCurrency: stock.otherCurrency,
+        unpricedQuantity: stock.unpricedQuantity,
+        unpricedCount: stock.unpricedCount,
         complete: stock.complete,
         accounts,
         accountRows,
@@ -312,6 +321,8 @@ function valuation(p) {
             difference: totals.difference,
             agrees: totals.difference != null && totals.difference.compare(0) === 0,
             otherCurrency: totals.otherCurrency,
+            unpricedQuantity: totals.unpricedQuantity,
+            unpricedCount: totals.unpricedCount,
             currency
         },
         accountRows: totals.accountRows,

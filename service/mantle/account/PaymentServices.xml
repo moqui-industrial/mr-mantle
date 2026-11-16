@@ -3783,6 +3783,29 @@ along with this software (see the LICENSE.md file). If not, see
                     amountText:ec.l10n.formatCurrency(payment.amount ?? 0, payment.amountUomId),
                     paymentDateText:payment.effectiveDate ? ec.l10n.format(payment.effectiveDate, 'yyyy-MM-dd') : null,
                     methodLabel:methodLabel, referenceNumber:payment.paymentRefNum, comments:payment.comments}"/>
+            <!-- an internal transfer names both of the organization's methods and its fee, as its review did (ACC-UI-010) -->
+            <if condition="payment.paymentTypeEnumId == 'PtInternalTransfer'">
+                <entity-find entity-name="mantle.account.method.PaymentMethod" list="transferMethodList" disable-authz="true">
+                    <econdition field-name="paymentMethodId" operator="in"
+                            from="[payment.paymentMethodId, payment.toPaymentMethodId].filter(Boolean)"/>
+                </entity-find>
+                <set field="transferMethodRows" from="ec.resource.script('component://mr-mantle/service/mantle/account/PaymentWorkflow.js')
+                        .execute('maskedMethods', {paymentMethodList:transferMethodList}).methodRows"/>
+                <entity-find entity-name="mantle.account.payment.Payment" list="feeList" disable-authz="true">
+                    <econdition field-name="feeForPaymentId" from="paymentId"/>
+                    <econdition field-name="statusId" operator="not-in" from="['PmntCancelled', 'PmntVoid']"/>
+                </entity-find>
+                <set field="feeAmount" from="Array.from(feeList).reduce((total, row) =&gt; total.add(row.amount ?? 0), toDecimal(0))"/>
+                <set field="document" from="Object.assign(document, {transfer:true, partyLabel:'Organization',
+                        fromMethodLabel:(transferMethodRows.find((row) =&gt; row.paymentMethodId == payment.paymentMethodId) || {}).label
+                            || null,
+                        toMethodLabel:(transferMethodRows.find((row) =&gt; row.paymentMethodId == payment.toPaymentMethodId) || {}).label
+                            || null,
+                        methodLabel:null,
+                        feeAmountText:feeAmount.compare(0) &gt; 0 ? ec.l10n.formatCurrency(feeAmount, payment.amountUomId) : null,
+                        totalAmountText:feeAmount.compare(0) &gt; 0
+                            ? ec.l10n.formatCurrency(toDecimal(payment.amount ?? 0).add(feeAmount), payment.amountUomId) : null})"/>
+            </if>
             <!-- the bank's numbers only on the check itself -->
             <if condition="bankCheck != null">
                 <set field="document" from="Object.assign(document, {checkNumber:String(bankCheck.checkNumber),

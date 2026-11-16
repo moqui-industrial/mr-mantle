@@ -123,6 +123,32 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="outcome" from="out.outcome"/>
         </actions>
     </service>
+    <service verb="update" noun="SalesOrderFacility" allow-remote="false">
+        <description>The facility a Sales order part ships from (impl-sales follow-up 5; a part is given its seller's default,
+            SalesPolicy.defaultFacilityId, when it is made), at the revision read: for a sales order, SALES_ORDER_EDIT on one the caller
+            may change and Sales' own (a direct order, an accepted quote or a Sales recurring occurrence; a store's or another app's
+            order keeps its owner's facility: ORDER_NOT_SALES), a direct draft or one placed, approved or held (ORDER_NOT_OPEN) with nothing reserved or shipped
+            (FACILITY_LOCKED: a reservation is Warehouse's to move); for a quote, SALES_QUOTE_EDIT on a draft the caller may change
+            (QUOTE_NOT_DRAFT). Refuses another organization's order as missing (RECORD_UNAVAILABLE), a stale revision
+            (REVISION_CHANGED), no facility (FACILITY_REQUIRED) and one that is not a warehouse, store or plant of the seller
+            (FACILITY_INVALID).</description>
+        <in-parameters>
+            <parameter name="orderId" required="true"/>
+            <parameter name="orderRevision" required="true"/>
+            <parameter name="facilityId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="orderId"/>
+            <parameter name="facilityId"/>
+            <parameter name="orderRevision" type="Integer"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/order/SalesOrders.js').execute('updateFacility', context)"/>
+            <set field="orderId" from="out.orderId"/>
+            <set field="facilityId" from="out.facilityId"/>
+            <set field="orderRevision" from="out.orderRevision"/>
+        </actions>
+    </service>
     <service verb="approve" noun="SalesOrder" allow-remote="false">
         <description>Approve a placed sales order the caller sees (theirs, their team's, the organization's for SALES_TEAM_VIEW, or
             awaiting approval for SALES_ORDER_APPROVE), at the revision read: SALES_ORDER_APPROVE where the seller's approval setting

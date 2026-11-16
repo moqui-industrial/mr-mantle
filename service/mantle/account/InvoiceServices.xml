@@ -738,6 +738,17 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- the book day of the invoice, in the user's zone, and who drafted it -->
             <set field="draftedByUserId" from="ec.user.userId"/>
             <set field="accountingDate" from="ec.l10n.format(invoiceDate, 'yyyy-MM-dd')"/>
+            <!-- an organization's own invoice takes its invoice prefix (PartyAcctgPreference.invoiceIdPrefix) on the standard
+                sequence: the setting was kept and never applied (ACC-UI-035). The enforced sequences need a counter of their
+                own and are refused when set (store#Preferences). -->
+            <if condition="isFromPartyOrgInternal">
+                <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="numbering"
+                        in-map="{organizationPartyId:organizationPartyId}"/>
+                <set field="invoiceIdPrefix" from="String(numbering?.partyAcctgPreference?.invoiceIdPrefix || '').trim()"/>
+                <if condition="invoiceIdPrefix">
+                    <set field="invoiceId" from="invoiceIdPrefix + ec.entity.sequencedIdPrimary('mantle.account.invoice.Invoice', null, null)"/>
+                </if>
+            </if>
             <service-call name="create#mantle.account.invoice.Invoice" in-map="context" out-map="context"/>
         </actions>
     </service>
@@ -3678,6 +3689,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentRows" type="List"/>
             <parameter name="sourceRows" type="List"/>
             <parameter name="shipmentRows" type="List"/>
+            <parameter name="submittedOrderId" type="String"><description>The purchase order a supplier named when it submitted this
+                bill from a public page (SupplierBillSubmission), whether or not its lines are linked to the order's.</description></parameter>
             <parameter name="budgetRows" type="List"/>
             <parameter name="budgetAvailable" type="Boolean"/>
             <parameter name="budgetUnavailableReason"/>
@@ -3732,6 +3745,13 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find entity-name="mantle.shipment.ShipmentItemSource" list="shipmentRows" limit="500" disable-authz="true">
                 <econdition field-name="invoiceId"/></entity-find>
             <set field="sourceRows" from="Array.from(orderSourceList).concat(Array.from(shipmentRows))"/>
+            <!-- a bill a supplier sent from its order's page names the order there only (ACC-UI-019) -->
+            <entity-find entity-name="mantle.account.invoice.SupplierBillSubmission" list="submissionRows" limit="1"
+                    disable-authz="true">
+                <econdition field-name="invoiceId"/>
+                <econdition field-name="orderId" operator="is-not-null"/>
+            </entity-find>
+            <set field="submittedOrderId" from="submissionRows[0]?.orderId ?? null"/>
             <set field="ledgerRows" from="[]"/>
             <if condition="capabilities.canReadLedger">
                 <entity-find entity-name="mantle.ledger.transaction.AcctgTrans" list="ledgerRows" limit="500"

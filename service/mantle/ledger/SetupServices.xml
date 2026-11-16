@@ -73,7 +73,8 @@ along with this software (see the LICENSE.md file). If not, see
             finance administration, a stale revision, a flag that is not Y or N, reviewed gateway payments without
             settlement controls, a unit that is not a currency, a change of base currency, costing or fiscal year start
             once entries are posted, an invalid fiscal year start, an error journal of another organization or type, a
-            document template that is not approved and an unknown sales tax gateway.</description>
+            document template that is not approved, an unknown sales tax gateway and an invoice sequence other than the standard
+            one.</description>
         <in-parameters>
             <parameter name="organizationPartyId"/>
             <parameter name="settings" type="Map"/>
@@ -111,6 +112,11 @@ along with this software (see the LICENSE.md file). If not, see
                     .find(field => preferenceValues[field] != null &amp;&amp; !['Y', 'N'].includes(preferenceValues[field]))"/>
             <if condition="invalidFlag">
                 <return error="true" message="Choose Enabled or Disabled for ${invalidFlag}"/>
+            </if>
+            <!-- an enforced or yearly sequence needs a counter of its own, not built: refused rather than kept and not applied
+                (ACC-UI-035); the prefix applies on the standard sequence (create#Invoice) -->
+            <if condition="preferenceValues.invoiceSequenceEnumId &amp;&amp; preferenceValues.invoiceSequenceEnumId != 'InvSqStandard'">
+                <return error="true" message="SEQUENCE_UNAVAILABLE: Invoices are numbered on the standard sequence; an enforced sequence is not available"/>
             </if>
             <set field="inheritedPreference" from="policy.preference(scope.organizationPartyId)"/>
             <set field="effective" from="Object.assign({}, inheritedPreference, policy.map(oldPreference), preferenceValues)"/>

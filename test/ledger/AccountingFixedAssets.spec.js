@@ -169,6 +169,8 @@ feature("an asset is capitalized from its class's version on its in-service day,
     when() {
         const capitalize = {assetId: "P12_TRUCK", classEnumId: "AsClsTruck", acquireCost: "12000", operationKey: "p12-cap-truck"}
         const readRefusal = asUser(f.users.read, () => rejected("capitalize#Asset", capitalize))
+        // not yet on the books: no net book value beside "Not capitalized" (ACC-UI-012)
+        const before = asUser(f.users.gl, () => call(books + "get#AssetBook", {assetId: "P12_TRUCK"}).asset)
         const first = asUser(f.users.gl, () => call(books + "capitalize#Asset", capitalize))
         const retry = asUser(f.users.gl, () => call(books + "capitalize#Asset", capitalize))
         const again = asUser(f.users.gl, () =>
@@ -188,10 +190,13 @@ feature("an asset is capitalized from its class's version on its in-service day,
                 })
         })
         const event = one("mantle.product.asset.AssetBookEvent", {assetBookEventId: first.assetBookEventId})
-        return {readRefusal, first, retry, again, truck: asset("P12_TRUCK"), event}
+        const after = asUser(f.users.gl, () => call(books + "get#AssetBook", {assetId: "P12_TRUCK"}).asset)
+        return {readRefusal, before, after, first, retry, again, truck: asset("P12_TRUCK"), event}
     },
-    then({readRefusal, first, retry, again, truck, event}) {
+    then({readRefusal, before, after, first, retry, again, truck, event}) {
         readRefusal.includes("PERMISSION_DENIED")
+        before.capitalized == false && before.netBook == null
+        after.capitalized == true && toDecimal(after.netBook).toNumber() == 12000
         lines(first.acctgTransId) == "C 139100000 12000, D 131100000 12000"
         retry.alreadyApplied == true && retry.assetBookEventId == first.assetBookEventId
         again.includes("ALREADY_CAPITALIZED")

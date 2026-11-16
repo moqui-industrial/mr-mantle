@@ -785,7 +785,8 @@ function book(p) {
             expectedEndOfLifeText: asset.expectedEndOfLife ? lib.calendarDateText(asset.expectedEndOfLife) : "",
             actualEndOfLifeText: disposed ? lib.calendarDateText(asset.actualEndOfLife) : "",
             accumulated,
-            netBook: cost.subtract(accumulated),
+            // an asset not yet capitalized is not on the books: its cost is no net book value (ACC-UI-012)
+            netBook: capitalized ? cost.subtract(accumulated) : null,
             capitalized: !!capitalized,
             disposed,
             stateText: disposed ? "Disposed" : capitalized ? "In service" : "Not capitalized",

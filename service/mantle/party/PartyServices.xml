@@ -204,6 +204,8 @@ along with this software (see the LICENSE.md file). If not, see
                     'identifications.idValue', 'combinedName', 'firstName', 'lastName', 'organizationName', 'userAccounts.username',
                     'contactMech.infoString', 'contactMechs.address1', 'contactMechs.unitNumber', 'contactMechs.postalCode',
                     'contactMechs.city', 'contactMechs.state', 'contactMechs.areaCode', 'contactMechs.contactNumber', 'contactMechs.city']"/>
+            <!-- a role asked for matches every row: it is no match to show -->
+            <if condition="roleTypeId"><set field="highlightFields" from="highlightFields.filter(name =&gt; name !== 'roles.roleTypeId')"/></if>
             <!-- <log level="warn" message="Product search queryString: ${queryString}"/> -->
             <if condition="queryString">
                 <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"

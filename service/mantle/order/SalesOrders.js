@@ -193,9 +193,55 @@ function placeOrder(p) {
     requireRevision(so.order, p.orderRevision)
     if (!linesOf(so.order.orderId).some(item => item.itemTypeEnumId === "ItemProduct"))
         denied("LINES_REQUIRED", "Add a product line to order " + so.order.orderId + " first")
+    // follow-up 5: a draft made before its seller had a default facility ships from it once placed (reservation needs one)
+    approvals().applyDefaultFacility(so.order.orderId)
     // every placement goes through place#Order (impl-sales §2)
     call("mantle.order.OrderServices.place#Order", {orderId: so.order.orderId})
     return outcomeOf(so.order.orderId)
+}
+
+// ===== update#SalesOrderFacility (follow-up 5) =====
+// The facility a Sales order part ships from, changed at the revision read by one who may change the order (a direct draft, or
+// placed, approved or held while nothing of it is reserved or shipped: a reservation is Warehouse's to move) or the quote (a
+// draft); only a warehouse, store or plant of the seller (SalesApprovals.js facilityRefusal).
+// Whether a sales order is Sales' own (a direct order, an accepted quote or an occurrence of a Sales recurring base), whose facility
+// Sales sets; a store's or another app's order keeps the facility its owner gave it (follow-up 5 review).
+function salesOwned(order) {
+    if ([salesAccess.orderPurposes.direct, salesAccess.quotePurpose].includes(order.orderPurposeEnumId)) return true
+    return !!order.parentOrderId && one(ORDER, {orderId: order.parentOrderId})?.orderPurposeEnumId === "OrpRecurringTemplate"
+}
+function updateFacility(p) {
+    const userScope = salesAccess.scope()
+    const orderId = text(p.orderId)
+    let target
+    if (salesAccess.orderOf(userScope, orderId)) {
+        target = salesAccess.requireOrder(userScope, orderId, true)
+        if (!salesOwned(target.order))
+            denied("ORDER_NOT_SALES", "Order " + orderId + " is a store's or another app's; it ships from where its owner set")
+        if (!isDirectDraft(target) && !openStatuses.includes(target.order.statusId))
+            denied("ORDER_NOT_OPEN", "Order " + orderId + " is " + statusText(target.order.statusId))
+        if (rows("mantle.product.issuance.AssetReservation", {orderId}).length || rows(SOURCE, {orderId}).length)
+            denied(
+                "FACILITY_LOCKED",
+                "Order " +
+                    orderId +
+                    " is reserved or shipped from " +
+                    approvals().facilityName(target.part.facilityId) +
+                    "; Warehouse moves its reservations"
+            )
+    } else {
+        target = salesAccess.requireQuote(userScope, orderId, true)
+        if (!["OrderOpen", "OrderBeingChanged"].includes(target.order.statusId))
+            denied("QUOTE_NOT_DRAFT", "Quote " + orderId + " is " + statusText(target.order.statusId) + ", not a draft")
+    }
+    requireRevision(target.order, p.orderRevision)
+    const facilityId = text(p.facilityId)
+    if (!facilityId) denied("FACILITY_REQUIRED", "Choose the facility to ship from")
+    const refused = approvals().facilityRefusal(target.part.vendorPartyId, facilityId)
+    if (refused) denied("FACILITY_INVALID", refused)
+    if (target.part.facilityId !== facilityId)
+        call("update#" + PART, {orderId, orderPartSeqId: target.part.orderPartSeqId, facilityId})
+    return {orderId, facilityId, orderRevision: revisionOf(one(ORDER, {orderId}))}
 }
 
 // ===== approve#SalesOrder =====
@@ -301,6 +347,8 @@ function cloneOrder(p) {
         copyItemWorkEffort: false
     })
     const orderId = cloned.orderId
+    // follow-up 5: a copy keeps the order's facility, else takes the seller's default
+    approvals().applyDefaultFacility(orderId)
     const part = rows(PART, {orderId})[0]
     for (const row of rows(PART_PARTY, {orderId, roleTypeId: salesAccess.quoteRoles.owner}))
         call("delete#" + PART_PARTY, {
@@ -770,6 +818,9 @@ function getOrder(p) {
             placedText: lib.dateText(order.placedDate),
             approvedText: lib.dateText(order.approvedDate),
             requiredText: dayText(part.shipBeforeDate),
+            // follow-up 5: the facility the part ships from
+            facilityId: part.facilityId || null,
+            facilityName: part.facilityId ? approvals().facilityName(part.facilityId) : "",
             salesOpportunityId: opportunity ? link.salesOpportunityId : null,
             opportunityName: opportunity ? opportunity.opportunity.opportunityName : "",
             acceptedText: accepted
@@ -802,7 +853,14 @@ function getOrder(p) {
             holdTypes,
             cancelRemainder:
                 editable && openStatuses.includes(order.statusId) && lines.some(line => line.quantityText !== line.cancelledText),
-            clone: editable
+            clone: editable,
+            // follow-up 5: while nothing is reserved or shipped (update#SalesOrderFacility)
+            changeFacility:
+                editable &&
+                salesOwned(order) &&
+                (isDirectDraft(so) || openStatuses.includes(order.statusId)) &&
+                !shipmentIds.length &&
+                !rows("mantle.product.issuance.AssetReservation", {orderId}).length
         }
     }
 }
@@ -970,6 +1028,7 @@ const operations = {
     storeLine,
     deleteLine,
     placeOrder,
+    updateFacility,
     approveOrder,
     holdOrder,
     releaseHold,

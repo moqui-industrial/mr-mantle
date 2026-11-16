@@ -527,11 +527,18 @@ function qualifyLead(p) {
     if (!accountPartyId && opportunity.accountPartyId)
         accountPartyId = accountFor(userScope, organizationPartyId, opportunity.accountPartyId).party.partyId
     if (!accountPartyId) denied("ACCOUNT_REQUIRED", "Choose the account or name a new one")
-    // the contact: a person given, made a contact of the account; else a new person named
+    // the contact: a person given, made a contact of the account (a current contact of it already is only linked, which changes no
+    // account and so needs no SALES_ACCOUNT_EDIT); else a new person named
     let contactPartyId = null
     if (!blank(p.contactPartyId)) {
         contactPartyId = personFor(userScope, p.contactPartyId).partyId
-        call("mantle.sales.AccountServices.add#Contact", {partyId: contactPartyId, accountPartyId, organizationPartyId})
+        const linked = rows("mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtContact",
+            fromPartyId: contactPartyId,
+            toPartyId: accountPartyId
+        }).some(row => current(row))
+        if (!linked)
+            call("mantle.sales.AccountServices.add#Contact", {partyId: contactPartyId, accountPartyId, organizationPartyId})
     } else if (text(p.contactFirstName) || text(p.contactLastName)) {
         contactPartyId = call("mantle.sales.AccountServices.create#Contact", {
             accountPartyId,

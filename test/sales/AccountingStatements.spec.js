@@ -106,6 +106,14 @@ feature("an open month's statements are summed from its posted entries", {
         num(cash.netIncomeMap, month) == 450
         num(retained.netIncomeMap, month) == 450
         num(ratios.salesMap, month) == 450
+        // the ratios read the assets with the balance sheet's sign, and the liabilities and equity positive (B16)
+        num(ratios.currentAssetsMap, month) == num(balance.classInfoById.CURRENT_ASSET.totalBalanceByTimePeriod, month)
+        num(ratios.totalAssetsMap, month) == 1450
+        num(ratios.accountsReceivableMap, month) == 450
+        num(ratios.equityMap, month) == 1000
+        num(ratios.totalAssetsTurnoverMap, month) > 0
+        num(ratios.equityMultiplierMap, month) > 1
+        num(ratios.returnOnAssetsMap, month) > 0
     }
 })
 

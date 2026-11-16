@@ -387,7 +387,8 @@ function statusReport(p) {
                 goodQuantity: row.good == null ? null : Number(row.good),
                 remainingQuantity: row.remaining == null ? null : Number(row.remaining),
                 stockUomId,
-                unitText: unitText(stockUomId),
+                // a work order with no output unit: its totals row says so rather than a blank unit
+                unitText: stockUomId ? unitText(stockUomId) : "No unit",
                 dueText: row.dueText,
                 completedText: run ? dateText(run.actualCompletionDate) : "",
                 late,
@@ -1780,7 +1781,13 @@ function dashboard(p) {
             if (!cost.complete)
                 report.partitions.push(...cost.partitions.map(row => ({name: "WIP: " + row.name, message: row.message})))
             const totals = cost.moneyTotals || []
-            if (!totals.length) return {value: 0, valueText: "No open work", detail: ""}
+            // open work orders with no cost event in a currency yet have no amount to total: said as such, not "No open work"
+            if (!totals.length) {
+                const openCount = cost.costRowsCount || 0
+                return openCount
+                    ? {value: 0, valueText: openCount + " open, nothing costed yet", detail: "Open work orders with no cost recorded"}
+                    : {value: 0, valueText: "No open work", detail: ""}
+            }
             return {
                 value: totals.length === 1 ? totals[0].wipAmount : null,
                 valueText: totals

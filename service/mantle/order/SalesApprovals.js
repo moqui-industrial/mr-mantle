@@ -4,7 +4,9 @@
 // - SalesPolicy: an organization's dated defaults, one in effect at a time; store#SalesPolicy publishes a successor from now or
 //   later and ends the row it replaces there (a preview writes nothing). Its quote validity and default team are read by create#Quote,
 //   its intake retention by purge#LeadIntakes; its templates, response requirements, thresholds, net-terms option and the approval
-//   setting are read by the phases that send, accept and approve (P10, P11, P13).
+//   setting are read by the phases that send, accept and approve (P10, P11, P13). Follow-up 5: its default facility (a warehouse,
+//   store or plant the organization owns) is given to a Sales order part that names none when it is made and before it is placed
+//   (applyDefaultFacility), so reservation and the shipment's origin have one; facilityRefusal is the one check of a part's facility.
 // - SalesApprovalPolicy: an organization's dated rules, each of one purpose (SapQuote: a quote's exception, decided before it is
 //   proposed; SapOrder: the final approval of a sales order, a person's approve#Order) and one bounded type: SarAmount (the total at
 //   or above a threshold in its currency), SarDiscount (a line's price at or beyond a percent under its calculated price), SarPriceFloor
@@ -65,7 +67,9 @@ const policyFields = [
     "reminderTextLocation",
     // P20 review: whether a request for quote made from mail is acknowledged, and its stored text (design §16)
     "rfqAcknowledge",
-    "rfqAcknowledgeTextLocation"
+    "rfqAcknowledgeTextLocation",
+    // follow-up 5: the facility a Sales order part ships from when it names none
+    "defaultFacilityId"
 ]
 const flagFields = ["responsePoRequired", "orderApprovalRequired", "approveNetTermsOrders", "rfqAcknowledge"]
 const dayFields = ["quoteValidityDays", "intakeRetentionDays", "reminderDays"]
@@ -81,6 +85,8 @@ const ruleFields = [
     "description"
 ]
 const minuteMs = 60 * 1000
+// follow-up 5: the facility types a Sales order part ships from
+const shippingFacilityTypes = ["FcTpWarehouse", "FcTpRetailStore", "FcTpPlant"]
 
 const blank = value => value == null || String(value).trim() === ""
 const text = value => (blank(value) ? null : String(value).trim())
@@ -171,6 +177,7 @@ function policyView(row) {
     view.fromText = lib.dateText(row.fromDate)
     view.thruText = row.thruDate ? lib.dateText(row.thruDate) : ""
     view.teamName = row.defaultTeamPartyId ? partyName(row.defaultTeamPartyId) : ""
+    view.facilityName = row.defaultFacilityId ? facilityName(row.defaultFacilityId) : ""
     view.changeReason = row.changeReason || ""
     view.changedByName = userName(row.changedByUserId)
     view.thresholds = thresholdsOf(row.salesPolicyId).map(found =>
@@ -190,6 +197,8 @@ function policyValues(organizationPartyId, replaced, p) {
     for (const field of dayFields) values[field] = days(values[field], field)
     if (values.defaultTeamPartyId && salesAccess.teamOrganization(values.defaultTeamPartyId) !== organizationPartyId)
         denied("TEAM_INVALID", "Choose a team of the organization")
+    const facilityRefused = values.defaultFacilityId ? facilityRefusal(organizationPartyId, values.defaultFacilityId) : null
+    if (facilityRefused) denied("FACILITY_INVALID", facilityRefused)
     for (const field of ["quoteEmailTemplateId", "confirmationEmailTemplateId", "reminderEmailTemplateId"])
         if (values[field] && !one("moqui.basic.email.EmailTemplate", {emailTemplateId: values[field]}))
             denied("TEMPLATE_INVALID", "Choose a mail template")
@@ -275,6 +284,77 @@ function storePolicy(p) {
         })
     return {salesPolicyId: created.salesPolicyId, changes, published: true}
 }
+// ===== follow-up 5: the facility a Sales order part ships from =====
+function facilityName(facilityId) {
+    const facility = facilityId ? one("mantle.facility.Facility", {facilityId}) : null
+    return facility ? facility.facilityName || facility.pseudoId || facilityId : facilityId || ""
+}
+// Why a facility may not be a Sales order part's of the organization, or null: one it owns, a warehouse, store or plant, not closed.
+function facilityRefusal(organizationPartyId, facilityId) {
+    const facility = facilityId ? one("mantle.facility.Facility", {facilityId: String(facilityId)}) : null
+    if (!facility || !organizationPartyId || facility.ownerPartyId !== organizationPartyId)
+        return "Choose a facility of " + (partyName(organizationPartyId) || "the selling organization")
+    if (!shippingFacilityTypes.includes(facility.facilityTypeEnumId))
+        return "Choose a warehouse, store or plant to ship from; " + facilityName(facilityId) + " is not one"
+    if (facility.closedDate && ms(facility.closedDate) <= nowMs()) return facilityName(facilityId) + " is closed"
+    return null
+}
+// The facilities a Sales order part of the organization may ship from, searched ignoring case by name or id ({value, label}), for a
+// drop-down (the caller has checked the organization).
+function facilityOptions(organizationPartyId, term, limit = 30) {
+    if (!organizationPartyId) return []
+    const factory = ec.entity.conditionFactory
+    let query = find("mantle.facility.Facility")
+        .condition("ownerPartyId", organizationPartyId)
+        .condition("facilityTypeEnumId", "in", shippingFacilityTypes)
+        .condition(
+            factory.makeCondition(
+                [
+                    factory.makeCondition("closedDate", "is-null", null),
+                    factory.makeCondition("closedDate", "greater", ec.user.nowTimestamp)
+                ],
+                "or"
+            )
+        )
+        .orderBy("facilityName")
+        .limit(limit)
+    const searched = text(term)
+    if (searched) {
+        const like = "%" + searched.replace(/[\\%_]/g, character => "\\" + character) + "%"
+        query = query.condition(
+            factory.makeCondition(
+                ["facilityId", "facilityName", "pseudoId"].map(field => factory.makeCondition(field, "like", like).ignoreCase()),
+                "or"
+            )
+        )
+    }
+    return Array.from(query.list()).map(row => ({
+        value: row.facilityId,
+        label: row.facilityName || row.pseudoId || row.facilityId
+    }))
+}
+// The organization's default facility in effect now, while it still qualifies (a facility since sold or closed is none), or null.
+function defaultFacilityOf(organizationPartyId) {
+    const facilityId = policyOf(organizationPartyId)?.defaultFacilityId || null
+    return facilityId && !facilityRefusal(organizationPartyId, facilityId) ? facilityId : null
+}
+// Each Sales part of the order (an internal seller, a customer that is not internal) that names no facility given its seller's
+// default (a quote or direct order made, a copy, a recurring order, a part placed); a part with a facility keeps it, and a seller
+// with no default leaves it as it is. Answers the parts given one.
+function applyDefaultFacility(orderId) {
+    let applied = 0
+    if (blank(orderId)) return applied
+    for (const part of rows(PART, {orderId: String(orderId)})) {
+        if (part.facilityId || !part.vendorPartyId || !part.customerPartyId) continue
+        if (!salesAccess.isInternal(part.vendorPartyId) || salesAccess.isInternal(part.customerPartyId)) continue
+        const facilityId = defaultFacilityOf(part.vendorPartyId)
+        if (!facilityId) continue
+        call("update#" + PART, {orderId: part.orderId, orderPartSeqId: part.orderPartSeqId, facilityId})
+        applied++
+    }
+    return applied
+}
+
 // get#SalesPolicy: the organization's defaults in effect, the scheduled ones and the earlier ones (each with who and why), the
 // effective commercial revision flag (X2, F9) and where it is set, for a configurer of the organization.
 function getPolicy(p) {
@@ -1223,6 +1303,12 @@ const operations = {
 ;({
     // for SalesQuotes.js and SalesIntake.js, never a service's parameters
     policyOf,
+    // follow-up 5: a Sales order part's facility (SalesQuotes.js, SalesOrders.js, SalesQuoteIssues.js, SalesRecurrence.js)
+    facilityName,
+    facilityRefusal,
+    facilityOptions,
+    defaultFacilityOf,
+    applyDefaultFacility,
     freeLineCovered,
     summary,
     // P10: propose#Quote's approval guard and the quote's product lines (SalesQuoteIssues.js)

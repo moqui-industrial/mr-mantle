@@ -348,6 +348,8 @@ feature("a receipt without a cost basis and a ledger difference are listed in th
     then({report, costBasis, tieOut, checklist}) {
         report.exceptionRows.some(r => r.movementId == f.nocost.assetReceiptId && r.resultEnumId == "AtrNoAcquireCost")
         report.summary.difference == -5
+        // the costless receipt's 3 on hand are counted as left out of both totals (ACC-UI-013)
+        report.summary.unpricedCount == 1 && report.summary.unpricedQuantity == 3
         report.valuationRows.find(r => r.productId == "").ledgerBalance == 5
         costBasis.count == 1 && costBasis.items[0].text.includes(f.nocost.assetReceiptId)
         tieOut.count == 1 && tieOut.items[0].text.includes("difference")
