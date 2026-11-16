@@ -625,7 +625,14 @@ feature("a run into an archived repository fails at once; a private repository's
             statusId: "SmmFailed"
         })
         lib.set("moqui.resource.GitRepository", {repositoryId: started.repositoryId}, {archivedDate: ec.user.nowTimestamp})
-        const out = step(started.importId)
+        // the repository is archived only for the run: the test database is shared, and another component's spec counts
+        // the archived repositories (mr-boss Code)
+        let out
+        try {
+            out = step(started.importId)
+        } finally {
+            lib.set("moqui.resource.GitRepository", {repositoryId: started.repositoryId}, {archivedDate: null})
+        }
         const run = op("SGI_OWNER", "getGitHubImport", {importId: started.importId}).importRun
         const left = lib.row("moqui.resource.GitMergeRequest", {mergeRequestId: leftover})
         lib.set("mantle.smithy.SmithyRepository", {repositoryId: repositoryId()}, {visibilityEnumId: "SmvPrivate"})
@@ -650,9 +657,11 @@ feature("a run into an archived repository fails at once; a private repository's
         const route = ec.resource
             .script("component://mr-mantle/script/PassRoutes.js")
             .find(([verb, path]) => verb === "POST" && path === "imports/{importId}/cancel")
-        return {out, run, left, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route}
+        const unarchived = lib.row("moqui.resource.GitRepository", {repositoryId: started.repositoryId}).archivedDate == null
+        return {out, run, left, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route, unarchived}
     },
-    then({out, run, left, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route}) {
+    then({out, run, left, hidden, hiddenPage, shownPage, hiddenGroup, shownGroup, route, unarchived}) {
+        unarchived
         // the failed run's end closed the leftover, which stays hidden: no conversation, read by nobody
         left.statusId == "GmrClosed"
         left.hiddenDate != null
