@@ -95,7 +95,7 @@ feature("the bank file services refuse a caller without finance authority in the
         call("create#moqui.security.UserGroup", { userGroupId: "BOF_SPEC_NOFIN", description: "Bank files spec: no finance authority" })
         call("create#moqui.security.ArtifactGroup", { artifactGroupId: "BOF_SPEC_FILES", description: "Bank file services" })
         call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "BOF_SPEC_FILES", artifactTypeEnumId: "AT_SERVICE",
-                artifactName: "mantle\\.(ext\\.account\\.(NachaServices|OfxServices)|account\\.ReconciliationServices)\\..*", nameIsPattern: "Y", inheritAuthz: "Y" })
+                artifactName: "mantle\\.(ext\\.account\\.(NachaServices|OfxServices|PositivePayServices)|account\\.ReconciliationServices)\\..*", nameIsPattern: "Y", inheritAuthz: "Y" })
         call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "BOF_SPEC_FILES", artifactGroupId: "BOF_SPEC_FILES",
                 userGroupId: "BOF_SPEC_NOFIN", authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
         const partyId = call("mantle.party.PartyServices.create#Person", { firstName: "No", lastName: "Finance" }).partyId
@@ -121,10 +121,11 @@ feature("the bank file services refuse a caller without finance authority in the
     },
 })
 
-// SEC-BAP-08 (the owner's decision of Nov 16, 2026): a NACHA file sends money, so a direct caller needs what approving a
-// payment run needs, PAYMENT_RUN_APPROVE in the bank account's organization; a finance reader there is refused. Both are
-// agents of the organization (AccountingSettlementFixtures user) and run the services through the spec's ALLOW group.
-feature("a NACHA file needs payment run approval authority: a finance reader is refused, an approver is answered", {
+// SEC-BAP-08 (the owner's decision of Nov 16, 2026): a NACHA or Positive Pay file tells the bank to pay, so a direct caller needs
+// what approving a payment run needs, PAYMENT_RUN_APPROVE in the bank account's organization; a finance reader there is refused.
+// Both are agents of the organization (AccountingSettlementFixtures user) and run the services through the spec's ALLOW group.
+// The REST resources that write the files are POST only: a GET is not served and writes nothing.
+feature("a NACHA or Positive Pay file needs payment run approval authority: a finance reader is refused, an approver is answered", {
     when() {
         const h = ec.resource.script("component://mr-mantle/test/account/AccountingSettlementFixtures.js")
         const f = { org: organizationPartyId }
@@ -137,20 +138,38 @@ feature("a NACHA file needs payment run approval authority: a finance reader is 
             ec.artifactExecution.enableAuthz()
             try { return run() } finally { ec.artifactExecution.disableAuthz(); login("john.doe") }
         }
-        const refused = as(reader, () => errorOf("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId }))
+        // a check account with a Positive Pay format and no checks
+        const checkBankId = call("mantle.account.PaymentMethodServices.create#BankAccount", { ownerPartyId: organizationPartyId,
+                description: "PosPay approval", bankName: "Test Bank", routingNumber: "021000021", accountNumber: "7770009999",
+                typeEnumId: "BatChecking", currencyUomId: "USD", posPayFormatEnumId: "PmftZionsBankCsv", posPayBankNumber: "123" }).paymentMethodId
+        const NACHA = "mantle.ext.account.NachaServices.generate#NachaFile", POSPAY = "mantle.ext.account.PositivePayServices.generate#PositivePayFile"
+        const refused = as(reader, () => ({ nacha: errorOf(NACHA, { paymentMethodId: companyBankId }),
+                posPay: errorOf(POSPAY, { paymentMethodId: checkBankId }) }))
         // nothing is left to send (the features above sent it), so the approver's answer is an empty file, not a refusal
         const answered = as(approver, () => {
-            const out = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId })
+            const nacha = call(NACHA, { paymentMethodId: companyBankId })
+            const posPay = call(POSPAY, { paymentMethodId: checkBankId })
             const errors = ec.message.getErrorsString() || ""
             ec.message.clearErrors()
-            return { out, errors }
+            return { nacha, posPay, errors }
         })
-        return { refused, answered }
+        // the REST resources as an administrator: a GET is not served and writes no file
+        const filesBefore = ec.entity.find("mantle.account.method.PaymentMethodFile").count()
+        const gets = ["nacha", "positivePay"].map(name =>
+            screenTest("rest").render("s1/mantle/parties/paymentMethods/" + (name == "nacha" ? companyBankId : checkBankId) + "/" + name, null, "get"))
+        const filesAfter = ec.entity.find("mantle.account.method.PaymentMethodFile").count()
+        ec.message.clearErrors()
+        return { refused, answered, gets: gets.map(out => ({ status: out.status, errors: String(out.errorMessages || ""), output: String(out.output || "") })),
+            filesBefore, filesAfter }
     },
-    then({ refused, answered }) {
-        refused != null && refused.includes("runApprove authority is required")
+    then({ refused, answered, gets, filesBefore, filesAfter }) {
+        refused.nacha != null && refused.nacha.includes("runApprove authority is required")
+        refused.posPay != null && refused.posPay.includes("runApprove authority is required")
         answered.errors == ""
-        answered.out.fileText == null
+        answered.nacha.fileText == null
+        answered.posPay.paymentCount == 0 && answered.posPay.paymentMethodFileId == null
+        gets.every(out => out.status == 405)
+        filesAfter == filesBefore
     },
 })
 
