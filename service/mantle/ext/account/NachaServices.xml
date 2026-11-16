@@ -43,6 +43,13 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fileText"/>
         </out-parameters>
         <actions>
+            <!-- A payment file: the bank account's organization in the caller's Accounting scope, with finance read authority
+                (check#BankAccess); a job or a system message's consume runs with authorization off (SEC-BAP-08) -->
+            <if condition="!ec.artifactExecution.authzDisabled()">
+                <service-call name="mantle.account.ReconciliationServices.check#BankAccess"
+                        in-map="{paymentMethodId:paymentMethodId, need:'read'}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
             <entity-find-one entity-name="mantle.account.method.BankAccount" value-field="bankAccount"/>
             <if condition="bankAccount == null"><return error="true" message="Payment method ${paymentMethodId} is not a bank account"/></if>

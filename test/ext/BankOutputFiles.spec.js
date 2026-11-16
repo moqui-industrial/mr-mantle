@@ -87,6 +87,40 @@ feature("a second NACHA run has nothing to send, and bad configuration is refuse
     },
 })
 
+// SEC-BAP-08: a caller whom an app root's grant lets run the bank file services, with no finance authority, is refused by
+// the services themselves (check#BankAccess); the holder's runs are the features above, with authorization off as a job's
+feature("the bank file services refuse a caller without finance authority in the bank account's organization", {
+    when() {
+        const since = effectiveTime - 86400000
+        call("create#moqui.security.UserGroup", { userGroupId: "BOF_SPEC_NOFIN", description: "Bank files spec: no finance authority" })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "BOF_SPEC_FILES", description: "Bank file services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "BOF_SPEC_FILES", artifactTypeEnumId: "AT_SERVICE",
+                artifactName: "mantle\\.(ext\\.account\\.(NachaServices|OfxServices)|account\\.ReconciliationServices)\\..*", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "BOF_SPEC_FILES", artifactGroupId: "BOF_SPEC_FILES",
+                userGroupId: "BOF_SPEC_NOFIN", authzTypeEnumId: "AUTHZT_ALLOW", authzActionEnumId: "AUTHZA_ALL" })
+        const partyId = call("mantle.party.PartyServices.create#Person", { firstName: "No", lastName: "Finance" }).partyId
+        call("mantle.party.PartyServices.create#PartyUserAccount", { partyId, username: "bof.nofinance", emailAddress: "bof.nofinance@example.com",
+                newPassword: "moqui1!!", newPasswordVerify: "moqui1!!" })
+        const userId = ec.entity.find("moqui.security.UserAccount").condition("username", "bof.nofinance").one().userId
+        call("create#moqui.security.UserGroupMember", { userGroupId: "BOF_SPEC_NOFIN", userId, fromDate: since })
+        login("bof.nofinance", "moqui1!!")
+        ec.artifactExecution.enableAuthz()
+        try {
+            return {
+                nacha: errorOf("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId }),
+                ofx: errorOf("mantle.ext.account.OfxServices.import#OfxVersion1", { paymentMethodId: companyBankId, ofxString: "OFXHEADER:100" }),
+            }
+        } finally {
+            ec.artifactExecution.disableAuthz()
+            login("john.doe")
+        }
+    },
+    then({ nacha, ofx }) {
+        nacha != null && nacha.includes("Accounting access is required")
+        ofx != null && ofx.includes("Accounting access is required")
+    },
+})
+
 const formats = ["PmftBankOfAmericaAr", "PmftCityBankCnb", "PmftSunTrustCpr", "PmftWachoviaAr", "PmftWellsFargoArp", "PmftZionsBankCsv"]
 feature("generate Positive Pay files #format", {
     where: formats.map(format => ({ format })),
