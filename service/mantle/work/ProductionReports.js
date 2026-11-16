@@ -387,7 +387,8 @@ function statusReport(p) {
                 goodQuantity: row.good == null ? null : Number(row.good),
                 remainingQuantity: row.remaining == null ? null : Number(row.remaining),
                 stockUomId,
-                unitText: unitText(stockUomId),
+                // a work order with no output unit: its totals row says so rather than a blank unit
+                unitText: stockUomId ? unitText(stockUomId) : "No unit",
                 dueText: row.dueText,
                 completedText: run ? dateText(run.actualCompletionDate) : "",
                 late,
