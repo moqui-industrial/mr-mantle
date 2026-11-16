@@ -121,6 +121,39 @@ feature("the bank file services refuse a caller without finance authority in the
     },
 })
 
+// SEC-BAP-08 (the owner's decision of Nov 16, 2026): a NACHA file sends money, so a direct caller needs what approving a
+// payment run needs, PAYMENT_RUN_APPROVE in the bank account's organization; a finance reader there is refused. Both are
+// agents of the organization (AccountingSettlementFixtures user) and run the services through the spec's ALLOW group.
+feature("a NACHA file needs payment run approval authority: a finance reader is refused, an approver is answered", {
+    when() {
+        const h = ec.resource.script("component://mr-mantle/test/account/AccountingSettlementFixtures.js")
+        const f = { org: organizationPartyId }
+        const reader = h.user(f, "BOF_READ", ["ACCOUNTING_VIEW", "PAYMENT_VIEW"])
+        const approver = h.user(f, "BOF_APPROVE", ["ACCOUNTING_VIEW", "PAYMENT_RUN_APPROVE"])
+        for (const userId of [reader, approver])
+            call("create#moqui.security.UserGroupMember", { userGroupId: "BOF_SPEC_NOFIN", userId, fromDate: effectiveTime - 86400000 })
+        const as = (userId, run) => {
+            login(userId)
+            ec.artifactExecution.enableAuthz()
+            try { return run() } finally { ec.artifactExecution.disableAuthz(); login("john.doe") }
+        }
+        const refused = as(reader, () => errorOf("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId }))
+        // nothing is left to send (the features above sent it), so the approver's answer is an empty file, not a refusal
+        const answered = as(approver, () => {
+            const out = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId })
+            const errors = ec.message.getErrorsString() || ""
+            ec.message.clearErrors()
+            return { out, errors }
+        })
+        return { refused, answered }
+    },
+    then({ refused, answered }) {
+        refused != null && refused.includes("runApprove authority is required")
+        answered.errors == ""
+        answered.out.fileText == null
+    },
+})
+
 const formats = ["PmftBankOfAmericaAr", "PmftCityBankCnb", "PmftSunTrustCpr", "PmftWachoviaAr", "PmftWellsFargoArp", "PmftZionsBankCsv"]
 feature("generate Positive Pay files #format", {
     where: formats.map(format => ({ format })),

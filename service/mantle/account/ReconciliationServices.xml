@@ -558,11 +558,11 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The organization of a bank account (or the organization given) and what the user may do with its
             bank lines. Refuses a method that is not an internal organization's, an organization the user does not work in,
             and a user without bank reconciliation, accounting view or administration authority; with need reconcile, a
-            user without BANK_RECONCILE.</description>
+            user without BANK_RECONCILE; with need runApprove, a user without payment run approval (PAYMENT_RUN_APPROVE).</description>
         <in-parameters>
             <parameter name="paymentMethodId"/>
             <parameter name="organizationPartyId"/>
-            <parameter name="need" default-value="read"><description>read or reconcile</description></parameter>
+            <parameter name="need" default-value="read"><description>read, reconcile, deposit or runApprove</description></parameter>
         </in-parameters>
         <out-parameters>
             <parameter name="organizationPartyId"/>
