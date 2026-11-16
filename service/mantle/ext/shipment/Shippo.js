@@ -211,10 +211,11 @@ function read(gw, path, what) {
     )
 }
 // The label file at Shippo's label URL (a storage link that may have expired), with no Shippo credentials; or null.
+// Only an https URL, never an internal address (redirects included), as the URL is the answer's (SEC-BAP-06).
 function download(url) {
-    if (blank(url)) return null
+    if (blank(url) || !/^https:\/\//i.test(String(url))) return null
     try {
-        const response = ec.service.rest().method("GET").uri(String(url)).timeout(TIMEOUT_SECONDS).call()
+        const response = ec.service.rest().method("GET").uri(String(url)).timeout(TIMEOUT_SECONDS).denyInternal().call()
         if (response.getStatusCode() !== 200) return null
         const bytes = response.bytes()
         return bytes && bytes.length ? bytes : null

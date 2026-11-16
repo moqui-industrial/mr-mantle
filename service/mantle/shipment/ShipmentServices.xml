@@ -1973,12 +1973,14 @@ along with this software (see the LICENSE.md file). If not, see
                     <message>Package ${packageRouteSeg.shipmentPackageSeqId} route segment ${packageRouteSeg.shipmentRouteSegmentSeqId} has no ${returnLabels ? 'return' : 'outgoing'} label URL or image</message>
                     <continue/>
                 </if>
-                <!-- get label binary from URL -->
+                <!-- get label binary from URL: an https URL only, never an internal address (redirects included), in 60 seconds
+                    (SEC-BAP-06) -->
                 <if condition="labelImage == null"><script><![CDATA[
                     let labelBytes = null
                     globalThis.contentType = null
                     try {
-                        const labelResponse = ec.service.rest().method("GET").uri(String(labelUrl)).call()
+                        if (!/^https:\/\//i.test(String(labelUrl))) throw new Error("the label URL is not an https URL")
+                        const labelResponse = ec.service.rest().method("GET").uri(String(labelUrl)).timeout(60).denyInternal().call()
                         if (labelResponse.statusCode === 200) {
                             labelBytes = labelResponse.bytes()
                             globalThis.contentType = labelResponse.getContentType()
