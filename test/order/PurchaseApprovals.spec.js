@@ -413,9 +413,9 @@ feature(
                 operationKey: orderId + "-approve"
             })
             const decisionCount = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId}).length
-            const reserved = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, statusId: "BcReserved"})
+            const reserved = rows("mantle.other.budget.BudgetCommitment", {sourceEntityName: "mantle.order.OrderHeader", sourceId: orderId, statusId: "BcReserved"})
             const cancelled = run(state.buyer, P + "cancel#PurchaseOrder", {orderId, reason: "No longer needed"})
-            const released = rows("mantle.other.budget.BudgetCommitment", {sourceId: orderId, statusId: "BcReleased"})
+            const released = rows("mantle.other.budget.BudgetCommitment", {sourceEntityName: "mantle.order.OrderHeader", sourceId: orderId, statusId: "BcReleased"})
             return {
                 preview,
                 buyerPreview,
