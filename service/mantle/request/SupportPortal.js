@@ -755,16 +755,19 @@ function createCustomerCase(p) {
     const description = text(p.description)
     if (!name || name.length > 255) fail("Unprocessable", "Give your request a subject")
     if (!description) fail("Unprocessable", "Tell us what you need")
-    const staged = media().stageGiven(p.file, "file", "support")
+    // the file is staged (written and scanned) only once the form token or the asker is known and the operation is new: a
+    // caller with no credential costs no write, and a repeat of an operation answers its first result with nothing staged
+    let staged = null
+    const stage = () => (staged = media().stageGiven(p.file, "file", "support"))
     try {
-        if (!blank(p.token)) return intakeCase(p, organizationPartyId, key, staged)
-        return contactCase(p, organizationPartyId, key, staged)
+        if (!blank(p.token)) return intakeCase(p, organizationPartyId, key, stage)
+        return contactCase(p, organizationPartyId, key, stage)
     } catch (error) {
         media().unstage(staged)
         throw error
     }
 }
-function intakeCase(p, organizationPartyId, key, staged) {
+function intakeCase(p, organizationPartyId, key, stage) {
     const target = ec.resource.script("component://mr-mantle/service/mantle/request/Channels.js").formTarget(p.token)
     if (!target || target.organizationPartyId !== organizationPartyId) unavailable()
     const operation = lib.operation({operationKey: key}, "SupportCaseIntake", organizationPartyId, {
@@ -773,6 +776,7 @@ function intakeCase(p, organizationPartyId, key, staged) {
         email: p.emailAddress
     })
     if (operation.old) return lib.previous(operation)
+    const staged = stage()
     const out = ec.service
         .sync()
         .name("mantle.request.RequestServices.create#IntakeRequest")
@@ -802,7 +806,7 @@ function intakeCase(p, organizationPartyId, key, staged) {
     lib.complete(operation, REQUEST, out?.requestId || "_NA_", result)
     return result
 }
-function contactCase(p, organizationPartyId, key, staged) {
+function contactCase(p, organizationPartyId, key, stage) {
     const asked = askers(p, organizationPartyId)
     const customers = asked.customers
     // an order link's case is about its one order (Shop P6)
@@ -831,6 +835,7 @@ function contactCase(p, organizationPartyId, key, staged) {
         orderId: p.orderId || null
     })
     if (operation.old) return lib.previous(operation)
+    const staged = stage()
     // the template values for the customer audience (P7): an internal field or one the rules hide is refused or dropped
     const template = templateFields(organizationPartyId, queue.requestCategoryId, requestTypeEnumId)
     let checkedValues = null
