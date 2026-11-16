@@ -35,9 +35,17 @@ function result(name, params) {
         return {error: String(e.message)}
     }
 }
-// as username with artifact authorization on, as a screen calls the services
-function as(username, action) {
+// as username with artifact authorization on, as a screen calls the services; a spec user (password moqui1!!) has confirmed who
+// they are just now (reauthenticate#User), as revoking another account's access needs (require#RecentAuth), unless stale
+function as(username, action, stale = false) {
     ec.user.internalLoginUser(username)
+    if (!stale && username.startsWith("ulc."))
+        ec.service
+            .sync()
+            .name("org.moqui.sso.RecentAuthServices.reauthenticate#User")
+            .parameters({password: "moqui1!!"})
+            .disableAuthz()
+            .call()
     ec.artifactExecution.enableAuthz()
     try {
         return action()
@@ -174,7 +182,15 @@ feature(
     "a global disable revokes access at once and disables the account for good; a shared identity needs ADMIN_IDENTITY_GLOBAL",
     {
         when() {
-            return as(operator(), () => {
+            // without a sign-in in the last five minutes the disable is refused whole: no operation, the account untouched
+            const stale = as(
+                operator(),
+                () => result(S + "start#Lifecycle", {userId: users.Leaver, kind: "disable", reason: "Left the company"}),
+                true
+            )
+            const staleAccount = one("moqui.security.UserAccount", {userId: users.Leaver})
+            const staleOperations = rows("mantle.party.UserLifecycleOperation", {userId: users.Leaver}).length
+            return Object.assign({stale, staleAccount, staleOperations}, as(operator(), () => {
                 const preview = result(S + "preview#Lifecycle", {userId: users.Leaver, kind: "disable"})
                 const shared = result(S + "preview#Lifecycle", {userId: users.Shared, kind: "disable"})
                 const self = result(S + "preview#Lifecycle", {userId: users.Operator, kind: "disable"})
@@ -187,9 +203,11 @@ feature(
                 })
                 operations.leaver = started.operationId
                 return {preview, shared, self, started}
-            })
+            }))
         },
-        then({preview, shared, self, started}) {
+        then({stale, staleAccount, staleOperations, preview, shared, self, started}) {
+            stale.applied == false && stale.reasonCode == "REAUTH_REQUIRED"
+            staleAccount.disabled != "Y" && staleOperations == 0
             preview.allowed == true && preview.activeSessionCount == 1 && preview.credentialCount >= 2
             preview.movesResources == true
             shared.allowed == false && shared.reasonCode == "IDENTITY_GLOBAL"

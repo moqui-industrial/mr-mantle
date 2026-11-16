@@ -93,6 +93,17 @@ const stamp = row => String(ms(row?.lastUpdatedStamp) ?? "")
 const openAt = (row, at = nowMs()) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 const refused = (reasonCode, reason, extra = {}) => Object.assign({applied: false, reasonCode, reason}, extra)
 const timeText = value => (value == null ? "" : ec.l10n.format(Number(value), "yyyy-MM-dd HH:mm"))
+// An administrator's revocation of another account's access (keys, tokens, app passwords, SSH keys; the framework's
+// revoke#AccountAccess beyond sessions) needs their own sign-in, or a confirmation, in the last five minutes
+// (org.moqui.sso.RecentAuthServices.require#RecentAuth, which leaves "Confirm it is you" and the X-Moqui-Reauth header so the
+// form asks and sends again). Asked before an operation starts, so it is refused whole rather than left half done; a caller with
+// authorization disabled (a scheduled step) passes.
+function recentAuthRefusal() {
+    if (ec.artifactExecution.authzDisabled()) return null
+    const out = ec.service.sync().name("org.moqui.sso.RecentAuthServices.require#RecentAuth").call()
+    if (out?.recent) return null
+    return refused("REAUTH_REQUIRED", "Confirm it is you: sign in again to revoke another account's access")
+}
 function requirePermission(permission) {
     if (!ec.user.userId) denied("SIGN_IN", "Sign in to administer identities")
     if (!access.has(permission)) denied("PERMISSION_DENIED", permission + " is required")
@@ -519,6 +530,10 @@ function startLifecycle(p) {
     if (text(p.expectedRevision) && text(p.expectedRevision) !== stamp(account))
         return refused("REVISION_CHANGED", "The account changed since you read it; reload it", {revision: stamp(account)})
     if (!planned.allowed) return refused(planned.reasonCode, planned.reason)
+    if (kind === "disable" && !planned.future) {
+        const reauth = recentAuthRefusal()
+        if (reauth) return reauth
+    }
     const reasonText = text(p.reason).slice(0, 255) || null
     const operation = ec.entity.makeValue(OPERATION)
     operation.setSequencedIdPrimary()
@@ -784,6 +799,10 @@ function retryLifecycleStep(p) {
         }
         const path = pathRefusal(operation, step.stepKind)
         if (path) return path
+        if (step.stepKind === "revokeAccess") {
+            const reauth = recentAuthRefusal()
+            if (reauth) return reauth
+        }
         outcome = runIdentityStep(operation, step.stepKind, reasonText)
     } else if (step.stepKind === "pause") {
         outcome = runPause(operation, step, reasonText)
