@@ -310,6 +310,13 @@ along with this software (see the LICENSE.md file). If not, see
                             summaryRows:summaryRows,
                             classInfoById:classInfoById, negateDebit:true, glAccountClassEnumId:classId}"/>
             </iterate>
+            <!-- negateDebit makes the assets negative and also negates their contra classes (accumulated depreciation), so
+                the asset classes are read again as the balance sheet reads them: assets positive, contra classes subtracted.
+                The liability and equity classes are positive under negateDebit, as on the balance sheet. -->
+            <service-call name="mantle.ledger.LedgerReportServices.get#GlAccountClassReportInfo" out-map="context"
+                    in-map="{organizationPartyId:organizationPartyId, timePeriodIdList:timePeriodIdList,
+                        summaryRows:summaryRows,
+                        classInfoById:classInfoById, negateCredit:true, glAccountClassEnumId:'ASSET'}"/>
 
             <!-- empty Maps for the various values -->
             <script>
@@ -405,19 +412,19 @@ along with this software (see the LICENSE.md file). If not, see
                     netFixedAssetsMap[timePeriodId] = netFixedAssets
                     const currentAssets = classVal('CURRENT_ASSET', 'totalBalanceByTimePeriod', timePeriodId)
                     currentAssetsMap[timePeriodId] = currentAssets
-                    const currentLiabilities = negated(classVal('CURRENT_LIABILITY', 'totalBalanceByTimePeriod', timePeriodId))
+                    const currentLiabilities = classVal('CURRENT_LIABILITY', 'totalBalanceByTimePeriod', timePeriodId)
                     currentLiabilitiesMap[timePeriodId] = currentLiabilities
                     const inventory = classVal('INVENTORY_ASSET', 'totalBalanceByTimePeriod', timePeriodId)
                     inventoryMap[timePeriodId] = inventory
 
-                    const totalLiabilities = negated(classVal('LIABILITY', 'totalBalanceByTimePeriod', timePeriodId))
+                    const totalLiabilities = classVal('LIABILITY', 'totalBalanceByTimePeriod', timePeriodId)
                     totalLiabilitiesMap[timePeriodId] = totalLiabilities
-                    const longTermDebt = negated(classVal('LONG_TERM_LIABILITY', 'totalBalanceByTimePeriod', timePeriodId))
+                    const longTermDebt = classVal('LONG_TERM_LIABILITY', 'totalBalanceByTimePeriod', timePeriodId)
                     longTermDebtMap[timePeriodId] = longTermDebt
                     const equity = classVal('EQUITY', 'totalBalanceByTimePeriod', timePeriodId)
                     equityMap[timePeriodId] = equity
 
-                    const accountsReceivable = negated(classVal('ACCOUNTS_RECEIVABLE', 'totalBalanceByTimePeriod', timePeriodId))
+                    const accountsReceivable = classVal('ACCOUNTS_RECEIVABLE', 'totalBalanceByTimePeriod', timePeriodId)
                     accountsReceivableMap[timePeriodId] = accountsReceivable
                     const depreciation = negated(classVal('DEPRECIATION', 'totalPostedByTimePeriod', timePeriodId))
                     depreciationMap[timePeriodId] = depreciation

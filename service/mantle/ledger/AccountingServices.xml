@@ -173,6 +173,7 @@ along with this software (see the LICENSE.md file). If not, see
                         .map(user => [user.userId, user.userFullName || user.username || user.userId]))"/>
                 <set field="auditRows" from="Array.from(auditList).map(audit => Object.assign(policy.display(audit), {
                         changedByName:auditUserNames[audit.changedByUserId] || audit.changedByUserId || '',
+                        fieldText:StringUtilities.camelCaseToPretty(audit.changedFieldName || ''),
                         lineText:audit.changedEntityName.endsWith('AcctgTransEntry') ? 'Line ' + (audit.pkSecondaryValue || '') :
                             'Entry'}))"/>
                 <service-call name="mantle.ledger.LedgerServices.calculate#AcctgTransTrialBalance" out-map="context"
