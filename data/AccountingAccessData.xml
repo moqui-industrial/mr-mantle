@@ -22,6 +22,11 @@
     <moqui.security.UserPermission userPermissionId="PAYABLE_IMPORT" description="Payable Import"/>
     <moqui.security.UserPermission userPermissionId="PAYABLE_VIEW" description="Payable View"/>
     <moqui.security.UserPermission userPermissionId="PAYMENT_EDIT" description="Payment Edit"/>
+    <!-- the whole card and bank account numbers of a payment method (PaymentMethodServices.get#PartyPaymentMethodInfo, the
+        edit form; the REST GET of paymentMethods/info); others but the owner's own user see them masked. CARD_NUMBER_EDIT
+        (typing a new card number) and PAYMENT_EDIT do not show them (the user's call of Nov 16, 2026, SEC-BAP-04). -->
+    <moqui.security.UserPermission userPermissionId="PAYMENT_NUMBER_VIEW" description="Payment Method Number View"/>
+    <moqui.security.UserGroupPermission userGroupId="ADMIN" userPermissionId="PAYMENT_NUMBER_VIEW" fromDate="0"/>
     <moqui.security.UserPermission userPermissionId="PAYMENT_RUN_APPROVE" description="Payment Run Approve"/>
     <moqui.security.UserPermission userPermissionId="PAYMENT_VIEW" description="Payment View"/>
     <moqui.security.UserPermission userPermissionId="PRODUCTION_COST_POST" description="Production Cost Post"/>

@@ -121,29 +121,48 @@ feature("a bank account number is stored encrypted, labeled by its last four dig
     },
 })
 
-// a list answers card and bank numbers masked; the edit form's single answer has them whole only for the owner or a payment
-// editor, and a save that leaves the number out keeps it (SEC-BAP-04)
-feature("payment method lists mask the numbers; the edit answer is whole for a payment editor only, and a save without the number keeps it", {
+// a user of its own group holding only the permissions given
+function userWith(kind, permissions) {
+    const id = "PMS_U_" + kind
+    call("create#moqui.security.UserGroup", { userGroupId: id, description: "Payment numbers " + kind })
+    for (const permission of permissions)
+        call("create#moqui.security.UserGroupPermission", { userGroupId: id, userPermissionId: permission, fromDate: effectiveTime - 1000 })
+    call("create#mantle.party.Party", { partyId: id, partyTypeEnumId: "PtyPerson" })
+    call("create#mantle.party.Person", { partyId: id, firstName: "Numbers", lastName: kind })
+    call("create#moqui.security.UserAccount", { userId: id, username: id, partyId: id,
+        currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394", passwordHashType: "SHA", timeZone: ec.user.userAccount?.timeZone || "America/Chicago" })
+    call("create#moqui.security.UserGroupMember", { userId: id, userGroupId: id, fromDate: effectiveTime - 1000 })
+    return id
+}
+
+// a list answers card and bank numbers masked; the edit form's single answer has them whole only for the owner's own user or a
+// holder of PAYMENT_NUMBER_VIEW, not for CARD_NUMBER_EDIT or PAYMENT_EDIT alone, and a save that leaves the number out keeps
+// it (SEC-BAP-04)
+feature("payment method lists mask the numbers; the edit answer is whole for PAYMENT_NUMBER_VIEW only, and a save without the number keeps it", {
     when() {
         const list = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfoList", { partyId: ownerId })
         const bankInfo = list.methodInfoList.find(info => info.paymentMethodId == bankId)
         const cardInfo = list.methodInfoList.find(info => info.paymentMethodId == card2Id)
-        const editor = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: bankId })
-        const editorCard = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: card2Id })
-        let other, otherCard
-        login("joe@public.com")
+        const users = { viewer: userWith("NUMBER_VIEW", ["PAYMENT_NUMBER_VIEW"]), cardEditor: userWith("CARD_EDIT", ["CARD_NUMBER_EDIT"]),
+            paymentEditor: userWith("PAYMENT_EDIT", ["PAYMENT_EDIT"]), other: "joe@public.com" }
+        const answers = {}
         try {
-            other = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: bankId })
-            otherCard = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: card2Id })
+            for (const [name, username] of Object.entries(users)) {
+                login(username)
+                answers[name] = { bank: call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: bankId }),
+                    card: call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: card2Id }) }
+            }
         } finally { login("john.doe") }
+        const editor = answers.viewer.bank, editorCard = answers.viewer.card
+        const masked = ["cardEditor", "paymentEditor", "other"].map(name => answers[name])
         // the form of a user who sees the number masked sends none
         const savedId = call("mantle.account.PaymentMethodServices.store#PaymentMethodInfo", { partyId: ownerId, paymentMethodId: bankId,
             paymentMethodTypeEnumId: "PmtBankAccount", bankName: "Card Bank 3", routingNumber: "021000021" }).paymentMethodId
         const saved = ec.entity.find("mantle.account.method.BankAccount").condition("paymentMethodId", savedId).one()
         bankId = savedId
-        return { bankInfo, cardInfo, editor, editorCard, other, otherCard, saved }
+        return { bankInfo, cardInfo, editor, editorCard, masked, saved }
     },
-    then({ bankInfo, cardInfo, editor, editorCard, other, otherCard, saved }) {
+    then({ bankInfo, cardInfo, editor, editorCard, masked, saved }) {
         !("accountNumber" in bankInfo.bankAccount)
         bankInfo.maskedAccountNumber == "•••• 5666"
         !("cardNumber" in cardInfo.creditCard)
@@ -151,11 +170,8 @@ feature("payment method lists mask the numbers; the edit answer is whole for a p
         editor.fullNumbers == true
         editor.bankAccount.accountNumber == "444555666"
         editorCard.creditCard.cardNumber == "4111111111111111"
-        other.fullNumbers == false
-        !("accountNumber" in other.bankAccount)
-        other.maskedAccountNumber == "•••• 5666"
-        !("cardNumber" in otherCard.creditCard)
-        otherCard.maskedCardNumber.endsWith("1111")
+        masked.every(({ bank }) => bank.fullNumbers == false && !("accountNumber" in bank.bankAccount) && bank.maskedAccountNumber == "•••• 5666")
+        masked.every(({ card }) => !("cardNumber" in card.creditCard) && card.maskedCardNumber.endsWith("1111"))
         saved.bankName == "Card Bank 3"
         saved.accountNumber == "444555666"
     },

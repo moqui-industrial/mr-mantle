@@ -17,9 +17,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="PartyPaymentMethodInfo">
         <description>A party's payment method for its edit form: refused for a method another party owns (the partyId given is
             the owner's), and the card's security code is never answered. The whole card and bank account numbers are
-            answered only to the owner's own user and to a holder of CARD_NUMBER_EDIT (the edit form's permission to change a
-            stored number) or PAYMENT_EDIT (fullNumbers true); anyone else gets maskedCardNumber and maskedAccountNumber
-            only, and the form shows those, not an input.</description>
+            answered only to the owner's own user and to a holder of PAYMENT_NUMBER_VIEW (fullNumbers true); anyone else,
+            a holder of CARD_NUMBER_EDIT or PAYMENT_EDIT too, gets maskedCardNumber and maskedAccountNumber only, and the form
+            shows those, not the number.</description>
         <in-parameters>
             <parameter name="partyId" required="true"/>
             <parameter name="paymentMethodId"/>
@@ -51,9 +51,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fullNumbers" type="Boolean"/>
         </out-parameters>
         <actions>
-            <!-- the whole numbers only for the owner or a payment editor (SEC-BAP-04) -->
+            <!-- the whole numbers only for the owner's own user or a holder of PAYMENT_NUMBER_VIEW (SEC-BAP-04) -->
             <set field="fullNumbers" from="(ec.user.userAccount?.partyId != null &amp;&amp; ec.user.userAccount.partyId == partyId)
-                     || ec.user.hasPermission('CARD_NUMBER_EDIT') || ec.user.hasPermission('PAYMENT_EDIT')"/>
+                     || ec.user.hasPermission('PAYMENT_NUMBER_VIEW')"/>
             <if condition="paymentMethodId">
                 <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
                 <!-- the partyId names the owner: another party's method is not answered (SEC-BAP-04) -->
