@@ -33,9 +33,15 @@ feature("store a credit card with a billing address, and get the party's payment
         cardId = stored.paymentMethodId
         const info = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: ownerId, paymentMethodId: cardId })
         const list = call("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfoList", { partyId: ownerId })
-        return { stored, info, list }
+        // another party's id with this method: refused (SEC-BAP-04)
+        const otherId = call("mantle.party.PartyServices.create#Person", { firstName: "Other", lastName: "Party" }).partyId
+        const other = errorOf("mantle.account.PaymentMethodServices.get#PartyPaymentMethodInfo", { partyId: otherId, paymentMethodId: cardId })
+        return { stored, info, list, other }
     },
-    then({ stored, info, list }) {
+    then({ stored, info, list, other }) {
+        other.includes("not found for party")
+        !("cardSecurityCode" in info.creditCard)
+        !("cardSecurityCode" in list.methodInfoList[0].creditCard)
         cardId != null
         stored.postalContactMechId != null
         info.paymentMethod.paymentMethodId == cardId
