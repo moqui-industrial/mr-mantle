@@ -690,6 +690,17 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- the book day of the invoice, in the user's zone, and who drafted it -->
             <set field="draftedByUserId" from="ec.user.userId"/>
             <set field="accountingDate" from="ec.l10n.format(invoiceDate, 'yyyy-MM-dd')"/>
+            <!-- an organization's own invoice takes its invoice prefix (PartyAcctgPreference.invoiceIdPrefix) on the standard
+                sequence: the setting was kept and never applied (ACC-UI-035). The enforced sequences need a counter of their
+                own and are refused when set (store#Preferences). -->
+            <if condition="isFromPartyOrgInternal">
+                <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="numbering"
+                        in-map="{organizationPartyId:organizationPartyId}"/>
+                <set field="invoiceIdPrefix" from="String(numbering?.partyAcctgPreference?.invoiceIdPrefix || '').trim()"/>
+                <if condition="invoiceIdPrefix">
+                    <set field="invoiceId" from="invoiceIdPrefix + ec.entity.sequencedIdPrimary('mantle.account.invoice.Invoice', null, null)"/>
+                </if>
+            </if>
             <service-call name="create#mantle.account.invoice.Invoice" in-map="context" out-map="context"/>
         </actions>
     </service>

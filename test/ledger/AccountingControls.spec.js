@@ -1607,12 +1607,32 @@ feature("currencies, rate imports and finance settings are read and kept through
             lastUpdatedStamp: preferences.settings.lastUpdatedStamp,
             changeReason: "Spec prefix",
         })
+        // the prefix applies to the organization's next invoice, on the standard sequence; an enforced one is refused,
+        // not kept unapplied (ACC-UI-035)
+        const prefixed = lib().call("mantle.account.InvoiceServices.create#Invoice", {
+            fromPartyId: org,
+            toPartyId: "ORG_ACME",
+            description: "Spec prefixed invoice",
+        }).invoiceId
+        const enforced = rejected("SetupServices.store#Preferences", {
+            organizationPartyId: org,
+            settings: { invoiceSequenceEnumId: "InvSqEnforced" },
+            lastUpdatedStamp: stored.settings.lastUpdatedStamp,
+            changeReason: "Spec sequence",
+        })
         const badFlag = rejected("SetupServices.store#Preferences", {
             organizationPartyId: org,
             // impl-customer-service F111: orderConfirmationOnPlace is one of the flags
             settings: { orderConfirmationOnPlace: "X" },
             lastUpdatedStamp: stored.settings.lastUpdatedStamp,
             changeReason: "Spec flag",
+        })
+        // the prefix cleared again, so the specs after this one number as before
+        native("SetupServices.store#Preferences", {
+            organizationPartyId: org,
+            settings: { invoiceIdPrefix: "" },
+            lastUpdatedStamp: native("SetupServices.get#Preferences", { organizationPartyId: org }).settings.lastUpdatedStamp,
+            changeReason: "Spec prefix cleared",
         })
         const setup = native("SetupServices.get#Context", { organizationPartyId: org })
         const term = native("SetupServices.store#SettlementTerm", {
@@ -1622,9 +1642,11 @@ feature("currencies, rate imports and finance settings are read and kept through
             termValueUomId: "TF_day",
             changeReason: "Spec term",
         })
-        return { currency, precision, badCode, imported, result, preferences, stored, badFlag, setup, term }
+        return { currency, precision, badCode, imported, result, preferences, stored, prefixed, enforced, badFlag, setup, term }
     },
-    then({ currency, precision, badCode, imported, result, preferences, stored, badFlag, setup, term }) {
+    then({ currency, precision, badCode, imported, result, preferences, stored, prefixed, enforced, badFlag, setup, term }) {
+        prefixed.startsWith("NFC") && /^NFC\d+$/.test(prefixed)
+        enforced.includes("SEQUENCE_UNAVAILABLE")
         currency.complete == true
         precision.complete == true
         lib().one("moqui.basic.Uom", { uomId: "XQZ" }).fractionDigits == 2
