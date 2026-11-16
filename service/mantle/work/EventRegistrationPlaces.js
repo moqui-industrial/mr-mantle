@@ -273,9 +273,11 @@ function cancelTermsOf(row, policy, at = nowMs()) {
 // ===== the people =====
 // The party for a typed person: by address, the address's directory party or a new person (MarketingPortal.js subscriberOf, never
 // said which); with no address, a new person with the name. {partyId, contactMechId}.
-function personOf(name, address) {
-    if (address)
-        return ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingPortal.js").subscriberOf(address, name)
+// The party of a person named, with an address or none: staff's typed address names the directory party that has it; a visitor's
+// (typed true: an address nobody confirmed) is a new person with it, never a directory party (SEC-PSS-61).
+function personOf(name, address, typed = false) {
+    const portal = () => ec.resource.script("component://mr-mantle/service/mantle/marketing/MarketingPortal.js")
+    if (address) return typed ? portal().newPersonOf(address, name) : portal().subscriberOf(address, name)
     const partyId = call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson"}).partyId
     call("create#mantle.party.Person", {partyId, firstName: name || null})
     return {partyId, contactMechId: null}
@@ -439,6 +441,9 @@ function complete(reservation, p) {
     const people = places.map((row, index) =>
         personInput(attendees[index] || (index === 0 ? p.buyerAttendee : null), "attendee " + (index + 1), false)
     )
+    const buyerAddress = current.emailContactMechId
+        ? text(one("mantle.party.contact.ContactMech", {contactMechId: current.emailContactMechId})?.infoString)?.toLowerCase() || null
+        : null
     const publication = questionsOf(policy)
     const scope = policy.questionScopeEnumId || "ErqAttendee"
     const answers = Array.from(p.answers || [])
@@ -447,12 +452,16 @@ function complete(reservation, p) {
         denied("REQUEST_KEY_INVALID", "Reload the page and try again")
     places.forEach((row, index) => {
         const person = people[index]
-        // the buyer stays the first attendee when the name typed is theirs and no other address is given; else the typed person
+        // the buyer stays the first attendee when the name typed is theirs and no other address than the reservation's is given; else
+        // the typed person (a visitor's typed address a new person, p.typedAddresses)
         const buyerName = row.attendeeName || partyName(reservation.buyerPartyId)
         const party =
-            index === 0 && row.attendeePartyId && !person.address && person.name.toLowerCase() === String(buyerName).toLowerCase()
+            index === 0 &&
+            row.attendeePartyId &&
+            (!person.address || person.address === buyerAddress) &&
+            person.name.toLowerCase() === String(buyerName).toLowerCase()
                 ? {partyId: row.attendeePartyId}
-                : personOf(person.name, person.address)
+                : personOf(person.name, person.address, !!p.typedAddresses)
         let formResponseId = null
         if (publication && (scope === "ErqAttendee" || index === 0)) {
             const values = (scope === "ErqAttendee" ? answers[index] : answers[0]) || {}

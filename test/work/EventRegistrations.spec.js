@@ -340,6 +340,8 @@ spec({
             ids.code = offerFor(orgA, siteA, "CODE", 5, [{priceSourceEnumId: "EtpFree"}])
             // follow-up 5: the ticket payments that carry a remote frontend's visitor key
             ids.visitor = offerFor(orgA, siteA, "VISITOR", 10, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_A"}])
+            // SEC-PSS-61: reservations for addresses the directory knows
+            ids.match = offerFor(orgA, siteA, "MATCH", 5, [{priceSourceEnumId: "EtpFree"}])
             make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
             make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -1397,6 +1399,66 @@ feature("a ticket payment's visitor key: its digest kept only where allowed, rea
         r.lateKept == String(ec.resource.digestText("mkt-visitor:MkrgVisitorKey5_0123456789ab", "sha256"))
         r.lateResult.registration.state == "confirmed" && r.latePlaced.placedDate != null
         r.latePlaced.marketingVisitorKeyHash == null
+    }
+})
+
+// SEC-PSS-61 (the owner's decision of Nov 16, 2026): an address typed on the public page names nobody until it is confirmed. A visitor's
+// reservation for a directory party's address, and an attendee typed with another's, are new people with the names and addresses
+// typed, never those parties; a signed-in account whose own verified address is typed reserves as its own party.
+const personWithAddress = (partyId, firstName, address) => {
+    make("mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
+    make("mantle.party.Person", {partyId, firstName, lastName: "Stored"})
+    const contactMechId = make("mantle.party.contact.ContactMech", {contactMechTypeEnumId: "CmtEmailAddress", infoString: address})
+        .contactMechId
+    make("mantle.party.contact.PartyContactMech", {partyId, contactMechId, contactMechPurposeId: "EmailPrimary", fromDate: new Date(0)})
+}
+const emailOf = partyId =>
+    rows("mantle.party.contact.PartyContactMech", {partyId})
+        .map(mech => row("mantle.party.contact.ContactMech", {contactMechId: mech.contactMechId})?.infoString)
+        .join()
+feature("a typed address attaches no reservation or attendee to the directory party that has it; a verified account's own does", {
+    when() {
+        const known = prefix + "_KNOWN",
+            guest = prefix + "_KNOWN_GUEST",
+            own = prefix + "_OWN"
+        system(() => {
+            personWithAddress(known, "Known", "known@mkrg.example.test")
+            personWithAddress(guest, "Guest", "guest.known@mkrg.example.test")
+            personWithAddress(own, "Own", "own@mkrg.example.test")
+            make("moqui.security.UserAccount", {userId: own, username: own, partyId: own, emailAddress: "own@mkrg.example.test",
+                currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394", passwordHashType: "SHA"})
+            make("moqui.security.public.VerifiedAddress", {userId: own, emailAddress: "own@mkrg.example.test", verifiedAt: new Date()})
+        })
+        const typed = reserve(siteA, ids.match.registrationPolicyId, ids.match.ticketTypeId, 2, "Known@mkrg.example.test")
+        const completed = visitor("complete#Registration", {siteId: siteA, token: typed.token, acceptTerms: "Y", termsRevision: 0,
+            operationId: key(), attendees: JSON.stringify([{name: "Spec buyer", email: "known@mkrg.example.test"},
+                {name: "Typed guest", email: "guest.known@mkrg.example.test"}])})
+        const typedPlaces = places(typed.reference)
+        // signed in: the account's own verified address
+        login(own)
+        let mine
+        try {
+            ec.message.pushErrors()
+            mine = ec.service.sync().throwOnError(true).name(PORTAL + "reserve#Registration").parameters({input: {siteId: siteA,
+                registrationPolicyId: ids.match.registrationPolicyId, lines: JSON.stringify([{ticketTypeId: ids.match.ticketTypeId,
+                quantity: 1}]), buyerName: "Own buyer", buyerEmail: "own@mkrg.example.test", operationId: key()}}).call().result
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            login("john.doe")
+        }
+        return {known, guest, own, typed: reservationOf(typed.reference), completed, typedPlaces, mine: reservationOf(mine.registration.reference)}
+    },
+    then(r) {
+        r.completed.registration.state == "confirmed"
+        r.typed.buyerPartyId != r.known
+        row("mantle.party.Person", {partyId: r.typed.buyerPartyId}).firstName == "Spec buyer"
+        emailOf(r.typed.buyerPartyId) == "known@mkrg.example.test"
+        r.typedPlaces[0].attendeePartyId == r.typed.buyerPartyId
+        r.typedPlaces[1].attendeePartyId != r.guest && r.typedPlaces[1].attendeePartyId != r.typed.buyerPartyId
+        emailOf(r.typedPlaces[1].attendeePartyId) == "guest.known@mkrg.example.test"
+        rows("mantle.party.ExternalAccessCapability", {recordId: r.typed.reservationId}).every(cap => cap.partyId == r.typed.buyerPartyId)
+        r.mine.buyerPartyId == r.own
     }
 })
 

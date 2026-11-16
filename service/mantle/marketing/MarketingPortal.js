@@ -211,6 +211,11 @@ function subscriberOf(address, displayName) {
         if (party && party.disabled !== "Y" && !party.mergedToPartyId && !party.privateOwnerUserId)
             return {partyId: party.partyId, contactMechId: info.contactMechId}
     }
+    return newPersonOf(address, displayName)
+}
+// A new person with the name and address typed, never a directory party that has the address: for an address nobody has confirmed
+// (a public reservation's buyer and attendees, SEC-PSS-61).
+function newPersonOf(address, displayName) {
     const partyId = call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson"}).partyId
     call("create#mantle.party.Person", {partyId, firstName: displayName || null})
     const contactMechId = call("create#mantle.party.contact.ContactMech", {
@@ -1053,6 +1058,29 @@ function registrationView(reservation, policy, via, extra = {}) {
         extra
     )
 }
+// The party a public reservation's buyer is (SEC-PSS-61, the owner's decision of Nov 16, 2026): a signed-in visitor's own party when
+// the address typed is their account's verified address and the account reaches its own records (ExternalAccess selfOf, the
+// account's way back to the reservation); anyone else a new person with the name and address typed, never the directory party
+// that has the address, which an unconfirmed address would hand the reservation, its order and its capability.
+function buyerOf(address, name) {
+    const account = ec.user.userAccount
+    const own =
+        account?.partyId &&
+        String(account.emailAddress || "")
+            .trim()
+            .toLowerCase() === address &&
+        access().selfOf(account.partyId)
+    if (!own) return newPersonOf(address, name)
+    const cf = ec.entity.conditionFactory
+    const info = find("mantle.party.contact.PartyContactMechInfo")
+        .condition("partyId", account.partyId)
+        .condition("contactMechTypeEnumId", "CmtEmailAddress")
+        .condition(cf.makeCondition("infoString", "equals", address, false, true))
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .orderBy("contactMechId")
+        .one()
+    return {partyId: account.partyId, contactMechId: info?.contactMechId || null}
+}
 // reserveRegistration: places asked of a published, open offer on this site for a buyer (a name and an address), held or waitlisted
 // together, or refused when there are not enough; PASS's request key answers a repeat with the first. A request past the client's,
 // site's or address's limit is refused alike and holds nothing. The reservation's capability (view and cancel) is answered once.
@@ -1077,7 +1105,7 @@ function reserveRegistration(p) {
     if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
     const party = earlier
         ? {partyId: earlier.buyerPartyId, contactMechId: earlier.emailContactMechId}
-        : apart("Error making the buyer", () => subscriberOf(buyer.address, buyer.name))
+        : apart("Error making the buyer", () => buyerOf(buyer.address, buyer.name))
     const out = asPage(() =>
         placesOf().reserve({
             registrationPolicyId: policyId,
@@ -1119,7 +1147,9 @@ function completeRegistration(p) {
             answers: answers || [],
             acceptTerms: yes(p.acceptTerms),
             termsRevision: p.termsRevision,
-            requestKey: p.operationId
+            requestKey: p.operationId,
+            // the attendees' addresses are typed, not confirmed: each a new person (SEC-PSS-61)
+            typedAddresses: true
         })
     )
     return {registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via)}
@@ -1395,6 +1425,7 @@ const internalOperations = new Set(["appReadiness", "buildVerification", "attemp
 ;({
     served,
     subscriberOf,
+    newPersonOf,
     offersOf,
     preferencesContext,
     changeTopics,
