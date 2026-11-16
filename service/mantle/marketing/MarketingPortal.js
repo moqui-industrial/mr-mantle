@@ -923,6 +923,16 @@ const jsonOf = value =>
 // The reservation a page reaches (scope RegistrationView or RegistrationCancel): by its capability's token, by the signed-in buyer's
 // own verified account (the self relationship), or for the provider's return by its reference and key, which read its state alone;
 // on this site, of the organization the site serves. {reservation, policy, via}. Anything else the one NotFound.
+// A signed-in account whose verified address is the reservation's typed buyer or attendee address claims those people first
+// (EventRegistrationClaims.js, SEC-PSS-61), by the token or by the reservation's reference, as Shop claims guest purchases.
+const claims = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationClaims.js")
+// a reservation of this site's offers, claimed by the signed-in account when it may
+function claimOn(reservationId, siteId, organizationPartyId) {
+    if (!ec.user.userAccount || !reservationId) return
+    const found = one(RESERVATION, {reservationId})
+    const policy = found ? one(REG_POLICY, {registrationPolicyId: found.registrationPolicyId}) : null
+    if (policy && policy.siteId === siteId && policy.organizationPartyId === organizationPartyId) claims().claim(reservationId)
+}
 function reach(p, scope = "RegistrationView") {
     const organizationPartyId = served(p.siteId)
     let reservationId = null,
@@ -942,6 +952,7 @@ function reach(p, scope = "RegistrationView") {
         reservationId = row.reservationId
         via = "return"
     } else if (!blank(p.reservationId) && ec.user.userAccount) {
+        claimOn(text(p.reservationId), p.siteId, organizationPartyId)
         try {
             reservationId = access().check({
                 recordType: "EventRegistration",
@@ -955,6 +966,7 @@ function reach(p, scope = "RegistrationView") {
         }
         via = "account"
     } else unavailable()
+    if (via === "token") claimOn(reservationId, p.siteId, organizationPartyId)
     const reservation = one(RESERVATION, {reservationId})
     const policy = reservation ? one(REG_POLICY, {registrationPolicyId: reservation.registrationPolicyId}) : null
     if (!policy || policy.siteId !== p.siteId || policy.organizationPartyId !== organizationPartyId) unavailable()

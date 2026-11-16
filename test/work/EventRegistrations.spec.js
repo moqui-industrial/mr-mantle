@@ -342,6 +342,7 @@ spec({
             ids.visitor = offerFor(orgA, siteA, "VISITOR", 10, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_A"}])
             // SEC-PSS-61: reservations for addresses the directory knows
             ids.match = offerFor(orgA, siteA, "MATCH", 5, [{priceSourceEnumId: "EtpFree"}])
+            ids.claim = offerFor(orgA, siteA, "CLAIM", 5, [{priceSourceEnumId: "EtpFree"}])
             make("mantle.party.Party", {partyId: prefix + "_RACER", partyTypeEnumId: "PtyPerson"})
             make("mantle.party.Person", {partyId: prefix + "_RACER", firstName: "Racer"})
             users.manager = user(prefix, "manager", [orgA], ["MARKETING_VIEW", "MARKETING_EVENT_MANAGE"])
@@ -1459,6 +1460,88 @@ feature("a typed address attaches no reservation or attendee to the directory pa
         emailOf(r.typedPlaces[1].attendeePartyId) == "guest.known@mkrg.example.test"
         rows("mantle.party.ExternalAccessCapability", {recordId: r.typed.reservationId}).every(cap => cap.partyId == r.typed.buyerPartyId)
         r.mine.buyerPartyId == r.own
+    }
+})
+
+// SEC-PSS-61 (the owner's call of Nov 16, 2026): a signed-in account whose verified address is the reservation's typed buyer (or an
+// attendee's typed) address claims that person while the event is still to come: the reservation and its places move to the
+// account's party, the person is marked merged, and the links already mailed keep working. An unverified account and one of
+// another address claim nothing.
+const accountWith = (partyId, address, verified) =>
+    system(() => {
+        personWithAddress(partyId, "Account", address)
+        make("moqui.security.UserAccount", {userId: partyId, username: partyId, partyId, emailAddress: address,
+            currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394", passwordHashType: "SHA"})
+        if (verified) make("moqui.security.public.VerifiedAddress", {userId: partyId, emailAddress: address, verifiedAt: new Date()})
+        return partyId
+    })
+// a PASS operation as a signed-in account: its result, or {kind, message} of its refusal
+function asAccount(username, service, input) {
+    login(username)
+    ec.message.pushErrors()
+    try {
+        return ec.service.sync().throwOnError(true).name(PORTAL + service).parameters({input}).call().result
+    } catch (error) {
+        return {kind: error.moquiErrorKind || "error", message: String(error.message)}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+        login("john.doe")
+    }
+}
+feature("a verified account claims a live reservation typed with its address, and the mailed links still work; others claim nothing", {
+    when() {
+        const buyerAddress = "claim@mkrg.example.test", guestAddress = "claim.guest@mkrg.example.test"
+        const reserved = reserve(siteA, ids.claim.registrationPolicyId, ids.claim.ticketTypeId, 2, buyerAddress)
+        const completed = visitor("complete#Registration", {siteId: siteA, token: reserved.token, acceptTerms: "Y", termsRevision: 0,
+            operationId: key(), attendees: JSON.stringify([{name: "Spec buyer"}, {name: "Claim guest", email: guestAddress}])})
+        const before = reservationOf(reserved.reference)
+        const [first, second] = places(reserved.reference)
+        // the buyer's mailed ticket: its link's token, as sent
+        const delivery = rows("mantle.party.MessageDelivery", {eventKey: "evreg-ticket:" + first.registrationId})[0]
+        const mailed = system(() => ec.service.sync().name(E + "build#RegistrationDelivery").parameters({deliveryId: delivery.deliveryId})
+            .disableAuthz().call())
+        const mailedToken = (/Registration\?token=([A-Za-z0-9_-]+)/.exec(String(mailed.bodyText)) || [])[1]
+        // the owner's account before its address is verified, and a verified account of another address
+        const owner = accountWith(prefix + "_CLAIM_OWNER", buyerAddress, false)
+        const otherAddress = accountWith(prefix + "_CLAIM_OTHER", "other.claim@mkrg.example.test", true)
+        const guestOwner = accountWith(prefix + "_CLAIM_GUEST", guestAddress, true)
+        asAccount(owner, "get#Registration", {siteId: siteA, token: reserved.token})
+        asAccount(otherAddress, "get#Registration", {siteId: siteA, token: reserved.token})
+        const refused = reservationOf(reserved.reference).buyerPartyId
+        system(() => make("moqui.security.public.VerifiedAddress", {userId: owner, emailAddress: buyerAddress, verifiedAt: new Date()}))
+        // the owner by the page's token; the guest's account by the reservation's reference alone claims its place, though the
+        // reservation stays the buyer's to read
+        const claimedView = asAccount(owner, "get#Registration", {siteId: siteA, token: reserved.token})
+        const guestView = asAccount(guestOwner, "get#Registration", {siteId: siteA, reservationId: reserved.reference})
+        const after = reservationOf(reserved.reference)
+        const placesAfter = places(reserved.reference)
+        // the links as sent, opened by anyone after the claim; the owner's own account reaches it by its reference
+        const byMail = visitor("get#Registration", {siteId: siteA, token: mailedToken})
+        const byPage = visitor("get#Registration", {siteId: siteA, token: reserved.token})
+        const byAccount = asAccount(owner, "get#Registration", {siteId: siteA, reservationId: reserved.reference})
+        const again = asAccount(otherAddress, "get#Registration", {siteId: siteA, reservationId: reserved.reference})
+        return {completed, before, first, second, mailedToken, refused, owner, guestOwner, claimedView, guestView, after, placesAfter,
+            byMail, byPage, byAccount, again, buyerParty: row("mantle.party.Party", {partyId: before.buyerPartyId}),
+            guestParty: row("mantle.party.Party", {partyId: second.attendeePartyId}),
+            capabilities: rows("mantle.party.ExternalAccessCapability", {recordType: "EventRegistration", recordId: reserved.reference})}
+    },
+    then(r) {
+        r.completed.registration.state == "confirmed"
+        !!r.mailedToken && r.mailedToken != null
+        r.refused == r.before.buyerPartyId
+        !r.claimedView.kind && r.claimedView.registration.reference == r.before.reservationId
+        r.guestView.kind == "NotFound"
+        r.after.buyerPartyId == r.owner
+        r.placesAfter[0].buyerPartyId == r.owner && r.placesAfter[0].attendeePartyId == r.owner
+        r.placesAfter[1].attendeePartyId == r.guestOwner
+        r.buyerParty.mergedToPartyId == r.owner && r.buyerParty.disabled == "Y"
+        r.guestParty.mergedToPartyId == r.guestOwner
+        r.capabilities.length >= 2 && r.capabilities.every(cap => cap.partyId == r.owner)
+        !r.byMail.kind && r.byMail.registration.reference == r.before.reservationId && r.byMail.registration.state == "confirmed"
+        !r.byPage.kind && r.byPage.registration.reference == r.before.reservationId
+        !r.byAccount.kind && r.byAccount.registration.reference == r.before.reservationId
+        r.again.kind == "NotFound"
     }
 })
 

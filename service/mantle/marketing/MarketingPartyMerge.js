@@ -7,7 +7,8 @@
 // - ENROLLMENT_CONFLICT: an ended enrollment of the merged party in an automation the kept party was enrolled in by the same source
 //   (one enrollment per automation, person and source: the two cannot be one person's);
 // - REGISTRATION_ACTIVE: an event registration whose attendee or buyer is the merged party, in a live state (held, pending,
-//   confirmed, waitlisted, under review) on an occurrence that has not ended (cancel or move it, or wait for the event, first);
+//   confirmed, waitlisted, under review) on an occurrence that has not ended (cancel or move it, or wait for the event, first),
+//   except in a verified account's claim of the person a public reservation made (EventRegistrationClaims.js, the system's merge);
 // - RECIPIENT_PENDING: a recipient of the merged party still waiting in a send that is not finished (it would reach the kept
 //   party a second time).
 // What moves, never silently lost:
@@ -85,7 +86,10 @@ function refuse(reason, message) {
 }
 
 // ===== refusals (PartyMerge.js rules) =====
-function refusals(fromPartyId, toPartyId) {
+// options.liveRegistrations: a verified account's claim of the person a public reservation made for its address
+// (EventRegistrationClaims.js, the system's merge only, PartyMerge.js): the live registrations move with the person, so
+// REGISTRATION_ACTIVE does not refuse it (the owner's call of Nov 16, 2026, SEC-PSS-61).
+function refusals(fromPartyId, toPartyId, options = {}) {
     const active = query(ENROLLMENT, {partyId: fromPartyId, statusId: "AenActive"}).one()
     if (active)
         refuse(
@@ -116,7 +120,7 @@ function refusals(fromPartyId, toPartyId) {
                     ")"
             )
     }
-    for (const field of ["attendeePartyId", "buyerPartyId"])
+    for (const field of options.liveRegistrations ? [] : ["attendeePartyId", "buyerPartyId"])
         for (const registration of listOf(REGISTRATION, {[field]: fromPartyId, statusId: liveRegistrationStatuses})) {
             const policy = query(POLICY, {registrationPolicyId: registration.registrationPolicyId}).one()
             const end = ms(policy?.occurrenceEnd) ?? ms(policy?.occurrenceStart)

@@ -17,7 +17,9 @@
 //   never moved), and for a Sales merger its orders with the organizations of their scope only;
 // - no active automation enrollment, live event registration of an occurrence not ended or recipient waiting in a send of the
 //   merged party (impl-marketing P19, F82: ENROLLMENT_ACTIVE, ENROLLMENT_CONFLICT, REGISTRATION_ACTIVE, RECIPIENT_PENDING;
-//   mantle/marketing/MarketingPartyMerge.js, which also moves Marketing's rows after merge#Parties' own moves).
+//   mantle/marketing/MarketingPartyMerge.js, which also moves Marketing's rows after merge#Parties' own moves). A system merge
+//   with claimRegistration (a verified account's claim of the person a public reservation made, EventRegistrationClaims.js)
+//   moves live registrations instead of refusing them; any other caller's claimRegistration is ignored.
 // Refusals carry reason codes (EntityLib.js denied). merge#Parties moves what it may (ExternalAccessContact, agreements and their
 // parties, an opportunity's account and parties) after these checks.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
@@ -60,7 +62,7 @@ function admits(to, from) {
     denied("PERMISSION_DENIED", "You may not merge these parties")
 }
 // The rules every merge meets, then for a Sales merger the documents it moves.
-function rules(to, from, admitted) {
+function rules(to, from, admitted, options = {}) {
     if (isInternal(from.partyId))
         denied("INTERNAL_PARTY", "Party " + from.partyId + " is an internal organization and is not merged")
     if (to.partyTypeEnumId !== from.partyTypeEnumId) denied("PARTY_KIND_MISMATCH", "A person and an organization are not merged")
@@ -79,7 +81,9 @@ function rules(to, from, admitted) {
     }
     // Marketing P19 (impl-marketing F82; design-marketing §10): an active enrollment, a live registration of an occurrence not ended
     // and a recipient still waiting in a send refuse the merge, naming the record (MarketingPartyMerge.js)
-    marketingMerge().refusals(from.partyId, to.partyId)
+    marketingMerge().refusals(from.partyId, to.partyId, {
+        liveRegistrations: !!options.claimRegistration && admitted.by === "system"
+    })
     if (admitted.by === "sales") {
         // the merged party's orders, invoices and payments with an internal organization outside the Sales merger's scope
         // (read without the caller's filters, as merge#Parties moves them)
@@ -143,10 +147,10 @@ function dependencyOrganizations(partyId) {
 }
 
 // The guard merge#Parties runs before it changes anything: throws the refusal.
-function guard(toPartyId, fromPartyId) {
+function guard(toPartyId, fromPartyId, options = {}) {
     const {to, from} = partiesOf(toPartyId, fromPartyId)
     const admitted = admits(to, from)
-    rules(to, from, admitted)
+    rules(to, from, admitted, options)
     return {admittedBy: admitted.by}
 }
 // check#PartyMerge: whether the caller may merge fromPartyId into toPartyId, without failing: {allowed, admittedBy, reasonCode,
