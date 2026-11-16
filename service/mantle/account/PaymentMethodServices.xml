@@ -576,51 +576,6 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
         </actions>
     </service>
-    <service verb="migrate" noun="BankAccountNumbers" allow-remote="false">
-        <description>BankAccount.accountNumber is encrypted from Nov 16, 2026 (it was plain text). A number stored before then
-            is rewritten through the entity facade, which encrypts it, and a payment method description that holds the
-            whole number gets its last four digits in its place (create#BankAccount's label). A stored value that starts
-            with a colon is encrypted already, so this does nothing once done, on a new database, or with no crypt pass
-            (the facade then stores plain text). Until it runs, a plain number of an even count of digits reads as
-            _DECRYPT_FAILED_ (it looks like legacy hex ciphertext). A data load calls it (data/AccountingPaymentSeedData.xml).
-            Each row on its own: one that fails is logged and counted, and the rest go on.</description>
-        <out-parameters>
-            <parameter name="migratedCount" type="Integer"/>
-            <parameter name="failedCount" type="Integer"/>
-        </out-parameters>
-        <actions><script><![CDATA[
-            migratedCount = 0; failedCount = 0
-            const definition = ec.entity.getEntityDefinition('mantle.account.method.BankAccount')
-            let found
-            try {
-                found = ec.entity.runSqlStatement(definition.groupName || 'transactional', `SELECT PAYMENT_METHOD_ID, ACCOUNT_NUMBER FROM ` +
-                        `${definition.tableName} WHERE ACCOUNT_NUMBER IS NOT NULL AND ACCOUNT_NUMBER <> '' AND ACCOUNT_NUMBER NOT LIKE ':%'`, 1000000)
-            } catch (err) {
-                ec.logger.error(`Bank account numbers not read for encryption: ${err && err.message ? err.message : err}`)
-                return
-            }
-            const already = ec.artifactExecution.disableAuthz()
-            try {
-                for (const record of Array.from(found.records || [])) {
-                    const paymentMethodId = String(record[0])
-                    const plain = String(record[1])
-                    try {
-                        ec.entity.makeValue('mantle.account.method.BankAccount').setAll({paymentMethodId, accountNumber: plain}).update()
-                        const method = ec.entity.find('mantle.account.method.PaymentMethod').condition('paymentMethodId', paymentMethodId).one()
-                        if (method?.description && plain.length > 4 && String(method.description).includes(plain)) {
-                            method.set('description', String(method.description).split(plain).join('•••• ' + plain.slice(-4)))
-                            method.update()
-                        }
-                        migratedCount++
-                    } catch (err) {
-                        failedCount++
-                        ec.logger.error(`Bank account ${paymentMethodId} number not encrypted: ${err && err.message ? err.message : err}`)
-                    }
-                }
-            } finally { if (!already) ec.artifactExecution.enableAuthz() }
-            if (migratedCount || failedCount) ec.logger.info(`Bank account numbers encrypted: ${migratedCount}, failed: ${failedCount}`)
-        ]]></script></actions>
-    </service>
     <service verb="update" noun="BankAccountMutable">
         <description>Update limited fields on PaymentMethod and BankAccount records without cloning (as update#BankAccount does)</description>
         <implements service="mantle.account.PaymentMethodServices.update#PaymentMethodMutable"/>
