@@ -184,6 +184,7 @@ function send(gw, method, path, body) {
             .addHeader("Accept", "application/json")
         if (body != null) client = client.jsonObject(JSON.stringify(body))
         if (gw.remote.allowPrivateNetwork === "N") client = client.denyInternal()
+        else if (gw.remote.allowPrivateNetwork === "Y") client = client.allowInternal()
         response = client.call()
     } catch (error) {
         return {lost: "No answer from Shippo: " + clip(errorText(error), 200)}

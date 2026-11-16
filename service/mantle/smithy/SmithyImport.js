@@ -177,6 +177,8 @@ kit => {
             .addHeader("User-Agent", "moqui-smithy-import")
             .addHeader("Authorization", "Bearer " + token)
             .timeout(30)
+            // the GitHub API host is the operator's smithy_github_api, which may be a GitHub Enterprise on a private network
+            .allowInternal()
             .call()
         const headers = {}
         for (const name of ["link", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"])
