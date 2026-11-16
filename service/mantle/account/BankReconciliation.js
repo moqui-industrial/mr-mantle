@@ -1109,6 +1109,18 @@ function bankLines(p) {
                   .methodRows.map(row => [row.paymentMethodId, row.label])
             : []
     )
+    // the payments the rules suggest, counted over all the organization's open lines (another may be on another page or
+    // filtered out): one two lines take is applied to neither, which a line's Why says, as the rule test does (ACC-UI-027)
+    let claims = null
+    const claimsOf = () => {
+        if (claims) return claims
+        claims = new Map()
+        for (const open of openLines(scope.organizationPartyId, null, 1000)) {
+            const suggested = ruleSuggestion(open, rules, methodOf(open.paymentMethodId))
+            for (const row of suggested?.candidateRows || []) claims.set(row.value, (claims.get(row.value) || 0) + 1)
+        }
+        return claims
+    }
     const lineRows = lines.map(line => {
         const extra = {
             bankReconciliationId: cleared[line.paymentMethodId + "|" + line.fitId] || null,
@@ -1130,6 +1142,10 @@ function bankLines(p) {
                     ? "Several records have this amount"
                     : "Nothing has this amount"
             extra.ambiguous = suggestion ? suggestion.ambiguous : found.length !== 1
+            if (suggestion && found.length === 1 && claimsOf().get(found[0].value) > 1) {
+                extra.ambiguous = true
+                extra.suggestionReason = "Rule " + suggestion.ruleDescription + ": Another line matches the same payment"
+            }
         }
         return lineRow(line, extra)
     })
