@@ -44,4 +44,8 @@ along with this software (see the LICENSE.md file). If not, see
             description="Confirmed"/>
     <moqui.basic.StatusFlowTransition statusFlowId="Default" statusId="PrvReview" toStatusId="PrvComplete"
             transitionName="Confirm"/>
+
+    <!-- BankAccount.accountNumber is encrypted from Nov 16, 2026: a number stored before in plain text is encrypted, and a
+        payment method description that holds it keeps its last four digits only (migrate#BankAccountNumbers) -->
+    <mantle.account.PaymentMethodServices.migrate-BankAccountNumbers/>
 </entity-facade-xml>

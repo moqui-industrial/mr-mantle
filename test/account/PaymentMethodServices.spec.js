@@ -84,6 +84,37 @@ feature("mutable fields update in place; create and update a bank account", {
     },
 })
 
+// the account number is stored encrypted and the default label shows its last four digits only (SEC-BAP-02); a number
+// stored in plain text before the field was encrypted is encrypted by the migration, and its label masked
+const storedNumber = (id) => {
+    return String(ec.entity.runSqlStatement("transactional", `SELECT ACCOUNT_NUMBER FROM BANK_ACCOUNT WHERE PAYMENT_METHOD_ID = '${id}'`, 1).records[0][0])
+}
+feature("a bank account number is stored encrypted, labeled by its last four digits, and a plain one is migrated", {
+    when() {
+        const madeId = call("mantle.account.PaymentMethodServices.create#BankAccount", { ownerPartyId: ownerId, bankName: "Mask Bank",
+            routingNumber: "021000021", accountNumber: "000123456789", typeEnumId: "BatChecking" }).paymentMethodId
+        const made = { label: pm(madeId).description, stored: storedNumber(madeId),
+            read: ec.entity.find("mantle.account.method.BankAccount").condition("paymentMethodId", madeId).one().accountNumber }
+        // as a row written before the field was encrypted
+        ec.entity.runSqlStatement("transactional", `UPDATE BANK_ACCOUNT SET ACCOUNT_NUMBER = '000987654321' WHERE PAYMENT_METHOD_ID = '${madeId}'`, 1)
+        call("mantle.account.PaymentMethodServices.update#PaymentMethodMutable", { paymentMethodId: madeId, description: "Old Bank 000987654321" })
+        const migrated = call("mantle.account.PaymentMethodServices.migrate#BankAccountNumbers", {})
+        const after = { label: pm(madeId).description, stored: storedNumber(madeId),
+            read: ec.entity.find("mantle.account.method.BankAccount").condition("paymentMethodId", madeId).one().accountNumber }
+        return { made, migrated, after }
+    },
+    then({ made, migrated, after }) {
+        made.label == "Mask Bank •••• 6789"
+        made.stored.startsWith(":")
+        made.read == "000123456789"
+        migrated.migratedCount >= 1
+        migrated.failedCount == 0
+        after.label == "Old Bank •••• 4321"
+        after.stored.startsWith(":")
+        after.read == "000987654321"
+    },
+})
+
 feature("payment method content text", {
     when() {
         const contentId = call("mantle.account.PaymentMethodServices.create#PaymentMethodContent", { paymentMethodId: card2Id, contentTypeEnumId: "PmctImage", description: "scan" }).paymentMethodContentId
