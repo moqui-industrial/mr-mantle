@@ -24,7 +24,13 @@ const dayMs = 24 * 3600 * 1000
 let keySeq = 0
 const key = () => prefix + "-op-" + ++keySeq
 // a local date in the facilities' zone, days from now
-const localDay = days => ec.l10n.format(new Date(Date.now() + days * dayMs), "yyyy-MM-dd", null, zone)
+// days after today on the zone's calendar: n × 24 hours crosses a daylight-saving change an hour off, which late in the
+// evening is the next day, and a weekly cadence anchored on it falls a day later
+const localDay = days => {
+    const date = new Date(ec.l10n.format(new Date(), "yyyy-MM-dd", null, zone) + "T12:00:00Z")
+    date.setUTCDate(date.getUTCDate() + days)
+    return date.toISOString().slice(0, 10)
+}
 
 // the service's answer as a user, or the reason code it refuses with, in its own transaction
 function as(username, service, parameters = {}) {
