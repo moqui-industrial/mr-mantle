@@ -524,9 +524,10 @@ feature(
             payrollLater == "2700"
             hrRows == ["Grade 4"]
             hrShown == false
-            !/2500|2700|USD|PayrollMonth|minAmount|maxAmount|"band"/.test(hrAnswer)
+            !/(?<!\d)(2500|2700)(?!\d)|USD|PayrollMonth|minAmount|maxAmount|"band"/.test(hrAnswer)
             positionGrade == "Grade 4"
-            !/2500|2700|USD/.test(positionAnswer)
+            // the amounts as whole numbers: a timestamp or an id may hold the same digits
+            !/(?<!\d)(2500|2700)(?!\d)|USD/.test(positionAnswer)
             salary == "2400"
         }
     }
