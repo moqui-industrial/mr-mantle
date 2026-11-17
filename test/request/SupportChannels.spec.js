@@ -622,6 +622,44 @@ feature(
     }
 )
 
+feature("an address past its hourly requests through a queue's form gets the neutral receipt, known or not (SEC-PSS-28)", {
+    when() {
+        run(state.admin, S + "save#ServiceRoute", {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", rateLimitPerHour: 30})
+        const issued = run(state.admin, R + "create#IntakeToken", {requestCategoryId: state.queue})
+        // five web requests of the customer's address in this hour
+        const mech = Array.from(
+            ec.entity.find("mantle.party.contact.ContactMech").condition("infoString", "dana.sch@example.com").disableAuthz().list()
+        )[0]
+        for (let i = 0; i < 5; i++)
+            run("john.doe", "create#" + REQUEST, {
+                requestName: "SCH earlier " + i,
+                statusId: "ReqSubmitted",
+                requestCategoryId: state.queue,
+                salesChannelEnumId: "ScWeb",
+                emailContactMechId: mech.contactMechId,
+                requestDate: ec.user.nowTimestamp
+            })
+        const before = ec.entity.find(REQUEST).condition("requestCategoryId", state.queue).disableAuthz().count()
+        const sixth = run("john.doe", R + "create#IntakeRequest", {
+            token: issued.token,
+            firstName: "Dana",
+            lastName: "Spec",
+            emailAddress: "dana.sch@example.com",
+            requestName: "SCH sixth",
+            description: "Over the address limit"
+        })
+        const after = ec.entity.find(REQUEST).condition("requestCategoryId", state.queue).disableAuthz().count()
+        run(state.admin, R + "remove#IntakeToken", {requestCategoryId: state.queue})
+        return {sixth, before, after}
+    },
+    then({sixth, before, after}) {
+        sixth.error == ""
+        sixth.received == true
+        sixth.requestId == null
+        after == before
+    }
+})
+
 feature("a logged call: one that reached the customer meets first response, an internal one does not; the refusals", {
     when() {
         const made = run(state.agent, S + "create#Case", {
