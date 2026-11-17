@@ -179,10 +179,13 @@ const records = {
     // Sales P17 (impl-sales §4, F42, F48; design-sales §10 CustomerOrder): OrderView's page goes by the order's store: a storeless
     // order's link opens the organization's Sales mount (CustomerOrder; the storeless confirmation's link, SalesOrders.js), a
     // store order's keeps Shop's page on the store's site. One order has one public page.
+    // SEC-PSS-23: OrderChange, an emailed code's capability for one order link (openChangeCode below), never on a mailed link
+    // (unissued: create refuses it) and never a token's scope: a guest's cancel, return and case by the link need its code.
     SalesOrder: {
         permissions: ["SUPPORT_CASE_EDIT"],
         // DownloadFile (SEC-PSS-03): issue#Download's capability of minutes, which streams a file and is no order link
-        scopes: ["OrderView", "Download", "DownloadFile", "RenewalAction", "QuoteView", "QuoteRespond"],
+        scopes: ["OrderView", "Download", "DownloadFile", "RenewalAction", "QuoteView", "QuoteRespond", "OrderChange"],
+        unissued: ["OrderChange"],
         page: {app: "shop", path: "/Orders/Status?token="},
         scopePages: {
             QuoteView: {app: "sales", path: "/CustomerQuote?token=", target: "organization"},
@@ -276,7 +279,11 @@ function scopeList(scopes) {
 function create(p) {
     const kind = records[p.recordType]
     const scopes = scopeList(p.scopes)
-    if (!kind || !scopes.length || scopes.some(scope => !kind.scopes.includes(scope)))
+    if (
+        !kind ||
+        !scopes.length ||
+        scopes.some(scope => !kind.scopes.includes(scope) || kind.unissued?.includes(scope))
+    )
         denied("SCOPE_INVALID", "Choose what the link allows")
     // Sales P13: a bound scope (a quote's) is never mixed with another kind of scope and always names the revision it binds
     const bound = scopes.filter(scope => kind.boundScopes?.includes(scope))
@@ -376,7 +383,7 @@ function selfOf(partyId) {
 // contact of. organizationPartyId, when given, is the organization the page serves (its app mount's target).
 function check(p) {
     const kind = records[p.recordType]
-    if (!kind || !kind.scopes.includes(p.scope)) unavailable()
+    if (!kind || !kind.scopes.includes(p.scope) || kind.unissued?.includes(p.scope)) unavailable()
     if (p.token) {
         const row = tokenCapability(p.token)
         if (
@@ -410,6 +417,87 @@ function check(p) {
     const held = grants(p.organizationPartyId, appOf(kind, p.scope)).filter(row => row.outsidePartyId === record.partyId)
     if (!held.length || (kind.contactAllows && !kind.contactAllows(p.recordId, held))) unavailable()
     return {via: "contact", capabilityId: null, recordId: p.recordId, recordRevision: null, thruDate: null, ...record}
+}
+// ===== an emailed code for an order link's writes (SEC-PSS-23) =====
+// A guest's order link reads its order; its cancel, return and case need a code mailed to the order's address. The code's
+// capability (scope OrderChange) is bound to the link that asked for it (boundCapabilityId), lasts CHANGE_CODE_MINUTES, is
+// used once and ends at its CHANGE_CODE_TRIES-th wrong try. The code itself is made by the delivery's build at each attempt
+// (mintChangeCode) and only its digest, over the link and the code, is kept.
+const CHANGE_CODE_MINUTES = 15
+const CHANGE_CODE_TRIES = 5
+const changeCodeDigest = (linkCapabilityId, code) => tokenDigest("order-change:" + linkCapabilityId + ":" + code)
+// A new code's capability for a link (check()'s answer for a token), in a transaction of its own so the delivery's attempt
+// sees it; the link's earlier codes end. Its capabilityId.
+function openChangeCode(link) {
+    return ec.transaction.runRequireNew(null, "The order change code could not be made", () => {
+        for (const row of rows(C, {boundCapabilityId: link.capabilityId}))
+            if (!row.revokedDate) call("update#" + C, {capabilityId: row.capabilityId, revokedDate: ec.user.nowTimestamp})
+        return call("create#" + C, {
+            organizationPartyId: link.organizationPartyId,
+            partyId: link.partyId,
+            recordType: "SalesOrder",
+            recordId: link.recordId,
+            scopes: "OrderChange",
+            issuerKind: "organization",
+            boundCapabilityId: link.capabilityId,
+            failedTries: 0,
+            fromDate: ec.user.nowTimestamp,
+            thruDate: new Date(Date.now() + CHANGE_CODE_MINUTES * 60000),
+            createdByUserId: ec.user.userId || null
+        }).capabilityId
+    })
+}
+// The code's capability while it may still be used (not used, ended or expired), else null.
+function openCode(capabilityId, forUpdate) {
+    const row = capabilityId ? find(C, {capabilityId}).forUpdate(!!forUpdate).one() : null
+    return row && row.scopes === "OrderChange" && row.boundCapabilityId && !row.revokedDate && lib.entityLib.active(row)
+        ? row
+        : null
+}
+// The delivery's build: a fresh eight-digit code for the capability, its digest replacing any before (an earlier attempt's
+// code no longer works). {code, thruDate, recordId, organizationPartyId, partyId}, or null when the capability is used,
+// ended or expired.
+function mintChangeCode(capabilityId) {
+    const row = openCode(capabilityId, true)
+    if (!row) return null
+    const code = ec.user.randomCode(8)
+    call("update#" + C, {capabilityId: row.capabilityId, tokenDigest: changeCodeDigest(row.boundCapabilityId, code)})
+    return {
+        code,
+        thruDate: row.thruDate,
+        recordId: row.recordId,
+        organizationPartyId: row.organizationPartyId,
+        partyId: row.partyId
+    }
+}
+// A write by an order link with its code: "ok" (the code used, in the caller's transaction, so a write that fails leaves it
+// usable until it expires), "wrong" (its try counted in a transaction of its own, the last ending it) or "expired" (no code
+// of the link may be used: none asked, used, ended or expired).
+function useChangeCode(linkCapabilityId, code) {
+    const open = rows(C, {boundCapabilityId: linkCapabilityId})
+        .filter(row => row.tokenDigest && openCode(row.capabilityId))
+        .sort((a, b) => lib.ms(b.fromDate) - lib.ms(a.fromDate))[0]
+    if (!open) return "expired"
+    const given = String(code ?? "").trim()
+    if (/^[0-9]{8}$/.test(given) && open.tokenDigest === changeCodeDigest(linkCapabilityId, given)) {
+        const locked = openCode(open.capabilityId, true)
+        if (!locked || locked.tokenDigest !== open.tokenDigest) return "expired"
+        call("update#" + C, {capabilityId: locked.capabilityId, revokedDate: ec.user.nowTimestamp})
+        return "ok"
+    }
+    ec.transaction.runRequireNew(null, "The order change code's try could not be counted", () => {
+        const locked = openCode(open.capabilityId, true)
+        if (!locked) return
+        const tries = Number(locked.failedTries || 0) + 1
+        call(
+            "update#" + C,
+            Object.assign(
+                {capabilityId: locked.capabilityId, failedTries: tries},
+                tries >= CHANGE_CODE_TRIES ? {revokedDate: ec.user.nowTimestamp} : {}
+            )
+        )
+    })
+    return "wrong"
 }
 // The outside parties a signed-in user is a contact of, for an app of an organization.
 function contactParties(organizationPartyId, app) {
@@ -567,6 +655,11 @@ function bindContact(partyId, scopes) {
     list,
     // Sales P13: the quote scopes of the SalesOrder kind
     quoteScopes,
+    // SEC-PSS-23: an order link's emailed code
+    CHANGE_CODE_MINUTES,
+    openChangeCode,
+    mintChangeCode,
+    useChangeCode,
     invite,
     bindContact
 })

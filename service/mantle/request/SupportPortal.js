@@ -21,6 +21,7 @@ const apps = () => ec.resource.script("component://mr-mantle/service/mantle/publ
 const media = () => ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js")
 const knowledge = () => ec.resource.script("component://mr-mantle/service/mantle/request/Knowledge.js")
 const time = () => ec.resource.script("component://mr-mantle/service/mantle/work/BusinessTime.js")
+const notices = () => ec.resource.script("component://mr-mantle/service/mantle/request/SupportNotices.js")
 const {find, one, rows, call, ms} = lib
 
 const REQUEST = "mantle.request.Request",
@@ -45,9 +46,12 @@ const customerTexts = {
 // message kinds that are never the customer's: a note, an internal message, a status update
 const internalTypes = ["Comment", "Message", "StatusUpdate"]
 // RATE_SITE_LIMIT: a site's article ratings an hour, whoever sends them (SEC-PSS-25), as Marketing's anonymous writes are
+// CODE_LIMIT, CODE_ORDER_LIMIT: an order link's emailed codes (SEC-PSS-23), a requester's in ten minutes and an order's an hour
 const POST_LIMIT = 30,
     RATE_LIMIT = 30,
-    RATE_SITE_LIMIT = 500
+    RATE_SITE_LIMIT = 500,
+    CODE_LIMIT = 5,
+    CODE_ORDER_LIMIT = 5
 const dayMs = 86400000
 
 const blank = value => value == null || String(value).trim() === ""
@@ -147,8 +151,10 @@ function actingFor(organizationPartyId) {
 }
 // Who a request may be for (Shop P6, impl-shop F27; design-customer-service §8 Access): a guest's order link (the SalesOrder
 // OrderView capability, orderToken) is the order's customer for that one order only, as a contact or the self relationship
-// is for its customers; else the signed-in account's customers (actingFor). {customers, orderId, via}.
-function askers(p, organizationPartyId) {
+// is for its customers; else the signed-in account's customers (actingFor). {customers, orderId, via, link}.
+// SEC-PSS-23: the link reads; a write by it ({write: true}: a cancel, a return, a case) needs the code send#OrderChangeCode
+// mailed to the order's address (p.changeCode), used once (requireChangeCode).
+function askers(p, organizationPartyId, options = {}) {
     if (!blank(p.orderToken)) {
         const checked = access().check({
             token: String(p.orderToken),
@@ -158,16 +164,61 @@ function askers(p, organizationPartyId) {
         })
         if (!blank(p.orderId) && String(p.orderId) !== checked.recordId) unavailable()
         if (!cases.servedCustomer(checked.partyId, organizationPartyId)) unavailable()
+        if (options.write) requireChangeCode(checked, p.changeCode)
         return {
             customers: [
                 {partyId: checked.partyId, administrator: false, via: "orderLink", name: cases.partyName(checked.partyId)}
             ],
             orderId: checked.recordId,
-            via: "orderLink"
+            via: "orderLink",
+            link: checked
         }
     }
     if (!ec.user.userId) signInRequired()
     return {customers: actingFor(organizationPartyId), orderId: null, via: "account"}
+}
+// An order link's write with its emailed code (SEC-PSS-23): none, a wrong one (its try counted) or one used, ended or expired is
+// refused.
+function requireChangeCode(link, changeCode) {
+    if (blank(changeCode)) fail("Unprocessable", "Enter the code we email to the order's address. Ask for it with Email me a code")
+    const used = access().useChangeCode(link.capabilityId, changeCode)
+    if (used === "expired") fail("Unprocessable", "This code has expired or was used. Ask for a new one")
+    if (used !== "ok") fail("Unprocessable", "This code is not right. Check the email we sent and try again")
+}
+// send#OrderChangeCode: a guest's order link (its OrderView) asks for the code its writes need, mailed to the order's address
+// through the delivery ledger (MdsrcOrderChangeCode, whose build makes the code: never kept); counted against the requester
+// (CODE_LIMIT in ten minutes) and the order (CODE_ORDER_LIMIT an hour). The answer names no address.
+function sendOrderChangeCode(p) {
+    throttle("order-change-code", CODE_LIMIT)
+    const organizationPartyId = served(p.siteId)
+    if (blank(p.orderToken)) unavailable()
+    const asked = askers({orderToken: p.orderToken}, organizationPartyId)
+    const allowed = ec.service
+        .sync()
+        .throwOnError(true)
+        .name("org.moqui.public.AccountServices.record#Attempt")
+        .parameters({input: {key: "order-change-code:" + asked.orderId, limit: CODE_ORDER_LIMIT, windowMillis: 3600000}})
+        .requireNewTransaction(true)
+        .call().result.allowed
+    if (!allowed) fail("Tarpit", "Too many codes were asked for this order. Wait an hour and try again.")
+    const toAddress = notices().orderEmail(asked.orderId, asked.link.partyId)
+    if (!toAddress) fail("Unprocessable", "We have no email address for this order. Sign in or contact us another way")
+    const capabilityId = access().openChangeCode(asked.link)
+    call("mantle.party.MessageServices.queue#Delivery", {
+        eventKey: "OrderChangeCode:" + capabilityId,
+        sourceEnumId: "MdsrcOrderChangeCode",
+        recipientPartyId: asked.link.partyId,
+        toAddress,
+        templateKey: "MANTLE_ORDER_CHANGE_CODE",
+        siteId: p.siteId,
+        organizationPartyId,
+        transactional: true,
+        sendNow: true
+    })
+    return {
+        sent: true,
+        receipt: {message: L("We emailed a code to the address of this order. It works once, for 15 minutes.")}
+    }
 }
 // The queue a store's order's request goes to: its checkout policy's support queue (Commerce P6), when the mount offers it.
 function storeQueueOf(orderId, offered) {
@@ -837,7 +888,7 @@ function intakeCase(p, organizationPartyId, key, stage) {
     return result
 }
 function contactCase(p, organizationPartyId, key, stage) {
-    const asked = askers(p, organizationPartyId)
+    const asked = askers(p, organizationPartyId, {write: true})
     const customers = asked.customers
     // an order link's case is about its one order (Shop P6)
     if (asked.orderId) p = Object.assign({}, p, {orderId: asked.orderId})
@@ -1175,6 +1226,7 @@ const operations = {
     requestCaseReopen,
     cancelCustomerCase,
     getCaseFile,
+    sendOrderChangeCode,
     saveSetting,
     getSetting,
     caseLink

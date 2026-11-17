@@ -1110,6 +1110,8 @@
             'emailAddress',
             'website',
             'file',
+            // SEC-PSS-23: an order link's write needs its emailed code
+            'changeCode',
             'operationId',
         ],
     },
@@ -1159,6 +1161,7 @@
             'customerReference',
             'note',
             'file',
+            'changeCode',
             'operationId',
         ],
     },
@@ -1194,8 +1197,14 @@
             'lines',
             'reason',
             'consent',
+            'changeCode',
             'operationId',
         ],
+    },
+    // SEC-PSS-23: a guest's order link asks for the code its cancel, return and case need
+    sendOrderChangeCode: {
+        service: 'mantle.request.SupportCaseServices.send#OrderChangeCode',
+        fields: ['siteId', 'orderToken'],
     },
     getOrderCancelRequest: {
         service: 'mantle.order.OrderChangeServices.get#CustomerCancel',

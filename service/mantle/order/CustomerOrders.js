@@ -129,8 +129,9 @@ function requestCustomerCancel(p) {
     const s = portal()
     s.throttle("support-cancel")
     const organizationPartyId = s.served(p.siteId)
-    // a signed-in account's customers, or a guest's order link for its one order (Shop P6, F27)
-    const asked = s.askers(p, organizationPartyId)
+    // a signed-in account's customers, or a guest's order link for its one order (Shop P6, F27), the link's
+    // write with its emailed code (SEC-PSS-23)
+    const asked = s.askers(p, organizationPartyId, {write: true})
     const {order, customer} = orderFor(asked.orderId || p.orderId, organizationPartyId, asked.customers)
     const key = s.operationKey(p)
     const consent = p.consent === true || p.consent === "Y" || p.consent === "true"

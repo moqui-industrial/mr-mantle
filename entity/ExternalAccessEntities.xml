@@ -39,12 +39,20 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="revokedDate" type="date-time"/>
         <field name="revokedByUserId" type="id"/>
         <field name="createdByUserId" type="id"/>
+        <field name="boundCapabilityId" type="id">
+            <description>An emailed code's capability (the OrderChange scope, SEC-PSS-23): the order link it was asked with,
+                which alone may use it; its tokenDigest binds the code to that link.</description></field>
+        <field name="failedTries" type="number-integer">
+            <description>An emailed code's wrong tries; the fifth ends it.</description></field>
         <relationship type="one" title="Organization" related="mantle.party.Party">
             <key-map field-name="organizationPartyId" related="partyId"/>
         </relationship>
         <relationship type="one" related="mantle.party.Party"/>
+        <relationship type="one-nofk" title="Bound" related="mantle.party.ExternalAccessCapability">
+            <key-map field-name="boundCapabilityId" related="capabilityId"/></relationship>
         <index name="EXT_ACCESS_TOKEN" unique="true"><index-field name="tokenDigest"/></index>
         <index name="EXT_ACCESS_RECORD"><index-field name="recordType"/><index-field name="recordId"/></index>
+        <index name="EXT_ACCESS_BOUND"><index-field name="boundCapabilityId"/></index>
     </entity>
     <entity entity-name="ExternalAccessContact" package="mantle.party" cache="never">
         <description>A public account's grant as a contact of an outside party (a customer, a supplier) on one app of one

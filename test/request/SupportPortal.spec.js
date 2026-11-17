@@ -153,12 +153,43 @@ const capability = (recordType, recordId, scopes, token, partyId = customer) =>
         createdByUserId: ec.user.userId
     })
 const token = name => (prefix + name + "0".repeat(48)).slice(0, 48)
+// A throttle's bucket of this window removed (record#Attempt's, the framework's Account.js); the requester's key as the spec's
+// calls have it.
+const requester = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+function clearBucket(key, windowMillis) {
+    const bucketId = ec.user.singleUseCodeHash(key + ":" + Math.floor(Date.now() / windowMillis))
+    find("moqui.security.public.AccountAttempt", {bucketId}).deleteAll()
+}
+// The specs of one run share the requester's link lookups (100 in ten minutes, ExternalAccess.js tokenCapability): this
+// spec's many go between a clear of this window's bucket before and after them, as ShopOperations does for cart creations;
+// the throttle is unchanged.
+const clearLinkLookups = () => clearBucket("access-token:" + requester(), 600000)
+// SEC-PSS-23: an order link's emailed code: the link asks for it (send#OrderChangeCode, its requester's and order's limits
+// cleared first), and the delivery's build makes it as an attempt would; {sent, delivery, code, capability}
+function changeCode(link, orderId) {
+    clearBucket("order-change-code:" + requester(), 600000)
+    clearBucket("order-change-code:" + orderId, 3600000)
+    const sent = page(null, S + "send#OrderChangeCode", {orderToken: link})
+    const delivery = Array.from(
+        find("mantle.party.MessageDelivery", {sourceEnumId: "MdsrcOrderChangeCode"}).orderBy("-createdDate").limit(1).list()
+    )[0]
+    const built = run("john.doe", S + "build#OrderChangeCodeMessage", {eventKey: delivery?.eventKey})
+    const capabilityId = String(delivery?.eventKey || "").replace(/^OrderChangeCode:/, "")
+    return {
+        sent,
+        delivery,
+        built,
+        code: /: ([0-9]{8})/.exec(String(built.bodyText || ""))?.[1] || null,
+        capability: () => one("mantle.party.ExternalAccessCapability", {capabilityId})
+    }
+}
 
 spec({
     stepwise: true,
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        clearLinkLookups()
         party(org, "Support Portal Spec Co", "OrgInternal", "PtyOrganization", "_NA_")
         svc("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {
             organizationPartyId: org,
@@ -257,11 +288,23 @@ spec({
             contactMechPurposeId: "EmailPrimary",
             fromDate: since
         })
+        // the organization's address, an order link's emailed code's sender (SEC-PSS-23)
+        const orgMech = svc("create#mantle.party.contact.ContactMech", {
+            contactMechTypeEnumId: "CmtEmailAddress",
+            infoString: "support@portal-spec.example.test"
+        }).contactMechId
+        svc("create#mantle.party.contact.PartyContactMech", {
+            partyId: org,
+            contactMechId: orgMech,
+            contactMechPurposeId: "EmailPrimary",
+            fromDate: since
+        })
         state.shipped = sale(true)
         state.approved = sale(false)
     },
     cleanupSpec() {
         ec.artifactExecution.disableAuthz()
+        clearLinkLookups()
         for (const entity of ["mantle.public.PublicSiteApp", "mantle.public.PublicSiteHost", "mantle.public.PublicSite"])
             find(entity, {siteId}).deleteAll()
         ec.artifactExecution.enableAuthz()
@@ -715,8 +758,8 @@ feature("a cancel request of an approved order is filed as a proposal, read and 
 })
 
 // Shop P6 (impl-shop F27; design-customer-service §8 Access): a guest's order link (the SalesOrder OrderView capability)
-// admits the customer services for its one order, as a contact or the self relationship does; the case carries the order's
-// store (impl-commerce F37)
+// admits the customer services for its one order, as a contact or the self relationship does, each write with the code
+// emailed for it (SEC-PSS-23); the case carries the order's store (impl-commerce F37)
 feature("a guest's order link files a case, a return and a cancel request for its one order; another order is refused", {
     when() {
         login("john.doe")
@@ -738,6 +781,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderToken: link,
             requestName: "About my order",
             description: "Where is the second one?",
+            changeCode: changeCode(link, shipped).code,
             operationId: opId()
         })
         const offer = page(null, R + "get#ReturnableOrder", {orderToken: link, orderId: shipped})
@@ -746,6 +790,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderToken: link,
             orderId: shipped,
             lines: [{orderItemSeqId: seq, quantity: 1, returnReasonEnumId: "RrsnDefective", returnResponseEnumId: "RrspCredit"}],
+            changeCode: changeCode(link, shipped).code,
             operationId: opId()
         })
         const cancelSeq = page(null, S + "get#CaseIntake", {orderToken: token("LinkApproved")}).order?.lines[0]?.orderItemSeqId
@@ -754,6 +799,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderId: approved,
             lines: [{orderItemSeqId: cancelSeq, quantity: 1}],
             consent: "Y",
+            changeCode: changeCode(token("LinkApproved"), approved).code,
             operationId: opId()
         })
         // the link of one order reaches no other, and no link no order
@@ -782,6 +828,68 @@ feature("a guest's order link files a case, a return and a cancel request for it
         r.cancel.stateText != null
         r.otherOrder.kind === "NotFound"
         r.noLink.kind === "AuthenticationRequired"
+    }
+})
+
+feature("an order link's cancel, return and case need the code emailed to the order: once, for 15 minutes, wrong tries counted (SEC-PSS-23)", {
+    when() {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        const orderId = sale(false)
+        const link = token("LinkCode")
+        capability("SalesOrder", orderId, "OrderView", link)
+        // reads keep the link alone
+        const read = page(null, S + "get#CaseIntake", {orderToken: link})
+        const lines = [{orderItemSeqId: read.order?.lines[0]?.orderItemSeqId, quantity: 1}]
+        const cancel = changeCode =>
+            page(null, O + "request#CustomerCancel", {orderToken: link, orderId, lines, consent: "Y", changeCode, operationId: opId()})
+        const noCode = {
+            cancel: cancel(null),
+            return: page(null, R + "request#CustomerReturn", {orderToken: link, orderId, lines: [], operationId: opId()}),
+            case: page(null, S + "create#CustomerCase", {
+                orderToken: link,
+                requestName: "About my order",
+                description: "Is it on its way?",
+                operationId: opId()
+            })
+        }
+        const first = changeCode(link, orderId)
+        const wrongCode = first.code === "00000000" ? "00000001" : "00000000"
+        const wrong = cancel(wrongCode)
+        const afterWrong = first.capability()
+        const used = cancel(first.code)
+        const again = cancel(first.code)
+        // a code past its 15 minutes
+        const late = changeCode(link, orderId)
+        svc("update#mantle.party.ExternalAccessCapability", {
+            capabilityId: late.capability().capabilityId,
+            thruDate: new Date(Date.now() - 1000)
+        })
+        const expired = cancel(late.code)
+        // the fifth wrong try ends a code
+        const tried = changeCode(link, orderId)
+        const tries = [1, 2, 3, 4, 5].map(() => cancel(wrongCode))
+        const afterTries = cancel(tried.code)
+        return {read, noCode, first, wrong, afterWrong, used, again, expired, tried, tries, afterTries, ended: tried.capability()}
+    },
+    then(r) {
+        r.read.mode === "orderLink"
+        r.noCode.cancel.kind === "Unprocessable" && r.noCode.cancel.error.includes("Email me a code")
+        r.noCode.return.kind === "Unprocessable" && r.noCode.return.error.includes("Email me a code")
+        r.noCode.case.kind === "Unprocessable" && r.noCode.case.error.includes("Email me a code")
+        r.first.sent.sent === true
+        /^[0-9]{8}$/.test(r.first.code)
+        // never kept in clear: not on the delivery, and the capability holds its digest over the link
+        !String(r.first.delivery.parametersJson || "").includes(r.first.code)
+        r.afterWrong.scopes === "OrderChange" && r.afterWrong.tokenDigest !== ec.user.singleUseCodeHash(r.first.code)
+        r.wrong.kind === "Unprocessable" && r.wrong.error.includes("not right")
+        r.afterWrong.failedTries === 1 && r.afterWrong.revokedDate == null
+        r.used.stateText === "Cancellation requested"
+        r.again.error.includes("expired or was used")
+        r.expired.error.includes("expired or was used")
+        r.tries.every(t => t.error.includes("not right"))
+        r.afterTries.error.includes("expired or was used")
+        r.ended.failedTries === 5 && r.ended.revokedDate != null
     }
 })
 

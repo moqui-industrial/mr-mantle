@@ -54,6 +54,13 @@ along with this software (see the LICENSE.md file). If not, see
             <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_RETURN_DECISION_EMAIL" description="Return decision notice"
                     emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
                     subject="${subject}"/>
+            <!-- SEC-PSS-23: the code a guest's order link asks for before a cancel, return or case (send#OrderChangeCode),
+                minted by the delivery's build at each attempt (SupportNotices.js buildOrderChangeCode), so it is never kept -->
+            <moqui.basic.Enumeration enumId="MdsrcOrderChangeCode" description="Order change code" sequenceNum="23"
+                    enumTypeId="MessageDeliverySource" enumCode="mantle.request.SupportCaseServices.build#OrderChangeCodeMessage"/>
+            <moqui.basic.email.EmailTemplate emailTemplateId="MANTLE_ORDER_CHANGE_CODE" description="Order change code"
+                    emailServerId="SYSTEM" fromAddress="${fromAddress}" fromName="${fromName}" ccAddresses="" bccAddresses=""
+                    subject="${subject}"/>
         </seed-data>
     </entity>
     <extend-entity entity-name="ExternalAccessContact" package="mantle.party">

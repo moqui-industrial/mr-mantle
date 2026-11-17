@@ -204,6 +204,8 @@
     ['POST', 'support/return/withdrawal', 'withdrawCustomerReturn'],
     ['GET', 'support/return/label', 'getReturnLabel'],
     ['POST', 'support/order-cancel', 'requestOrderCancel'],
+    // SEC-PSS-23
+    ['POST', 'support/order-code', 'sendOrderChangeCode'],
     ['GET', 'support/order-cancel', 'getOrderCancelRequest'],
     ['POST', 'support/order-cancel/withdrawal', 'withdrawOrderCancel'],
     // Shop P1
