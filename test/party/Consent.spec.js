@@ -392,6 +392,37 @@ feature("an unknown, malformed or expired token, or one used beyond its party an
     },
 })
 
+feature("list link lookups count against the requester first: past the limit even a good token is refused (SEC-PSS-44)", {
+    when() {
+        const out = anonymously(14, () => {
+            // a requester of this feature's own, its bucket filled to the limit for this window (record#Attempt's, Account.js)
+            const requester = "spec:list-token-throttle"
+            const bucketId = ec.user.singleUseCodeHash(
+                "list-token:" + requester + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000))
+            ec.artifactExecution.disableAuthz()
+            ec.service.sync().name("create#moqui.security.public.AccountAttempt").parameters({ bucketId, attemptCount: 100,
+                expiresAt: new Date(Date.now() + 1200000) }).requireNewTransaction(true).call()
+            ec.artifactExecution.enableAuthz()
+            ec.user.context.passRequester = requester
+            try {
+                return { resolve: errorOf(RESOLVE, { token: token.news }), apply: errorOf(APPLY, { token: token.news, unsubscribeAll: true }) }
+            } finally {
+                ec.user.context.remove("passRequester")
+                ec.artifactExecution.disableAuthz()
+                ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", bucketId).deleteAll()
+                ec.artifactExecution.enableAuthz()
+            }
+        })
+        out.news = statusOf("news", "Cora")
+        return out
+    },
+    then({ resolve, apply, news }) {
+        resolve.includes("wait a few minutes")
+        apply.includes("wait a few minutes")
+        news == "CLPT_ACCEPTED"
+    },
+})
+
 feature("apply#UnsubscribePreferences for an anonymous visitor: each offered list subscribed or not, any other list skipped", {
     when() {
         const out = anonymously(14, () => call(APPLY, { token: token.news, listChoices: [

@@ -1459,6 +1459,12 @@ along with this software (see the LICENSE.md file). If not, see
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
             listList = []
+            // every lookup counts against the requester first, as a link's (ExternalAccess.js tokenCapability) does, so a
+            // requester over its limit is refused whether its token is good or not (SEC-PSS-44)
+            const lookups = ec.service.sync().name('org.moqui.public.AccountServices.record#Attempt').parameters({input: {key: 'list-token:' +
+                    ec.resource.script('component://framework/service/org/moqui/public/Account.js').requesterKey(), limit: 100, windowMillis: 600000}})
+                    .requireNewTransaction(true).call()
+            if (!lookups?.result?.allowed) { ec.message.addError('Too many links opened just now; wait a few minutes and try again'); return }
             // the token first, before anything else is read
             const invalid = 'This unsubscribe link is not valid or has expired'
             const tokenText = token == null ? '' : String(token).trim()
@@ -1537,6 +1543,12 @@ along with this software (see the LICENSE.md file). If not, see
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
             changedList = []; failedContactListIds = []; marketingWithdrawn = false; unsubscribePending = false; verifyEmailSent = false
+            // every lookup counts against the requester first, as a link's (ExternalAccess.js tokenCapability) does, so a
+            // requester over its limit is refused whether its token is good or not (SEC-PSS-44)
+            const lookups = ec.service.sync().name('org.moqui.public.AccountServices.record#Attempt').parameters({input: {key: 'list-token:' +
+                    ec.resource.script('component://framework/service/org/moqui/public/Account.js').requesterKey(), limit: 100, windowMillis: 600000}})
+                    .requireNewTransaction(true).call()
+            if (!lookups?.result?.allowed) { ec.message.addError('Too many links opened just now; wait a few minutes and try again'); return }
             // the token first, before anything else is read
             const invalid = 'This unsubscribe link is not valid or has expired'
             const tokenText = token == null ? '' : String(token).trim()
