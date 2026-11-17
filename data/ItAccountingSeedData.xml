@@ -49,7 +49,7 @@ Grant of Patent License.
             description="Revenues from sales and services"/>
     <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccAltriRicaviProventi" enumCode="CE.A.5"
             description="Other revenues and income"/>
-    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCostiMateriePrimeSussidiarieConsumoMerci" enumCode="CE.B.6"
+    <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCostiMateriePrimeSussidConsumoMerci" enumCode="CE.B.6"
             description="Raw materials, consumables and goods for resale"/>
     <moqui.basic.Enumeration enumTypeId="GlXbrlClass" enumId="ItccCostiServizi" enumCode="CE.B.7"
             description="Services"/>
@@ -78,7 +78,7 @@ Grant of Patent License.
     <mantle.ledger.account.GlAccount glAccountId="310000000" glXbrlClassEnumId="ItccCapitaleSociale"/>
     <mantle.ledger.account.GlAccount glAccountId="330000000" glXbrlClassEnumId="ItccUtiliPortatiNuovo"/>
     <mantle.ledger.account.GlAccount glAccountId="411000000" glXbrlClassEnumId="ItccRicaviVenditePrestazioni"/>
-    <mantle.ledger.account.GlAccount glAccountId="510000000" glXbrlClassEnumId="ItccCostiMateriePrimeSussidiarieConsumoMerci"/>
+    <mantle.ledger.account.GlAccount glAccountId="510000000" glXbrlClassEnumId="ItccCostiMateriePrimeSussidConsumoMerci"/>
     <mantle.ledger.account.GlAccount glAccountId="610000000" glXbrlClassEnumId="ItccTotaleCostiPersonale"/>
     <mantle.ledger.account.GlAccount glAccountId="740000000" glXbrlClassEnumId="ItccOneriDiversiGestione"/>
     -->
