@@ -276,6 +276,28 @@ spec({
     }
 })
 
+feature("a staged file's type is read from its first eight bytes alone (SEC-PSS-65)", {
+    when() {
+        const media = ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js")
+        const write = (name, bytes) => {
+            const location = "runtime://tmp/spp-sniff/" + name
+            ec.resource.getLocationReference(location).putBytes(new Uint8Array(bytes))
+            return location
+        }
+        // a PNG's signature followed by a megabyte, a JPEG's three bytes and nothing after, a text, an empty file
+        const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].concat(new Array(1048576).fill(0x41))
+        const kinds = [
+            write("big.png", png),
+            write("short.jpg", [0xff, 0xd8, 0xff]),
+            write("plain.txt", Array.from("not an image").map(c => c.charCodeAt(0))),
+            write("empty.png", [])
+        ].map(location => media.sniff(location)?.type || null)
+        return {kinds}
+    },
+    then({kinds}) {
+        kinds == ["image/png", "image/jpeg", null, null]
+    }
+})
 feature("a site's article ratings are bounded per hour, whoever sends them (SEC-PSS-25)", {
     when() {
         // the site's bucket filled to the limit for this hour (record#Attempt's, the framework's Account.js)
