@@ -181,7 +181,8 @@ const records = {
     // store order's keeps Shop's page on the store's site. One order has one public page.
     SalesOrder: {
         permissions: ["SUPPORT_CASE_EDIT"],
-        scopes: ["OrderView", "Download", "RenewalAction", "QuoteView", "QuoteRespond"],
+        // DownloadFile (SEC-PSS-03): issue#Download's capability of minutes, which streams a file and is no order link
+        scopes: ["OrderView", "Download", "DownloadFile", "RenewalAction", "QuoteView", "QuoteRespond"],
         page: {app: "shop", path: "/Orders/Status?token="},
         scopePages: {
             QuoteView: {app: "sales", path: "/CustomerQuote?token=", target: "organization"},
