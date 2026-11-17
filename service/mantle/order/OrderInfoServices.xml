@@ -420,9 +420,9 @@ along with this software (see the LICENSE.md file). If not, see
                 const shipToPartyId = customerShipToDetail?.partyId || orderPart.customerPartyId
                 const billToPartyId = customerBillToDetail?.partyId || orderPart.customerPartyId
 
-                const customerTaxAuthorityInfo = orderPart.customerPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.customerPartyId).conditionDate("", "", ec.user.nowTimestamp).list()?.[0] ?? null) : null
+                const customerTaxAuthorityInfo = orderPart.customerPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.customerPartyId).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list()?.[0] ?? null) : null
                 const customerSocialSecurityNumber = orderPart.customerPartyId ? (ec.entity.find("mantle.party.PartyIdentification").condition({partyId:orderPart.customerPartyId, partyIdTypeEnumId:"PtidSsn"}).one() ?? null) : null
-                const vendorTaxAuthorityInfo = orderPart.vendorPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.vendorPartyId).conditionDate("", "", ec.user.nowTimestamp).list()?.[0] ?? null) : null
+                const vendorTaxAuthorityInfo = orderPart.vendorPartyId ? (ec.entity.find("mantle.other.tax.TaxAuthorityParty").condition("partyId", orderPart.vendorPartyId).conditionDate("fromDate", "thruDate", ec.user.nowTimestamp).list()?.[0] ?? null) : null
                 const vendorSocialSecurityNumber = orderPart.vendorPartyId ? (ec.entity.find("mantle.party.PartyIdentification").condition({partyId:orderPart.vendorPartyId, partyIdTypeEnumId:"PtidSsn"}).one() ?? null) : null
 
                 let customerEmail = null
