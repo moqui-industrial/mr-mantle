@@ -1,6 +1,7 @@
 // The owner services the framework's operation screens call as the caller (SEC-ADM-10): the store channel recovery
 // (StoreChannelServices.find#MessageRecoveryTargets, recover#StoreMessage), the delivery ledger's mail outcomes
-// (MessageServices.find#MailOutcomeOwners, recover#OwnedMailOutcome) and the forum's (DeliveryWorkerServices.find#MailOutcomeOwners).
+// (MessageServices.find#MailOutcomeOwners, recover#OwnedMailOutcome) and the forum's
+// (DeliveryWorkerServices.find#MailOutcomeOwners).
 // Every user may call them (MantleOperationOwners, data/PartyAccessData.xml), so an operator reaches them with no grant of
 // its own; each refuses a caller without its permission by its own check. Authorization on, spec-local users and records.
 // Run: ./moq test mr-mantle --spec OperationOwners

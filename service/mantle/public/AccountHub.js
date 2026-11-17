@@ -202,7 +202,9 @@ function getEmailPreferences(p) {
         if (marketing)
             for (const topic of marketing.topics)
                 topic.canSubscribe =
-                    topic.state === "subscribed" || topic.state === "pending" || listLinks().undoable(tokenOf.row, topic.contactListId)
+                    topic.state === "subscribed" ||
+                    topic.state === "pending" ||
+                    listLinks().undoable(tokenOf.row, topic.contactListId)
         return {
             mode: "token",
             // anything else the link may not subscribe to needs the page's sign-in

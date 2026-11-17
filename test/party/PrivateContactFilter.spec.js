@@ -52,12 +52,22 @@ spec({
             authzTypeEnumId: "AUTHZT_ALLOW",
             authzActionEnumId: "AUTHZA_VIEW"
         })
-        call("create#moqui.security.ArtifactAuthzFilter", {artifactAuthzId: ids.group, entityFilterSetId: "MANTLE_PRIVATE_CONTACT"})
+        call("create#moqui.security.ArtifactAuthzFilter", {
+            artifactAuthzId: ids.group,
+            entityFilterSetId: "MANTLE_PRIVATE_CONTACT"
+        })
         user(ids.owner)
         user(ids.other)
-        call("create#mantle.party.Party", {partyId: ids.carrier, partyTypeEnumId: "PtyOrganization", privateOwnerUserId: ids.owner})
+        call("create#mantle.party.Party", {
+            partyId: ids.carrier,
+            partyTypeEnumId: "PtyOrganization",
+            privateOwnerUserId: ids.owner
+        })
         call("create#mantle.party.Organization", {partyId: ids.carrier, organizationName: "Filter spec carrier"})
-        call("create#mantle.shipment.carrier.CarrierShipmentMethod", {carrierPartyId: ids.carrier, shipmentMethodEnumId: "ShMthGround"})
+        call("create#mantle.shipment.carrier.CarrierShipmentMethod", {
+            carrierPartyId: ids.carrier,
+            shipmentMethodEnumId: "ShMthGround"
+        })
     },
     cleanupSpec() {
         ec.artifactExecution.enableAuthz()

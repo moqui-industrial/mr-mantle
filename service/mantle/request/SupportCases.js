@@ -365,7 +365,8 @@ function confirmSender(requestId, by, newTransaction = false) {
         const typed = request.emailContactMechId
             ? one("mantle.party.contact.ContactMech", {contactMechId: request.emailContactMechId})?.infoString
             : null
-        const fromTyped = !!typed && !blank(by.address) && String(typed).trim().toLowerCase() === String(by.address).trim().toLowerCase()
+        const lower = value => String(value).trim().toLowerCase()
+        const fromTyped = !!typed && !blank(by.address) && lower(typed) === lower(by.address)
         const filer = !blank(by.partyId) && by.partyId === request.filedByPartyId
         if (!fromTyped && !filer) return false
         ec.message.pushErrors()
