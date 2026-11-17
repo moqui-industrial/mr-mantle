@@ -35,7 +35,17 @@ const OPERATION = "mantle.ledger.transaction.PostingOperation"
 // ===== tables =====
 // Bounds: a line's quantity, lines a cart, days a cart lives after its last activity (a guest's and an account's), and
 // the requester's limits a ten-minute window (carts made, codes tried, capability lookups).
-const limits = {lineQuantity: 999, lines: 50, guestDays: 30, accountDays: 90, creates: 30, codeTries: 20, lookups: 600}
+// siteGuestCarts: a site's new guest carts an hour (SEC-PSS-05), each a guest party and an open order until the expiry job
+const limits = {
+    lineQuantity: 999,
+    lines: 50,
+    guestDays: 30,
+    accountDays: 90,
+    creates: 30,
+    siteGuestCarts: 1000,
+    codeTries: 20,
+    lookups: 600
+}
 // Payment statuses that no longer hold a cart's checkout.
 const settledPaymentStatuses = ["PmntVoid", "PmntCancelled", "PmntDeclined"]
 const taxTypes = ["ItemSalesTax", "ItemVatTax"]
@@ -156,6 +166,16 @@ function createCart(shop) {
     externalAccess().throttle("cart-create", limits.creates, "Wait a few minutes before starting another cart")
     let guestPartyId = null
     if (!shop.customerPartyId) {
+        // a guest's cart counts against the site's hour as well as its requester's ten minutes (SEC-PSS-05): many addresses
+        // fill no party and order tables past it
+        const allowed = ec.service
+            .sync()
+            .throwOnError(true)
+            .name("org.moqui.public.AccountServices.record#Attempt")
+            .parameters({input: {key: "cart-site:" + shop.siteId, limit: limits.siteGuestCarts, windowMillis: 3600000}})
+            .requireNewTransaction(true)
+            .call().result.allowed
+        if (!allowed) refuse("Tarpit", "RATE_LIMITED", "This shop takes no new carts just now. Try again later")
         guestPartyId = lib.call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson", disabled: "N"}).partyId
         lib.call("create#mantle.party.Person", {partyId: guestPartyId, firstName: "Guest"})
         lib.call("create#mantle.party.PartyRole", {partyId: guestPartyId, roleTypeId: "Customer"})

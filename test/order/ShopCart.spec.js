@@ -380,3 +380,34 @@ feature("merge#Parties moves a cart's access with its party (F23)", {
         access.capabilityDigest == "merge-test-digest"
     }
 })
+
+// A throttle's bucket filled to its limit for this window, as record#Attempt keeps it (the framework's Account.js), in a
+// transaction of its own; and removed.
+function bucket(key, windowMillis, count) {
+    const bucketId = ec.user.singleUseCodeHash(key + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / windowMillis))
+    system(() => {
+        ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", bucketId).deleteAll()
+        if (count)
+            ec.service
+                .sync()
+                .name("create#moqui.security.public.AccountAttempt")
+                .parameters({bucketId, attemptCount: count, expiresAt: new Date(Date.now() + 2 * windowMillis)})
+                .requireNewTransaction(true)
+                .call()
+    })
+}
+feature("a site's new guest carts are bounded per hour, whatever the requester; an account's cart is not (SEC-PSS-05)", {
+    when() {
+        bucket("cart-site:" + ids.euroSite, 3600000, 1000)
+        const guest = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"})
+        const account = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"}, "john.doe")
+        bucket("cart-site:" + ids.euroSite, 3600000, 0)
+        const after = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"})
+        return {guest, account, after}
+    },
+    then({guest, account, after}) {
+        guest.error.includes("RATE_LIMITED")
+        account.result.cart.items.length >= 1
+        after.result.token.length == 48
+    }
+})
