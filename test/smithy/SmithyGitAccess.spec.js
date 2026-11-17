@@ -159,9 +159,46 @@ feature("an account with no password to give again signs in again instead", {
             fromDate: ec.user.nowTimestamp,
             successfulLogin: "Y"
         })
-        return {stale, older, recent: add("sga-provider-2")}
+        const recent = add("sga-provider-2")
+        // through a remote frontend the visitor's own sign-in counts, its delegation's issue, not the account's latest
+        // anywhere (SEC-PFS-63): a delegation of ten minutes ago is refused though the account signed in just now
+        setProperty("pass_client_sgaspec_sites", SITE)
+        const delegation = (token, issued) =>
+            lib.make("moqui.security.public.DelegatedSession", {
+                delegationId: "SGA_DEL_" + token.slice(4, 7),
+                userId: "SGA_PROVIDER",
+                clientId: "sgaspec",
+                siteId: SITE,
+                tokenHash: ec.user.singleUseCodeHash(token),
+                issuedAt: new Date(Number(ec.user.nowTimestamp) - issued * 60000),
+                expiresAt: new Date(Number(ec.user.nowTimestamp) + 15 * 60000)
+            })
+        const delegated = (token, operationId) => {
+            const out = ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                siteId: SITE,
+                operation: "createAccessToken",
+                input: {name: "Delegated", operationId},
+                delegation: token,
+                clientId: "sgaspec",
+                clientVerified: true
+            })
+            ec.message.clearErrors()
+            ec.user.loginUser(lib.OPERATOR, "moqui")
+            return out.error ? {kind: out.error.code, reason: out.error.reason} : out.result
+        }
+        delegation("sga-old-delegation-token-0000000000", 10)
+        delegation("sga-new-delegation-token-0000000000", 1)
+        return {
+            stale,
+            older,
+            recent,
+            oldDelegation: delegated("sga-old-delegation-token-0000000000", "sga-provider-4"),
+            newDelegation: delegated("sga-new-delegation-token-0000000000", "sga-provider-5")
+        }
     },
-    then({stale, older, recent}) {
+    then({stale, older, recent, oldDelegation, newDelegation}) {
+        oldDelegation.reason == "recentSignInRequired"
+        newDelegation.token.length > 20
         stale.kind == "AuthenticationRequired"
         stale.reason == "recentSignInRequired"
         older.reason == "recentSignInRequired"

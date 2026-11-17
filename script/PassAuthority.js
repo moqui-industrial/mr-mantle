@@ -365,9 +365,11 @@ function envelope(error) {
    operation sent the file as the response itself) or {error}. */
 function handle(p) {
     // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
-    // limit key, and the client the transport authenticated (never a flag in a service's input)
+    // limit key, and the client the transport authenticated (never a flag in a service's input); and when a delegated
+    // visitor signed in (passSignedInAt, SmithyGit.js)
     ec.user.context.remove('passRequester')
     ec.user.context.remove('passVerifiedClient')
+    ec.user.context.remove('passSignedInAt')
     try {
         return run(p || {})
     } catch (error) {
@@ -375,6 +377,7 @@ function handle(p) {
     } finally {
         ec.user.context.remove('passRequester')
         ec.user.context.remove('passVerifiedClient')
+        ec.user.context.remove('passSignedInAt')
     }
 }
 function run(p) {
@@ -425,6 +428,10 @@ function run(p) {
         delegation = asSystem(() =>
             account().authenticateDelegation(p.delegation, clientId, siteId),
         )
+        // when this visitor signed in (the delegation's issue), for a check of a recent sign-in (SmithyGit.js
+        // reauthenticate, SEC-PFS-63): the account's login history is anyone's sign-in, not this session's
+        if (delegation.issuedAt)
+            ec.user.context.passSignedInAt = ec.user.timestampMillis(delegation.issuedAt)
     }
     const action = operation.startsWith('account.') ? operation.slice(8) : null
     const route =
