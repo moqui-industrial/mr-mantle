@@ -849,7 +849,8 @@ function createCustomerCase(p) {
     }
 }
 function intakeCase(p, organizationPartyId, key, stage) {
-    const target = ec.resource.script("component://mr-mantle/service/mantle/request/Channels.js").formTarget(p.token)
+    // the site's organization goes to the token check itself (SEC-PSS-66), and to create#IntakeRequest's
+    const target = ec.resource.script("component://mr-mantle/service/mantle/request/Channels.js").formTarget(p.token, organizationPartyId)
     if (!target || target.organizationPartyId !== organizationPartyId) unavailable()
     const operation = lib.operation({operationKey: key}, "SupportCaseIntake", organizationPartyId, {
         token: ec.user.singleUseCodeHash(String(p.token)),
@@ -863,6 +864,7 @@ function intakeCase(p, organizationPartyId, key, stage) {
         .name("mantle.request.RequestServices.create#IntakeRequest")
         .parameters({
             token: p.token,
+            organizationPartyId,
             firstName: p.firstName,
             lastName: p.lastName,
             emailAddress: p.emailAddress,

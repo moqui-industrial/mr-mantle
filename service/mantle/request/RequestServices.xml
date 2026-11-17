@@ -816,9 +816,12 @@ along with this software (see the LICENSE.md file). If not, see
             from one the queue ignores); a customer the organization serves (found by the address) makes a case, anyone else is held for review
             (Channels.js formRequest), and a held one is not confirmed. Its sender is marked not verified (Request
             senderVerified N, SEC-PSS-28) until a reply comes from the typed address or its filer opens it signed in.
+            organizationPartyId, from a site's form (a PASS Support mount), is the organization the site serves: a queue's
+            token of another organization is not available there (SEC-PSS-66); a project's form token is never a site's.
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
+            <parameter name="organizationPartyId"><description>The organization a site's form serves; none for /r/&lt;token&gt;</description></parameter>
             <parameter name="firstName"/>
             <parameter name="lastName"/>
             <parameter name="emailAddress"/>
@@ -841,10 +844,12 @@ along with this software (see the LICENSE.md file). If not, see
             const fail = (text) => { ec.message.addError(L(text)) }
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
-                const project = ec.service.sync().name('mantle.request.RequestServices.find#IntakeProject').parameters({token: token}).call()?.project
+                // a site's form takes its own organization's queue tokens only, never a project's (SEC-PSS-66)
+                const project = organizationPartyId ? null
+                        : ec.service.sync().name('mantle.request.RequestServices.find#IntakeProject').parameters({token: token}).call()?.project
                 // a service queue's token (Customer Service P6): an ExternalAccessCapability on its RequestCategory
                 const channels = project == null ? ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js') : null
-                const queueForm = channels ? channels.formTarget(token) : null
+                const queueForm = channels ? channels.formTarget(token, organizationPartyId) : null
                 if (project == null && queueForm == null) { fail('This form is not available'); return }
                 const formName = project ? project.workEffortId : 'queue ' + queueForm.requestCategoryId
                 if (website != null && String(website).trim() !== '') {

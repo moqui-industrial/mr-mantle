@@ -689,11 +689,18 @@ function removeToken(p) {
     return {}
 }
 // The queue a public form's token names, with the form's settings (the queue's offered types, its web form route, the
-// limits), or null for a token that is not a queue's in effect.
-function formTarget(token) {
+// limits), or null for a token that is not a queue's in effect. organizationPartyId, when the form is a site's (a PASS
+// Support mount), is the organization the site serves: a queue's token of another organization is none (SEC-PSS-66). The
+// business host's /r/<token> form serves no one organization, so its token alone names the queue.
+function formTarget(token, organizationPartyId) {
     let checked = null
     try {
-        checked = externalAccess().check({recordType: "RequestCategory", scope: intakeScope, token})
+        checked = externalAccess().check({
+            recordType: "RequestCategory",
+            scope: intakeScope,
+            token,
+            organizationPartyId: organizationPartyId || null
+        })
     } catch (error) {
         return null
     }
