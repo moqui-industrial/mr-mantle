@@ -128,6 +128,10 @@ function checkSecret(request, account, clientId, clientSecret) {
 }
 /* A file is never a page of the site (SEC-PSF-08): its type is PassAuthority.js servedType's, and it runs nothing. */
 const SANDBOX = "default-src 'none'; sandbox"
+/* Whether a file is sandboxed: always, but a PDF shown inline, which a browser will not display in a sandbox and whose
+   viewer has an origin of its own (the framework's web::user_file_inline; PASS's Facade.js sandboxed). */
+const sandboxed = (type, disposition) =>
+    !(String(disposition || '') === 'inline' && String(type || '').split(';')[0].trim().toLowerCase() === 'application/pdf')
 /* The bytes a ranged download reads and writes at a time. */
 const RANGE_WINDOW = 1024 * 1024
 /* A ranged file (Shop P6, a granted download): Accept-Ranges, a 206 of the range asked or a 416 outside the file, the bytes
@@ -208,7 +212,7 @@ function respond(response, answer) {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         response.setContentType(file.contentType)
-        response.setHeader('Content-Security-Policy', SANDBOX)
+        if (sandboxed(file.contentType, file.disposition)) response.setHeader('Content-Security-Policy', SANDBOX)
         // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
         response.setHeader('Cache-Control', file.cacheControl || 'no-store')
         response.setHeader(
