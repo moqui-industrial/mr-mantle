@@ -69,6 +69,26 @@ function page(name, input, username = null) {
         ec.artifactExecution.disableAuthz()
     }
 }
+// Accounting's bill upload page (PortalServices get#Submission, the BillUpload scope) as no one signed in or as a user
+function billPage(input, username = null) {
+    if (username) login(username)
+    else logout()
+    try {
+        return ec.service
+            .sync()
+            .throwOnError(true)
+            .name("mantle.account.PortalServices.get#Submission")
+            .parameters({input: Object.assign({siteId}, input)})
+            .requireNewTransaction(true)
+            .call().result
+    } catch (error) {
+        ec.message.clearErrors()
+        return {errorKind: error.moquiErrorKind || "Error", errorMessage: String(error.message)}
+    } finally {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+    }
+}
 function user(kind, permissions, organizationPartyId = org) {
     const id = prefix + "_" + kind
     call("create#moqui.security.UserGroup", {userGroupId: id, description: "Supplier portal " + kind})
@@ -440,8 +460,11 @@ feature(
             })
             const item = one("mantle.order.OrderItem", {orderId: prefix + "_PO", orderItemSeqId: "01"})
             const part = one("mantle.order.OrderPart", {orderId: prefix + "_PO", orderPartSeqId: "01"})
+            const billBefore = billPage({token: token("PO_R1")})
             // the buyer revises the order: the revision 1 link now says so, and its acknowledgement is refused
             call("update#mantle.order.OrderHeader", {orderId: prefix + "_PO", orderRevision: 2})
+            // the bill page of the revision 1 link shows no total of the new revision (SEC-PSS-24)
+            const billAfter = billPage({token: token("PO_R1")})
             const superseded = page("getPublishedPurchaseOrder", {token: token("PO_R1")})
             const supersededHome = page("getSupplierHome", {token: token("PO_R1")})
             const late = page("acknowledgePurchaseOrder", {
@@ -453,9 +476,12 @@ feature(
             const bill = ec.resource
                 .script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
                 .check({token: token("PO_R1"), scope: "BillUpload", recordType: "Order", organizationPartyId: org})
-            return {view, changed, first, repeat, item, part, superseded, supersededHome, late, bill}
+            return {view, changed, first, repeat, item, part, superseded, supersededHome, late, bill, billBefore, billAfter}
         },
-        then({view, changed, first, repeat, item, part, superseded, supersededHome, late, bill}) {
+        then({view, changed, first, repeat, item, part, superseded, supersededHome, late, bill, billBefore, billAfter}) {
+            billBefore.order.totalText != null
+            billAfter.order.orderId === prefix + "_PO"
+            billAfter.order.totalText == null
             view.order.revision === 1
             view.order.buyerName === "Portal Spec Buyer"
             view.lines[0].quantityText === "10"
@@ -533,6 +559,8 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
         })
         call("update#mantle.order.OrderHeader", {orderId: prefix + "_PO", orderRevision: 3})
         const held = page("getPublishedPurchaseOrder", {orderId: prefix + "_PO"}, state.contact)
+        // nor the bill page the total of a revision the buyer has not sent (SEC-PSS-24)
+        const heldBill = billPage({orderId: prefix + "_PO"}, state.contact)
         const heldAcknowledged = page(
             "acknowledgePurchaseOrder",
             {orderId: prefix + "_PO", operationId: key(), outcome: "accept"},
@@ -544,9 +572,11 @@ feature("A signed-in contact sees only its supplier's documents; a cancel revoke
             row => !row.revokedDate
         )
         const cancelled = page("getPublishedPurchaseOrder", {token: token("PO_R2")})
-        return {home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged}
+        return {home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged, heldBill}
     },
-    then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged}) {
+    then({home, own, competitor, competitorQuote, live, cancelled, unsent, unsentId, held, heldAcknowledged, heldBill}) {
+        heldBill.order.orderId === prefix + "_PO"
+        heldBill.order.totalText == null
         held.capabilities.canAcknowledge === false
         // the order as last sent: revision 2, line 01 at 10, no added line (P17 review)
         held.order.revision === 2

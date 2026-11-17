@@ -433,13 +433,22 @@ function checkOrder(p) {
     const organizationPartyId = served(p.siteId, "supplier")
     return access.check({token: p.token, scope: "BillUpload", recordType: "Order", recordId: p.orderId, organizationPartyId})
 }
-function orderView(orderId) {
+// The order the bill page shows. Its total is the live order's, so it is left out when that is not the order the supplier
+// has (SEC-PSS-24): for a link of an earlier revision (SupplierPortal.js answers such a link nothing of the new one), and
+// while a revision the buyer applied waits for its approval (not sent yet).
+function orderView(orderId, checked) {
     const order = one("mantle.order.OrderHeader", {orderId})
+    const behind = checked?.recordRevision != null && Number(checked.recordRevision) < Number(order.orderRevision ?? 1)
+    const unsent =
+        !behind &&
+        !!ec.resource
+            .script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
+            .awaitingApproval({orderId, order})
     return {
         orderId,
         orderName: order.orderName || null,
         placedDateText: day(order.placedDate || order.entryDate),
-        totalText: order.grandTotal == null ? null : moneyText(order.grandTotal, order.currencyUomId),
+        totalText: order.grandTotal == null || behind || unsent ? null : moneyText(order.grandTotal, order.currencyUomId),
         currencyUomId: order.currencyUomId
     }
 }
@@ -478,7 +487,7 @@ function getSubmission(p) {
         submission = list.find(row => row.submissionId === p.submissionId) || null
         if (!submission) unavailable()
     }
-    return {order: orderView(checked.recordId), submissionList: list, submission}
+    return {order: orderView(checked.recordId, checked), submissionList: list, submission}
 }
 // Stage the file under PASS's media root and scan it, as Forum stages an attachment; refuse it unless it is clean. The rules
 // are the shared PortalMedia.js (F58, Customer Service P15); noun names the file in the refusals (Purchasing's quote and
