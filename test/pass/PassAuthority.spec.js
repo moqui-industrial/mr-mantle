@@ -6,6 +6,7 @@
 // registered client are spec-local.
 const SITE = "PASS_AUTHORITY_SPEC"
 const CLIENT = "paspec"
+const OTHER_SITE = "PASS_AUTHORITY_SPEC_B"
 const authority = () => ec.resource.script("component://mr-mantle/script/PassAuthority.js")
 const handle = p => authority().handle({siteId: SITE, input: {}, ...p})
 function sys(work) {
@@ -17,10 +18,11 @@ function sys(work) {
     }
 }
 // A request and response as the servlet API gives them to PassApi.js: the response keeps its status, headers and body.
-function servlet(method, path, headers = {}) {
+function servlet(method, path, headers = {}, remoteAddr = null) {
     const request = {
         requestURI: "/rest/s1/pass/v1/sites/" + SITE + "/" + path,
         method,
+        remoteAddr,
         getHeader: name => headers[String(name).toLowerCase()] ?? null,
         getParameterMap: () => ({})
     }
@@ -56,6 +58,19 @@ spec({
             call("create#mantle.public.PublicSite", {
                 siteId: SITE,
                 name: SITE,
+                state: "published",
+                registrationMode: "closed",
+                locale: "en",
+                timeZone: "UTC",
+                policyRevision: 1,
+                generation: 1
+            })
+        )
+        // a published site the spec's client does not serve (SEC-PSA-05)
+        sys(() =>
+            call("create#mantle.public.PublicSite", {
+                siteId: OTHER_SITE,
+                name: OTHER_SITE,
                 state: "published",
                 registrationMode: "closed",
                 locale: "en",
@@ -125,13 +140,59 @@ feature("a delegation needs a registered client and a good credential, and a wri
         noClient.error.code == "AuthenticationRequired"
         noClient.error.status == 401
         wrongSecret.error.status == 401
-        // the client is registered for its own sites only
-        otherSite.error.status == 401
+        // the client is registered for its own sites only: another site's call is not found (SEC-PSA-05)
+        otherSite.error.status == 404
         badCredential.error.code == "AuthenticationRequired"
         write.error.code == "Unauthorized"
         write.error.status == 403
         // an opt-out takes no session: its service checks the token
         optOut.error.code != "Unauthorized"
+    }
+})
+feature("a registered client reads only its own sites: another site's call is Not Found, not an anonymous read (SEC-PSA-05)", {
+    when() {
+        return {
+            verified: handle({operation: "getSiteInfo", siteId: OTHER_SITE, clientId: CLIENT, clientVerified: true}),
+            bySecret: handle({operation: "getSiteInfo", siteId: OTHER_SITE, clientId: CLIENT, clientSecret: "pass-authority-spec-secret"}),
+            // a wrong secret is no registered client: it reads as anyone does
+            wrongSecret: handle({operation: "getSiteInfo", siteId: OTHER_SITE, clientId: CLIENT, clientSecret: "wrong"}),
+            anonymous: handle({operation: "getSiteInfo", siteId: OTHER_SITE}),
+            own: handle({operation: "getSiteInfo", clientId: CLIENT, clientVerified: true})
+        }
+    },
+    then({verified, bySecret, wrongSecret, anonymous, own}) {
+        verified.error.status == 404
+        !verified.result
+        bySecret.error.status == 404
+        wrongSecret.result.site.siteId == OTHER_SITE
+        anonymous.result.site.siteId == OTHER_SITE
+        own.result.site.siteId == SITE
+    }
+})
+feature("the servlet counts wrong client secrets by address: past ten, a secret from there is refused, right or wrong (SEC-PSA-03)", {
+    when() {
+        const address = "203.0.113.77"
+        const secret = value => ({"x-pass-client": CLIENT, "x-pass-client-secret": value})
+        const wrong = Array.from({length: 10}, () => servlet("GET", "site", secret("guess"), address).status)
+        const right = servlet("GET", "site", secret("pass-authority-spec-secret"), address)
+        const another = servlet("GET", "site", secret("pass-authority-spec-secret"), "203.0.113.78")
+        // no secret at all is not counted
+        const none = servlet("GET", "site", {}, address)
+        return {wrong, right, another, none}
+    },
+    then({wrong, right, another, none}) {
+        // a wrong secret reads as anyone does, and is counted
+        wrong.every(status => status == 200)
+        right.status == 429
+        right.body.code == "Tarpit"
+        another.status == 200
+        none.status == 200
+    },
+    // this feature's bucket goes, so no later spec's call from the address is refused for the rest of the window
+    cleanup() {
+        const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        const buckets = [window, window - 1].map(at => ec.user.singleUseCodeHash("pass-client-secret:203.0.113.77:" + at))
+        sys(() => ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", "in", buckets).deleteAll())
     }
 })
 feature("an account action runs the account service, and a registered client's sign-in gets a working delegation", {

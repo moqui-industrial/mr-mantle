@@ -401,6 +401,13 @@ function run(p) {
             siteId,
             p.clientVerified === true,
         )
+    // SEC-PSA-05: a registered client asks only of its own sites; for another its call is not answered as an anonymous one
+    if (
+        clientId &&
+        !registered &&
+        account().clientRegistered(clientId, p.clientSecret || '', null, p.clientVerified === true)
+    )
+        fail('NotFound', 'Resource not found')
     if (registered && p.clientVerified === true)
         ec.user.context.passVerifiedClient = clientId
     // A registered deployment names its browser's address, for the account rate limits only.
