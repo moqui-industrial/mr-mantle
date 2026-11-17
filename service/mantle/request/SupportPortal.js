@@ -44,8 +44,10 @@ const customerTexts = {
 }
 // message kinds that are never the customer's: a note, an internal message, a status update
 const internalTypes = ["Comment", "Message", "StatusUpdate"]
+// RATE_SITE_LIMIT: a site's article ratings an hour, whoever sends them (SEC-PSS-25), as Marketing's anonymous writes are
 const POST_LIMIT = 30,
-    RATE_LIMIT = 30
+    RATE_LIMIT = 30,
+    RATE_SITE_LIMIT = 500
 const dayMs = 86400000
 
 const blank = value => value == null || String(value).trim() === ""
@@ -472,6 +474,14 @@ function getCustomerArticle(p) {
 function rateArticle(p) {
     throttle("article-rating", RATE_LIMIT)
     const organizationPartyId = served(p.siteId)
+    const siteAllowed = ec.service
+        .sync()
+        .throwOnError(true)
+        .name("org.moqui.public.AccountServices.record#Attempt")
+        .parameters({input: {key: "article-rating-site:" + p.siteId, limit: RATE_SITE_LIMIT, windowMillis: 3600000}})
+        .requireNewTransaction(true)
+        .call().result.allowed
+    if (!siteAllowed) fail("Tarpit", "Too many answers just now. Try again later.")
     const nonce = String(p.token || "")
     if (!/^[A-Za-z0-9_-]{24,64}$/.test(nonce)) fail("Unprocessable", "Reload the page and try again")
     const {article, source} = articleFor(organizationPartyId, p.wikiPageId)

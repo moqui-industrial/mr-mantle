@@ -276,6 +276,26 @@ spec({
     }
 })
 
+feature("a site's article ratings are bounded per hour, whoever sends them (SEC-PSS-25)", {
+    when() {
+        // the site's bucket filled to the limit for this hour (record#Attempt's, the framework's Account.js)
+        const bucketId = ec.user.singleUseCodeHash(
+            "article-rating-site:" + siteId + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 3600000)
+        )
+        svc("create#moqui.security.public.AccountAttempt", {bucketId, attemptCount: 500, expiresAt: new Date(Date.now() + 7200000)})
+        const rating = {wikiPageId: "SPP_NO_PAGE", token: "n".repeat(32), helpful: "Y"}
+        const full = page(null, "mantle.request.KnowledgeServices.rate#Article", rating)
+        ec.artifactExecution.disableAuthz()
+        find("moqui.security.public.AccountAttempt", {bucketId}).deleteAll()
+        // with room left the same rating goes on to the article's own check
+        const room = page(null, "mantle.request.KnowledgeServices.rate#Article", rating)
+        return {full, room}
+    },
+    then({full, room}) {
+        full.kind == "Tarpit"
+        room.kind == "NotFound"
+    }
+})
 feature("a contact files and sees its own cases, an administrator the customer's, the customer's own account its own", {
     when() {
         const filed = page(state.contact, S + "create#CustomerCase", {
