@@ -222,7 +222,9 @@ kit => {
             hookOf(p, p.webhookId)
             return store()
         }
-        return receipt(p, "smithy.storeWebhook", () => {
+        // the receipt's stored hash of the input leaves the secret out, as storeMirror's does (SEC-PFS-62): a short secret
+        // could be guessed against it offline, every other field being known from the webhook row
+        return receipt({...p, secret: undefined}, "smithy.storeWebhook", () => {
             if (find("moqui.resource.GitWebhook", {repositoryId: p.repositoryId}).count() >= MAX_WEBHOOKS)
                 invalid("quotaExceeded: A repository has at most " + MAX_WEBHOOKS + " webhooks")
             return store()
