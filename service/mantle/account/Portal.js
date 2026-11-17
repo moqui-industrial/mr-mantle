@@ -500,6 +500,19 @@ function stage(file, noun = "bill") {
         .script("component://mr-mantle/service/mantle/party/PortalMedia.js")
         .stage(file, noun, noun === "bill" ? "bills" : "supplier")
 }
+// At most five of a supplier's bills for one order wait for review (SEC-PSS-26): while five are neither approved nor
+// rejected (no invoice yet, or one still incoming or received), a sixth is refused, so an order's link cannot fill Accounts
+// Payable's queue. A repeat of a submission still answers the first.
+const OPEN_BILL_LIMIT = 5
+const openBillStatuses = ["InvoiceIncoming", "InvoiceReceived"]
+function openBillCount(scope, orderId) {
+    const invoiceIds = rows(SUB, {...scope, orderId}).map(row => row.invoiceId)
+    const billed = invoiceIds.filter(Boolean)
+    const waiting = billed.length
+        ? Number(find(I, {}).condition("invoiceId", "in", billed).condition("statusId", "in", openBillStatuses).count())
+        : 0
+    return invoiceIds.length - billed.length + waiting
+}
 function submitSupplierBill(p) {
     throttle()
     const checked = checkOrder(p)
@@ -513,6 +526,11 @@ function submitSupplierBill(p) {
     if (!reference || reference.length > 60) fail("Unprocessable", "Enter your bill number")
     const earlier = rows(SUB, {...scope, referenceNumber: reference})[0]
     if (earlier) return {submission: submissionView(earlier), alreadyApplied: true}
+    if (openBillCount(scope, checked.recordId) >= OPEN_BILL_LIMIT)
+        fail(
+            "Conflict",
+            "Five bills for this order are waiting for the buyer's review; send another when one of them is accepted or declined"
+        )
     const order = one("mantle.order.OrderHeader", {orderId: checked.recordId})
     let amount = null
     if (p.amount != null && String(p.amount).trim() !== "")
