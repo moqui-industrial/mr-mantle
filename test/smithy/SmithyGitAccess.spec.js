@@ -122,7 +122,7 @@ feature("the list is the caller's own and has no secret, and an account ends onl
 
 feature("an account with no password to give again signs in again instead", {
     when() {
-        // an account that signs in through a provider: no password, and no sign-in in the framework's history
+        // an account that signs in through a provider: no password, and no sign-in of this session
         lib.account(SITE, "SGA_PROVIDER", {handle: "sgaprovider"})
         const asProvider = work => {
             ec.user.internalLoginUser("SGA_PROVIDER")
@@ -154,11 +154,18 @@ feature("an account with no password to give again signs in again instead", {
             successfulLogin: "Y"
         })
         const older = add("sga-provider-3")
+        // another session's sign-in now is not this session's (SEC-PFS-63): a fresh history row alone is refused
         lib.make("moqui.security.UserLoginHistory", {
             userId: "SGA_PROVIDER",
             fromDate: ec.user.nowTimestamp,
             successfulLogin: "Y"
         })
+        const historyOnly = add("sga-provider-6")
+        // this session signs in itself (a password sign-in notes it; the account then has no password again): recent
+        const password = lib.row("moqui.security.UserAccount", {userId: "SGA_ONE"}).currentPassword
+        lib.set("moqui.security.UserAccount", {userId: "SGA_PROVIDER"}, {currentPassword: password, passwordHashType: "SHA"})
+        ec.user.loginUser("SGA_PROVIDER", "moqui")
+        lib.set("moqui.security.UserAccount", {userId: "SGA_PROVIDER"}, {currentPassword: null})
         const recent = add("sga-provider-2")
         // through a remote frontend the visitor's own sign-in counts, its delegation's issue, not the account's latest
         // anywhere (SEC-PFS-63): a delegation of ten minutes ago is refused though the account signed in just now
@@ -191,12 +198,14 @@ feature("an account with no password to give again signs in again instead", {
         return {
             stale,
             older,
+            historyOnly,
             recent,
             oldDelegation: delegated("sga-old-delegation-token-0000000000", "sga-provider-4"),
             newDelegation: delegated("sga-new-delegation-token-0000000000", "sga-provider-5")
         }
     },
-    then({stale, older, recent, oldDelegation, newDelegation}) {
+    then({stale, older, historyOnly, recent, oldDelegation, newDelegation}) {
+        historyOnly.reason == "recentSignInRequired"
         oldDelegation.reason == "recentSignInRequired"
         newDelegation.token.length > 20
         stale.kind == "AuthenticationRequired"

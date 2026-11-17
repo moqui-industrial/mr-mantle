@@ -291,8 +291,8 @@ kit => {
     /* Before a credential is made the account proves again who it is: with a password, the password (and the second
        factor's code where it has one), as Forum's setSiteRole asks; with none (it signs in through a provider), a
        sign-in within the last five minutes: through a remote frontend this visitor's own, its delegation's issue
-       (PassAuthority.js passSignedInAt, SEC-PFS-63), else by the framework's login history (in local mode the PASS
-       session's own recent sign-in is not known here). */
+       (PassAuthority.js passSignedInAt, SEC-PFS-63), else this session's own (check#RecentAuth: a password, a second
+       factor's code or a provider sign-in with its auth_time; never another session's or a login key). */
     function reauthenticate(p) {
         const account = one("moqui.security.UserAccount", {userId: ec.user.userId})
         if (!account) fail("AuthenticationRequired", "Sign in to continue")
@@ -301,9 +301,11 @@ kit => {
             const recent =
                 signedInAt != null
                     ? millis(now()) - Number(signedInAt) <= RECENT_SIGN_IN
-                    : find("moqui.security.UserLoginHistory", {userId: account.userId, successfulLogin: "Y"})
-                          .condition("fromDate", "greater", stamp(millis(now()) - RECENT_SIGN_IN))
-                          .count() > 0
+                    : ec.service
+                          .sync()
+                          .name("org.moqui.sso.RecentAuthServices.check#RecentAuth")
+                          .parameters({maxAgeSeconds: RECENT_SIGN_IN / 1000})
+                          .call()?.recent === true
             if (!recent) fail("AuthenticationRequired", "recentSignInRequired: Sign in again to change your git access")
             return
         }
