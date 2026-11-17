@@ -212,9 +212,16 @@ function read(gw, path, what) {
     )
 }
 // The label file at Shippo's label URL (a storage link that may have expired), with no Shippo credentials; or null.
-// Only an https URL, never an internal address (redirects included), as the URL is the answer's (SEC-BAP-06).
+// Only an https URL of a carrier's label host on a production instance (check#LabelUrl), never an internal address
+// (redirects included), as the URL is the answer's (SEC-BAP-06).
 function download(url) {
-    if (blank(url) || !/^https:\/\//i.test(String(url))) return null
+    if (blank(url)) return null
+    const refusal = ec.service.sync().name("mantle.account.GatewayConnectionServices.check#LabelUrl").parameter("url", String(url))
+        .call()?.refusal
+    if (refusal) {
+        ec.logger.warn("Shippo label not fetched: " + refusal)
+        return null
+    }
     try {
         const response = ec.service.rest().method("GET").uri(String(url)).timeout(TIMEOUT_SECONDS).denyInternal().call()
         if (response.getStatusCode() !== 200) return null

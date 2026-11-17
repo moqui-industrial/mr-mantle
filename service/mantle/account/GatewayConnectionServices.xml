@@ -91,4 +91,13 @@ along with this software (see the LICENSE.md file). If not, see
         <implements service="org.moqui.admin.ConfigurationServices.find#AdapterConsumers"/>
         <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('findPrinterConsumers', context))</script></actions>
     </service>
+    <service verb="check" noun="LabelUrl" authenticate="anonymous-all" allow-remote="false">
+        <description>Internal, for the label fetches (SEC-BAP-06): why the server does not fetch the label or document file
+            at url (a route segment's labelUrl, returnLabelUrl or invoice URL), or empty refusal when it may: an https URL
+            only, and on a production instance (instance_purpose) a host one of the registered shipping gateway types
+            names for its label files only.</description>
+        <in-parameters><parameter name="url" allow-html="any"/></in-parameters>
+        <out-parameters><parameter name="refusal"/></out-parameters>
+        <actions><script>ec.context.putAll(ec.resource.script('component://mr-mantle/service/mantle/account/GatewayConnections.js').execute('checkLabelUrl', context))</script></actions>
+    </service>
 </services>

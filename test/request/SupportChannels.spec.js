@@ -622,7 +622,7 @@ feature(
     }
 )
 
-feature("a case a queue's form filed is marked sender not verified until a reply comes from its address (SEC-PSS-28)", {
+feature("a case a queue's form filed is marked sender not verified until a reply comes from its address (SEC-PSS-28); a site's form takes its own organization's token only (SEC-PSS-66)", {
     when() {
         run(state.admin, S + "save#ServiceRoute", {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", rateLimitPerHour: 30})
         const issued = run(state.admin, R + "create#IntakeToken", {requestCategoryId: state.queue})
@@ -634,6 +634,19 @@ feature("a case a queue's form filed is marked sender not verified until a reply
             requestName: "SCH typed address",
             description: "Typed into the form"
         })
+        // a site's form takes its own organization's queue tokens only (SEC-PSS-66)
+        const site = organizationPartyId =>
+            run("john.doe", R + "create#IntakeRequest", {
+                token: issued.token,
+                organizationPartyId,
+                firstName: "Dana",
+                lastName: "Spec",
+                emailAddress: "dana.sch@example.com",
+                requestName: "SCH site form",
+                description: "From a site"
+            })
+        const otherSite = site(otherOrg)
+        const ownSite = site(org)
         run(state.admin, R + "remove#IntakeToken", {requestCategoryId: state.queue})
         const profile = profileOf(filed.requestId)
         const marked = one(REQUEST, {requestId: filed.requestId})?.senderVerified
@@ -643,6 +656,8 @@ feature("a case a queue's form filed is marked sender not verified until a reply
         )
         return {
             filed,
+            otherSite,
+            ownSite,
             profile,
             marked,
             mailed: one(REQUEST, {requestId: state.mailCase})?.senderVerified ?? null,
@@ -650,8 +665,10 @@ feature("a case a queue's form filed is marked sender not verified until a reply
             after: one(REQUEST, {requestId: filed.requestId})?.senderVerified
         }
     },
-    then({filed, profile, marked, mailed, reply, after}) {
+    then({filed, otherSite, ownSite, profile, marked, mailed, reply, after}) {
         filed.requestId != null && profile != null
+        otherSite.error.includes("not available") && otherSite.requestId == null
+        ownSite.error == "" && ownSite.requestId != null
         marked == "N"
         // a case that came by mail has no mark
         mailed == null
