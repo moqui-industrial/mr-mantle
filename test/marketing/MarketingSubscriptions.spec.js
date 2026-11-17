@@ -478,7 +478,7 @@ feature("a checkout's store-news choice is a request of the audience: pending at
 })
 
 feature(
-    "the preferences page's Marketing context: the offered lists with their state; off keeps the reason, on asks to confirm",
+    "the preferences page's Marketing context: the offered lists with their state; off keeps the reason; a link turns on only its own undo, which asks to confirm (SEC-PSS-44)",
     {
         when() {
             // the turning on is evidence of now, later than feature two's withdrawal (the spec's clock moves on)
@@ -513,6 +513,11 @@ feature(
             )
             const gardenAfter = statusOf(list.garden, partyId)
             const kitchenAfter = statusOf(list.kitchen, partyId)
+            // the link's own unsubscribe of garden, undone within the day (a moment later, so the turning on is the newer evidence)
+            ec.user.setEffectiveTime(Date.now() + 2000)
+            const undoShown = hub("get#EmailPreferences", {})
+            hub("store#EmailPreferences", {choices: JSON.stringify({marketing: {topics: {[list.garden]: true}}})})
+            const gardenUndone = statusOf(list.garden, partyId)
             const leave = hub("store#EmailPreferences", {
                 choices: JSON.stringify({marketing: {leaveOrganization: true, reason: "other", reasonText: "Moving away"}})
             })
@@ -527,6 +532,8 @@ feature(
                 withdrawal: withdrawal || {},
                 gardenAfter,
                 kitchenAfter,
+                undoShown,
+                gardenUndone,
                 kitchenLeft: statusOf(list.kitchen, partyId),
                 mailed: tokenTo(shared.newcomer) != null,
                 leave,
@@ -539,7 +546,11 @@ feature(
             !r.shown.lists.some(l => l.contactListId === list.garden)
             r.withdrawal.comments === "Too frequent"
             r.gardenAfter === "CLPT_UNSUBSCRIBED"
-            r.kitchenAfter === "CLPT_PENDING"
+            // a list the link did not leave is not turned on by it: that needs the page's sign-in
+            r.kitchenAfter === "CLPT_UNSUBSCRIBED"
+            r.shown.marketing.topics.find(t => t.contactListId === list.kitchen).canSubscribe === false
+            r.undoShown.marketing.topics.find(t => t.contactListId === list.garden).canSubscribe === true
+            r.gardenUndone === "CLPT_PENDING"
             r.mailed
             r.scoped.length === 1
             r.scoped[0].statusId === "PconWithdrawn"

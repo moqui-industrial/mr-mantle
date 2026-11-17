@@ -38,7 +38,9 @@ along with this software (see the LICENSE.md file). If not, see
         Unsubscribe links: create#UnsubscribeToken makes a random token (ec.user.randomString(32): 32 URL-safe characters,
         192 bits) for a party on a list, usually one per message sent, and keeps only its hash in
         mantle.marketing.contact.ContactListToken (tokenHash, ec.user.singleUseCodeHash), so the stored rows give no working
-        links; thruDate revokes or expires one. The public page /u/<token> (a token-route whose check is
+        links; thruDate revokes or expires one, and every link expires (its list's linkValidDays, else 365 days). A link
+        unsubscribes; it subscribes the party again only to a list it unsubscribed itself, within a day of that (the page's
+        undo), and any other subscription needs the preference page's sign-in (SEC-PSS-44, ListLinks.js). The public page /u/<token> (a token-route whose check is
         check#UnsubscribeToken: a known token is let through, an ended one only to say so) reads resolve#UnsubscribeToken
         (read only, so a mail scanner fetching the link changes nothing) and posts unsubscribe#ContactListParty or
         apply#UnsubscribePreferences. These run for an anonymous visitor (authenticate anonymous-view and anonymous-all,
@@ -1210,6 +1212,9 @@ along with this software (see the LICENSE.md file). If not, see
             }
             if (tokenRow != null) {
                 tokenRow.set('usedDate', now)
+                // the lists this link unsubscribed, which it may subscribe again within a day (SEC-PSS-44)
+                ec.resource.script('component://mr-mantle/service/mantle/party/ListLinks.js').note(tokenRow,
+                        changedList.filter((row) => ['CLPT_UNSUBSCRIBED', 'CLPT_UNSUBS_PENDING'].includes(row.statusId)).map((row) => row.contactListId))
                 tokenRow.update()
             }
         ]]></script></actions>
@@ -1297,7 +1302,7 @@ along with this software (see the LICENSE.md file). If not, see
             ContactListCommStatus fills the list, party, address and communication event. The address defaults to the
             party's preferredContactMechId on the list, the purpose to PcpSms for a list of phone numbers, else
             PcpMarketingEmail. baseUrl defaults to the web request's root URL when there is one. thruDate (or validDays)
-            ends it; with neither it does not expire.
+            ends it; with neither, the list's linkValidDays, else 365 days (SEC-PSS-44).
         </description>
         <in-parameters>
             <parameter name="contactListId"/>
@@ -1351,7 +1356,9 @@ along with this software (see the LICENSE.md file). If not, see
             if (contactMechId && ec.entity.find('mantle.party.contact.PartyContactMech').condition({partyId: partyId, contactMechId: contactMechId}).count() === 0) {
                 ec.message.addError(`Contact information ${contactMechId} is not party ${partyId}'s`); return }
             if (!purposeEnumId) purposeEnumId = list.contactMechTypeEnumId === 'CmtTelecomNumber' ? 'PcpSms' : 'PcpMarketingEmail'
-            if (!thruDate && validDays) thruDate = new Date(toMillis(ec.user.nowTimestamp) + Number(validDays) * 86400000)
+            // a link expires: the days asked, else the list's linkValidDays, else a year (SEC-PSS-44)
+            if (!thruDate) thruDate = new Date(toMillis(ec.user.nowTimestamp) + Number(validDays ||
+                    ec.resource.script('component://mr-mantle/service/mantle/party/ListLinks.js').linkDays(list)) * 86400000)
             token = ec.user.randomString(32)
             contactListTokenId = ec.service.sync().name('create#mantle.marketing.contact.ContactListToken').parameters({
                 tokenHash: ec.user.singleUseCodeHash(token), contactListId: contactListId, partyId: partyId, contactMechId: contactMechId,
@@ -1448,7 +1455,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="listList" type="List"><parameter name="list" type="Map">
                 <parameter name="contactListId"/><parameter name="contactListName"/><parameter name="description"/>
                 <parameter name="statusId"/><parameter name="subscribed" type="Boolean"/><parameter name="unsubscribePending" type="Boolean"/>
-                <parameter name="isTokenList" type="Boolean"/></parameter></parameter>
+                <parameter name="isTokenList" type="Boolean"/><parameter name="undoable" type="Boolean"><description>The link may
+                subscribe the party again: it unsubscribed it from this list less than a day ago (SEC-PSS-44)</description></parameter>
+            </parameter></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const toMillis = (value) => {
@@ -1504,7 +1513,8 @@ along with this software (see the LICENSE.md file). If not, see
             }
             listList = (state.listList || []).filter((entry) => entry.isCurrent && !entry.isArchived).map((entry) => ({contactListId: entry.contactListId,
                 contactListName: entry.contactListName, description: entry.description, statusId: entry.statusId, subscribed: entry.subscribed,
-                unsubscribePending: entry.unsubscribePending, isTokenList: entry.contactListId === list.contactListId}))
+                unsubscribePending: entry.unsubscribePending, isTokenList: entry.contactListId === list.contactListId,
+                undoable: ec.resource.script('component://mr-mantle/service/mantle/party/ListLinks.js').undoable(tokenRow, entry.contactListId)}))
             listList.sort((a, b) => (b.isTokenList ? 1 : 0) - (a.isTokenList ? 1 : 0))
         ]]></script></actions>
     </service>
@@ -1517,7 +1527,9 @@ along with this software (see the LICENSE.md file). If not, see
             own transaction, with source PcsEmailLink; with unsubscribeAll, all marketing email instead
             (unsubscribe#ContactListParty allMarketing). The token is checked first. reasonText goes on the consent rows of
             the lists unsubscribed (their comments). A list that requires confirmation waits for it (CLPT_UNSUBS_PENDING,
-            the verification email with its link under baseUrl). Subscribing again here is the page's undo.
+            the verification email with its link under baseUrl). Subscribing again here is the page's undo, only of a list
+            this link unsubscribed less than a day ago; any other subscription is skipped (failedContactListIds,
+            signInRequired): it needs the preference page's sign-in (SEC-PSS-44, ListLinks.js).
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
@@ -1533,6 +1545,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="marketingWithdrawn" type="Boolean"/>
             <parameter name="unsubscribePending" type="Boolean"/>
             <parameter name="verifyEmailSent" type="Boolean"/>
+            <parameter name="signInRequired" type="Boolean"><description>A subscription asked was not this link's undo and was
+                skipped: it needs the preference page's sign-in (SEC-PSS-44)</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
             const toMillis = (value) => {
@@ -1543,6 +1557,9 @@ along with this software (see the LICENSE.md file). If not, see
                 return Number.isNaN(number) ? new Date(String(value)).getTime() : number
             }
             changedList = []; failedContactListIds = []; marketingWithdrawn = false; unsubscribePending = false; verifyEmailSent = false
+            signInRequired = false
+            const links = ec.resource.script('component://mr-mantle/service/mantle/party/ListLinks.js')
+            const unsubscribedIds = [], resubscribedIds = []
             // every lookup counts against the requester first, as a link's (ExternalAccess.js tokenCapability) does, so a
             // requester over its limit is refused whether its token is good or not (SEC-PSS-44)
             const lookups = ec.service.sync().name('org.moqui.public.AccountServices.record#Attempt').parameters({input: {key: 'list-token:' +
@@ -1590,6 +1607,13 @@ along with this software (see the LICENSE.md file). If not, see
                     continue
                 }
                 if (choice.subscribed ? entry.subscribed : ['CLPT_UNSUBSCRIBED', 'CLPT_UNSUBS_PENDING'].includes(entry.statusId)) continue
+                // a link subscribes again only a list it unsubscribed itself, within a day (SEC-PSS-44)
+                if (choice.subscribed && !links.undoable(tokenRow, id)) {
+                    ec.logger.info(`Unsubscribe preferences: contact list ${id} was not unsubscribed by token ${tokenRow.contactListTokenId} in the last day; subscribing needs a sign-in`)
+                    failedContactListIds.push(id)
+                    signInRequired = true
+                    continue
+                }
                 try {
                     const out = ec.service.sync().name('mantle.party.ConsentServices.set#ContactListPartySubscription').parameters({contactListId: id,
                         partyId: tokenRow.partyId, subscribe: choice.subscribed, contactMechId: tokenRow.contactMechId || null,
@@ -1599,6 +1623,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (out.statusId === 'CLPT_UNSUBS_PENDING') unsubscribePending = true
                     if (out.verifyEmailSent) verifyEmailSent = true
                     if (out.changed) changedList.push({contactListId: id, statusId: out.statusId, previousStatusId: out.previousStatusId})
+                    if (out.changed) (choice.subscribed ? resubscribedIds : unsubscribedIds).push(id)
                 } catch (err) {
                     ec.message.clearErrors()
                     ec.logger.error(`Unsubscribe preferences: contact list ${id} for token ${tokenRow.contactListTokenId} failed: ${String(err && err.message ? err.message : err).trim()}`)
@@ -1606,6 +1631,7 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
             tokenRow.set('usedDate', ec.user.nowTimestamp)
+            links.note(tokenRow, unsubscribedIds, resubscribedIds)
             tokenRow.update()
         ]]></script></actions>
     </service>

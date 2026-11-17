@@ -1486,6 +1486,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="defaultDeliveryEnumId" type="id"><description>A new member's delivery of a mailbox's posts (empty
             is the Inbox)</description></field>
         <field name="archivedDate" type="date-time"><description>An archived list takes no posts or members</description></field>
+        <field name="linkValidDays" type="number-integer" enable-audit-log="update"><description>How many days a list link (an
+            unsubscribe token, ContactListToken) of a message of this list works; empty is 365 (SEC-PSS-44,
+            ListLinks.js)</description></field>
         <!-- impl-marketing P3 (design-marketing §4 ListDetail): a single-use list is reserved atomically by the first released send,
             which keeps it while any hand-off is accepted or uncertain; a cancellation before any hand-off releases it, and the send's
             completion consumes it (mantle.marketing.AudienceServices reserve#SingleUseList, release#SingleUseList; the send is P9's) -->
@@ -1622,8 +1625,11 @@ along with this software (see the LICENSE.md file). If not, see
             Unsubscribe page and of the List-Unsubscribe header's one-click POST (RFC 8058), usually one per message sent
             (communicationEventId, messageId). The token is random (32 URL-safe characters, 192 bits) and is given only
             when it is created; this keeps its hash (tokenHash), so reading the rows gives no working links. A token ends
-            at thruDate (revoked or expired); usedDate is its last use. mantle.party.ConsentServices create#UnsubscribeToken,
-            resolve#UnsubscribeToken, apply#UnsubscribePreferences and unsubscribe#ContactListParty.</description>
+            at thruDate (revoked or expired; its list's linkValidDays, else 365 days, after it is made); usedDate is its last
+            use. A link unsubscribes; it subscribes the party again only to a list it unsubscribed itself, within a day of that
+            (unsubscribedListIds, unsubscribedDate; ListLinks.js, SEC-PSS-44). mantle.party.ConsentServices
+            create#UnsubscribeToken, resolve#UnsubscribeToken, apply#UnsubscribePreferences and
+            unsubscribe#ContactListParty.</description>
         <field name="contactListTokenId" type="id" is-pk="true"/>
         <field name="tokenHash" type="id-long"/>
         <field name="contactListId" type="id"/>
@@ -1636,6 +1642,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="createdDate" type="date-time" default="ec.user.nowTimestamp"/>
         <field name="usedDate" type="date-time"/>
         <field name="thruDate" type="date-time"/>
+        <field name="unsubscribedListIds" type="text-long"><description>The lists this link unsubscribed the party from, which
+            it may subscribe again within a day of unsubscribedDate (comma separated)</description></field>
+        <field name="unsubscribedDate" type="date-time"><description>When this link last unsubscribed the party from a list</description></field>
         <relationship type="one" related="mantle.marketing.contact.ContactList" short-alias="contactList"/>
         <relationship type="one" related="mantle.party.Party" short-alias="party"/>
         <relationship type="one" related="mantle.party.contact.ContactMech" short-alias="contactMech"/>
