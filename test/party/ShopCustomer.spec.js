@@ -337,6 +337,47 @@ feature("reorder rebuilds the lines in a cart at today's price; addresses are th
     }
 })
 
+feature("an account's address and card setup posts count against its requester (SEC-PSS-67)", {
+    when() {
+        // a requester of this feature's own, filled to the limit for this window (record#Attempt's bucket, Account.js)
+        const requester = "spec:shop-customer-throttle"
+        const bucketId = ec.user.singleUseCodeHash(
+            "shop-account:" + requester + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        )
+        system(() =>
+            ec.service
+                .sync()
+                .name("create#moqui.security.public.AccountAttempt")
+                .parameters({bucketId, attemptCount: 30, expiresAt: new Date(Date.now() + 1200000)})
+                .requireNewTransaction(true)
+                .call()
+        )
+        const asRequester = (service, input) => {
+            login(ids.buyer)
+            ec.user.context.passRequester = requester
+            try {
+                ec.service.sync().name(A + service).parameters({input: Object.assign({siteId: ids.site}, input)}).call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : "done"
+            } catch (error) {
+                return String(error.message || error)
+            } finally {
+                ec.user.context.remove("passRequester")
+                ec.message.clearErrors()
+                login("john.doe")
+            }
+        }
+        const address = asRequester("store#Address", {address1: "9 Limit Lane", city: "Springfield", postalCode: "62701"})
+        const setup = asRequester("begin#PaymentMethodSetup", {})
+        const finish = asRequester("finish#PaymentMethodSetup", {setupReference: "x"})
+        system(() => ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", bucketId).deleteAll())
+        return {address, setup, finish}
+    },
+    then({address, setup, finish}) {
+        address.includes("RATE_LIMITED")
+        setup.includes("RATE_LIMITED")
+        finish.includes("RATE_LIMITED")
+    }
+})
 feature("a card is added through the gateway's hosted setup once; ending one names the recurring order it pays", {
     when() {
         const begun = op(ids.buyer, A + "begin#PaymentMethodSetup", {})
