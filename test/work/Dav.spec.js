@@ -64,7 +64,7 @@ feature("a user with an app password, a default calendar with an event, a task a
                 username: "dv.ana", newPassword: "moqui1!!", newPasswordVerify: "moqui1!!", timeZone: "America/Chicago" }).userId
         login("dv.ana", "moqui1!!")
         try {
-            s.password = call("org.moqui.impl.UserServices.create#UserAppPassword", { name: "Ana's phone" }).password
+            s.password = call("org.moqui.impl.UserServices.create#UserAppPassword", { name: "Ana's phone", scope: "dav" }).password
             s.calendarId = call("mantle.work.CalendarServices.ensure#UserDefaultCalendar", {}).calendarId
             s.eventId = call("mantle.work.EventServices.create#Event", { workEffortName: "Planning review", calendarId: s.calendarId,
                     statusId: "WeApproved", estimatedStartDate: new Date(dayStart + 10 * hour), estimatedCompletionDate: new Date(dayStart + 11 * hour) }).workEffortId
@@ -373,7 +373,7 @@ feature("an attendee's phone reads an invitation put in their own calendar, is r
         login("dv.ben", "moqui1!!")
         let benPassword, benCalendarId, added
         try {
-            benPassword = call("org.moqui.impl.UserServices.create#UserAppPassword", { name: "Ben's phone" }).password
+            benPassword = call("org.moqui.impl.UserServices.create#UserAppPassword", { name: "Ben's phone", scope: "dav" }).password
             benCalendarId = call("mantle.work.CalendarServices.ensure#UserDefaultCalendar", {}).calendarId
             added = call("mantle.work.CalendarServices.add#CalendarEvent", { calendarId: benCalendarId, workEffortId: eventId }).added
         } finally { login("john.doe") }

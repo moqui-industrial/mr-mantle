@@ -98,6 +98,8 @@ const shippingTypes = {
         ),
         // one host for test and live: the token decides, and the gateway's own test mode says which it is
         hosts: {"api.goshippo.com": ""},
+        // where its label files are (an answer's label_url, a presigned storage link; SEC-BAP-06)
+        labelHosts: ["shippo-delivery.s3.amazonaws.com", "shippo-delivery-east.s3.amazonaws.com", "deliver.goshippo.com"],
         address: "https://api.goshippo.com",
         needs: "its API base and API token (the password)",
         complete: remote => !!text(remote.sendUrl) && !!text(remote.password)
@@ -799,6 +801,22 @@ function findRemoteConsumers(p) {
     return {consumerList: found}
 }
 // find#PrinterConsumers: the facilities that print a kind of document on a printer, those of the caller's organizations.
+// check#LabelUrl (SEC-BAP-06): why the server does not fetch the label or document file at `url` (a route segment's
+// labelUrl, returnLabelUrl or invoice URL, which a carrier's answer or a screen's user wrote), or null: an https URL only,
+// and on a production instance one of a registered carrier's label hosts only, so the URL never reaches another server.
+function checkLabelUrl(p) {
+    const url = text(p.url)
+    if (!/^https:\/\//i.test(url)) return {refusal: "the label URL is not an https URL"}
+    if (!production()) return {refusal: null}
+    const host = hostOf(url)
+    const hosts = Object.values(shippingTypes).flatMap(type => type.labelHosts || [])
+    return {
+        refusal: hosts.includes(host)
+            ? null
+            : "a label is fetched only from a carrier's label host (" + hosts.join(", ") + "), not " + (host || "there")
+    }
+}
+
 function findPrinterConsumers(p) {
     lib.requireView(VIEW, MANAGE)
     const networkPrinterId = text(p.connectionKey)
@@ -832,7 +850,7 @@ function findPrinterConsumers(p) {
     return {consumerList: found}
 }
 
-const operations = {runGatewayConnectionAdapter, storePaymentGatewayOrganization, findRemoteConsumers, findPrinterConsumers}
+const operations = {runGatewayConnectionAdapter, storePaymentGatewayOrganization, findRemoteConsumers, findPrinterConsumers, checkLabelUrl}
 ;({
     execute: (op, parameters) => {
         if (!Object.hasOwn(operations, op)) throw new Error("Unknown gateway connection operation " + op)
