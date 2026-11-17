@@ -769,3 +769,50 @@ feature("a guest's order link files a case, a return and a cancel request for it
         r.noLink.kind === "AuthenticationRequired"
     }
 })
+
+feature("an article's rating takes only the nonce the server signed for that view of that article (SEC-PSS-25)", {
+    when() {
+        const W = "org.moqui.resource.WikiServices."
+        const K = "mantle.request.KnowledgeServices."
+        run("john.doe", W + "create#WikiSpace", {wikiSpaceId: "SPPHELP", description: "Support portal spec help"})
+        const article = name => {
+            const out = run("john.doe", W + "update#WikiPage", {wikiSpaceId: "SPPHELP", parentPath: "help", pageName: name,
+                pageText: name + " in five steps."})
+            run("john.doe", W + "set#PublishedVersion", {wikiPageId: out.wikiPageId, publishedVersionName: out.versionName})
+            return out.wikiPageId
+        }
+        const pairing = article("SPP pairing"),
+            battery = article("SPP battery")
+        run(state.admin, K + "save#ServiceKnowledgeSource", {
+            organizationPartyId: org,
+            wikiSpaceId: "SPPHELP",
+            pagePathPrefix: "help",
+            audienceEnumId: "SkaPublic",
+            localeLanguage: "en"
+        })
+        const read = page(null, K + "get#CustomerArticle", {wikiPageId: pairing})
+        const other = page(null, K + "get#CustomerArticle", {wikiPageId: battery})
+        const nonce = String(read.nonce || "")
+        const rate = token => page(null, K + "rate#Article", {wikiPageId: pairing, token, helpful: "Y"})
+        const edited = nonce.slice(0, -1) + (nonce.endsWith("A") ? "B" : "A")
+        return {
+            read,
+            rated: rate(nonce),
+            again: rate(nonce),
+            unsigned: rate("n".repeat(32)),
+            otherArticle: rate(String(other.nonce || "")),
+            edited: rate(edited),
+            otherView: rate("x".repeat(24) + nonce.slice(24))
+        }
+    },
+    then({read, rated, again, unsigned, otherArticle, edited, otherView}) {
+        read.article.title != null
+        rated.alreadyApplied === false
+        rated.receipt.helpful === true
+        again.alreadyApplied === true
+        unsigned.kind === "Unprocessable"
+        otherArticle.kind === "Unprocessable"
+        edited.kind === "Unprocessable"
+        otherView.kind === "Unprocessable"
+    }
+})

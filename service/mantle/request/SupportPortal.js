@@ -450,6 +450,21 @@ function articleFor(organizationPartyId, wikiPageId) {
         unavailable()
     return {article, source, customer}
 }
+// A page view's rating nonce (SEC-PSS-25): a random view id and the server's grant for the site, the article and that id,
+// good for an hour (ec.user.serverGrant, keyed by the server's own secret); rate#Article takes only one the server made.
+const NONCE_PURPOSE = "article-rating"
+function articleNonce(siteId, wikiPageId) {
+    const view = ec.user.randomString(24)
+    return view + "." + ec.user.serverGrant(NONCE_PURPOSE, String(siteId || "") + ":" + wikiPageId + ":" + view, 3600)
+}
+function nonceValid(nonce, siteId, wikiPageId) {
+    const at = nonce.indexOf(".")
+    const view = at < 0 ? "" : nonce.slice(0, at)
+    return (
+        /^[A-Za-z0-9_-]{24}$/.test(view) &&
+        ec.user.checkServerGrant(NONCE_PURPOSE, String(siteId || "") + ":" + wikiPageId + ":" + view, nonce.slice(at + 1))
+    )
+}
 function getCustomerArticle(p) {
     const organizationPartyId = served(p.siteId)
     const {article, customer} = articleFor(organizationPartyId, p.wikiPageId)
@@ -465,11 +480,12 @@ function getCustomerArticle(p) {
             url
         },
         organizationName: cases.partyName(organizationPartyId),
-        nonce: ec.user.randomString(32),
+        nonce: articleNonce(p.siteId, article.wikiPageId),
         capabilities: {canRate: true, canCreateCase: customer && offeredQueues(organizationPartyId).length > 0}
     }
 }
-// rate#Article: helpful or not with an optional comment, once per page view (the view's nonce; a repeat answers the first),
+// rate#Article: helpful or not with an optional comment, once per page view (the view's nonce, signed by the server for the
+// site and article; a repeat answers the first),
 // limited per requester; an AfsCustomer ArticleFeedback for the source's organization, which P12's review reads.
 function rateArticle(p) {
     throttle("article-rating", RATE_LIMIT)
@@ -483,8 +499,9 @@ function rateArticle(p) {
         .call().result.allowed
     if (!siteAllowed) fail("Tarpit", "Too many answers just now. Try again later.")
     const nonce = String(p.token || "")
-    if (!/^[A-Za-z0-9_-]{24,64}$/.test(nonce)) fail("Unprocessable", "Reload the page and try again")
+    if (!nonce || nonce.length > 200) fail("Unprocessable", "Reload the page and try again")
     const {article, source} = articleFor(organizationPartyId, p.wikiPageId)
+    if (!nonceValid(nonce, p.siteId, article.wikiPageId)) fail("Unprocessable", "Reload the page and try again")
     const nonceDigest = ec.user.singleUseCodeHash(nonce + ":" + article.wikiPageId)
     const earlier = one(FEEDBACK, {nonceDigest})
     if (earlier)
