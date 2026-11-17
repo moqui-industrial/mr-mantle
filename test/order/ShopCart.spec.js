@@ -1,6 +1,7 @@
 // Shop's carts (mr-pass impl-shop P4; mantle.order.ShopCartServices over ShopCart.js; design-shop §4.2, §6 Cart, §7.1): a
 // cart is reached only by the session's capability or the signed-in account's own, never by an order id; a shopper's input
-// sets no price, customer, store or status (the line has the store authority's price, the part a guest party); a change
+// sets no price, customer, store or status (the line has the store authority's price; a guest's part has no customer party
+// until its checkout begins, SEC-PSS-05); a store's new guest carts an hour are its setting; a change
 // naming an older revision is refused and an operation id answers once; a code is the store's and every refusal reads the
 // same; sign-in merges a proven guest cart into the account's cart once; another store's or currency's cart is apart;
 // sign-out rotates the account's capabilities; merge#Parties moves a cart's access with its party (F23). Standalone:
@@ -180,8 +181,8 @@ feature("a guest's first add makes the cart with a capability; the input sets no
         added.result.summary.itemCount == 2
         access.capabilityDigest != added.result.token
         !access.customerPartyId
-        part.customerPartyId == access.guestPartyId
-        part.customerPartyId != state.johnPartyId
+        !access.guestPartyId
+        !part.customerPartyId
         order.productStoreId == ids.store
         order.currencyUomId == "USD"
         order.statusId == "OrderOpen"
@@ -191,7 +192,55 @@ feature("a guest's first add makes the cart with a capability; the input sets no
         noToken.result.cart.empty == true
         orderIdOnly.error.includes("NOT_AVAILABLE")
         !JSON.stringify(again.result).includes(access.orderId)
-        !JSON.stringify(again.result).includes(access.guestPartyId)
+    }
+})
+
+feature("a guest's cart has no party until its checkout begins, which makes its guest party and keeps its code (SEC-PSS-05)", {
+    when() {
+        const added = cart("add#CartItem", {productId: ids.book, quantity: "1"})
+        const token = added.result?.token
+        const coded = cart("apply#PromoCode", {token, promoCode: ids.code, expectedRevision: added.result?.cart.revision})
+        const digest = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").tokenDigest(token)
+        const accessOf = () => one("mantle.order.StoreCartAccess", {capabilityDigest: digest})
+        const before = accessOf()
+        const partOf = () => list("mantle.order.OrderPart", {orderId: before.orderId})[0]
+        const partBefore = partOf()
+        logout()
+        ec.message.pushErrors()
+        let begun
+        try {
+            begun = ec.service
+                .sync()
+                .name("mantle.order.ShopCheckoutServices.begin#Checkout")
+                .parameters({input: {siteId: ids.site, token}})
+                .call()?.result
+            begun = ec.message.hasError() ? {error: ec.message.getErrorsString()} : begun
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            login("john.doe")
+        }
+        const after = accessOf()
+        const partAfter = partOf()
+        const guest = after?.guestPartyId ? one("mantle.party.Person", {partyId: after.guestPartyId}) : null
+        const roles = after?.guestPartyId ? list("mantle.party.PartyRole", {partyId: after.guestPartyId}) : []
+        const checkout = list("mantle.order.StoreCheckout", {cartAccessId: before.cartAccessId})[0]
+        const viewed = cart("get#Cart", {token})
+        return {coded, before, partBefore, begun, after, partAfter, guest, roles, checkout, viewed}
+    },
+    then({coded, before, partBefore, begun, after, partAfter, guest, roles, checkout, viewed}) {
+        coded.result.cart.totals.discounts.amount == "-2.00"
+        !before.guestPartyId
+        !partBefore.customerPartyId
+        !begun.error
+        !!after.guestPartyId
+        partAfter.customerPartyId == after.guestPartyId
+        !after.customerPartyId
+        guest.firstName == "Guest"
+        roles.map(role => role.roleTypeId) == ["Customer"]
+        checkout.customerPartyId == after.guestPartyId
+        viewed.result.cart.totals.discounts.amount == "-2.00"
+        !JSON.stringify(viewed.result).includes(after.guestPartyId)
     }
 })
 
@@ -396,18 +445,27 @@ function bucket(key, windowMillis, count) {
                 .call()
     })
 }
-feature("a site's new guest carts are bounded per hour, whatever the requester; an account's cart is not (SEC-PSS-05)", {
+feature("a store's new guest carts an hour are its setting, else 1000, whatever the requester; not an account's (SEC-PSS-05)", {
     when() {
-        bucket("cart-site:" + ids.euroSite, 3600000, 1000)
-        const guest = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"})
-        const account = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"}, "john.doe")
-        bucket("cart-site:" + ids.euroSite, 3600000, 0)
-        const after = cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"})
-        return {guest, account, after}
+        const key = "cart-store:" + ids.euroStore
+        const add = username => cart("add#CartItem", {siteId: ids.euroSite, productId: ids.mug, quantity: "1"}, username)
+        const setting = {productStoreId: ids.euroStore, settingTypeEnumId: "PsstGuestCartsHourly", fromDate: new Date(0)}
+        system(() => make(S + "ProductStoreSetting", Object.assign({settingValue: "5"}, setting)))
+        bucket(key, 3600000, 5)
+        const capped = add()
+        const account = add("john.doe")
+        system(() => call("delete#" + S + "ProductStoreSetting", setting))
+        bucket(key, 3600000, 5)
+        const unset = add()
+        bucket(key, 3600000, 1000)
+        const full = add()
+        bucket(key, 3600000, 0)
+        return {capped, account, unset, full}
     },
-    then({guest, account, after}) {
-        guest.error.includes("RATE_LIMITED")
+    then({capped, account, unset, full}) {
+        capped.error.includes("RATE_LIMITED")
         account.result.cart.items.length >= 1
-        after.result.token.length == 48
+        unset.result.token.length == 48
+        full.error.includes("RATE_LIMITED")
     }
 })

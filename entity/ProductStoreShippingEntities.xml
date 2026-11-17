@@ -61,6 +61,9 @@
                     enumId="PsstTaxDisplay" enumTypeId="ProductStoreSettingType"/>
             <moqui.basic.Enumeration description="Tax origin (a fulfillment facility of the store)"
                     enumId="PsstTaxOrigin" enumTypeId="ProductStoreSettingType"/>
+            <!-- SEC-PSS-05: Shop's new guest carts an hour for the store (ShopCart.js createCart) -->
+            <moqui.basic.Enumeration description="Shop: new guest carts an hour (a whole number; default 1000)"
+                    enumId="PsstGuestCartsHourly" enumTypeId="ProductStoreSettingType"/>
         </seed-data>
     </entity>
 </entities>

@@ -456,10 +456,12 @@ General Order Placement and eCommerce Usage
                 </if>
             </else></if>
 
+            <!-- a sales line's cost snapshot; a part with no customer yet (a guest's Shop cart before its checkout, SEC-PSS-05) is a
+                sales part of an internal seller -->
             <script>
                 const current=ec.entity.find('mantle.order.OrderItem').condition({orderId:orderId,orderItemSeqId:orderItemSeqId}).disableAuthz().one()
                 const part=current?ec.entity.find('mantle.order.OrderPart').condition({orderId:orderId,orderPartSeqId:orderPartSeqId || current.orderPartSeqId}).disableAuthz().one():null
-                const sales=part &amp;&amp; ec.entity.find('mantle.party.PartyRole').condition({partyId:part.vendorPartyId,roleTypeId:'OrgInternal'}).disableAuthz().one() &amp;&amp; !ec.entity.find('mantle.party.PartyRole').condition({partyId:part.customerPartyId,roleTypeId:'OrgInternal'}).disableAuthz().one()
+                const sales=part &amp;&amp; ec.entity.find('mantle.party.PartyRole').condition({partyId:part.vendorPartyId,roleTypeId:'OrgInternal'}).disableAuthz().one() &amp;&amp; !(part.customerPartyId &amp;&amp; ec.entity.find('mantle.party.PartyRole').condition({partyId:part.customerPartyId,roleTypeId:'OrgInternal'}).disableAuthz().one())
                 productStandardCostId=current?.productStandardCostId || null
                 const changed=current &amp;&amp; (productId!==current.productId || (quantityUomId &amp;&amp; quantityUomId!==current.quantityUomId) || orderPartSeqId!==current.orderPartSeqId)
                 if(sales &amp;&amp; changed) {

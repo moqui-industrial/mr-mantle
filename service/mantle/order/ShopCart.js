@@ -12,21 +12,26 @@
  *   never a price, customer, store, status or adjustment. Prices are the authority's (get#StoreProductPrice through
  *   ShopCatalog.js), set on each line as it is added or changed; promotions are Mantle's (add#/remove#OrderPromoCode and
  *   the order's own re-apply).
- * - The part always carries a customer party: the signed-in account's, else an anonymous guest party made with the cart,
- *   so the selling organization's sales commercial revision applies (impl-commerce F40, impl-shop F36); the revision is
- *   the order's own orderRevision, and a change that names an older one is refused (STALE_REVISION).
+ * - The part's customer is the signed-in account's party; a guest's cart has none until its checkout begins, when
+ *   begin#Checkout (ShopCheckout.js guestParty) makes its anonymous guest party (SEC-PSS-05), so carts that never reach a
+ *   checkout fill no party table. Before that the cart's only changes are the shopper's own lines and codes, which count
+ *   in the order's revision either way; from then on the selling organization's sales commercial revision applies to the
+ *   frozen checkout (impl-commerce F40, impl-shop F36). The revision is the order's own orderRevision, and a change that
+ *   names an older one is refused (STALE_REVISION).
  * - A write with an operationId answers its first result again (PostingOperation, keyed by the cart and the id).
  * - Activity and expiry move on shopper actions only; reads do not touch them.
  * - Sign-in (attach#Cart) attaches the session's guest cart to the account, or merges it into the account's open cart of
  *   the same site, store and currency when neither has a payment in progress (lines re-added at today's prices, codes tried
  *   again, unavailable lines named, the guest cart retired and cancelled); the capability is rotated. Sign-out
  *   (release#Cart) rotates the account's carts' capabilities so the browser's session reaches none of them.
- * - Rate limits: cart creation, code tries and capability lookups, by requester.
+ * - Rate limits: cart creation, code tries and capability lookups, by requester; a store's new guest carts an hour, its
+ *   PsstGuestCartsHourly setting (StoreCheckout.js settingAt; default limits.storeGuestCarts).
  * Reads and writes are the authority's own (authorization disabled), after these checks.
  */
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const catalog = () => ec.resource.script("component://mr-mantle/service/mantle/product/ShopCatalog.js")
 const externalAccess = () => ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js")
+const storeSettings = () => ec.resource.script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
 const {find, one, rows, ms} = lib
 const A = "mantle.order.StoreCartAccess"
 const ITEM = "mantle.order.OrderItem"
@@ -35,14 +40,15 @@ const OPERATION = "mantle.ledger.transaction.PostingOperation"
 // ===== tables =====
 // Bounds: a line's quantity, lines a cart, days a cart lives after its last activity (a guest's and an account's), and
 // the requester's limits a ten-minute window (carts made, codes tried, capability lookups).
-// siteGuestCarts: a site's new guest carts an hour (SEC-PSS-05), each a guest party and an open order until the expiry job
+// storeGuestCarts: a store's new guest carts an hour when its PsstGuestCartsHourly setting is absent (SEC-PSS-05), each an
+// open order until the expiry job
 const limits = {
     lineQuantity: 999,
     lines: 50,
     guestDays: 30,
     accountDays: 90,
     creates: 30,
-    siteGuestCarts: 1000,
+    storeGuestCarts: 1000,
     codeTries: 20,
     lookups: 600
 }
@@ -160,32 +166,42 @@ function touch(cart) {
         expireDate: days(cart.row.customerPartyId ? limits.accountDays : limits.guestDays)
     })
 }
-// A new cart of the shop: the signed-in account's party as its customer, else an anonymous guest party made for it; the
-// order through create#Order (open, the store's web channel); the access row with a new capability. {cart, token}.
+// A store's new guest carts an hour: its PsstGuestCartsHourly setting in effect, a whole number of at least 0, else
+// limits.storeGuestCarts.
+function guestCartsHourly(productStoreId) {
+    const value = text(storeSettings().settingAt(productStoreId, "PsstGuestCartsHourly")?.settingValue)
+    const number = value === "" ? NaN : Number(value)
+    return Number.isFinite(number) && number >= 0 ? Math.floor(number) : limits.storeGuestCarts
+}
+// A new cart of the shop: the signed-in account's party as its customer, else none (a guest's party is made when its
+// checkout begins, SEC-PSS-05); the order through create#Order (open, the store's web channel); the access row with a new
+// capability. {cart, token}.
 function createCart(shop) {
     externalAccess().throttle("cart-create", limits.creates, "Wait a few minutes before starting another cart")
-    let guestPartyId = null
     if (!shop.customerPartyId) {
-        // a guest's cart counts against the site's hour as well as its requester's ten minutes (SEC-PSS-05): many addresses
-        // fill no party and order tables past it
+        // a guest's cart counts against its store's hour as well as its requester's ten minutes (SEC-PSS-05): many addresses
+        // fill no order table past it
         const allowed = ec.service
             .sync()
             .throwOnError(true)
             .name("org.moqui.public.AccountServices.record#Attempt")
-            .parameters({input: {key: "cart-site:" + shop.siteId, limit: limits.siteGuestCarts, windowMillis: 3600000}})
+            .parameters({
+                input: {
+                    key: "cart-store:" + shop.productStoreId,
+                    limit: guestCartsHourly(shop.productStoreId),
+                    windowMillis: 3600000
+                }
+            })
             .requireNewTransaction(true)
             .call().result.allowed
         if (!allowed) refuse("Tarpit", "RATE_LIMITED", "This shop takes no new carts just now. Try again later")
-        guestPartyId = lib.call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson", disabled: "N"}).partyId
-        lib.call("create#mantle.party.Person", {partyId: guestPartyId, firstName: "Guest"})
-        lib.call("create#mantle.party.PartyRole", {partyId: guestPartyId, roleTypeId: "Customer"})
     }
     const order = lib.call("mantle.order.OrderServices.create#Order", {
         productStoreId: shop.productStoreId,
         currencyUomId: shop.currencyUomId,
         salesChannelEnumId: "ScWeb",
         vendorPartyId: shop.organizationPartyId,
-        customerPartyId: shop.customerPartyId || guestPartyId
+        customerPartyId: shop.customerPartyId || null
     })
     const token = newToken()
     const access = lib.call("create#" + A, {
@@ -195,7 +211,6 @@ function createCart(shop) {
         productStoreId: shop.productStoreId,
         currencyUomId: shop.currencyUomId,
         customerPartyId: shop.customerPartyId || null,
-        guestPartyId,
         capabilityDigest: digest(token),
         lastActivityDate: ec.user.nowTimestamp,
         expireDate: days(shop.customerPartyId ? limits.accountDays : limits.guestDays),
