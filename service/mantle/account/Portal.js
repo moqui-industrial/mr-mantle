@@ -365,9 +365,10 @@ function startInvoicePayment(p) {
         call("update#" + P, {paymentId, statusId: "PmntCancelled"})
     return {attempt: attemptView(settle(paymentId)), resumed: false}
 }
-// An attempt's outcome, for its invoice's link or contact, or for the reference its gateway return carries (returnToken, or
-// returnKey from a frontend before SEC-PSS-27: the authority's REST takes it as a query parameter, which its request log
-// keeps unless the name says token), which reads this attempt and its invoice only, on the site it was started from.
+// An attempt's outcome, for its invoice's link or contact: the attempt and its invoice. For the reference its gateway return
+// carries (returnToken, or returnKey from a frontend before SEC-PSS-27: the authority's REST takes it as a query parameter,
+// which its request log keeps unless the name says token), only the attempt's state (paid, declined, pending or failed), on
+// the site it was started from: no amount, reference, payment page or invoice (SEC-PSS-27), which need the link or a sign-in.
 const RETURN_READ_MS = 86400000
 function getPaymentResult(p) {
     const row = p.attemptId && one(ATT, {paymentId: p.attemptId})
@@ -387,7 +388,10 @@ function getPaymentResult(p) {
             settledLongAgo
         )
             unavailable()
-    } else checkInvoice(p, row.invoiceId)
+        const {attemptId, state} = attemptView(refresh(row.paymentId))
+        return {attempt: {attemptId, state}}
+    }
+    checkInvoice(p, row.invoiceId)
     return {attempt: attemptView(refresh(row.paymentId)), invoice: invoiceView(row.invoiceId)}
 }
 // The job (resolve_PortalPayments): the portal payments still pending, oldest first, each asked of its gateway in its own

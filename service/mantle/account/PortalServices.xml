@@ -77,8 +77,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="PaymentResult" authenticate="anonymous-all" allow-remote="false">
         <description>An attempt's outcome, looked up at the gateway while pending (get#SinglePaymentGatewayDetails) and captured
             when authorized; what the payer's browser brings back from the gateway is never read. The link's token, the
-            contact, or the reference the gateway's return carries (returnToken; returnKey, its older name) reads it. A paid attempt is applied
-            to the invoice by Mantle's PaymentApplyForInvoice SECA.</description>
+            contact reads it with its invoice; the reference the gateway's return carries (returnToken; returnKey, its older
+            name) reads only its state, paid, declined, pending or failed, with no amount, reference or invoice
+            (SEC-PSS-27). A paid attempt is applied to the invoice by Mantle's PaymentApplyForInvoice SECA.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

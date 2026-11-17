@@ -550,8 +550,10 @@ feature("pending attempts resolve: the invoice page asks the gateway, the job se
         job.resolved >= 1
         jobStatus == "PmntDelivered"
         wrongKey.errorKind == "NotFound"
+        // the return's reference reads only the attempt's state (SEC-PSS-27)
         byKey.attempt.state == "paid"
-        byKey.invoice.statusText == "Paid"
+        Object.keys(byKey.attempt).sort().join() == "attemptId,state"
+        byKey.invoice == null
         stuckStatus == "PmntCancelled"
         stuckView.attempt == null
         stuckView.capabilities.canPay == true
@@ -721,6 +723,7 @@ feature("the return's reference reads for a day after its attempt settles and on
         paidRead.attempt.state == "paid"
         paidLater.errorKind == "NotFound"
         waitRead.attempt.state == "pending"
+        waitRead.attempt.redirectUrl == null && waitRead.invoice == null
         waitCancelled.errorKind == "NotFound"
         youngView.attempt.state == "pending"
         abandonedView.attempt == null
