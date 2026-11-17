@@ -2338,6 +2338,16 @@ methods.redeemInvitation = (p) => {
             'Conflict',
             'Existing staff membership must be managed by its owner',
         )
+    // A staff suspension or removal stands until staff change it, as joinSite says (SEC-PSS-43): an invitation, which
+    // another actor may send (an internal user inviting a contact to Billing, Supplier, Support or Sales), does not end it.
+    if (
+        old &&
+        (old.state === 'suspended' ||
+            (old.state === 'ended' &&
+                old.stateSetByPartyId &&
+                old.stateSetByPartyId !== partyId))
+    )
+        fail('Unauthorized', 'Joining is not permitted')
     const values = {
         siteId: p.siteId,
         partyId,

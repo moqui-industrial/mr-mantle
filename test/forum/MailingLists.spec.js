@@ -713,3 +713,40 @@ feature("a reply to a list's message, by its reply address or by In-Reply-To, is
         viaReference.communicationEventId != root
     }
 })
+
+feature("an invitation does not bring back a member staff suspended or removed; one who left joins again (SEC-PSS-43)", {
+    when() {
+        const hash = text => ec.user.singleUseCodeHash(text)
+        const member = (id, state, setBy) => {
+            lib.account(SITE, id, {member: true})
+            lib.set("mantle.public.PublicSiteParty", {siteId: SITE, partyId: id}, {state, stateSetByPartyId: setBy})
+            lib.make("mantle.public.PublicSiteInvitation", {
+                invitationId: id + "_INV",
+                siteId: SITE,
+                tokenHash: hash(id + "-token"),
+                emailHash: hash(id.toLowerCase() + "@smithy.test"),
+                scopes: "[]",
+                expiresAt: ec.user.timestampMillis(ec.user.nowTimestamp) + 3600000
+            })
+            return lib.op(id, SITE, "redeemInvitation", {token: id + "-token"})
+        }
+        const suspended = member("MLS_SUSPENDED", "suspended", "MLS_OWNER")
+        const removed = member("MLS_REMOVED", "ended", "MLS_OWNER")
+        const left = member("MLS_LEFT", "ended", "MLS_LEFT")
+        const state = id => lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: id}).state
+        return {
+            suspended,
+            removed,
+            left,
+            states: ["MLS_SUSPENDED", "MLS_REMOVED", "MLS_LEFT"].map(state),
+            unredeemed: lib.row("mantle.public.PublicSiteInvitation", {invitationId: "MLS_SUSPENDED_INV"}).redeemedAt
+        }
+    },
+    then({suspended, removed, left, states, unredeemed}) {
+        suspended.kind == "Unauthorized"
+        removed.kind == "Unauthorized"
+        left.state == "active"
+        states == ["suspended", "ended", "active"]
+        unredeemed == null
+    }
+})
