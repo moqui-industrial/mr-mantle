@@ -765,7 +765,7 @@ feature(
             const paymentId = reservationOf(reserved.reference).paymentId
             const back = rows("mantle.account.method.PaymentGatewayResponse", {paymentId, transactionStatus: "HostedPending"})[0]
                 .reasonMessage
-            const returnKey = decodeURIComponent((/[?&]key=([^&]+)/.exec(back) || [])[1] || "")
+            const returnKey = decodeURIComponent((/[?&]returnToken=([^&]+)/.exec(back) || [])[1] || "")
             const byKey = visitor("get#Registration", {siteId: siteC, reference: reserved.reference, key: returnKey})
             const formByKey = visitor("get#RegistrationPaymentForm", {
                 siteId: siteC,

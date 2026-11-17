@@ -669,7 +669,7 @@ feature("the store's opt-ins are offered unchecked; a guest's choice waits until
         const before = consent()
         const pending = list("mantle.marketing.contact.ContactListParty", {contactListId: listId, partyId})
         const link = system(() => call(H + "make#OptInConfirmLink", {orderId: chose.row.orderId}))
-        const code = decodeURIComponent(String(link.confirmUrl).split("confirm=")[1] || "")
+        const code = decodeURIComponent(String(link.confirmUrl).split("confirmToken=")[1] || "")
         const shown = op(H + "get#EmailPreferences", {confirm: code})
         const wrong = op(H + "get#EmailPreferences", {confirm: code.slice(0, -2) + "zz"})
         const confirmed = op(H + "store#EmailPreferences", {confirm: code, choices: JSON.stringify({confirm: true})})
@@ -702,7 +702,7 @@ feature("the store's opt-ins are offered unchecked; a guest's choice waits until
         pending[0].statusId == "CLPT_PENDING"
         pending[0].thruDate == null
         before == false
-        link.confirmUrl.startsWith("https://" + ids.host + "/account/EmailPreferences?confirm=")
+        link.confirmUrl.startsWith("https://" + ids.host + "/account/EmailPreferences?confirmToken=")
         shown.result.mode == "confirm"
         shown.result.confirmed == false
         shown.result.choices[0].optInId == "reviewRequests"

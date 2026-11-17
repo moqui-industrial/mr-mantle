@@ -11,7 +11,7 @@
  *   PcpCartReminder on the store's topic list) and Commerce's cart recovery requires (check#CartReminderConsent; guests never
  *   get recovery). Commerce P9 follow-up (Nov 6): each store's "review requests" too (PcpReviewRequest), which the review
  *   request needs (check#ReviewRequestConsent); the topics and their lists are StoreTopics.js'. A checkout opt-in waiting for
- *   confirmation is confirmed here: by the receipt's link (?confirm=, read only; its button confirms) or, for a signed-in
+ *   confirmation is confirmed here: by the receipt's link (?confirmToken=, read only; its button confirms) or, for a signed-in
  *   account with its email verified, on opening the page.
  * - Marketing's context (impl-marketing P7, F25; design-marketing §13 EmailPreferences): the sending organization's lists offered on
  *   the site's Marketing mount, with the recipient's state on each (MarketingPortal.js preferencesContext): by a list link's

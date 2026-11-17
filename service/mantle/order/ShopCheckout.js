@@ -1204,12 +1204,12 @@ function freeze(p) {
 const digitalOrder = orderId =>
     ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").digitalLines(orderId).length > 0
 // The canonical return address of a checkout: the site's canonical host and Shop mount (never a caller's origin), with
-// its reference and key.
+// its reference and key; the key as returnToken, a name the request log's secret rule leaves out (SEC-PSS-02).
 const returnUrl = (checkout, returnKey) =>
     publicApps().pageUrl(
         checkout.siteId,
         "shop",
-        "/Checkout/return?ref=" + encodeURIComponent(checkout.returnReference) + "&key=" + encodeURIComponent(returnKey)
+        "/Checkout/return?ref=" + encodeURIComponent(checkout.returnReference) + "&returnToken=" + encodeURIComponent(returnKey)
     )
 // authorize: the attempt's payment authorized through authorize#SinglePayment with its operation key (a retry answers the
 // first gateway response) and the return address; the transaction holds the payment only.
