@@ -234,7 +234,7 @@ feature("a Maintainer keeps the webhooks, and a secret is never read back", {
             // a hook to this server's own address is stored (the framework's outbound rules are asked at a delivery),
             // its test fails without saying why, and tests are few a minute
             tests: (() => {
-                const local = on("SRS_MAINTAINER", "storeWebhook", {url: "http://127.0.0.1:9/hook", operationId: "srs-hook-4"})
+                const local = on("SRS_MAINTAINER", "storeWebhook", {url: "https://127.0.0.1:9/hook", operationId: "srs-hook-4"})
                 const test = () => on("SRS_MAINTAINER", "testWebhook", {webhookId: local.webhookId})
                 const results = [test(), test(), test(), test()]
                 on("SRS_MAINTAINER", "deleteWebhook", {webhookId: local.webhookId})
