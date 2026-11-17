@@ -393,8 +393,9 @@ feature("an entered price over the rule waits for an approver who is not its aut
         !r.noticeUsers.includes(users.rep)
         String(r.notice.titleText).includes(quotes.discount.orderId)
         String(r.notice.titleText).includes("discount")
-        !String(r.notice.titleText).includes("85")
-        !String(r.notice.messageJson).includes("85")
+        // the entered price (85) is in neither, as a number of its own: an id with those digits (order 100185) is not it
+        !/(^|[^0-9])85([.,]0+)?([^0-9]|$)/.test(String(r.notice.titleText))
+        !/(^|[^0-9])85([.,]0+)?([^0-9]|$)/.test(String(r.notice.messageJson))
         r.seen == true
         r.leadEdit.includes("PERMISSION_DENIED")
         r.repDecide.includes("PERMISSION_DENIED")

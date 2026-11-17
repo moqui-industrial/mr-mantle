@@ -11,8 +11,9 @@ const TS = "mantle.work.TimesheetServices"
 const TIME = "mantle.work.TimeServices"
 const PROJECT = "mantle.work.ProjectServices"
 const TASK = "mantle.work.TaskServices"
-// Wednesday November 18, 2026 in the week of Monday the 16th, at the hour given in the session's time zone
-const at = (day, hour, minute) => Number(String(ec.l10n.parseTimestamp(`2026-11-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}:00.000`,
+// Wednesday February 18, 2032 in the week of Monday the 16th, at the hour given in the session's time zone: a week of the
+// spec's own, which the demo data's time (dated from today) never reaches; in the week of today that time was joe's too
+const at = (day, hour, minute) => Number(String(ec.l10n.parseTimestamp(`2032-02-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${String(minute || 0).padStart(2, "0")}:00.000`,
         "yyyy-MM-dd HH:mm:ss.SSS")))
 const made = {}
 
@@ -87,8 +88,8 @@ feature("a project to keep time on, and the policy: its defaults, then short key
         const stored = call(`${TS}.store#TimesheetPolicy`, { organizationPartyId: made.org, weekStart: 1, approvers: "project", lock: true, needComment: true,
             minHours: "0.25", dayHours: "8", workDays: "12345", remindDay: 1, remindHour: 10 })
         const after = call(`${TS}.get#TimesheetPolicy`, { partyId: "ORG_ZIZI_JD" }).policy
-        const range = call(`${TS}.get#WeekRange`, { date: "2026-11-18", weekStart: 1 })
-        const sunday = call(`${TS}.get#WeekRange`, { date: "2026-11-18", weekStart: 7 })
+        const range = call(`${TS}.get#WeekRange`, { date: "2032-02-18", weekStart: 1 })
+        const sunday = call(`${TS}.get#WeekRange`, { date: "2032-02-18", weekStart: 7 })
         return { before, stored, after, range, sunday }
     },
     then({ before, stored, after, range, sunday }) {
@@ -100,10 +101,10 @@ feature("a project to keep time on, and the policy: its defaults, then short key
         JSON.parse(stored.settingValue).rc == "Y"
         after.needComment == true
         after.workDays == [1, 2, 3, 4, 5]
-        range.weekStartDay == "2026-11-16"
+        range.weekStartDay == "2032-02-16"
         range.dayList.length == 7
-        range.dayList[6] == "2026-11-22"
-        sunday.weekStartDay == "2026-11-15"
+        range.dayList[6] == "2032-02-22"
+        sunday.weekStartDay == "2032-02-15"
     },
 })
 
@@ -148,18 +149,18 @@ feature("the timer: joe starts it, a switch stops the first, one runs per person
 feature("joe fills his week: entries by day go on the week's timesheet; get#PartyWeek has the rows, totals and the days below their hours", {
     when() {
         setNow(at(18, 9))
-        made.monday = entry({ workEffortId: made.task1, fromDate: "2026-11-16 13:00:00", hours: "2", comments: "Cells" })
-        made.tuesday = entry({ workEffortId: made.task1, fromDate: "2026-11-17 09:00:00", hours: "6", comments: "Keyboard moves" })
-        made.unpaid = entry({ workEffortId: made.task2, fromDate: "2026-11-17 15:00:00", hours: "1", rateTypeEnumId: "RatpNoCharge" })
-        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2026-11-18", extraWorkEffortIds: ["IRON-3"] }).week)
-        const bob = as("bob.developer", () => errorOf(`${TS}.get#PartyWeek`, { partyId: "ORG_ZIZI_JD", date: "2026-11-18" }))
-        const manager = as("john.doe", () => call(`${TS}.get#PartyWeek`, { partyId: "ORG_ZIZI_JD", date: "2026-11-18" }).week)
+        made.monday = entry({ workEffortId: made.task1, fromDate: "2032-02-16 13:00:00", hours: "2", comments: "Cells" })
+        made.tuesday = entry({ workEffortId: made.task1, fromDate: "2032-02-17 09:00:00", hours: "6", comments: "Keyboard moves" })
+        made.unpaid = entry({ workEffortId: made.task2, fromDate: "2032-02-17 15:00:00", hours: "1", rateTypeEnumId: "RatpNoCharge" })
+        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2032-02-18", extraWorkEffortIds: ["IRON-3"] }).week)
+        const bob = as("bob.developer", () => errorOf(`${TS}.get#PartyWeek`, { partyId: "ORG_ZIZI_JD", date: "2032-02-18" }))
+        const manager = as("john.doe", () => call(`${TS}.get#PartyWeek`, { partyId: "ORG_ZIZI_JD", date: "2032-02-18" }).week)
         return { week, bob, manager, entries: all("mantle.work.time.TimeEntry", { partyId: "ORG_ZIZI_JD", timesheetId: made.timesheetId }) }
     },
     then({ week, bob, manager, entries }) {
         entries.length == 5
-        week.weekStart == "2026-11-16"
-        week.prevWeek == "2026-11-09"
+        week.weekStart == "2032-02-16"
+        week.prevWeek == "2032-02-09"
         week.isMine == true
         week.dayList.length == 7
         week.dayList[0].total == 4
@@ -173,8 +174,8 @@ feature("joe fills his week: entries by day go on the week's timesheet; get#Part
         week.difference == -29
         const grid = week.rowList.find((row) => row.workEffortId == made.task1)
         grid.total == 9.5
-        grid.cells["2026-11-16"].hours == 3.5
-        grid.cells["2026-11-16"].entryIds.length == 2
+        grid.cells["2032-02-16"].hours == 3.5
+        grid.cells["2032-02-16"].entryIds.length == 2
         grid.projectName == "Timesheet walk"
         week.rowList.find((row) => row.workEffortId == "IRON-3").added == true
         week.entryList.find((one) => one.timeEntryId == made.unpaid).billable == false
@@ -190,8 +191,8 @@ feature("joe fills his week: entries by day go on the week's timesheet; get#Part
 feature("submit: only joe submits his week; then it is locked, and its approvers are asked", {
     when() {
         const byManager = as("john.doe", () => errorOf(`${TS}.submit#Timesheet`, { timesheetId: made.timesheetId }))
-        const submitted = as("joe.developer", () => call(`${TS}.submit#Timesheet`, { partyId: "ORG_ZIZI_JD", date: "2026-11-18" }))
-        const added = errorOf(`${TIME}.store#TimeEntry`, { partyId: "ORG_ZIZI_JD", workEffortId: made.task1, fromDate: "2026-11-18 09:00:00", hours: "1" })
+        const submitted = as("joe.developer", () => call(`${TS}.submit#Timesheet`, { partyId: "ORG_ZIZI_JD", date: "2032-02-18" }))
+        const added = errorOf(`${TIME}.store#TimeEntry`, { partyId: "ORG_ZIZI_JD", workEffortId: made.task1, fromDate: "2032-02-18 09:00:00", hours: "1" })
         return { byManager, submitted, added, approvals: messagesOf("TimesheetApproval", made.timesheetId) }
     },
     then({ byManager, submitted, added, approvals }) {
@@ -209,7 +210,7 @@ feature("return: not by bob; john.doe returns it with a reason, which joe hears 
     when() {
         const outsider = as("bob.developer", () => errorOf(`${TS}.return#Timesheet`, { timesheetId: made.timesheetId, reason: "Not mine" }))
         const returned = as("john.doe", () => call(`${TS}.return#Timesheet`, { timesheetId: made.timesheetId, reason: "Monday needs its full day" }))
-        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2026-11-18" }).week)
+        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2032-02-18" }).week)
         const notes = all("mantle.party.communication.CommunicationEventRecord", { recordEntityName: "mantle.work.time.Timesheet", recordId: made.timesheetId })
         return { outsider, returned, week, notes, approvals: messagesOf("TimesheetApproval", made.timesheetId),
             returnedNotices: messagesOf("TimesheetReturned", made.timesheetId) }
@@ -232,12 +233,12 @@ feature("return: not by bob; john.doe returns it with a reason, which joe hears 
 
 feature("joe fixes Monday and submits again; john.doe approves from the notice; he reopens it, until an entry is invoiced", {
     when() {
-        made.fix = entry({ workEffortId: made.task1, fromDate: "2026-11-16 15:00:00", hours: "4.5", comments: "Finished the cells" })
+        made.fix = entry({ workEffortId: made.task1, fromDate: "2032-02-16 15:00:00", hours: "4.5", comments: "Finished the cells" })
         as("joe.developer", () => call(`${TS}.submit#Timesheet`, { timesheetId: made.timesheetId }))
         const notice = messagesOf("TimesheetApproval", made.timesheetId).find((message) => usersOf(message).some((row) => row.viewedDate == null))
         const approved = as("john.doe", () => call("org.moqui.ui.NotificationServices.approve#NotificationMessage", { notificationMessageId: notice.notificationMessageId }))
         const status1 = sheet().statusId
-        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2026-11-18" }).week)
+        const week = as("joe.developer", () => call(`${TS}.get#PartyWeek`, { date: "2032-02-18" }).week)
         const reopened = as("john.doe", () => call(`${TS}.reopen#Timesheet`, { timesheetId: made.timesheetId, reason: "One more fix" }))
         const status2 = sheet().statusId
         as("joe.developer", () => call(`${TS}.submit#Timesheet`, { timesheetId: made.timesheetId }))
@@ -270,19 +271,19 @@ feature("joe fixes Monday and submits again; john.doe approves from the notice; 
 feature("find#Timesheets: john.doe's lists and counts, joe's own; the missing week of bob reminded once", {
     when() {
         // bob's week, not submitted
-        call(`${TIME}.store#TimeEntry`, { partyId: "ORG_ZIZI_BD", workEffortId: made.task2, fromDate: "2026-11-17 10:00:00", hours: "3", rateTypeEnumId: "RatpStandard" })
-        const managerAll = as("john.doe", () => call(`${TS}.find#Timesheets`, { list: "all", weekDate: "2026-11-18" }))
-        const joeMine = as("joe.developer", () => call(`${TS}.find#Timesheets`, { list: "mine", weekDate: "2026-11-18" }))
-        const bobsWeek = as("john.doe", () => call(`${TS}.find#Timesheets`, { list: "missing", weekDate: "2026-11-18" }))
-        const reminded = as("john.doe", () => call(`${TS}.send#MissingTimeReminders`, { partyIds: ["ORG_ZIZI_BD", "ORG_ZIZI_JD"], weekDate: "2026-11-18" }))
-        const outsider = as("bob.developer", () => call(`${TS}.send#MissingTimeReminders`, { partyIds: ["EX_JOHN_DOE"], weekDate: "2026-11-18" }))
+        call(`${TIME}.store#TimeEntry`, { partyId: "ORG_ZIZI_BD", workEffortId: made.task2, fromDate: "2032-02-17 10:00:00", hours: "3", rateTypeEnumId: "RatpStandard" })
+        const managerAll = as("john.doe", () => call(`${TS}.find#Timesheets`, { list: "all", weekDate: "2032-02-18" }))
+        const joeMine = as("joe.developer", () => call(`${TS}.find#Timesheets`, { list: "mine", weekDate: "2032-02-18" }))
+        const bobsWeek = as("john.doe", () => call(`${TS}.find#Timesheets`, { list: "missing", weekDate: "2032-02-18" }))
+        const reminded = as("john.doe", () => call(`${TS}.send#MissingTimeReminders`, { partyIds: ["ORG_ZIZI_BD", "ORG_ZIZI_JD"], weekDate: "2032-02-18" }))
+        const outsider = as("bob.developer", () => call(`${TS}.send#MissingTimeReminders`, { partyIds: ["EX_JOHN_DOE"], weekDate: "2032-02-18" }))
         // the job, on the policy's day and hour (Monday 10:00, the week after): once, then not again
         setNow(at(23, 10, 5))
         const job = call(`${TS}.send#MissingTimeReminders`, {})
         const jobAgain = call(`${TS}.send#MissingTimeReminders`, {})
         setNow(at(18, 9))
         return { managerAll, joeMine, bobsWeek, reminded, outsider, job, jobAgain,
-            bobNotices: all("moqui.security.user.NotificationMessage", { topic: "TimesheetMissing", subTopic: "ORG_ZIZI_BD:2026-11-16" }) }
+            bobNotices: all("moqui.security.user.NotificationMessage", { topic: "TimesheetMissing", subTopic: "ORG_ZIZI_BD:2032-02-16" }) }
     },
     then({ managerAll, joeMine, bobsWeek, reminded, outsider, job, jobAgain, bobNotices }) {
         const joeRow = managerAll.rowList.find((row) => row.partyId == "ORG_ZIZI_JD")
@@ -308,8 +309,8 @@ feature("find#Timesheets: john.doe's lists and counts, joe's own; the missing we
 feature("Home counts the week's hours with its status, and the timesheets to approve; a timesheet's Chatter is its person's and approvers'", {
     when() {
         setNow(at(25, 9))
-        entry({ workEffortId: made.task1, fromDate: "2026-11-24 09:00:00", hours: "2" })
-        const nextSheet = made.nextSheet = call(`${TS}.get#PartyTimesheet`, { partyId: "ORG_ZIZI_JD", date: "2026-11-24", make: false }).timesheetId
+        entry({ workEffortId: made.task1, fromDate: "2032-02-24 09:00:00", hours: "2" })
+        const nextSheet = made.nextSheet = call(`${TS}.get#PartyTimesheet`, { partyId: "ORG_ZIZI_JD", date: "2032-02-24", make: false }).timesheetId
         as("joe.developer", () => call(`${TS}.submit#Timesheet`, { timesheetId: nextSheet }))
         const joeCounts = as("joe.developer", () => call(`${PROJECT}.get#ProjectHomeCounts`, {}).counts)
         const managerCounts = as("john.doe", () => call(`${PROJECT}.get#ProjectHomeCounts`, { managers: true }).counts)
@@ -338,7 +339,7 @@ feature("Home counts the week's hours with its status, and the timesheets to app
         joeCounts.timesheetStatusId == "TmshCompleted"
         joeCounts.expectedWeek == 40
         managerCounts.timesheetsToApprove >= 1
-        toApprove.rowList.some((row) => row.partyId == "ORG_ZIZI_JD" && row.weekStart == "2026-11-23" && row.canApprove)
+        toApprove.rowList.some((row) => row.partyId == "ORG_ZIZI_JD" && row.weekStart == "2032-02-23" && row.canApprove)
         toApprove.counts.toApprove == toApprove.rowList.length
         joeSees == true
         managerSees == true
