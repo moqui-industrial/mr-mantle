@@ -191,7 +191,7 @@ const deliveries = orderId =>
     list("mantle.party.MessageDelivery", {sourceEnumId: "MdsrcCartRecovery"}).filter(row =>
         String(row.eventKey).startsWith("cartRecovery:" + orderId + ":")
     )
-const tokenOf = message => decodeURIComponent((/Recover\?r=([A-Za-z0-9_%-]+)/.exec(message?.body || "") || [])[1] || "")
+const tokenOf = message => decodeURIComponent((/Recover\?recoveryToken=([A-Za-z0-9_%-]+)/.exec(message?.body || "") || [])[1] || "")
 
 spec({
     setupSpec() {
@@ -390,7 +390,7 @@ feature("the job sends one recovery to the opted-in idle cart and no other; a fa
         r.first.failures[0].startsWith(carts.broken)
         r.mails.length == 1
         r.mails[0].toList.includes("crcv_buyer@crcv.example.test")
-        r.mails[0].body.includes("Recover?r=")
+        r.mails[0].body.includes("Recover?recoveryToken=")
         r.mails[0].body.includes("/account/EmailPreferences")
         r.ok.length == 1 && r.ok[0].stateEnumId == "MdsSent"
         JSON.parse(r.ok[0].consentJson).granted == true

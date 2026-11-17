@@ -503,7 +503,7 @@ feature("pending attempts resolve: the invoice page asks the gateway, the job se
         const pageStart = portal("start#InvoicePayment", {siteId: site, token: pageToken, operationId: "portal-res-0001", confirm: true})
         const pageView = portal("get#Invoice", {siteId: site, token: pageToken})
         const jobStart = portal("start#InvoicePayment", {siteId: site, token: jobToken, operationId: "portal-res-0002", confirm: true})
-        const returnKey = decodeURIComponent(/[?&]key=([^&]+)/.exec(jobStart.attempt.redirectUrl)[1])
+        const returnKey = decodeURIComponent(/[?&]returnToken=([^&]+)/.exec(jobStart.attempt.redirectUrl)[1])
         const wrongKey = portal("get#PaymentResult", {siteId: site, attemptId: jobStart.attempt.attemptId, returnKey: "x".repeat(40)})
         login("john.doe")
         ec.artifactExecution.disableAuthz()
@@ -665,7 +665,7 @@ feature("the return's reference reads for a day after its attempt settles and on
         const paidToken = token(paidId),
             waitToken = token(waitId),
             youngToken = token(youngId)
-        const keyOf = out => decodeURIComponent(/[?&]key=([^&]+)/.exec(out.attempt.redirectUrl)[1])
+        const keyOf = out => decodeURIComponent(/[?&]returnToken=([^&]+)/.exec(out.attempt.redirectUrl)[1])
         login("john.doe")
         payThrough("ACCT_PORTAL_HOSTED")
         logout()

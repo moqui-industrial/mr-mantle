@@ -411,7 +411,7 @@ function makeConfirmLink(p) {
     const checkout = text(p.orderId) ? one(C, {orderId: text(p.orderId), statusId: "ScoCompleted"}) : null
     if (!checkout || checkout.optInPending !== "Y") return {}
     const code = checkout.checkoutId + "." + ec.user.randomString(32)
-    const confirmUrl = publicApps().pageUrl(checkout.siteId, "account", "/EmailPreferences?confirm=" + encodeURIComponent(code))
+    const confirmUrl = publicApps().pageUrl(checkout.siteId, "account", "/EmailPreferences?confirmToken=" + encodeURIComponent(code))
     if (!confirmUrl) return {}
     call("update#" + C, {
         checkoutId: checkout.checkoutId,

@@ -339,10 +339,11 @@ function startInvoicePayment(p) {
         return {attempt: attemptView(refresh(paymentId)), resumed: !!begun.resumed, alreadyApplied: !!begun.alreadyApplied}
     // a new attempt: the gateway, under the payment's lock only
     find(P, {paymentId}).forUpdate(true).one()
+    // the key as returnToken, a name the request log's secret rule leaves out (SEC-PSS-27)
     const returnUrl = apps.pageUrl(
         p.siteId,
         "billing",
-        "/InvoicePay/return?attemptId=" + encodeURIComponent(paymentId) + "&key=" + encodeURIComponent(begun.returnKey)
+        "/InvoicePay/return?attemptId=" + encodeURIComponent(paymentId) + "&returnToken=" + encodeURIComponent(begun.returnKey)
     )
     asPortalPayment(paymentId, () => {
         const auth = call("mantle.account.PaymentServices.authorize#SinglePayment", {
@@ -364,14 +365,16 @@ function startInvoicePayment(p) {
         call("update#" + P, {paymentId, statusId: "PmntCancelled"})
     return {attempt: attemptView(settle(paymentId)), resumed: false}
 }
-// An attempt's outcome, for its invoice's link or contact, or for the reference its gateway return carries (returnKey),
-// which reads this attempt and its invoice only, on the site it was started from.
+// An attempt's outcome, for its invoice's link or contact, or for the reference its gateway return carries (returnToken, or
+// returnKey from a frontend before SEC-PSS-27: the authority's REST takes it as a query parameter, which its request log
+// keeps unless the name says token), which reads this attempt and its invoice only, on the site it was started from.
 const RETURN_READ_MS = 86400000
 function getPaymentResult(p) {
     const row = p.attemptId && one(ATT, {paymentId: p.attemptId})
     // only an invoice attempt is Billing's (a Shop checkout's has its own result, ShopCheckout.js)
     if (!row || !invoiceAttempt(row)) unavailable()
-    if (p.returnKey) {
+    const returnToken = p.returnToken || p.returnKey
+    if (returnToken) {
         // the reference reads while the attempt is pending or for a day after it settled, and only while the invoice can
         // still be reached (issued, not cancelled), on the organization's site it came from
         const organizationPartyId = served(p.siteId, "billing")
@@ -379,7 +382,7 @@ function getPaymentResult(p) {
         const settledLongAgo = row.settledDate && Date.now() - lib.ms(row.settledDate) > RETURN_READ_MS
         if (
             row.siteId !== p.siteId ||
-            row.returnKeyDigest !== ec.user.singleUseCodeHash(String(p.returnKey)) ||
+            row.returnKeyDigest !== ec.user.singleUseCodeHash(String(returnToken)) ||
             record?.organizationPartyId !== organizationPartyId ||
             settledLongAgo
         )

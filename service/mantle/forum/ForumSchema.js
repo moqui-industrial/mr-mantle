@@ -960,7 +960,8 @@
     },
     getPaymentResult: {
         service: 'mantle.account.PortalServices.get#PaymentResult',
-        fields: ['siteId', 'attemptId', 'token', 'returnKey'],
+        // returnToken: the gateway return's key (SEC-PSS-27); returnKey, its old name, from a frontend before it
+        fields: ['siteId', 'attemptId', 'token', 'returnToken', 'returnKey'],
     },
     getSubmission: {
         service: 'mantle.account.PortalServices.get#Submission',
