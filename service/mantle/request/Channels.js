@@ -526,6 +526,8 @@ function mailIntake(p) {
                 emailMessageId: p.emailMessageId,
                 automatic: !!decision.automatic
             })
+            // a reply from the address a public form was given confirms it (SEC-PSS-28)
+            if (!decision.automatic) cases.confirmSender(decision.requestId, {address: message.fromAddress})
             return Object.assign(result, {requestId: decision.requestId, joined: true})
         }
         // P8: the customer's reply to a closed case: its follow-up case, acknowledged as a new case
@@ -750,7 +752,9 @@ function formRequest(p) {
         salesChannelEnumId: "ScWeb",
         filedByPartyId: party.partyId,
         customerPartyId: isCase ? sender.customerPartyId : null,
-        emailContactMechId: party.contactMechId || null
+        emailContactMechId: party.contactMechId || null,
+        // the address was typed into the form, not proven (SEC-PSS-28): staff see "sender not verified" until a reply from it
+        senderVerified: "N"
     }).requestId
     if (!isCase)
         noteHeld(

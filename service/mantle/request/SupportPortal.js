@@ -236,6 +236,9 @@ function caseFor(p, organizationPartyId) {
     const request = one(REQUEST, {requestId: checked.recordId})
     const profile = request ? one(PROFILE, {requestId: checked.recordId}) : null
     if (!profile) unavailable()
+    // its filer signed in confirms a public form's typed address (SEC-PSS-28); a link's holder does not
+    if (!p.token && request.senderVerified === "N")
+        cases.confirmSender(request.requestId, {partyId: ec.user.userAccount?.partyId}, true)
     return {checked, request, profile, requestId: request.requestId, customerPartyId: checked.partyId, organizationPartyId}
 }
 const statusLabel = (profile, statusId) =>

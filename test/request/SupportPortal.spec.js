@@ -423,6 +423,21 @@ feature("MyCases pages by an opaque cursor scoped to the list and the account; a
     }
 })
 
+feature("a form-filed case's typed address is confirmed by its filer opening it signed in, not by another reader (SEC-PSS-28)", {
+    when() {
+        // as a queue's public form leaves a case: its sender not verified
+        svc("update#mantle.request.Request", {requestId: state.filed, filedByPartyId: state.contact, senderVerified: "N"})
+        const byAdministrator = page(state.boss, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
+        const afterAdministrator = one("mantle.request.Request", {requestId: state.filed}).senderVerified
+        const byFiler = page(state.contact, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
+        return {byAdministrator, afterAdministrator, byFiler, after: one("mantle.request.Request", {requestId: state.filed}).senderVerified}
+    },
+    then({byAdministrator, afterAdministrator, byFiler, after}) {
+        byAdministrator === state.filed && afterAdministrator === "N"
+        byFiler === state.filed && after === "Y"
+    }
+})
+
 feature("a case shows outward messages and shared files only, takes a reply, and is cancelled at its revision", {
     when() {
         const requestId = state.filed

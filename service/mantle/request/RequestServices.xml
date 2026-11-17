@@ -814,7 +814,8 @@ along with this software (see the LICENSE.md file). If not, see
             same checks, the types the queue offers, its web form route's hourly limit (else 30) and the address's (5) per
             queue, past which the address gets the neutral receipt and nothing is made (a refusal would tell a known address
             from one the queue ignores); a customer the organization serves (found by the address) makes a case, anyone else is held for review
-            (Channels.js formRequest), and a held one is not confirmed.
+            (Channels.js formRequest), and a held one is not confirmed. Its sender is marked not verified (Request
+            senderVerified N, SEC-PSS-28) until a reply comes from the typed address or its filer opens it signed in.
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
