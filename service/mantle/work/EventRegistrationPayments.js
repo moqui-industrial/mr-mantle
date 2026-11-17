@@ -213,7 +213,11 @@ const returnUrl = (reservation, returnKey) =>
     apps().pageUrl(
         reservation.siteId,
         "marketing",
-        "/Register?ref=" + encodeURIComponent(reservation.reservationId) + "&key=" + encodeURIComponent(returnKey) + "&returned=1"
+        "/Register?ref=" +
+            encodeURIComponent(reservation.reservationId) +
+            "&returnToken=" +
+            encodeURIComponent(returnKey) +
+            "&returned=1"
     )
 
 // The price of a reservation's held places now (the tickets' own prices, before tax): {subtotal, currencyUomId, priceKey}, or null

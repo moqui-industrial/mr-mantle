@@ -551,8 +551,10 @@ along with this software (see the LICENSE.md file). If not, see
     </moqui.security.EntityFilterSet>
     <!-- Personal contacts on their own, for an app whose authz has the active organization filter: that set applies only
         while an organization is active, and a personal contact must stay hidden from other users without one too. The
-        IronStone apps' authz records carry this set beside MANTLE_ACTIVE_ORG. -->
-    <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_PRIVATE_CONTACT" description="Personal Contact Filter" allowMissingAlias="Y">
+        IronStone apps' authz records carry this set beside MANTLE_ACTIVE_ORG. It fails closed (allowMissingAlias="N",
+        SEC-DAT-11): a find on a view over Party that has no alias of its privateOwnerUserId is refused, so each view over
+        Party aliases it (one alias for each Party member). -->
+    <moqui.security.EntityFilterSet entityFilterSetId="MANTLE_PRIVATE_CONTACT" description="Personal Contact Filter" allowMissingAlias="N">
         <filters entityFilterId="MANTLE_PRIVATE_CONTACT_1" entityName="mantle.party.Party"
                 filterMap="({_join: 'or', _list: [{privateOwnerUserId: null}, {privateOwnerUserId: ec.user.userId || null}]})"/>
     </moqui.security.EntityFilterSet>

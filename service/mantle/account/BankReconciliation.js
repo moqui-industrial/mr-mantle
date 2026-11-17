@@ -26,10 +26,14 @@ function bank(p) {
     if (!organizationPartyId) denied("ORGANIZATION_REQUIRED", "Choose an internal organization")
     if (!one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}))
         denied("BANK_UNAVAILABLE", "The bank account is not an internal organization's")
-    if (!["read", "reconcile", "deposit"].includes(need)) denied("PERMISSION_DENIED", "Unknown bank authority " + need)
-    // a user who holds only BANK_RECONCILE reads the bank, not the rest of Accounting (bankReconcile is no general read)
+    if (!["read", "reconcile", "deposit", "runApprove"].includes(need)) denied("PERMISSION_DENIED", "Unknown bank authority " + need)
+    // a user who holds only BANK_RECONCILE reads the bank, not the rest of Accounting (bankReconcile is no general read);
+    // runApprove is a payment run approver's authority (PAYMENT_RUN_APPROVE) in the organization, which a bank file needs
     const c = policy.capabilities()
-    const scope = policy.organization({organizationPartyId}, c.read ? "read" : c.bankReconcile ? "bankReconcile" : "read")
+    const scope = policy.organization(
+        {organizationPartyId},
+        need === "runApprove" ? "runApprove" : c.read ? "read" : c.bankReconcile ? "bankReconcile" : "read"
+    )
     const canReconcile = !!(c.bankReconcile || c.systemAdmin)
     const canRead = canReconcile || c.reportRead || c.admin
     const canDeposit = !!(c.paymentEdit && c.paymentRead) || c.systemAdmin

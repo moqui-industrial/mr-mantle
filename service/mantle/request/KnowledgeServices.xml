@@ -274,7 +274,7 @@ along with this software (see the LICENSE.md file). If not, see
 
     <!-- ===== the Support app's help (impl-customer-service P15, F59, F109; SupportPortal.js): PASS operations ===== -->
     <service verb="get" noun="CustomerArticle" authenticate="anonymous-all" allow-remote="false">
-        <description>getCustomerArticle: a published article of the Support mount's customer and public knowledge sources (get#PublishedArticle's exact published version, cleaned; an anonymous reader a public source's only), its link on the site (PublicApps.pageUrl, F105), the view's rating nonce and whether a case may cite it. A draft, an internal or unsourced page is NotFound alike.</description>
+        <description>getCustomerArticle: a published article of the Support mount's customer and public knowledge sources (get#PublishedArticle's exact published version, cleaned; an anonymous reader a public source's only), its link on the site (PublicApps.pageUrl, F105), the view's rating nonce (signed by the server for the site and the article, good for an hour) and whether a case may cite it. A draft, an internal or unsourced page is NotFound alike.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
@@ -282,7 +282,7 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="rate" noun="Article" authenticate="anonymous-all" allow-remote="false">
-        <description>rateArticle (TOKEN_WRITES, the view's nonce as its token): helpful or not with an optional plain comment, once per page view (a repeat answers the first) and 30 in ten minutes per requester, kept as the customer's ArticleFeedback (AfsCustomer) for the source's organization, which ArticleFeedback reviews.</description>
+        <description>rateArticle (TOKEN_WRITES, the view's nonce as its token, refused unless the server signed it for this site and article): helpful or not with an optional plain comment, once per page view (a repeat answers the first), 30 in ten minutes per requester and 500 an hour per site, kept as the customer's ArticleFeedback (AfsCustomer) for the source's organization, which ArticleFeedback reviews.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

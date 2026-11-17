@@ -11,7 +11,7 @@
  *   PcpCartReminder on the store's topic list) and Commerce's cart recovery requires (check#CartReminderConsent; guests never
  *   get recovery). Commerce P9 follow-up (Nov 6): each store's "review requests" too (PcpReviewRequest), which the review
  *   request needs (check#ReviewRequestConsent); the topics and their lists are StoreTopics.js'. A checkout opt-in waiting for
- *   confirmation is confirmed here: by the receipt's link (?confirm=, read only; its button confirms) or, for a signed-in
+ *   confirmation is confirmed here: by the receipt's link (?confirmToken=, read only; its button confirms) or, for a signed-in
  *   account with its email verified, on opening the page.
  * - Marketing's context (impl-marketing P7, F25; design-marketing §13 EmailPreferences): the sending organization's lists offered on
  *   the site's Marketing mount, with the recipient's state on each (MarketingPortal.js preferencesContext): by a list link's
@@ -110,6 +110,7 @@ function reasonTextOf(choices) {
     if (!reason) return other || null
     return (reason.reasonId === "other" && other ? "Other: " + other : reason.label).slice(0, 255)
 }
+const listLinks = () => ec.resource.script("component://mr-mantle/service/mantle/party/ListLinks.js")
 // A list link's token row (resolve#UnsubscribeToken has checked it), its list's organization.
 function tokenRowOf(token) {
     const row = one("mantle.marketing.contact.ContactListToken", {tokenHash: ec.user.singleUseCodeHash(text(token))})
@@ -155,8 +156,10 @@ function storeMarketing(site, marketing, choices, who) {
         const isOn = topic.state === "subscribed" || topic.state === "pending"
         if (want === isOn) continue
         if (want) {
-            // P22: a text message topic is never turned on from the email page (it needs a phone number's own evidence)
-            if (topic.channelEnumId !== "MdcSms") turnOn.push(topic.contactListId)
+            // P22: a text message topic is never turned on from the email page (it needs a phone number's own evidence); a
+            // list link turns one on again only as the undo of its own unsubscribe within a day (SEC-PSS-44)
+            if (topic.channelEnumId !== "MdcSms" && (!who.token || listLinks().undoable(who.tokenRow, topic.contactListId)))
+                turnOn.push(topic.contactListId)
             continue
         }
         call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {
@@ -195,8 +198,17 @@ function getEmailPreferences(p) {
         const resolved = call("mantle.party.ConsentServices.resolve#UnsubscribeToken", {token: text(p.token)})
         const tokenOf = tokenRowOf(p.token)
         const marketing = tokenOf ? marketingOf(site.siteId, tokenOf.organizationPartyId, tokenOf.row.partyId) : null
+        // a link turns a topic on again only as the undo of its own unsubscribe within a day (SEC-PSS-44)
+        if (marketing)
+            for (const topic of marketing.topics)
+                topic.canSubscribe =
+                    topic.state === "subscribed" ||
+                    topic.state === "pending" ||
+                    listLinks().undoable(tokenOf.row, topic.contactListId)
         return {
             mode: "token",
+            // anything else the link may not subscribe to needs the page's sign-in
+            signInToSubscribe: true,
             organizationName: resolved.organizationName || "",
             maskedAddress: resolved.maskedAddress || "",
             marketingWithdrawn: !!resolved.marketingWithdrawn,
@@ -207,7 +219,9 @@ function getEmailPreferences(p) {
                 description: list.description || "",
                 subscribed: !!list.subscribed,
                 pending: !!list.unsubscribePending,
-                fromLink: !!list.isTokenList
+                fromLink: !!list.isTokenList,
+                // the link subscribes again only a list it unsubscribed itself, within a day (SEC-PSS-44)
+                canSubscribe: !!list.subscribed || !!list.undoable
             })),
             topics: [],
             forumUrl
@@ -295,6 +309,7 @@ function storeEmailPreferences(p) {
             const marketing = tokenOf ? marketingOf(site.siteId, tokenOf.organizationPartyId, tokenOf.row.partyId) : null
             storeMarketing(site, marketing, choices.marketing, {
                 token: text(p.token),
+                tokenRow: tokenOf?.row || null,
                 partyId: tokenOf?.row.partyId,
                 contactMechId: tokenOf?.row.contactMechId || null
             })

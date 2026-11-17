@@ -650,17 +650,31 @@ function getProposals(p) {
     }
 }
 // Exchange rates are global UomConversion rows, so every writer of an active rate (store#Rate, the CSV import, an accepted
-// proposal) needs finance administration of every organization: ACCOUNTING_ADMIN, which AccountingPolicy scopes to
-// every internal organization, or a system administrator; never a capability limited to some organizations (F420).
+// proposal) needs finance administration of every organization: ACCOUNTING_ADMIN with ACCOUNTING_ALL_ORGANIZATIONS (with which
+// AccountingPolicy scopes it to every internal organization), or a system administrator; never a capability limited to some
+// organizations (F420).
 function ratesAdmin() {
+    const refusal = ratesAdminRefusal()
+    if (refusal) denied("PERMISSION_DENIED", refusal)
+}
+// Why the user may not write the rates, or null when they may: ratesAdmin's rule, asked without refusing, so a screen can
+// show the writers disabled with the reason (get#RateAccess).
+function ratesAdminRefusal() {
     const domain = ec.resource.script("component://mr-mantle/service/mantle/product/ProductAccess.js")
-    if (!(domain.systemAdmin() || lib.capabilities().admin))
-        denied("PERMISSION_DENIED", "Exchange rates are shared by every organization: finance administration is required")
-    // ACCOUNTING_ADMIN covers every internal organization today, so this cannot fail yet; it guards a future
-    // organization-limited finance administrator, who must not set the rates every organization posts at
+    if (domain.systemAdmin()) return null
+    if (!lib.capabilities().admin)
+        return "Exchange rates are shared by every organization: finance administration is required"
+    // an organization-limited finance administrator (ACCOUNTING_ADMIN without ACCOUNTING_ALL_ORGANIZATIONS, SEC-BOS-02) must not
+    // set the rates every organization posts at
     const internal = find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).count()
-    if (!domain.systemAdmin() && lib.access("admin").organizationPartyIds.length < internal)
-        denied("PERMISSION_DENIED", "Exchange rates need finance administration of every organization")
+    if (lib.access("admin").organizationPartyIds.length < internal)
+        return "Exchange rates need finance administration of every organization"
+    return null
+}
+// get#RateAccess: whether the user may write the rates (store#Rate, the CSV import, accepting a proposal), and why not.
+function rateAccess() {
+    const refusal = ratesAdminRefusal()
+    return {mayStoreRates: !refusal, rateAccessText: refusal ? ec.l10n.localize(refusal) : null}
 }
 // accept#RateProposals and reject#RateProposals: each proposal decided in its own transaction, re-read under lock (the
 // organization's, still proposed); an accepted one becomes an active dated rate through store#Rate. A failure is named
@@ -728,6 +742,7 @@ const operations = {
     refreshRates,
     proposeRates,
     getProposals,
+    rateAccess,
     acceptProposals: p => decideProposals(p, true),
     rejectProposals: p => decideProposals(p, false),
     decideProposal,

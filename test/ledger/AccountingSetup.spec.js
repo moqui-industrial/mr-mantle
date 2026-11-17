@@ -53,7 +53,9 @@ spec({
         const h = helper(),
             f = {org}
         users = {
-            admin: h.user(f, "ADMIN", ["ACCOUNTING_ADMIN", "INVOICE_APPROVE"]),
+            // every organization's finance administration, which a new organization's setup needs until someone works for it
+            // (ACCOUNTING_ADMIN alone is the holder's own organizations, SEC-BOS-02)
+            admin: h.user(f, "ADMIN", ["ACCOUNTING_ADMIN", "ACCOUNTING_ALL_ORGANIZATIONS", "INVOICE_APPROVE"]),
             read: h.user(f, "READ", ["ACCOUNTING_VIEW"]),
             ar: h.user(f, "AR", ["RECEIVABLE_EDIT", "RECEIVABLE_VIEW"]),
             ap: h.user(f, "AP", ["PAYABLE_EDIT", "PAYABLE_VIEW"])

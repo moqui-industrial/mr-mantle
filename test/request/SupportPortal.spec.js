@@ -153,12 +153,43 @@ const capability = (recordType, recordId, scopes, token, partyId = customer) =>
         createdByUserId: ec.user.userId
     })
 const token = name => (prefix + name + "0".repeat(48)).slice(0, 48)
+// A throttle's bucket of this window removed (record#Attempt's, the framework's Account.js); the requester's key as the spec's
+// calls have it.
+const requester = () => ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+function clearBucket(key, windowMillis) {
+    const bucketId = ec.user.singleUseCodeHash(key + ":" + Math.floor(Date.now() / windowMillis))
+    find("moqui.security.public.AccountAttempt", {bucketId}).deleteAll()
+}
+// The specs of one run share the requester's link lookups (100 in ten minutes, ExternalAccess.js tokenCapability): this
+// spec's many go between a clear of this window's bucket before and after them, as ShopOperations does for cart creations;
+// the throttle is unchanged.
+const clearLinkLookups = () => clearBucket("access-token:" + requester(), 600000)
+// SEC-PSS-23: an order link's emailed code: the link asks for it (send#OrderChangeCode, its requester's and order's limits
+// cleared first), and the delivery's build makes it as an attempt would; {sent, delivery, code, capability}
+function changeCode(link, orderId) {
+    clearBucket("order-change-code:" + requester(), 600000)
+    clearBucket("order-change-code:" + orderId, 3600000)
+    const sent = page(null, S + "send#OrderChangeCode", {orderToken: link})
+    const delivery = Array.from(
+        find("mantle.party.MessageDelivery", {sourceEnumId: "MdsrcOrderChangeCode"}).orderBy("-createdDate").limit(1).list()
+    )[0]
+    const built = run("john.doe", S + "build#OrderChangeCodeMessage", {eventKey: delivery?.eventKey})
+    const capabilityId = String(delivery?.eventKey || "").replace(/^OrderChangeCode:/, "")
+    return {
+        sent,
+        delivery,
+        built,
+        code: /: ([0-9]{8})/.exec(String(built.bodyText || ""))?.[1] || null,
+        capability: () => one("mantle.party.ExternalAccessCapability", {capabilityId})
+    }
+}
 
 spec({
     stepwise: true,
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        clearLinkLookups()
         party(org, "Support Portal Spec Co", "OrgInternal", "PtyOrganization", "_NA_")
         svc("mantle.ledger.LedgerServices.init#PartyAccountingConfiguration", {
             organizationPartyId: org,
@@ -257,11 +288,23 @@ spec({
             contactMechPurposeId: "EmailPrimary",
             fromDate: since
         })
+        // the organization's address, an order link's emailed code's sender (SEC-PSS-23)
+        const orgMech = svc("create#mantle.party.contact.ContactMech", {
+            contactMechTypeEnumId: "CmtEmailAddress",
+            infoString: "support@portal-spec.example.test"
+        }).contactMechId
+        svc("create#mantle.party.contact.PartyContactMech", {
+            partyId: org,
+            contactMechId: orgMech,
+            contactMechPurposeId: "EmailPrimary",
+            fromDate: since
+        })
         state.shipped = sale(true)
         state.approved = sale(false)
     },
     cleanupSpec() {
         ec.artifactExecution.disableAuthz()
+        clearLinkLookups()
         for (const entity of ["mantle.public.PublicSiteApp", "mantle.public.PublicSiteHost", "mantle.public.PublicSite"])
             find(entity, {siteId}).deleteAll()
         ec.artifactExecution.enableAuthz()
@@ -276,6 +319,48 @@ spec({
     }
 })
 
+feature("a staged file's type is read from its first eight bytes alone (SEC-PSS-65)", {
+    when() {
+        const media = ec.resource.script("component://mr-mantle/service/mantle/party/PortalMedia.js")
+        const write = (name, bytes) => {
+            const location = "runtime://tmp/spp-sniff/" + name
+            ec.resource.getLocationReference(location).putBytes(new Uint8Array(bytes))
+            return location
+        }
+        // a PNG's signature followed by a megabyte, a JPEG's three bytes and nothing after, a text, an empty file
+        const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].concat(new Array(1048576).fill(0x41))
+        const kinds = [
+            write("big.png", png),
+            write("short.jpg", [0xff, 0xd8, 0xff]),
+            write("plain.txt", Array.from("not an image").map(c => c.charCodeAt(0))),
+            write("empty.png", [])
+        ].map(location => media.sniff(location)?.type || null)
+        return {kinds}
+    },
+    then({kinds}) {
+        kinds == ["image/png", "image/jpeg", null, null]
+    }
+})
+feature("a site's article ratings are bounded per hour, whoever sends them (SEC-PSS-25)", {
+    when() {
+        // the site's bucket filled to the limit for this hour (record#Attempt's, the framework's Account.js)
+        const bucketId = ec.user.singleUseCodeHash(
+            "article-rating-site:" + siteId + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 3600000)
+        )
+        svc("create#moqui.security.public.AccountAttempt", {bucketId, attemptCount: 500, expiresAt: new Date(Date.now() + 7200000)})
+        const rating = {wikiPageId: "SPP_NO_PAGE", token: "n".repeat(32), helpful: "Y"}
+        const full = page(null, "mantle.request.KnowledgeServices.rate#Article", rating)
+        ec.artifactExecution.disableAuthz()
+        find("moqui.security.public.AccountAttempt", {bucketId}).deleteAll()
+        // with room left the same rating goes on to the article's own check
+        const room = page(null, "mantle.request.KnowledgeServices.rate#Article", rating)
+        return {full, room}
+    },
+    then({full, room}) {
+        full.kind == "Tarpit"
+        room.kind == "NotFound"
+    }
+})
 feature("a contact files and sees its own cases, an administrator the customer's, the customer's own account its own", {
     when() {
         const filed = page(state.contact, S + "create#CustomerCase", {
@@ -378,6 +463,21 @@ feature("MyCases pages by an opaque cursor scoped to the list and the account; a
         r.tooMany.kind === "Unprocessable"
         r.changed.customers.length === 0 && r.changed.caseList.length === 0
         r.restored.caseList.length === 1
+    }
+})
+
+feature("a form-filed case's typed address is confirmed by its filer opening it signed in, not by another reader (SEC-PSS-28)", {
+    when() {
+        // as a queue's public form leaves a case: its sender not verified
+        svc("update#mantle.request.Request", {requestId: state.filed, filedByPartyId: state.contact, senderVerified: "N"})
+        const byAdministrator = page(state.boss, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
+        const afterAdministrator = one("mantle.request.Request", {requestId: state.filed}).senderVerified
+        const byFiler = page(state.contact, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
+        return {byAdministrator, afterAdministrator, byFiler, after: one("mantle.request.Request", {requestId: state.filed}).senderVerified}
+    },
+    then({byAdministrator, afterAdministrator, byFiler, after}) {
+        byAdministrator === state.filed && afterAdministrator === "N"
+        byFiler === state.filed && after === "Y"
     }
 })
 
@@ -658,8 +758,8 @@ feature("a cancel request of an approved order is filed as a proposal, read and 
 })
 
 // Shop P6 (impl-shop F27; design-customer-service §8 Access): a guest's order link (the SalesOrder OrderView capability)
-// admits the customer services for its one order, as a contact or the self relationship does; the case carries the order's
-// store (impl-commerce F37)
+// admits the customer services for its one order, as a contact or the self relationship does, each write with the code
+// emailed for it (SEC-PSS-23); the case carries the order's store (impl-commerce F37)
 feature("a guest's order link files a case, a return and a cancel request for its one order; another order is refused", {
     when() {
         login("john.doe")
@@ -681,6 +781,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderToken: link,
             requestName: "About my order",
             description: "Where is the second one?",
+            changeCode: changeCode(link, shipped).code,
             operationId: opId()
         })
         const offer = page(null, R + "get#ReturnableOrder", {orderToken: link, orderId: shipped})
@@ -689,6 +790,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderToken: link,
             orderId: shipped,
             lines: [{orderItemSeqId: seq, quantity: 1, returnReasonEnumId: "RrsnDefective", returnResponseEnumId: "RrspCredit"}],
+            changeCode: changeCode(link, shipped).code,
             operationId: opId()
         })
         const cancelSeq = page(null, S + "get#CaseIntake", {orderToken: token("LinkApproved")}).order?.lines[0]?.orderItemSeqId
@@ -697,6 +799,7 @@ feature("a guest's order link files a case, a return and a cancel request for it
             orderId: approved,
             lines: [{orderItemSeqId: cancelSeq, quantity: 1}],
             consent: "Y",
+            changeCode: changeCode(token("LinkApproved"), approved).code,
             operationId: opId()
         })
         // the link of one order reaches no other, and no link no order
@@ -725,5 +828,114 @@ feature("a guest's order link files a case, a return and a cancel request for it
         r.cancel.stateText != null
         r.otherOrder.kind === "NotFound"
         r.noLink.kind === "AuthenticationRequired"
+    }
+})
+
+feature("an order link's cancel, return and case need the code emailed to the order: once, for 15 minutes, wrong tries counted (SEC-PSS-23)", {
+    when() {
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        const orderId = sale(false)
+        const link = token("LinkCode")
+        capability("SalesOrder", orderId, "OrderView", link)
+        // reads keep the link alone
+        const read = page(null, S + "get#CaseIntake", {orderToken: link})
+        const lines = [{orderItemSeqId: read.order?.lines[0]?.orderItemSeqId, quantity: 1}]
+        const cancel = changeCode =>
+            page(null, O + "request#CustomerCancel", {orderToken: link, orderId, lines, consent: "Y", changeCode, operationId: opId()})
+        const noCode = {
+            cancel: cancel(null),
+            return: page(null, R + "request#CustomerReturn", {orderToken: link, orderId, lines: [], operationId: opId()}),
+            case: page(null, S + "create#CustomerCase", {
+                orderToken: link,
+                requestName: "About my order",
+                description: "Is it on its way?",
+                operationId: opId()
+            })
+        }
+        const first = changeCode(link, orderId)
+        const wrongCode = first.code === "00000000" ? "00000001" : "00000000"
+        const wrong = cancel(wrongCode)
+        const afterWrong = first.capability()
+        const used = cancel(first.code)
+        const again = cancel(first.code)
+        // a code past its 15 minutes
+        const late = changeCode(link, orderId)
+        svc("update#mantle.party.ExternalAccessCapability", {
+            capabilityId: late.capability().capabilityId,
+            thruDate: new Date(Date.now() - 1000)
+        })
+        const expired = cancel(late.code)
+        // the fifth wrong try ends a code
+        const tried = changeCode(link, orderId)
+        const tries = [1, 2, 3, 4, 5].map(() => cancel(wrongCode))
+        const afterTries = cancel(tried.code)
+        return {read, noCode, first, wrong, afterWrong, used, again, expired, tried, tries, afterTries, ended: tried.capability()}
+    },
+    then(r) {
+        r.read.mode === "orderLink"
+        r.noCode.cancel.kind === "Unprocessable" && r.noCode.cancel.error.includes("Email me a code")
+        r.noCode.return.kind === "Unprocessable" && r.noCode.return.error.includes("Email me a code")
+        r.noCode.case.kind === "Unprocessable" && r.noCode.case.error.includes("Email me a code")
+        r.first.sent.sent === true
+        /^[0-9]{8}$/.test(r.first.code)
+        // never kept in clear: not on the delivery, and the capability holds its digest over the link
+        !String(r.first.delivery.parametersJson || "").includes(r.first.code)
+        r.afterWrong.scopes === "OrderChange" && r.afterWrong.tokenDigest !== ec.user.singleUseCodeHash(r.first.code)
+        r.wrong.kind === "Unprocessable" && r.wrong.error.includes("not right")
+        r.afterWrong.failedTries === 1 && r.afterWrong.revokedDate == null
+        r.used.stateText === "Cancellation requested"
+        r.again.error.includes("expired or was used")
+        r.expired.error.includes("expired or was used")
+        r.tries.every(t => t.error.includes("not right"))
+        r.afterTries.error.includes("expired or was used")
+        r.ended.failedTries === 5 && r.ended.revokedDate != null
+    }
+})
+
+feature("an article's rating takes only the nonce the server signed for that view of that article (SEC-PSS-25)", {
+    when() {
+        const W = "org.moqui.resource.WikiServices."
+        const K = "mantle.request.KnowledgeServices."
+        run("john.doe", W + "create#WikiSpace", {wikiSpaceId: "SPPHELP", description: "Support portal spec help"})
+        const article = name => {
+            const out = run("john.doe", W + "update#WikiPage", {wikiSpaceId: "SPPHELP", parentPath: "help", pageName: name,
+                pageText: name + " in five steps."})
+            run("john.doe", W + "set#PublishedVersion", {wikiPageId: out.wikiPageId, publishedVersionName: out.versionName})
+            return out.wikiPageId
+        }
+        const pairing = article("SPP pairing"),
+            battery = article("SPP battery")
+        run(state.admin, K + "save#ServiceKnowledgeSource", {
+            organizationPartyId: org,
+            wikiSpaceId: "SPPHELP",
+            pagePathPrefix: "help",
+            audienceEnumId: "SkaPublic",
+            localeLanguage: "en"
+        })
+        const read = page(null, K + "get#CustomerArticle", {wikiPageId: pairing})
+        const other = page(null, K + "get#CustomerArticle", {wikiPageId: battery})
+        const nonce = String(read.nonce || "")
+        const rate = token => page(null, K + "rate#Article", {wikiPageId: pairing, token, helpful: "Y"})
+        const edited = nonce.slice(0, -1) + (nonce.endsWith("A") ? "B" : "A")
+        return {
+            read,
+            rated: rate(nonce),
+            again: rate(nonce),
+            unsigned: rate("n".repeat(32)),
+            otherArticle: rate(String(other.nonce || "")),
+            edited: rate(edited),
+            otherView: rate("x".repeat(24) + nonce.slice(24))
+        }
+    },
+    then({read, rated, again, unsigned, otherArticle, edited, otherView}) {
+        read.article.title != null
+        rated.alreadyApplied === false
+        rated.receipt.helpful === true
+        again.alreadyApplied === true
+        unsigned.kind === "Unprocessable"
+        otherArticle.kind === "Unprocessable"
+        edited.kind === "Unprocessable"
+        otherView.kind === "Unprocessable"
     }
 })

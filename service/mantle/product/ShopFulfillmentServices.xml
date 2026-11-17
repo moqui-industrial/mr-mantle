@@ -19,7 +19,7 @@
         </actions>
     </service>
     <service verb="issue" noun="Download" authenticate="anonymous-all" allow-remote="false">
-        <description>issueDownload (DownloadAction): a capability of ten minutes (SalesOrder, Download, the grant's order) for one grant the caller reaches that is in effect and fulfilled; the frontend streams the file with it at once (getShopDownload). Rate limited by requester; a revoked, expired or another's grant is NOT_AVAILABLE.</description>
+        <description>issueDownload (DownloadAction): a capability of ten minutes (SalesOrder, DownloadFile, the grant's order; no order link) for one grant the caller reaches that is in effect and fulfilled; the frontend streams the file with it at once (getShopDownload). Rate limited by requester; a revoked, expired or another's grant is NOT_AVAILABLE.</description>
         <in-parameters>
             <parameter name="input" type="Map"/>
         </in-parameters>

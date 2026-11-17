@@ -812,8 +812,10 @@ along with this software (see the LICENSE.md file). If not, see
             the form sends one. The answer is only the request's id.
             A service queue's intake token (Customer Service P6, F10; the Support app's form, P15) files into the queue: the
             same checks, the types the queue offers, its web form route's hourly limit (else 30) and the address's (5) per
-            queue; a customer the organization serves (found by the address) makes a case, anyone else is held for review
-            (Channels.js formRequest), and a held one is not confirmed.
+            queue, past which the address gets the neutral receipt and nothing is made (a refusal would tell a known address
+            from one the queue ignores); a customer the organization serves (found by the address) makes a case, anyone else is held for review
+            (Channels.js formRequest), and a held one is not confirmed. Its sender is marked not verified (Request
+            senderVerified N, SEC-PSS-28) until a reply comes from the typed address or its filer opens it signed in.
         </description>
         <in-parameters>
             <parameter name="token" required="true"/>
@@ -896,6 +898,13 @@ along with this software (see the LICENSE.md file). If not, see
                         .condition('salesChannelEnumId', 'ScWeb').condition('requestDate', 'greater-equals', hourAgo)
                 if (queueForm) addressFind = addressFind.condition('requestCategoryId', queueForm.requestCategoryId)
                 if (addressIds.length && addressFind.count() >= 5) {
+                    // a queue's form answers the neutral receipt (SEC-PSS-28): a refusal only for an address the organization
+                    // already knows (an unknown sender is kept nowhere under SusIgnore) would tell a customer's address apart
+                    if (queueForm) {
+                        ec.logger.warn(`Public request form of ${formName}: an address's sixth request in an hour, not kept`)
+                        received = true
+                        return
+                    }
                     fail('You sent several requests just now; try again in an hour'); return
                 }
                 if (queueForm) {

@@ -1186,7 +1186,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="typeEnumId" type="id"/>
         <field name="routingNumber" type="text-short"/>
         <field name="bicSwiftNumber" type="text-short"/>
-        <field name="accountNumber" type="text-medium"/>
+        <field name="accountNumber" type="text-medium" encrypt="true"><description>Encrypted from Nov 16, 2026; a number stored
+            before then is encrypted by migrate#BankAccountNumbers. Never searched by value.</description></field>
         <field name="lastCheckNumber" type="number-integer"/>
 
         <field name="nachaImmedDest" type="text-short"><description>Must be 9 digits, generally assigned by bank,

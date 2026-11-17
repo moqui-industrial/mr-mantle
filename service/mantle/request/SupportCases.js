@@ -354,6 +354,41 @@ function revisionOf(requestId, request = one(REQUEST, {requestId})) {
         revision = Math.max(revision, Number(ms(row.lastUpdatedStamp) || 0))
     return revision
 }
+// SEC-PSS-28: a request a public form filed with a typed address (senderVerified N) has its sender confirmed by a reply
+// from that address (by.address, the request's emailContactMechId) or by its filer signed in (by.partyId, filedByPartyId):
+// senderVerified Y. Anything else leaves the mark. In the caller's transaction, or its own (newTransaction, for a read);
+// a failure is logged and never fails the caller. Whether it confirmed.
+function confirmSender(requestId, by, newTransaction = false) {
+    try {
+        const request = requestId ? one(REQUEST, {requestId}) : null
+        if (!request || request.senderVerified !== "N") return false
+        const typed = request.emailContactMechId
+            ? one("mantle.party.contact.ContactMech", {contactMechId: request.emailContactMechId})?.infoString
+            : null
+        const lower = value => String(value).trim().toLowerCase()
+        const fromTyped = !!typed && !blank(by.address) && lower(typed) === lower(by.address)
+        const filer = !blank(by.partyId) && by.partyId === request.filedByPartyId
+        if (!fromTyped && !filer) return false
+        ec.message.pushErrors()
+        try {
+            ec.service
+                .sync()
+                .name("update#" + REQUEST)
+                .parameters({requestId, senderVerified: "Y"})
+                .requireNewTransaction(newTransaction)
+                .disableAuthz()
+                .call()
+            if (ec.message.hasError()) throw new Error(ec.message.getErrorsString())
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+        }
+        return true
+    } catch (error) {
+        ec.logger.error("Request " + requestId + ": its sender was not marked verified: " + (error?.message || error))
+        return false
+    }
+}
 // A case of one of the user's organizations; a missing request, one that is not a case and another organization's are
 // refused alike (RECORD_UNAVAILABLE).
 function caseOf(requestId, lock = false) {
@@ -1059,6 +1094,8 @@ const operations = {
     customerSidesOf,
     organizationsOf,
     isInternal,
+    // SEC-PSS-28: a form-filed request's sender confirmed (Channels.js mail intake, SupportPortal.js signed in)
+    confirmSender,
     partyName,
     requirePermission,
     requireOrganization,

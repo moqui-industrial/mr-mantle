@@ -46,7 +46,7 @@ function rest(key, method, path, parameters = {}) {
 }
 /* Keys issued by the framework's own services as their user: an access token (create#UserAccessToken), a session's key
    (ec.user.getLoginKey), and from an access token's row a scoped key and a device's key: the row made a
-   device's as /sso/appToken's issue_device_key leaves one (deviceName, no description), since the framework issues a
+   device's as /sso/appToken's issue_device_key leaves one (deviceName, no description or scope), since the framework issues a
    device key only through the app sign-in's code or the REST login, which a server spec cannot make. kind: device,
    expired (a device's key past its thruDate), scoped (the gateway's, as create#UserScopedKey makes it) or token. */
 function issued(username, kind) {
@@ -56,6 +56,8 @@ function issued(username, kind) {
             lib.set("moqui.security.UserLoginKey", {loginKey: out.loginKey}, {
                 deviceName: "Dev AIDE",
                 description: null,
+                // create#UserAccessToken writes scope git; a device's key has none
+                scope: null,
                 ...(kind === "expired" ? {thruDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 60000} : {}),
                 // a scoped key as create#UserScopedKey leaves one (the gateway's alone, under a device name)
                 ...(kind === "scoped" ? {scope: "gateway", deviceName: "Gateway"} : {})

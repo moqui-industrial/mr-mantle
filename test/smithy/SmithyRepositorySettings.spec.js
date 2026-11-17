@@ -220,10 +220,13 @@ feature("a Maintainer keeps the webhooks, and a secret is never read back", {
         const hook = {url: "https://hooks.example.test/smithy", events: "push, tag", secret: "srs-secret-value"}
         const developer = on("SRS_DEVELOPER", "storeWebhook", {...hook, operationId: "srs-hook-1"})
         const stored = on("SRS_MAINTAINER", "storeWebhook", {...hook, operationId: "srs-hook-2"})
+        // the operation's receipt keeps no trace of the secret, so a retry with another one answers the first (SEC-PFS-62)
+        const retried = on("SRS_MAINTAINER", "storeWebhook", {...hook, secret: "srs-other-secret", operationId: "srs-hook-2"})
         const list = on("SRS_MAINTAINER", "findWebhooks")
         return {
             developer,
             stored,
+            retried,
             list,
             text: JSON.stringify(list),
             byDeveloper: on("SRS_DEVELOPER", "findWebhooks"),
@@ -231,7 +234,7 @@ feature("a Maintainer keeps the webhooks, and a secret is never read back", {
             // a hook to this server's own address is stored (the framework's outbound rules are asked at a delivery),
             // its test fails without saying why, and tests are few a minute
             tests: (() => {
-                const local = on("SRS_MAINTAINER", "storeWebhook", {url: "http://127.0.0.1:9/hook", operationId: "srs-hook-4"})
+                const local = on("SRS_MAINTAINER", "storeWebhook", {url: "https://127.0.0.1:9/hook", operationId: "srs-hook-4"})
                 const test = () => on("SRS_MAINTAINER", "testWebhook", {webhookId: local.webhookId})
                 const results = [test(), test(), test(), test()]
                 on("SRS_MAINTAINER", "deleteWebhook", {webhookId: local.webhookId})
@@ -242,7 +245,8 @@ feature("a Maintainer keeps the webhooks, and a secret is never read back", {
             left: on("SRS_MAINTAINER", "findWebhooks").webhookList.length
         }
     },
-    then({developer, stored, list, text, byDeveloper, badUrl, tests, elsewhere, removed, left}) {
+    then({developer, stored, retried, list, text, byDeveloper, badUrl, tests, elsewhere, removed, left}) {
+        retried.webhookId == stored.webhookId
         JSON.stringify(tests[0]) == '{"statusCode":null,"delivered":false,"errorText":"The delivery failed"}'
         tests[2].delivered == false
         tests[3].kind == "Tarpit"

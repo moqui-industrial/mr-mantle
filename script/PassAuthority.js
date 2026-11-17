@@ -70,6 +70,8 @@ const TOKEN_WRITES = [
     'getReturnableOrder',
     'requestCustomerReturn',
     'requestOrderCancel',
+    // SEC-PSS-23: an order link asks for the code its cancel, return and case need
+    'sendOrderChangeCode',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
     // IronStone Sales P13: a quote link's acceptance or decline (input.token)
@@ -156,6 +158,15 @@ const DOWNLOADS = [
     // Smithy DG7 (§15.8): a release's file
     'downloadReleaseAsset',
 ]
+/* The type a file is answered with (SEC-PSF-08): its own when inert (an image, a font, audio or video, a PDF, plain text
+   or CSV, an archive), else application/octet-stream, so no file a visitor uploaded or pushed (a release file named x.js)
+   is a script or a style sheet for the frontend's origin. PASS's Facade.js keeps the same list for local mode. */
+const INERT_TYPES =
+    /^(?:image\/(?:png|jpeg|gif|webp|avif|svg\+xml)|font\/(?:woff2?|ttf|otf)|(?:audio|video)\/[a-z0-9.+-]+|application\/(?:pdf|zip|gzip|x-gzip|x-tar|octet-stream)|text\/(?:plain|csv))$/
+function servedType(type) {
+    const base = String(type || '').split(';')[0].trim().toLowerCase()
+    return INERT_TYPES.test(base) ? String(type) : 'application/octet-stream'
+}
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
    transports pass only these (pass_authority.rs download_cache_control). */
@@ -356,9 +367,11 @@ function envelope(error) {
    operation sent the file as the response itself) or {error}. */
 function handle(p) {
     // what the framework's Account.js reads of this call, set only here and only for its length: the requester's rate
-    // limit key, and the client the transport authenticated (never a flag in a service's input)
+    // limit key, and the client the transport authenticated (never a flag in a service's input); and when a delegated
+    // visitor signed in (passSignedInAt, SmithyGit.js)
     ec.user.context.remove('passRequester')
     ec.user.context.remove('passVerifiedClient')
+    ec.user.context.remove('passSignedInAt')
     try {
         return run(p || {})
     } catch (error) {
@@ -366,6 +379,7 @@ function handle(p) {
     } finally {
         ec.user.context.remove('passRequester')
         ec.user.context.remove('passVerifiedClient')
+        ec.user.context.remove('passSignedInAt')
     }
 }
 function run(p) {
@@ -392,6 +406,13 @@ function run(p) {
             siteId,
             p.clientVerified === true,
         )
+    // SEC-PSA-05: a registered client asks only of its own sites; for another its call is not answered as an anonymous one
+    if (
+        clientId &&
+        !registered &&
+        account().clientRegistered(clientId, p.clientSecret || '', null, p.clientVerified === true)
+    )
+        fail('NotFound', 'Resource not found')
     if (registered && p.clientVerified === true)
         ec.user.context.passVerifiedClient = clientId
     // A registered deployment names its browser's address, for the account rate limits only.
@@ -409,6 +430,10 @@ function run(p) {
         delegation = asSystem(() =>
             account().authenticateDelegation(p.delegation, clientId, siteId),
         )
+        // when this visitor signed in (the delegation's issue), for a check of a recent sign-in (SmithyGit.js
+        // reauthenticate, SEC-PFS-63): the account's login history is anyone's sign-in, not this session's
+        if (delegation.issuedAt)
+            ec.user.context.passSignedInAt = ec.user.timestampMillis(delegation.issuedAt)
     }
     const action = operation.startsWith('account.') ? operation.slice(8) : null
     const route =
@@ -456,7 +481,7 @@ function run(p) {
             result: shown,
             download: {
                 location,
-                contentType: file.mimeType,
+                contentType: servedType(file.mimeType),
                 filename: String(file.filename),
                 disposition:
                     file.variant === 'thumbnail' || file.inline === true
@@ -561,4 +586,5 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     keyKind,
     // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
     downloadCache,
+    servedType,
 })

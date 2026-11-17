@@ -211,6 +211,11 @@ function subscriberOf(address, displayName) {
         if (party && party.disabled !== "Y" && !party.mergedToPartyId && !party.privateOwnerUserId)
             return {partyId: party.partyId, contactMechId: info.contactMechId}
     }
+    return newPersonOf(address, displayName)
+}
+// A new person with the name and address typed, never a directory party that has the address: for an address nobody has confirmed
+// (a public reservation's buyer and attendees, SEC-PSS-61).
+function newPersonOf(address, displayName) {
     const partyId = call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson"}).partyId
     call("create#mantle.party.Person", {partyId, firstName: displayName || null})
     const contactMechId = call("create#mantle.party.contact.ContactMech", {
@@ -918,6 +923,16 @@ const jsonOf = value =>
 // The reservation a page reaches (scope RegistrationView or RegistrationCancel): by its capability's token, by the signed-in buyer's
 // own verified account (the self relationship), or for the provider's return by its reference and key, which read its state alone;
 // on this site, of the organization the site serves. {reservation, policy, via}. Anything else the one NotFound.
+// A signed-in account whose verified address is the reservation's typed buyer or attendee address claims those people first
+// (EventRegistrationClaims.js, SEC-PSS-61), by the token or by the reservation's reference, as Shop claims guest purchases.
+const claims = () => ec.resource.script("component://mr-mantle/service/mantle/work/EventRegistrationClaims.js")
+// a reservation of this site's offers, claimed by the signed-in account when it may
+function claimOn(reservationId, siteId, organizationPartyId) {
+    if (!ec.user.userAccount || !reservationId) return
+    const found = one(RESERVATION, {reservationId})
+    const policy = found ? one(REG_POLICY, {registrationPolicyId: found.registrationPolicyId}) : null
+    if (policy && policy.siteId === siteId && policy.organizationPartyId === organizationPartyId) claims().claim(reservationId)
+}
 function reach(p, scope = "RegistrationView") {
     const organizationPartyId = served(p.siteId)
     let reservationId = null,
@@ -937,6 +952,7 @@ function reach(p, scope = "RegistrationView") {
         reservationId = row.reservationId
         via = "return"
     } else if (!blank(p.reservationId) && ec.user.userAccount) {
+        claimOn(text(p.reservationId), p.siteId, organizationPartyId)
         try {
             reservationId = access().check({
                 recordType: "EventRegistration",
@@ -950,6 +966,7 @@ function reach(p, scope = "RegistrationView") {
         }
         via = "account"
     } else unavailable()
+    if (via === "token") claimOn(reservationId, p.siteId, organizationPartyId)
     const reservation = one(RESERVATION, {reservationId})
     const policy = reservation ? one(REG_POLICY, {registrationPolicyId: reservation.registrationPolicyId}) : null
     if (!policy || policy.siteId !== p.siteId || policy.organizationPartyId !== organizationPartyId) unavailable()
@@ -1016,7 +1033,8 @@ function registrationView(reservation, policy, via, extra = {}) {
                 state.holdEndsMs != null && Number.isFinite(state.holdEndsMs) ? lib.dateText(new Date(state.holdEndsMs)) : "",
             places: all.map(row => ({
                 registrationId: row.registrationId,
-                attendeeName: row.attendeePartyId ? P.partyName(row.attendeePartyId) : "",
+                // the name typed, never the stored name of the party an address matched (SEC-PSS-41, SEC-PSS-61)
+                attendeeName: row.attendeeName || "",
                 ticketName: P.ticketName(row.ticketTypeId),
                 statusId: row.statusId,
                 stateText: L(P.stateTexts[row.statusId] || row.statusId),
@@ -1052,6 +1070,29 @@ function registrationView(reservation, policy, via, extra = {}) {
         extra
     )
 }
+// The party a public reservation's buyer is (SEC-PSS-61, the owner's decision of Nov 16, 2026): a signed-in visitor's own party when
+// the address typed is their account's verified address and the account reaches its own records (ExternalAccess selfOf, the
+// account's way back to the reservation); anyone else a new person with the name and address typed, never the directory party
+// that has the address, which an unconfirmed address would hand the reservation, its order and its capability.
+function buyerOf(address, name) {
+    const account = ec.user.userAccount
+    const own =
+        account?.partyId &&
+        String(account.emailAddress || "")
+            .trim()
+            .toLowerCase() === address &&
+        access().selfOf(account.partyId)
+    if (!own) return newPersonOf(address, name)
+    const cf = ec.entity.conditionFactory
+    const info = find("mantle.party.contact.PartyContactMechInfo")
+        .condition("partyId", account.partyId)
+        .condition("contactMechTypeEnumId", "CmtEmailAddress")
+        .condition(cf.makeCondition("infoString", "equals", address, false, true))
+        .conditionDate("fromDate", "thruDate", ec.user.nowTimestamp)
+        .orderBy("contactMechId")
+        .one()
+    return {partyId: account.partyId, contactMechId: info?.contactMechId || null}
+}
 // reserveRegistration: places asked of a published, open offer on this site for a buyer (a name and an address), held or waitlisted
 // together, or refused when there are not enough; PASS's request key answers a repeat with the first. A request past the client's,
 // site's or address's limit is refused alike and holds nothing. The reservation's capability (view and cancel) is answered once.
@@ -1076,7 +1117,7 @@ function reserveRegistration(p) {
     if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
     const party = earlier
         ? {partyId: earlier.buyerPartyId, contactMechId: earlier.emailContactMechId}
-        : apart("Error making the buyer", () => subscriberOf(buyer.address, buyer.name))
+        : apart("Error making the buyer", () => buyerOf(buyer.address, buyer.name))
     const out = asPage(() =>
         placesOf().reserve({
             registrationPolicyId: policyId,
@@ -1118,7 +1159,9 @@ function completeRegistration(p) {
             answers: answers || [],
             acceptTerms: yes(p.acceptTerms),
             termsRevision: p.termsRevision,
-            requestKey: p.operationId
+            requestKey: p.operationId,
+            // the attendees' addresses are typed, not confirmed: each a new person (SEC-PSS-61)
+            typedAddresses: true
         })
     )
     return {registration: registrationView(one(RESERVATION, {reservationId: reservation.reservationId}), policy, via)}
@@ -1394,6 +1437,7 @@ const internalOperations = new Set(["appReadiness", "buildVerification", "attemp
 ;({
     served,
     subscriberOf,
+    newPersonOf,
     offersOf,
     preferencesContext,
     changeTopics,

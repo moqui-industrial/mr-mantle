@@ -212,6 +212,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="ownerPartyId"><description>The organization the list belongs to</description></parameter>
             <parameter name="contactMechTypeEnumId"/>
             <parameter name="marketingCampaignId"/>
+            <parameter name="linkValidDays" type="Integer"><description>How long a list link of its messages works, 1 to 3650
+                days; empty is 365 (SEC-PSS-44)</description></parameter>
             <parameter name="memberPartyIdList" type="List"/>
         </in-parameters>
         <out-parameters><parameter name="contactListId"/></out-parameters>
@@ -238,10 +240,13 @@ along with this software (see the LICENSE.md file). If not, see
                     ec.message.addError('MEMBERS_NEED_EVIDENCE: A list is joined by an evidenced subscription request, not at its creation'); return }
             }
 
+            if (linkValidDays != null && !(Number(linkValidDays) >= 1 && Number(linkValidDays) <= 3650)) {
+                ec.message.addError('A list link works 1 to 3650 days'); return }
             contactListId = ec.service.sync().name('create#mantle.marketing.contact.ContactList').parameters({
                 contactListTypeEnumId: contactListTypeEnumId, contactListName: contactListName, description: description,
                 comments: comments, isPublic: isPublic, postingEnumId: postingEnumId, defaultDeliveryEnumId: defaultDeliveryEnumId,
-                ownerPartyId: ownerPartyId, contactMechTypeEnumId: contactMechTypeEnumId, marketingCampaignId: marketingCampaignId}).call()?.contactListId
+                ownerPartyId: ownerPartyId, contactMechTypeEnumId: contactMechTypeEnumId, marketingCampaignId: marketingCampaignId,
+                linkValidDays: linkValidDays ?? null}).call()?.contactListId
             if (ec.message.hasError()) return
 
             if (!isMailbox) return
@@ -272,6 +277,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="isPublic"/>
             <parameter name="postingEnumId"/>
             <parameter name="defaultDeliveryEnumId"/>
+            <parameter name="linkValidDays" type="Integer"><description>How long a list link of its messages works, 1 to 3650
+                days (SEC-PSS-44); a new link takes it, links already sent keep theirs</description></parameter>
             <parameter name="archived" type="Boolean"/>
         </in-parameters>
         <actions><script><![CDATA[
@@ -283,10 +290,12 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition('enumTypeId', enumTypeId).useCache(true).one() != null
             if (!enumIn(postingEnumId, 'ContactListPosting')) { ec.message.addError(`Unknown posting policy ${postingEnumId}`); return }
             if (!enumIn(defaultDeliveryEnumId, 'ContactListDelivery')) { ec.message.addError(`Unknown delivery ${defaultDeliveryEnumId}`); return }
+            if (linkValidDays != null && !(Number(linkValidDays) >= 1 && Number(linkValidDays) <= 3650)) {
+                ec.message.addError('A list link works 1 to 3650 days'); return }
             const list = ec.entity.find('mantle.marketing.contact.ContactList').disableAuthz().condition('contactListId', contactListId).one()
             const fields = {contactListName: contactListName, description: description, comments: comments,
                 isPublic: isPublic == null ? null : (isPublic === 'Y' ? 'Y' : 'N'), postingEnumId: postingEnumId,
-                defaultDeliveryEnumId: defaultDeliveryEnumId}
+                defaultDeliveryEnumId: defaultDeliveryEnumId, linkValidDays: linkValidDays}
             for (const [name, value] of Object.entries(fields)) if (value != null) list.set(name, value)
             if (archived === true && list.archivedDate == null) list.set('archivedDate', ec.user.nowTimestamp)
             if (archived === false) list.set('archivedDate', null)

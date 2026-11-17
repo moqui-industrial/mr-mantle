@@ -299,14 +299,21 @@ feature("create#UnsubscribeToken: a random token given once with its hash kept, 
             partyId: party.Cora, messageId: "<consent-news-1@example.com>" })
         const news = call(CREATE_TOKEN, { messageId: "<consent-news-1@example.com>", baseUrl: "https://shop.example.com/" })
         token.news = news.token
+        // a list's own link days, else a year (SEC-PSS-44)
+        call("update#mantle.marketing.contact.ContactList", { contactListId: list.promo, linkValidDays: 30 })
         token.promo = call(CREATE_TOKEN, { contactListId: list.promo, partyId: party.Cora, baseUrl: "https://shop.example.com" }).token
         token.confirm = call(CREATE_TOKEN, { contactListId: list.confirm, partyId: party.Cora }).token
         token.expired = call(CREATE_TOKEN, { contactListId: list.news, partyId: party.Cora, thruDate: new Date(effectiveTime + 11 * minute) }).token
         const row = ec.entity.find(TOKEN).condition("contactListTokenId", news.contactListTokenId).one()
+        const promoRow = ec.entity.find(TOKEN).condition("tokenHash", ec.user.singleUseCodeHash(token.promo)).one()
         const plainCount = ec.entity.find(TOKEN).condition("tokenHash", news.token).count()
-        return { news, communicationEventId, row, plainCount }
+        const days = (tokenRow) => (toMillis(tokenRow.thruDate) - toMillis(tokenRow.createdDate)) / 86400000
+        return { news, communicationEventId, row, plainCount, newsDays: days(row), promoDays: days(promoRow) }
     },
-    then({ news, communicationEventId, row, plainCount }) {
+    then({ news, communicationEventId, row, plainCount, newsDays, promoDays }) {
+        // a link expires: a year by default, the list's linkValidDays when it has them (SEC-PSS-44)
+        newsDays == 365
+        promoDays == 30
         news.token.length == 32
         urlSafe.test(news.token)
         news.unsubscribeUrl == "https://shop.example.com/u/" + news.token
@@ -392,8 +399,41 @@ feature("an unknown, malformed or expired token, or one used beyond its party an
     },
 })
 
-feature("apply#UnsubscribePreferences for an anonymous visitor: each offered list subscribed or not, any other list skipped", {
+feature("list link lookups count against the requester first: past the limit even a good token is refused (SEC-PSS-44)", {
     when() {
+        const out = anonymously(14, () => {
+            // a requester of this feature's own, its bucket filled to the limit for this window (record#Attempt's, Account.js)
+            const requester = "spec:list-token-throttle"
+            const bucketId = ec.user.singleUseCodeHash(
+                "list-token:" + requester + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000))
+            ec.artifactExecution.disableAuthz()
+            ec.service.sync().name("create#moqui.security.public.AccountAttempt").parameters({ bucketId, attemptCount: 100,
+                expiresAt: new Date(Date.now() + 1200000) }).requireNewTransaction(true).call()
+            ec.artifactExecution.enableAuthz()
+            ec.user.context.passRequester = requester
+            try {
+                return { resolve: errorOf(RESOLVE, { token: token.news }), apply: errorOf(APPLY, { token: token.news, unsubscribeAll: true }) }
+            } finally {
+                ec.user.context.remove("passRequester")
+                ec.artifactExecution.disableAuthz()
+                ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", bucketId).deleteAll()
+                ec.artifactExecution.enableAuthz()
+            }
+        })
+        out.news = statusOf("news", "Cora")
+        return out
+    },
+    then({ resolve, apply, news }) {
+        resolve.includes("wait a few minutes")
+        apply.includes("wait a few minutes")
+        news == "CLPT_ACCEPTED"
+    },
+})
+
+feature("apply#UnsubscribePreferences for an anonymous visitor: each offered list unsubscribed; a list the link did not unsubscribe is not subscribed again, nor any other list (SEC-PSS-44)", {
+    when() {
+        const confirmBefore = statusOf("confirm", "Cora")
+        const confirmRowsBefore = consentRows("Cora", { contactListId: list.confirm }).length
         const out = anonymously(14, () => call(APPLY, { token: token.news, listChoices: [
             { contactListId: list.news, subscribed: false },
             { contactListId: list.confirm, subscribed: "true" },
@@ -401,15 +441,21 @@ feature("apply#UnsubscribePreferences for an anonymous visitor: each offered lis
             { contactListId: list.other, subscribed: false },
         ] }))
         const tokenRow = ec.entity.find(TOKEN).condition("tokenHash", ec.user.singleUseCodeHash(token.news)).one()
-        return { out, tokenRow, news: statusOf("news", "Cora"), confirm: statusOf("confirm", "Cora"), promo: statusOf("promo", "Cora"),
-            other: statusOf("other", "Cora"), newsRows: consentRows("Cora", { contactListId: list.news }),
-            confirmRows: consentRows("Cora", { contactListId: list.confirm }) }
+        const result = { out, tokenRow, confirmBefore, news: statusOf("news", "Cora"), confirm: statusOf("confirm", "Cora"),
+            promo: statusOf("promo", "Cora"), other: statusOf("other", "Cora"), newsRows: consentRows("Cora", { contactListId: list.news }),
+            confirmRowsAdded: consentRows("Cora", { contactListId: list.confirm }).length - confirmRowsBefore }
+        // the later features take the confirmation list subscribed, as staff do it here
+        at(14)
+        call(`${CONSENT}.subscribe#ContactListParty`, { contactListId: list.confirm, partyId: party.Cora })
+        return result
     },
-    then({ out, tokenRow, news, confirm, promo, other, newsRows, confirmRows }) {
-        ids(out.changedList) == [list.news, list.confirm].sort()
-        out.failedContactListIds == [list.other]
+    then({ out, tokenRow, confirmBefore, news, confirm, promo, other, newsRows, confirmRowsAdded }) {
+        ids(out.changedList) == [list.news]
+        out.failedContactListIds == [list.confirm, list.other]
+        out.signInRequired == true
         news == "CLPT_UNSUBSCRIBED"
-        confirm == "CLPT_ACCEPTED"
+        confirmBefore != "CLPT_ACCEPTED" && confirm == confirmBefore
+        confirmRowsAdded == 0
         promo == "CLPT_ACCEPTED"
         other == "CLPT_ACCEPTED"
         newsRows.length == 1
@@ -418,9 +464,31 @@ feature("apply#UnsubscribePreferences for an anonymous visitor: each offered lis
         newsRows[0].userId == null
         newsRows[0].contactMechId == email.Cora
         newsRows[0].evidenceText.includes("of message consent-news-1@example.com")
-        confirmRows[0].statusId == "PconGranted"
-        confirmRows[0].sourceEnumId == "PcsEmailLink"
         tokenRow.usedDate != null
+        tokenRow.unsubscribedListIds == list.news
+    },
+})
+
+feature("a list link undoes its own unsubscribe within a day, and not after (SEC-PSS-44)", {
+    when() {
+        const offered = anonymously(14.2, () => call(RESOLVE, { token: token.news }))
+        const undo = anonymously(14.4, () => call(APPLY, { token: token.news, listChoices: [{ contactListId: list.news, subscribed: true }] }))
+        const undone = statusOf("news", "Cora")
+        anonymously(14.6, () => call(APPLY, { token: token.news, listChoices: [{ contactListId: list.news, subscribed: false }] }))
+        // more than a day after the link's last unsubscribe
+        const late = anonymously(14.6 + 1441, () => call(APPLY, { token: token.news, listChoices: [{ contactListId: list.news, subscribed: true }] }))
+        at(14.6)
+        return { offered, undo, undone, late, news: statusOf("news", "Cora") }
+    },
+    then({ offered, undo, undone, late, news }) {
+        offered.listList.find((row) => row.contactListId == list.news).undoable == true
+        offered.listList.find((row) => row.contactListId == list.promo).undoable == false
+        ids(undo.changedList) == [list.news]
+        undone == "CLPT_ACCEPTED"
+        late.changedList.length == 0
+        late.failedContactListIds == [list.news]
+        late.signInRequired == true
+        news == "CLPT_UNSUBSCRIBED"
     },
 })
 

@@ -36,6 +36,10 @@ function served(siteId, app) {
     if (!mount?.targetId) unavailable()
     return mount.targetId
 }
+// A Billing or bill upload post counts against its requester first (SEC-PSS-26), as Supplier's and Support's posts do: a
+// payment start calls the gateway, a bill makes an incoming invoice and its file, a shared link a capability.
+const POST_LIMIT = 60
+const throttle = () => access.throttle("billing-post", POST_LIMIT, "Too many attempts. Wait a few minutes and try again.")
 function operationId(p) {
     const value = String(p.operationId || "")
     if (!/^[A-Za-z0-9_-]{8,40}$/.test(value)) fail("Unprocessable", "Reload the page and try again")
@@ -246,6 +250,7 @@ function findInvoices(p) {
 function issueInvoiceAccess(p) {
     let siteId
     if (p.siteId) {
+        throttle()
         if (checkInvoice(p).via !== "contact") unavailable()
         siteId = p.siteId
     } else {
@@ -307,6 +312,7 @@ function beginPayment(p) {
     return {attemptId: paymentId, resumed: false, returnKey}
 }
 function startInvoicePayment(p) {
+    throttle()
     const checked = checkInvoice(p)
     const key = operationId(p)
     if (!(p.confirm === true || p.confirm === "true")) fail("Unprocessable", "Confirm the payment")
@@ -333,10 +339,11 @@ function startInvoicePayment(p) {
         return {attempt: attemptView(refresh(paymentId)), resumed: !!begun.resumed, alreadyApplied: !!begun.alreadyApplied}
     // a new attempt: the gateway, under the payment's lock only
     find(P, {paymentId}).forUpdate(true).one()
+    // the key as returnToken, a name the request log's secret rule leaves out (SEC-PSS-27)
     const returnUrl = apps.pageUrl(
         p.siteId,
         "billing",
-        "/InvoicePay/return?attemptId=" + encodeURIComponent(paymentId) + "&key=" + encodeURIComponent(begun.returnKey)
+        "/InvoicePay/return?attemptId=" + encodeURIComponent(paymentId) + "&returnToken=" + encodeURIComponent(begun.returnKey)
     )
     asPortalPayment(paymentId, () => {
         const auth = call("mantle.account.PaymentServices.authorize#SinglePayment", {
@@ -358,14 +365,17 @@ function startInvoicePayment(p) {
         call("update#" + P, {paymentId, statusId: "PmntCancelled"})
     return {attempt: attemptView(settle(paymentId)), resumed: false}
 }
-// An attempt's outcome, for its invoice's link or contact, or for the reference its gateway return carries (returnKey),
-// which reads this attempt and its invoice only, on the site it was started from.
+// An attempt's outcome, for its invoice's link or contact: the attempt and its invoice. For the reference its gateway return
+// carries (returnToken, or returnKey from a frontend before SEC-PSS-27: the authority's REST takes it as a query parameter,
+// which its request log keeps unless the name says token), only the attempt's state (paid, declined, pending or failed), on
+// the site it was started from: no amount, reference, payment page or invoice (SEC-PSS-27), which need the link or a sign-in.
 const RETURN_READ_MS = 86400000
 function getPaymentResult(p) {
     const row = p.attemptId && one(ATT, {paymentId: p.attemptId})
     // only an invoice attempt is Billing's (a Shop checkout's has its own result, ShopCheckout.js)
     if (!row || !invoiceAttempt(row)) unavailable()
-    if (p.returnKey) {
+    const returnToken = p.returnToken || p.returnKey
+    if (returnToken) {
         // the reference reads while the attempt is pending or for a day after it settled, and only while the invoice can
         // still be reached (issued, not cancelled), on the organization's site it came from
         const organizationPartyId = served(p.siteId, "billing")
@@ -373,12 +383,15 @@ function getPaymentResult(p) {
         const settledLongAgo = row.settledDate && Date.now() - lib.ms(row.settledDate) > RETURN_READ_MS
         if (
             row.siteId !== p.siteId ||
-            row.returnKeyDigest !== ec.user.singleUseCodeHash(String(p.returnKey)) ||
+            row.returnKeyDigest !== ec.user.singleUseCodeHash(String(returnToken)) ||
             record?.organizationPartyId !== organizationPartyId ||
             settledLongAgo
         )
             unavailable()
-    } else checkInvoice(p, row.invoiceId)
+        const {attemptId, state} = attemptView(refresh(row.paymentId))
+        return {attempt: {attemptId, state}}
+    }
+    checkInvoice(p, row.invoiceId)
     return {attempt: attemptView(refresh(row.paymentId)), invoice: invoiceView(row.invoiceId)}
 }
 // The job (resolve_PortalPayments): the portal payments still pending, oldest first, each asked of its gateway in its own
@@ -427,13 +440,22 @@ function checkOrder(p) {
     const organizationPartyId = served(p.siteId, "supplier")
     return access.check({token: p.token, scope: "BillUpload", recordType: "Order", recordId: p.orderId, organizationPartyId})
 }
-function orderView(orderId) {
+// The order the bill page shows. Its total is the live order's, so it is left out when that is not the order the supplier
+// has (SEC-PSS-24): for a link of an earlier revision (SupplierPortal.js answers such a link nothing of the new one), and
+// while a revision the buyer applied waits for its approval (not sent yet).
+function orderView(orderId, checked) {
     const order = one("mantle.order.OrderHeader", {orderId})
+    const behind = checked?.recordRevision != null && Number(checked.recordRevision) < Number(order.orderRevision ?? 1)
+    const unsent =
+        !behind &&
+        !!ec.resource
+            .script("component://mr-mantle/service/mantle/order/PurchaseRevisions.js")
+            .awaitingApproval({orderId, order})
     return {
         orderId,
         orderName: order.orderName || null,
         placedDateText: day(order.placedDate || order.entryDate),
-        totalText: order.grandTotal == null ? null : moneyText(order.grandTotal, order.currencyUomId),
+        totalText: order.grandTotal == null || behind || unsent ? null : moneyText(order.grandTotal, order.currencyUomId),
         currencyUomId: order.currencyUomId
     }
 }
@@ -472,7 +494,7 @@ function getSubmission(p) {
         submission = list.find(row => row.submissionId === p.submissionId) || null
         if (!submission) unavailable()
     }
-    return {order: orderView(checked.recordId), submissionList: list, submission}
+    return {order: orderView(checked.recordId, checked), submissionList: list, submission}
 }
 // Stage the file under PASS's media root and scan it, as Forum stages an attachment; refuse it unless it is clean. The rules
 // are the shared PortalMedia.js (F58, Customer Service P15); noun names the file in the refusals (Purchasing's quote and
@@ -482,7 +504,21 @@ function stage(file, noun = "bill") {
         .script("component://mr-mantle/service/mantle/party/PortalMedia.js")
         .stage(file, noun, noun === "bill" ? "bills" : "supplier")
 }
+// At most five of a supplier's bills for one order wait for review (SEC-PSS-26): while five are neither approved nor
+// rejected (no invoice yet, or one still incoming or received), a sixth is refused, so an order's link cannot fill Accounts
+// Payable's queue. A repeat of a submission still answers the first.
+const OPEN_BILL_LIMIT = 5
+const openBillStatuses = ["InvoiceIncoming", "InvoiceReceived"]
+function openBillCount(scope, orderId) {
+    const invoiceIds = rows(SUB, {...scope, orderId}).map(row => row.invoiceId)
+    const billed = invoiceIds.filter(Boolean)
+    const waiting = billed.length
+        ? Number(find(I, {}).condition("invoiceId", "in", billed).condition("statusId", "in", openBillStatuses).count())
+        : 0
+    return invoiceIds.length - billed.length + waiting
+}
 function submitSupplierBill(p) {
+    throttle()
     const checked = checkOrder(p)
     const key = operationId(p)
     // the organization first, as import#Bill locks it, so two submissions of one reference are serialized
@@ -494,6 +530,11 @@ function submitSupplierBill(p) {
     if (!reference || reference.length > 60) fail("Unprocessable", "Enter your bill number")
     const earlier = rows(SUB, {...scope, referenceNumber: reference})[0]
     if (earlier) return {submission: submissionView(earlier), alreadyApplied: true}
+    if (openBillCount(scope, checked.recordId) >= OPEN_BILL_LIMIT)
+        fail(
+            "Conflict",
+            "Five bills for this order are waiting for the buyer's review; send another when one of them is accepted or declined"
+        )
     const order = one("mantle.order.OrderHeader", {orderId: checked.recordId})
     let amount = null
     if (p.amount != null && String(p.amount).trim() !== "")

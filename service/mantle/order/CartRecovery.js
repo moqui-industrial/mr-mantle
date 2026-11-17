@@ -232,7 +232,8 @@ function messageOf(store, facts, email, recoveryUrl) {
         }
     }
 }
-const shopLink = (siteId, token) => publicApps().pageUrl(siteId, "shop", "/Recover?r=" + encodeURIComponent(token))
+// the token as recoveryToken, a name the request log's secret rule leaves out (SEC-PSF-03)
+const shopLink = (siteId, token) => publicApps().pageUrl(siteId, "shop", "/Recover?recoveryToken=" + encodeURIComponent(token))
 
 // ===== queue#Recovery (one cart, its own transaction) =====
 // A cart's recovery handed to the ledger when it is eligible now (the job's and staff's send), tried at once unless sendNow is

@@ -48,7 +48,9 @@
         <sms-consent name="mantle.consent" service="mantle.party.MessageSmsServices.check#SmsConsent"/>
     </shell-providers></screen-facade>
     <webapp-list><webapp name="webroot">
-        <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js">
+        <!-- an anonymous caller reaches this servlet, so its multipart bodies are held to the PASS media limit (10 MiB,
+            PortalMedia.js maxBytes) plus the form's envelope, not the 2 GiB of webapp_max_upload (SEC-PSA-07) -->
+        <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js" max-upload="11m">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>
         </servlet>
     </webapp></webapp-list>

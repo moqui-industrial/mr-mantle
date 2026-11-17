@@ -132,7 +132,9 @@ spec({
             toPartyId: orgA,
             fromDate: since
         })
-        state.finance = user("FINANCE", ["ACCOUNTING_ADMIN"])
+        // finance administration of every organization: it selects A or none as active (ACCOUNTING_ADMIN alone is the holder's own
+        // organizations, SEC-BOS-02)
+        state.finance = user("FINANCE", ["ACCOUNTING_ADMIN", "ACCOUNTING_ALL_ORGANIZATIONS"])
         state.payroll = user("PAYROLL", ["PAYROLL_VIEW", "PAYROLL_EDIT"])
         state.nobody = user("NOBODY", ["PEOPLE_HR_VIEW"])
     },

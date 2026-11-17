@@ -801,7 +801,10 @@ along with this software (see the LICENSE.md file). If not, see
             occurrence not ended or a recipient waiting in a send of the merged party (ENROLLMENT_ACTIVE, ENROLLMENT_CONFLICT,
             REGISTRATION_ACTIVE, RECIPIENT_PENDING); its list memberships and consent move with a withdrawal kept where the two
             parties disagree.</description>
-        <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/></in-parameters>
+        <in-parameters><parameter name="toPartyId" required="true"/><parameter name="fromPartyId" required="true"/>
+            <parameter name="claimRegistration" type="Boolean"><description>A verified account's claim of the person a public
+                reservation made for its address (EventRegistrationClaims.js): its live registrations move instead of refusing the
+                merge. Honored only for a caller with authorization off or the system.</description></parameter></in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.party.PartyRole" value-field="fromIntRole">
                 <field-map field-name="partyId" from="fromPartyId"/><field-map field-name="roleTypeId" value="OrgInternal"/></entity-find-one>
@@ -825,7 +828,7 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="fromParty.mergedToPartyId"><return message="From Party ${fromPartyId} already merged to Party ${fromParty.mergedToPartyId}"/></if>
             <!-- the merge guards (impl-sales P3): who may merge, one kind, one owner organization, no other organization's
                 dependency; a refusal fails the service with its reason code -->
-            <script>ec.resource.script('component://mr-mantle/service/mantle/party/PartyMerge.js').guard(toPartyId, fromPartyId)</script>
+            <script>ec.resource.script('component://mr-mantle/service/mantle/party/PartyMerge.js').guard(toPartyId, fromPartyId, {claimRegistration: claimRegistration == true})</script>
 
             <log level="info" message="Merging Party ${fromPartyId} to Party ${toPartyId}"/>
             <!-- disable from Party and set mergedToPartyId -->

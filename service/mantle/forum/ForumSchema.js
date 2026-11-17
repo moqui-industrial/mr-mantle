@@ -960,7 +960,8 @@
     },
     getPaymentResult: {
         service: 'mantle.account.PortalServices.get#PaymentResult',
-        fields: ['siteId', 'attemptId', 'token', 'returnKey'],
+        // returnToken: the gateway return's key (SEC-PSS-27); returnKey, its old name, from a frontend before it
+        fields: ['siteId', 'attemptId', 'token', 'returnToken', 'returnKey'],
     },
     getSubmission: {
         service: 'mantle.account.PortalServices.get#Submission',
@@ -1109,6 +1110,8 @@
             'emailAddress',
             'website',
             'file',
+            // SEC-PSS-23: an order link's write needs its emailed code
+            'changeCode',
             'operationId',
         ],
     },
@@ -1158,6 +1161,7 @@
             'customerReference',
             'note',
             'file',
+            'changeCode',
             'operationId',
         ],
     },
@@ -1193,8 +1197,14 @@
             'lines',
             'reason',
             'consent',
+            'changeCode',
             'operationId',
         ],
+    },
+    // SEC-PSS-23: a guest's order link asks for the code its cancel, return and case need
+    sendOrderChangeCode: {
+        service: 'mantle.request.SupportCaseServices.send#OrderChangeCode',
+        fields: ['siteId', 'orderToken'],
     },
     getOrderCancelRequest: {
         service: 'mantle.order.OrderChangeServices.get#CustomerCancel',

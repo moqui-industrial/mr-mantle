@@ -102,6 +102,11 @@ function cart() {
     const digest = ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").tokenDigest(token)
     return {token, access: one("mantle.order.StoreCartAccess", {capabilityDigest: digest})}
 }
+// a guest's cart with its checkout begun, which gives it its guest party (SEC-PSS-05): {token, access}
+function begun(c) {
+    op(CHECKOUT + "begin#Checkout", {token: c.token})
+    return Object.assign(c, {access: one("mantle.order.StoreCartAccess", {cartAccessId: c.access.cartAccessId})})
+}
 // a guest's cart submitted to the hosted page (its payment pending there): {token, access, submitted, checkout}
 function submitted() {
     const c = cart()
@@ -238,13 +243,15 @@ spec({
 
 feature("an expired cart is cancelled through the order path and its guest retired; one waiting for its payment is left", {
     when() {
-        const plain = cart()
+        const plain = begun(cart())
+        // a cart whose checkout never began has no guest party (SEC-PSS-05): retired with none
+        const bare = cart()
         const waiting = submitted()
         // review R2: a cart whose guestPartyId names a party staff keep (merge#Parties moves it there): never disabled
-        const kept = cart()
+        const kept = begun(cart())
         system(() => make("mantle.party.PartyRole", {partyId: kept.access.guestPartyId, roleTypeId: "Supplier"}))
         system(() => {
-            for (const c of [plain, waiting, kept])
+            for (const c of [plain, bare, waiting, kept])
                 call("update#mantle.order.StoreCartAccess", {
                     cartAccessId: c.access.cartAccessId,
                     expireDate: new Date(Date.now() - 60000)
@@ -256,6 +263,8 @@ feature("an expired cart is cancelled through the order path and its guest retir
             plainAccess: one("mantle.order.StoreCartAccess", {cartAccessId: plain.access.cartAccessId}),
             plainOrder: one("mantle.order.OrderHeader", {orderId: plain.access.orderId}),
             guest: one("mantle.party.Party", {partyId: plain.access.guestPartyId}),
+            bareAccess: one("mantle.order.StoreCartAccess", {cartAccessId: bare.access.cartAccessId}),
+            bareOrder: one("mantle.order.OrderHeader", {orderId: bare.access.orderId}),
             keptOrder: one("mantle.order.OrderHeader", {orderId: kept.access.orderId}),
             keptParty: one("mantle.party.Party", {partyId: kept.access.guestPartyId}),
             waitingAccess: one("mantle.order.StoreCartAccess", {cartAccessId: waiting.access.cartAccessId}),
@@ -265,13 +274,29 @@ feature("an expired cart is cancelled through the order path and its guest retir
             again: system(() => call(O + "run#ShopOperations", {limit: 500}))
         }
     },
-    then({job, plainAccess, plainOrder, guest, keptOrder, keptParty, waitingAccess, waitingOrder, waitingCheckout, again}) {
+    then({
+        job,
+        plainAccess,
+        plainOrder,
+        guest,
+        bareAccess,
+        bareOrder,
+        keptOrder,
+        keptParty,
+        waitingAccess,
+        waitingOrder,
+        waitingCheckout,
+        again
+    }) {
         job.failed == 0
         job.retired >= 1
         job.waiting >= 1
         plainAccess.revokeReasonEnumId == "ScrExpired"
         plainOrder.statusId == "OrderCancelled"
         guest.disabled == "Y"
+        bareAccess.revokeReasonEnumId == "ScrExpired"
+        !bareAccess.guestPartyId
+        bareOrder.statusId == "OrderCancelled"
         keptOrder.statusId == "OrderCancelled"
         keptParty.disabled != "Y"
         waitingAccess.revokedDate == null

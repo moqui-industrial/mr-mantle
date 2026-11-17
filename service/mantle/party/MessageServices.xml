@@ -137,16 +137,20 @@
         </actions>
     </service>
     <!-- The framework's mail queue (org.moqui.admin.OperationServices, moqui.server.MailOutcomeOwner; mr-boss impl-admin P12):
-        the ledger answers for the stored messages its attempts made, so none is retried or settled beside it. Neither
-        service is in a group's grant: the mail queue's services call them, and the second checks the ledger's own
-        permission. -->
+        the ledger answers for the stored messages its attempts made, so none is retried or settled beside it. Every user
+        may call both (MantleOperationOwners, data/PartyAccessData.xml), as the mail queue's services call them as the
+        caller: the first answers only a reader of the mail queue (ADMIN_OPERATION_VIEW or _MANAGE, ADMIN_CONNECTION_VIEW
+        or _MANAGE), the second checks the ledger's own permission. -->
     <service verb="find" noun="MailOutcomeOwners" allow-remote="false">
         <description>Which of the given EmailMessages are an attempt of a delivery of this ledger: each with its delivery
             (ownerRef), the delivery's state in words, whether its uncertain send may be reconciled now (the last attempt
             of an uncertain delivery) and whether the ledger tries it again on its own (queued or waiting). The ledger
-            offers no retry. No address or parameter of a delivery is returned.</description>
+            offers no retry. No address or parameter of a delivery is returned. Refused (PERMISSION_DENIED) to a caller
+            who does not read the mail queue: ADMIN_OPERATION_VIEW or _MANAGE, ADMIN_CONNECTION_VIEW or _MANAGE.</description>
         <implements service="org.moqui.admin.OperationServices.find#MailOutcomeOwners"/>
         <actions>
+            <if condition="!['ADMIN_OPERATION_VIEW', 'ADMIN_OPERATION_MANAGE', 'ADMIN_CONNECTION_VIEW', 'ADMIN_CONNECTION_MANAGE'].some(permission => ec.user.hasPermission(permission))">
+                <return error="true" message="PERMISSION_DENIED: Asking who owns a mail message needs ADMIN_OPERATION_VIEW"/></if>
             <set field="ownerList" from="ec.resource.script('component://mr-mantle/service/mantle/party/MessageDeliveries.js').execute('mailOutcomeOwners', context).ownerList"/>
         </actions>
     </service>

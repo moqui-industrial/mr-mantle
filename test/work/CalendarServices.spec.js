@@ -782,6 +782,28 @@ const importIcs = icsOf(["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Mantle Cal
     "SUMMARY:Imported offsite", "TRANSP:TRANSPARENT", "END:VEVENT",
     "END:VCALENDAR"])
 
+// a feed is fetched over https only, and never from a private address: the URL is the user's, the fetch the server's
+// (SEC-BAP-01); the refusal recorded is a fixed text, not what the address answered
+feature("a subscription refuses an http URL, and its fetch refuses an internal address with a fixed error", {
+    when() {
+        setTime(14.5)
+        return as("Ada", () => {
+            const plain = errorOf(`${CAL}.subscribe#Calendar`, { url: "http://calendar.example.com/plain.ics", fetchNow: false })
+            const local = call(`${CAL}.subscribe#Calendar`, { url: "webcal://127.0.0.1:9/local.ics", fetchNow: false }).calendarId
+            const fetched = call(`${CAL}.fetch#CalendarSubscriptions`, { calendarId: local, force: true })
+            const row = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", local).one()
+            call(`${CAL}.delete#Calendar`, { calendarId: local })
+            return { plain, fetched, row }
+        })
+    },
+    then({ plain, fetched, row }) {
+        plain.includes("needs an https or webcal URL")
+        fetched.failedCount == 1
+        row.lastFetchStatus == "error"
+        row.lastFetchError == "The feed address is on a private network and is not fetched"
+    },
+})
+
 feature("export#Calendar writes an iCalendar file that reads back through the ICalendar tool; import#Calendar reads a series, its moved instance and an all-day event", {
     when() {
         setTime(14.5)

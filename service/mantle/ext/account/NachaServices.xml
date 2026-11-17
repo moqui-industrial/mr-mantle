@@ -43,6 +43,15 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="fileText"/>
         </out-parameters>
         <actions>
+            <!-- A payment file sends money: the bank account's organization in the caller's Accounting scope, with the authority
+                that approves a payment run there (PAYMENT_RUN_APPROVE; check#BankAccess runApprove), for a direct caller as for a
+                run's approver. A payment run's file (PaymentRuns.js writeFile, after the run's approval, as a PAYMENT_EDIT holder),
+                a job and a system message's consume call it with authorization off (SEC-BAP-08) -->
+            <if condition="!ec.artifactExecution.authzDisabled()">
+                <service-call name="mantle.account.ReconciliationServices.check#BankAccess"
+                        in-map="{paymentMethodId:paymentMethodId, need:'runApprove'}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
             <entity-find-one entity-name="mantle.account.method.BankAccount" value-field="bankAccount"/>
             <if condition="bankAccount == null"><return error="true" message="Payment method ${paymentMethodId} is not a bank account"/></if>

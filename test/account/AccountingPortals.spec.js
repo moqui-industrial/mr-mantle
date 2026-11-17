@@ -503,7 +503,7 @@ feature("pending attempts resolve: the invoice page asks the gateway, the job se
         const pageStart = portal("start#InvoicePayment", {siteId: site, token: pageToken, operationId: "portal-res-0001", confirm: true})
         const pageView = portal("get#Invoice", {siteId: site, token: pageToken})
         const jobStart = portal("start#InvoicePayment", {siteId: site, token: jobToken, operationId: "portal-res-0002", confirm: true})
-        const returnKey = decodeURIComponent(/[?&]key=([^&]+)/.exec(jobStart.attempt.redirectUrl)[1])
+        const returnKey = decodeURIComponent(/[?&]returnToken=([^&]+)/.exec(jobStart.attempt.redirectUrl)[1])
         const wrongKey = portal("get#PaymentResult", {siteId: site, attemptId: jobStart.attempt.attemptId, returnKey: "x".repeat(40)})
         login("john.doe")
         ec.artifactExecution.disableAuthz()
@@ -550,8 +550,10 @@ feature("pending attempts resolve: the invoice page asks the gateway, the job se
         job.resolved >= 1
         jobStatus == "PmntDelivered"
         wrongKey.errorKind == "NotFound"
+        // the return's reference reads only the attempt's state (SEC-PSS-27)
         byKey.attempt.state == "paid"
-        byKey.invoice.statusText == "Paid"
+        Object.keys(byKey.attempt).sort().join() == "attemptId,state"
+        byKey.invoice == null
         stuckStatus == "PmntCancelled"
         stuckView.attempt == null
         stuckView.capabilities.canPay == true
@@ -665,7 +667,7 @@ feature("the return's reference reads for a day after its attempt settles and on
         const paidToken = token(paidId),
             waitToken = token(waitId),
             youngToken = token(youngId)
-        const keyOf = out => decodeURIComponent(/[?&]key=([^&]+)/.exec(out.attempt.redirectUrl)[1])
+        const keyOf = out => decodeURIComponent(/[?&]returnToken=([^&]+)/.exec(out.attempt.redirectUrl)[1])
         login("john.doe")
         payThrough("ACCT_PORTAL_HOSTED")
         logout()
@@ -721,6 +723,7 @@ feature("the return's reference reads for a day after its attempt settles and on
         paidRead.attempt.state == "paid"
         paidLater.errorKind == "NotFound"
         waitRead.attempt.state == "pending"
+        waitRead.attempt.redirectUrl == null && waitRead.invoice == null
         waitCancelled.errorKind == "NotFound"
         youngView.attempt.state == "pending"
         abandonedView.attempt == null
@@ -762,6 +765,51 @@ feature("a contact's shared pay link never ends the organization's emailed link;
     }
 })
 
+feature("Billing's and the bill upload's posts count against the requester first (SEC-PSS-26)", {
+    when() {
+        const invoiceId = invoice("12")
+        login(f.users.ar)
+        const token = access("create#AccessCapability", {recordType: "Invoice", recordId: invoiceId, scopes: "InvoicePay"}).token
+        logout()
+        // a requester of this feature's own, its posts' bucket filled to the limit for this window (record#Attempt's, Account.js)
+        const requester = "spec:billing-post-throttle"
+        const bucketId = ec.user.singleUseCodeHash(
+            "billing-post:" + requester + ":" + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+        )
+        settlement().call("create#moqui.security.public.AccountAttempt", {
+            bucketId,
+            attemptCount: 60,
+            expiresAt: new Date(Date.now() + 1200000)
+        })
+        const as = (who, name, input) => {
+            ec.user.context.passRequester = who
+            try {
+                return portal(name, input)
+            } finally {
+                ec.user.context.remove("passRequester")
+            }
+        }
+        const pay = {siteId: site, token, operationId: "portal-throttle-01"}
+        const result = {
+            payment: as(requester, "start#InvoicePayment", {...pay, confirm: true}),
+            bill: as(requester, "submit#SupplierBill", {siteId: site, token: "b".repeat(48), operationId: "portal-throttle-02"}),
+            share: as(requester, "issue#InvoiceAccess", {siteId: site, invoiceId}),
+            // another requester's post goes on to the payment's own checks
+            other: as("spec:billing-post-other", "start#InvoicePayment", pay)
+        }
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        ec.entity.find("moqui.security.public.AccountAttempt").condition("bucketId", bucketId).deleteAll()
+        return result
+    },
+    then({payment, bill, share, other}) {
+        payment.errorKind == "Tarpit"
+        bill.errorKind == "Tarpit"
+        share.errorKind == "Tarpit"
+        other.errorKind == "Unprocessable"
+        other.errorMessage.includes("Confirm the payment")
+    }
+})
 feature("token lookups count before the lookup: past the limit even a good token is refused, with no hit or miss told", {
     when() {
         const invoiceId = invoice("11")

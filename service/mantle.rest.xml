@@ -242,9 +242,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <resource name="bankAccount"><method type="patch">
                     <service name="mantle.account.PaymentMethodServices.update#BankAccount"/></method></resource>
 
-                <resource name="nacha"><method type="get">
+                <!-- each writes a file and marks its payments sent: a POST, never a GET -->
+                <resource name="nacha"><method type="post">
                     <service name="mantle.ext.account.NachaServices.generate#NachaFile"/></method></resource>
-                <resource name="positivePay"><method type="get">
+                <resource name="positivePay"><method type="post">
                     <service name="mantle.ext.account.PositivePayServices.generate#PositivePayFile"/></method></resource>
                 <resource name="ofx1"><method type="post">
                     <service name="mantle.ext.account.OfxServices.import#OfxVersion1"/></method></resource>

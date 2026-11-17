@@ -77,8 +77,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="PaymentResult" authenticate="anonymous-all" allow-remote="false">
         <description>An attempt's outcome, looked up at the gateway while pending (get#SinglePaymentGatewayDetails) and captured
             when authorized; what the payer's browser brings back from the gateway is never read. The link's token, the
-            contact, or the reference the gateway's return carries (returnKey) reads it. A paid attempt is applied
-            to the invoice by Mantle's PaymentApplyForInvoice SECA.</description>
+            contact reads it with its invoice; the reference the gateway's return carries (returnToken; returnKey, its older
+            name) reads only its state, paid, declined, pending or failed, with no amount, reference or invoice
+            (SEC-PSS-27). A paid attempt is applied to the invoice by Mantle's PaymentApplyForInvoice SECA.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>
@@ -90,8 +91,9 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A supplier's bill for a purchase order, for the order's BillUpload token or a signed-in contact of its
             supplier: the file is staged and scanned (pass_media_root, pass_scanner_service), then the incoming draft is made
             through import#Bill's core (or the receipt's self-billed draft takes it), recorded as a SupplierBillSubmission.
-            A repeat of the operationId or of the bill number answers the first submission. It never approves a
-            bill.</description>
+            A repeat of the operationId or of the bill number answers the first submission. A new one is refused
+            (Conflict) while five of the supplier's bills for the order wait for review, neither approved nor rejected
+            (SEC-PSS-26). It never approves a bill.</description>
         <in-parameters><parameter name="input" type="Map"/></in-parameters>
         <out-parameters><parameter name="result" type="Map"/></out-parameters>
         <actions>

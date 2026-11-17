@@ -1134,7 +1134,8 @@ function orderSnapshot(p) {
         !part ||
         !header ||
         !one("mantle.party.PartyRole", {partyId: part.vendorPartyId, roleTypeId: "OrgInternal"}) ||
-        one("mantle.party.PartyRole", {partyId: part.customerPartyId, roleTypeId: "OrgInternal"})
+        // a part with no customer yet (a guest's Shop cart before its checkout, SEC-PSS-05) is a sales part
+        (part.customerPartyId && one("mantle.party.PartyRole", {partyId: part.customerPartyId, roleTypeId: "OrgInternal"}))
     )
         return {sales: false}
     const row = effective(p.productId, part.vendorPartyId, ec.user.nowTimestamp, part.facilityId)

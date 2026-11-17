@@ -625,9 +625,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="activeOrgId" from="ec.user.getPreference('ACTIVE_ORGANIZATION')"/>
             <if condition="activeOrgId != null &amp;&amp; activeOrgId.length == 0"><set field="activeOrgId" from="null"/></if>
             <!-- if active org is not valid for the user ignore it -->
-            <!-- Finance administrators may select another internal organization; this only selects scope and grants no financial operation. -->
+            <!-- Accounting in every organization (ACCOUNTING_ALL_ORGANIZATIONS, ADMIN's; never ACCOUNTING_ADMIN alone, SEC-BOS-02) may
+                select another internal organization; this only selects scope and grants no financial operation. -->
             <set field="financeActiveOrgAllowed" from="false"/>
-            <if condition="activeOrgId &amp;&amp; partyId == ec.user.userAccount?.partyId &amp;&amp; (ec.user.isInGroup('ADMIN') || ec.user.hasPermission('ACCOUNTING_ADMIN'))">
+            <if condition="activeOrgId &amp;&amp; partyId == ec.user.userAccount?.partyId &amp;&amp; (ec.user.isInGroup('ADMIN') || ec.user.hasPermission('ACCOUNTING_ALL_ORGANIZATIONS'))">
                 <entity-find-one entity-name="mantle.party.PartyRole" value-field="financeActiveOrgRole" cache="true">
                     <field-map field-name="partyId" from="activeOrgId"/><field-map field-name="roleTypeId" value="OrgInternal"/>
                 </entity-find-one>

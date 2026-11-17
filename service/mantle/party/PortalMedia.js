@@ -16,12 +16,13 @@ const signatures = [
     {type: "image/jpeg", extension: "jpg", bytes: [0xff, 0xd8, 0xff]}
 ]
 const maxBytes = 10485760
-// A file's type from its leading bytes; null for anything but a PDF, PNG or JPEG.
+// A file's type from its leading bytes; null for anything but a PDF, PNG or JPEG. Only those eight bytes are read, not the
+// whole staged file (up to 10 MB a post; SEC-PSS-65).
 function sniff(location) {
     const stream = ec.resource.getLocationReference(location).openStream()
     let head
     try {
-        head = Array.from(stream.readAllBytes().slice(0, 8)).map(b => b & 0xff)
+        head = Array.from(stream.read(0, 8)).map(b => b & 0xff)
     } finally {
         stream.close()
     }

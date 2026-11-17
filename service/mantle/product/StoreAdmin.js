@@ -94,7 +94,9 @@ const settingTypes = {
     PsstRecoveryMaxSends: "recoveryMaxSends",
     PsstRecoveryRetention: "recoveryRetention",
     PsstCheckoutOptIns: "checkoutOptIns",
-    PsstNewsList: "newsList"
+    PsstNewsList: "newsList",
+    // SEC-PSS-05: Shop's new guest carts an hour (ShopCart.js createCart)
+    PsstGuestCartsHourly: "number"
 }
 // Setting types a clone never copies (a recovery schedule, P10).
 // P6: the support queue and tax origin name the store organization's queue and facility.

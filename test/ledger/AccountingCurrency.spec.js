@@ -76,6 +76,10 @@ spec({
         f = helper().fixtures("NATIVE_FX")
         off = helper().fixtures("NATIVE_FX_OFF")
         call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: off.org, postingGuardEnabled: "N"})
+        // exchange rates are every organization's: their finance administrators work in every organization (SEC-BOS-02)
+        for (const fixture of [f, off])
+            call("create#moqui.security.UserGroupPermission", {userGroupId: fixture.users.financeadmin,
+                userPermissionId: "ACCOUNTING_ALL_ORGANIZATIONS", fromDate: 0})
     },
     setup() {
         ec.artifactExecution.disableAuthz()

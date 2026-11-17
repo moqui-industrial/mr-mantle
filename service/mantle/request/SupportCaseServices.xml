@@ -1222,6 +1222,37 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('getCaseFile', input)"/>
         </actions>
     </service>
+    <service verb="send" noun="OrderChangeCode" authenticate="anonymous-all" allow-remote="false">
+        <description>sendOrderChangeCode (TOKEN_WRITES for a guest's order link, SEC-PSS-23): the link (its OrderView) asks for the code its cancel, return and case need, mailed to the order's address through the delivery ledger (MdsrcOrderChangeCode) and lasting 15 minutes, used once, ended at its fifth wrong try; counted against the requester (5 in ten minutes) and the order (5 an hour). The answer names no address.</description>
+        <in-parameters><parameter name="input" type="Map"/></in-parameters>
+        <out-parameters><parameter name="result" type="Map"/></out-parameters>
+        <actions>
+            <set field="result" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportPortal.js').execute('sendOrderChangeCode', input)"/>
+        </actions>
+    </service>
+    <service verb="build" noun="OrderChangeCodeMessage" allow-remote="false">
+        <description>The delivery ledger's build of an order link's code (MessageDeliverySource MdsrcOrderChangeCode, SEC-PSS-23): a fresh eight-digit code at each attempt, only its digest kept on the code's capability, from the organization's address to the order's; suppress once the code is used, ended or expired.</description>
+        <in-parameters>
+            <parameter name="deliveryId"/>
+            <parameter name="eventKey" required="true"/>
+            <parameter name="recipientPartyId"/>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="toAddress"/>
+            <parameter name="bodyParameters" type="Map"/>
+            <parameter name="body"/>
+            <parameter name="bodyText"/>
+            <parameter name="suppress"/>
+        </out-parameters>
+        <actions>
+            <set field="out" from="ec.resource.script('component://mr-mantle/service/mantle/request/SupportNotices.js').buildOrderChangeCode(context)"/>
+            <set field="toAddress" from="out.toAddress"/>
+            <set field="bodyParameters" from="out.bodyParameters"/>
+            <set field="body" from="out.body"/>
+            <set field="bodyText" from="out.bodyText"/>
+            <set field="suppress" from="out.suppress"/>
+        </actions>
+    </service>
     <service verb="save" noun="SupportAppSetting" allow-remote="false">
         <description>The Support mount's settings of an organization (design ServiceDefaults) from its date: the service queues a
             signed-in customer may file into (QUEUE_UNAVAILABLE), the case types offered (TYPE_INVALID) and the wiki spaces its

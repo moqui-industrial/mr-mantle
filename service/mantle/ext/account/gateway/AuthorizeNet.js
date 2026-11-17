@@ -120,6 +120,7 @@ function send(gw, requestName, body) {
         const client = ec.service.rest().method("POST").uri(gw.remote.sendUrl).timeout(40).jsonObject(JSON.stringify(request))
         // a connection that may not use the private network (a delegated administrator's on a production instance)
         if (gw.remote.allowPrivateNetwork === "N") client.denyInternal()
+        else if (gw.remote.allowPrivateNetwork === "Y") client.allowInternal()
         response = client.call()
     } catch (error) {
         return {unknown: "No answer from Authorize.Net: " + clip(error?.message ?? error, 200)}

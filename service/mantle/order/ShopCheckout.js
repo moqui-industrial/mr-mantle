@@ -595,12 +595,35 @@ function attemptView(checkout, payment) {
 }
 
 // ===== operations: begin, get, resume =====
+// A guest's cart has no customer party until its checkout begins (SEC-PSS-05): under the order's lock, an anonymous guest
+// party (a Person "Guest" with the Customer role) becomes its order part's customer and its access row's guestPartyId, and
+// the promotions are applied again for that customer, as attach#Cart does for an account. The cart as it is then.
+function guestParty(cart) {
+    find("mantle.order.OrderHeader", {orderId: cart.row.orderId}).forUpdate(true).one()
+    const fresh = carts().loaded(cart.row)
+    if (fresh.part.customerPartyId) return fresh
+    const partyId = call("create#mantle.party.Party", {partyTypeEnumId: "PtyPerson", disabled: "N"}).partyId
+    call("create#mantle.party.Person", {partyId, firstName: "Guest"})
+    call("create#mantle.party.PartyRole", {partyId, roleTypeId: "Customer"})
+    call("update#mantle.order.OrderPart", {
+        orderId: fresh.part.orderId,
+        orderPartSeqId: fresh.part.orderPartSeqId,
+        customerPartyId: partyId
+    })
+    call("update#" + A, {cartAccessId: fresh.row.cartAccessId, guestPartyId: partyId})
+    call("mantle.order.OrderServices.handle#OrderMajorChange", {
+        orderId: fresh.part.orderId,
+        orderPartSeqId: fresh.part.orderPartSeqId
+    })
+    return carts().loaded(fresh.row)
+}
 // begin#Checkout: the cart's checkout, made when there is none (the store's checkout policy as it is now, the terms in
-// effect, the signed-in account's contact), else the current one. An empty cart, a line that cannot be bought, or a store
-// whose policy needs an account (accountMode account) for a guest is refused.
+// effect, the signed-in account's contact; a guest's cart its guest party, guestParty), else the current one. An empty
+// cart, a line that cannot be bought, or a store whose policy needs an account (accountMode account) for a guest is
+// refused.
 function beginCheckout(p) {
     const shop = shopOf(p)
-    const cart = carts().cartOf(shop, p.token)
+    let cart = carts().cartOf(shop, p.token)
     if (!cart) notAvailable()
     const existing = checkoutOfCart(cart)
     if (existing && existing.statusId !== "ScoCompleted") return view(restate({shop, cart, checkout: existing, via: "cart"}))
@@ -620,6 +643,7 @@ function beginCheckout(p) {
     const policy = storePolicy(shop.store)
     if (policy.accountMode === "account" && !shop.customerPartyId)
         refuse("AuthenticationRequired", "SIGN_IN_REQUIRED", "Sign in to check out in this store")
+    if (!cart.part.customerPartyId) cart = guestParty(cart)
     const account = shop.customerPartyId ? ec.user.userAccount : null
     const person = account?.partyId ? one("mantle.party.Person", {partyId: account.partyId}) : null
     const created = call("create#" + C, {
@@ -1204,12 +1228,12 @@ function freeze(p) {
 const digitalOrder = orderId =>
     ec.resource.script("component://mr-mantle/service/mantle/product/ShopFulfillment.js").digitalLines(orderId).length > 0
 // The canonical return address of a checkout: the site's canonical host and Shop mount (never a caller's origin), with
-// its reference and key.
+// its reference and key; the key as returnToken, a name the request log's secret rule leaves out (SEC-PSS-02).
 const returnUrl = (checkout, returnKey) =>
     publicApps().pageUrl(
         checkout.siteId,
         "shop",
-        "/Checkout/return?ref=" + encodeURIComponent(checkout.returnReference) + "&key=" + encodeURIComponent(returnKey)
+        "/Checkout/return?ref=" + encodeURIComponent(checkout.returnReference) + "&returnToken=" + encodeURIComponent(returnKey)
     )
 // authorize: the attempt's payment authorized through authorize#SinglePayment with its operation key (a retry answers the
 // first gateway response) and the return address; the transaction holds the payment only.

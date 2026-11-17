@@ -450,6 +450,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="facilityOwnerPartyId" entity-alias="WEFFFAC" field="ownerPartyId"/>
         <alias name="facilityOwnerPseudoId" entity-alias="WEFFPTY" field="pseudoId"/>
         <alias name="facilityOwnerPartyTypeEnumId" entity-alias="WEFFPTY" field="partyTypeEnumId"/>
+        <alias name="facilityOwnerPrivateOwnerUserId" entity-alias="WEFFPTY" field="privateOwnerUserId"/>
         <alias name="facilityOwnerOrganizationName" entity-alias="WEFFORG" field="organizationName"/>
         <alias name="facilityOwnerFirstName" entity-alias="WEFFPER" field="firstName"/>
         <alias name="facilityOwnerLastName" entity-alias="WEFFPER" field="lastName"/>
@@ -460,6 +461,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="otherFacilityOwnerPartyId" entity-alias="WEFAFAC" field="ownerPartyId"/>
         <alias name="otherFacilityOwnerPseudoId" entity-alias="WEFAPTY" field="pseudoId"/>
         <alias name="otherFacilityOwnerPartyTypeEnumId" entity-alias="WEFAPTY" field="partyTypeEnumId"/>
+        <alias name="otherFacilityOwnerPrivateOwnerUserId" entity-alias="WEFAPTY" field="privateOwnerUserId"/>
         <alias name="otherFacilityOwnerOrganizationName" entity-alias="WEFAORG" field="organizationName"/>
         <alias name="otherFacilityOwnerFirstName" entity-alias="WEFAPER" field="firstName"/>
         <alias name="otherFacilityOwnerLastName" entity-alias="WEFAPER" field="lastName"/>

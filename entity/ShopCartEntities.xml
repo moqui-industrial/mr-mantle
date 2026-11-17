@@ -8,7 +8,8 @@
 <entities xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-definition-3.xsd">
   <entity entity-name="StoreCartAccess" package="mantle.order" cache="never">
     <description>A public cart's access: the open order, the scope (site, Shop mount, store and currency), the verified
-      customer (a signed-in account's party, empty for a guest, whose order part carries an anonymous guest party), the
+      customer (a signed-in account's party, empty for a guest, whose order part carries an anonymous guest party once its
+      checkout begins), the
       session capability's digest (rotated at sign-in and sign-out), a one-time recovery token's digest (Commerce P10), the
       last shopper activity and the expiry it extends, and retirement (revokedDate with its reason, and the cart a merge
       moved it into). merge#Parties moves customerPartyId and guestPartyId with the party; nothing moves a cart on an email
@@ -21,8 +22,8 @@
     <field name="currencyUomId" type="id"/>
     <field name="customerPartyId" type="id"><description>The verified customer: the signed-in account's party that made or
       attached the cart; empty for a guest's.</description></field>
-    <field name="guestPartyId" type="id"><description>The anonymous customer party a guest's cart was made with, kept on
-      the order part so the sales commercial revision applies.</description></field>
+    <field name="guestPartyId" type="id"><description>The anonymous customer party begin#Checkout made for a guest's cart
+      (none before its checkout begins, SEC-PSS-05), kept on the order part so the sales commercial revision applies.</description></field>
     <field name="capabilityDigest" type="text-medium"><description>The digest of the presentation session's capability;
       the capability itself is never stored.</description></field>
     <field name="recoveryTokenDigest" type="text-medium"><description>A one-time recovery link's token digest (Commerce

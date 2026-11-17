@@ -61,6 +61,8 @@ const TOKEN_WRITES = [
     'getReturnableOrder',
     'requestCustomerReturn',
     'requestOrderCancel',
+    // SEC-PSS-23: an order link asks for the code its cancel, return and case need
+    'sendOrderChangeCode',
     // Commerce P10: a cart recovery link's one-time token (input.token); the authority asks a visitor to sign in first
     'recoverCart',
     // IronStone Sales P13: a quote link's acceptance or decline (input.token)
@@ -90,6 +92,48 @@ const fail = (kind, message) => {
     e.moquiErrorKind = kind
     throw e
 }
+/* Wrong client secrets by address, as the host's gRPC listener counts them (pass_authority FAILURE_LIMIT, 10 in ten
+   minutes; SEC-PSA-03): each wrong one is counted in the framework's attempt buckets (record#Attempt, in its own
+   transaction) and logged, and an address that has used them up is refused every call that names a secret, right or
+   wrong, until its window ends, so a secret cannot be guessed at the webapp's general rate; each wrong one is also noted
+   for the web protection's auth-failure ban (ec.web.noteAuthFailure). */
+const SECRET_FAILURES = 10,
+    SECRET_WINDOW = 600000
+function checkSecret(request, account, clientId, clientSecret) {
+    const address = String(request.remoteAddr || 'unknown').slice(0, 64)
+    const key = 'pass-client-secret:' + address
+    // the bucket record#Attempt keeps for this key and window (Account.js recordAttempt): read without counting
+    const bucketId = ec.user.singleUseCodeHash(
+        key + ':' + Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / SECRET_WINDOW),
+    )
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    let used
+    try {
+        used = Number(
+            ec.entity.find('moqui.security.public.AccountAttempt').condition('bucketId', bucketId).one()?.attemptCount || 0,
+        )
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+    if (used >= SECRET_FAILURES) fail('Tarpit', 'Too many wrong client secrets; wait')
+    if (account.clientRegistered(clientId, clientSecret, null)) return
+    ec.service
+        .sync()
+        .throwOnError(true)
+        .name('org.moqui.public.AccountServices.record#Attempt')
+        .parameters({ input: { key, limit: SECRET_FAILURES, windowMillis: SECRET_WINDOW } })
+        .requireNewTransaction(true)
+        .call()
+    // the web protection's auth-failure ban counts it too, as a wrong password (the host takes it after this request)
+    ec.web?.noteAuthFailure()
+    ec.logger.warn('PASS authority: a wrong client secret for ' + String(clientId).slice(0, 64) + ' from ' + address)
+}
+/* A file is never a page of the site (SEC-PSF-08): its type is PassAuthority.js servedType's, and it runs nothing. */
+const SANDBOX = "default-src 'none'; sandbox"
+/* Whether a file is sandboxed: always, but a PDF shown inline, which a browser will not display in a sandbox and whose
+   viewer has an origin of its own (the framework's web::user_file_inline; PASS's Facade.js sandboxed). */
+const sandboxed = (type, disposition) =>
+    !(String(disposition || '') === 'inline' && String(type || '').split(';')[0].trim().toLowerCase() === 'application/pdf')
 /* The bytes a ranged download reads and writes at a time. */
 const RANGE_WINDOW = 1024 * 1024
 /* A ranged file (Shop P6, a granted download): Accept-Ranges, a 206 of the range asked or a 416 outside the file, the bytes
@@ -114,6 +158,7 @@ function streamRanged(response, file) {
         response.setHeader('Content-Range', 'bytes ' + start + '-' + end + '/' + file.size)
     }
     response.setContentType(file.contentType)
+    response.setHeader('Content-Security-Policy', SANDBOX)
     const wasDisabled = ec.artifactExecution.disableAuthz()
     try {
         // only the range is read, a window at a time (Shop F88)
@@ -169,6 +214,7 @@ function respond(response, answer) {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         response.setContentType(file.contentType)
+        if (sandboxed(file.contentType, file.disposition)) response.setHeader('Content-Security-Policy', SANDBOX)
         // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
         response.setHeader('Cache-Control', file.cacheControl || 'no-store')
         response.setHeader(
@@ -212,6 +258,7 @@ function respond(response, answer) {
             const account = ec.resource.script(
                 'component://framework/service/org/moqui/public/Account.js',
             )
+            if (clientId && clientSecret) checkSecret(request, account, clientId, clientSecret)
             const registeredClient = account.clientRegistered(
                 clientId,
                 clientSecret,

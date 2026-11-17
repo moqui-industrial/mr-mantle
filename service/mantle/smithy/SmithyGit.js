@@ -222,7 +222,9 @@ kit => {
             hookOf(p, p.webhookId)
             return store()
         }
-        return receipt(p, "smithy.storeWebhook", () => {
+        // the receipt's stored hash of the input leaves the secret out, as storeMirror's does (SEC-PFS-62): a short secret
+        // could be guessed against it offline, every other field being known from the webhook row
+        return receipt({...p, secret: undefined}, "smithy.storeWebhook", () => {
             if (find("moqui.resource.GitWebhook", {repositoryId: p.repositoryId}).count() >= MAX_WEBHOOKS)
                 invalid("quotaExceeded: A repository has at most " + MAX_WEBHOOKS + " webhooks")
             return store()
@@ -283,17 +285,27 @@ kit => {
 
     // ===== git access: the account's SSH keys and access tokens (§11 GitAccess) =====
     const MAX_CREDENTIALS = 20
-    const RECENT_SIGN_IN = 15 * 60000
+    // the framework's window for making a credential (org.moqui.sso.RecentAuthServices require#RecentAuth: five minutes,
+    // check#RecentAuth maxAgeSeconds 300), so Smithy and the framework's own git access pages agree
+    const RECENT_SIGN_IN = 5 * 60000
     /* Before a credential is made the account proves again who it is: with a password, the password (and the second
        factor's code where it has one), as Forum's setSiteRole asks; with none (it signs in through a provider), a
-       sign-in within the last 15 minutes, by the framework's login history. */
+       sign-in within the last five minutes: through a remote frontend this visitor's own, its delegation's issue
+       (PassAuthority.js passSignedInAt, SEC-PFS-63), else this session's own (check#RecentAuth: a password, a second
+       factor's code or a provider sign-in with its auth_time; never another session's or a login key). */
     function reauthenticate(p) {
         const account = one("moqui.security.UserAccount", {userId: ec.user.userId})
         if (!account) fail("AuthenticationRequired", "Sign in to continue")
         if (!account.currentPassword) {
-            const recent = find("moqui.security.UserLoginHistory", {userId: account.userId, successfulLogin: "Y"})
-                .condition("fromDate", "greater", stamp(millis(now()) - RECENT_SIGN_IN))
-                .count()
+            const signedInAt = ec.user.context.passSignedInAt
+            const recent =
+                signedInAt != null
+                    ? millis(now()) - Number(signedInAt) <= RECENT_SIGN_IN
+                    : ec.service
+                          .sync()
+                          .name("org.moqui.sso.RecentAuthServices.check#RecentAuth")
+                          .parameters({maxAgeSeconds: RECENT_SIGN_IN / 1000})
+                          .call()?.recent === true
             if (!recent) fail("AuthenticationRequired", "recentSignInRequired: Sign in again to change your git access")
             return
         }

@@ -11,6 +11,10 @@
 //   Service is set up for (a service policy) and a return the customer sees (not an agent's draft); without a Support site the
 //   mail goes without the link, logged. Run on commit of the decision (ReturnPolicies.js), in its own transaction: a failure is
 //   logged and changes nothing.
+// - buildOrderChangeCode (SEC-PSS-23): the delivery ledger's build of the code a guest's order link asks for
+//   (SupportPortal.js sendOrderChangeCode): a fresh eight-digit code at each attempt (ExternalAccess.js mintChangeCode, only
+//   its digest kept), from the organization's address to the order's (orderEmail); suppressed once the code is used, ended or
+//   expired.
 // CC0 1.0 Universal plus Grant of Patent License.
 const lib = ec.resource.script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
 const cases = ec.resource.script("component://mr-mantle/service/mantle/request/SupportCases.js")
@@ -271,4 +275,42 @@ function queueReturnDecision(returnId, decision) {
         ec.logger.error("Return " + returnId + ": the decision notice was not queued: " + error.message)
     }
 }
-;({caseLink, addCaseLink, sendReturnDecision, queueReturnDecision})
+// The address of an order's buyer: its completed Shop checkout's contact email, else the customer's own email.
+function orderEmail(orderId, partyId) {
+    const checkout = rows("mantle.order.StoreCheckout", {orderId}).find(row => row.statusId === "ScoCompleted" && row.contactEmail)
+    return (checkout ? String(checkout.contactEmail).trim() : null) || emailOf(partyId)
+}
+// build#OrderChangeCodeMessage (each attempt): {toAddress, bodyParameters, body, bodyText}, or suppress.
+function buildOrderChangeCode(p) {
+    const capabilityId = String(p.eventKey || "").replace(/^OrderChangeCode:/, "")
+    const minted = access().mintChangeCode(capabilityId)
+    if (!minted) return {suppress: "The code was used, replaced or expired"}
+    const toAddress = orderEmail(minted.recordId, minted.partyId)
+    if (!toAddress) return {suppress: "The order has no email address"}
+    const organizationName = cases.partyName(minted.organizationPartyId)
+    const fromAddress = senderOf(minted.organizationPartyId, null)
+    if (!fromAddress) throw new Error(organizationName + " has no email address to send the order change code from")
+    const minutes = access().CHANGE_CODE_MINUTES
+    const lines = [
+        L("Your code for order") + " " + minted.recordId + ": " + minted.code,
+        L("Enter it on the page where you asked for it, to cancel, return or ask about this order.") +
+            " " +
+            L("It works once, for") +
+            " " +
+            minutes +
+            " " +
+            L("minutes."),
+        L("If you did not ask for it, ignore this email: nothing changes without the code.")
+    ]
+    return {
+        toAddress,
+        bodyParameters: {
+            subject: L("Your code for order") + " " + minted.recordId + " · " + organizationName,
+            fromAddress,
+            fromName: organizationName
+        },
+        body: lines.map(line => "<p>" + encode(line) + "</p>").join(""),
+        bodyText: lines.join("\n\n")
+    }
+}
+;({caseLink, addCaseLink, sendReturnDecision, queueReturnDecision, orderEmail, buildOrderChangeCode})

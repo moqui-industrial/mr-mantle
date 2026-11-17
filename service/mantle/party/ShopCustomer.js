@@ -584,7 +584,11 @@ const ownAddress = (partyId, contactMechId) =>
 // store#Address (AddressEdit): a new address, or a change of an own one at the revision shown (Mantle's
 // update#PartyPostalAddress, which keeps a placed order's address as it was); the store's carrier may offer a correction,
 // never applied unasked.
+// An account's address and card setup posts count against its requester (SEC-PSS-67), as the cart, checkout, review and
+// download operations do: each may call the carrier's address validation or the store gateway's hosted setup.
+const throttle = () => externalAccess().throttle("shop-account", 30, "Wait a few minutes before trying again")
 function storeAddress(p) {
+    throttle()
     const shop = shopOf(p)
     const partyId = requireSelf()
     const field = name => text(p[name])
@@ -749,6 +753,7 @@ function getPaymentMethods(p) {
 // (a redirect, or a form the frontend's relay posts) returning to the Shop mount's PaymentMethods/return; the setup's
 // reference comes back with it.
 function beginPaymentMethodSetup(p) {
+    throttle()
     const shop = shopOf(p)
     const partyId = requireSelf()
     const gateway = setupGateway(shop)
@@ -777,6 +782,7 @@ function beginPaymentMethodSetup(p) {
 // finish#PaymentMethodSetup: the provider asked for the account's methods after its setup page (its profile read, the
 // new cards kept masked); what the browser brings back is never trusted. The methods as they are now.
 function finishPaymentMethodSetup(p) {
+    throttle()
     const shop = shopOf(p)
     const partyId = requireSelf()
     const gateway = setupGateway(shop)

@@ -79,13 +79,13 @@ const production = () => ec.resource.script("component://mr-mantle/service/mantl
 const payables = () => ec.resource.script("component://mr-mantle/service/mantle/account/Payables.js")
 
 // ===== access =====
-// The permission (any of a list) and the organizations the user may work in: every internal organization for a finance
-// administrator, else the user's own.
+// The permission (any of a list) and the organizations the user may work in: every internal organization with
+// ACCOUNTING_ALL_ORGANIZATIONS, else the user's own (a finance administrator's too, SEC-BOS-02).
 function requireAny(permissions) {
     if (!permissions.some(has)) denied("PERMISSION_DENIED", permissions.join(" or ") + " is required")
 }
 function organizationIds() {
-    if (entityLib.access.systemAdmin() || has("ACCOUNTING_ADMIN"))
+    if (entityLib.access.systemAdmin() || has("ACCOUNTING_ALL_ORGANIZATIONS"))
         return Array.from(find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).selectField("partyId").list()).map(
             row => row.partyId
         )

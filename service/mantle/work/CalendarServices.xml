@@ -785,8 +785,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="subscribe" noun="Calendar">
         <description>
             Subscribes the current user to an external calendar: a subscription calendar (kind CalkSubscription, owned by
-            the user's party) with its CalendarSubscription. An iCalendar URL (CspIcsUrl, the default) may be http, https or
-            webcal; Google and Microsoft 365 accounts (CspGoogle, CspMicrosoft) need the OAuth client (later). fetchNow
+            the user's party) with its CalendarSubscription. An iCalendar URL (CspIcsUrl, the default) is https or webcal
+            (fetched as https); http is refused. Google and Microsoft 365 accounts (CspGoogle, CspMicrosoft) need the OAuth client (later). fetchNow
             fetches it at once, in the background.
         </description>
         <in-parameters>
@@ -805,8 +805,8 @@ along with this software (see the LICENSE.md file). If not, see
                 ec.message.addError('Subscribing to a Google or Microsoft 365 account is not available yet'); return }
             if (providerEnumId !== 'CspIcsUrl') { ec.message.addError(`Unknown calendar provider ${providerEnumId}`); return }
             const text = url ? String(url).trim() : ''
-            const match = /^(https?|webcal):\/\/([^\/?#:]+)/i.exec(text)
-            if (!match) { ec.message.addError('A calendar subscription needs an http, https or webcal URL'); return }
+            const match = /^(https|webcal):\/\/([^\/?#:@]+)/i.exec(text)
+            if (!match) { ec.message.addError('A calendar subscription needs an https or webcal URL'); return }
             const minutes = Math.max(5, Number(refreshMinutes) || 60)
             calendarId = ec.service.sync().name('create#mantle.work.calendar.Calendar').parameters({
                 calendarName: calendarName ? String(calendarName).trim() : match[2], ownerPartyId: partyId,
@@ -896,8 +896,10 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
     <service verb="fetch" noun="CalendarSubscription" authenticate="anonymous-all">
-        <description>One subscription of the fetch job: GET its URL (webcal as https) and read what it answered with
-            store#CalendarFeedText. Errors are the caller's to record. With authorization on, only for a calendar the user
+        <description>One subscription of the fetch job: GET its URL (webcal as https; any other scheme refused) and read
+            what it answered with store#CalendarFeedText. The GET refuses a host that is or resolves to an internal
+            address, redirects included (denyInternal). A failed GET's error is a fixed text, not the answer's status or
+            the connection's error, which are logged. Errors are the caller's to record. With authorization on, only for a calendar the user
             owns or manages (check#CalendarAccess CalpManage).</description>
         <in-parameters><parameter name="calendarId" required="true"/></in-parameters>
         <out-parameters>
@@ -914,10 +916,23 @@ along with this software (see the LICENSE.md file). If not, see
             const subscription = ec.entity.find('mantle.work.calendar.CalendarSubscription').condition('calendarId', calendarId).one()
             if (subscription == null || !subscription.url) { ec.message.addError(`Calendar subscription ${calendarId} not found`); return }
             if (ec.factory.getToolFactory('ICalendar') == null) { ec.message.addError('The ICalendar tool is not available'); return }
-            const uri = String(subscription.url).replace(/^webcal:/i, 'https:')
-            const response = ec.service.rest().method('GET').uri(uri).contentType('text/calendar').timeout(60).call()
+            const uri = String(subscription.url).trim().replace(/^webcal:/i, 'https:')
+            if (!/^https:\/\//i.test(uri)) { ec.message.addError('A calendar subscription is fetched only over https'); return }
+            let response
+            try {
+                response = ec.service.rest().method('GET').uri(uri).contentType('text/calendar').timeout(60).denyInternal().call()
+            } catch (err) {
+                const detail = String(err && err.message ? err.message : err)
+                ec.logger.warn(`Calendar subscription ${calendarId} not fetched: ${detail}`)
+                ec.message.addError(detail.includes('internal address') ? 'The feed address is on a private network and is not fetched'
+                        : 'The feed could not be read')
+                return
+            }
             const status = response.getStatusCode()
-            if (status < 200 || status >= 300) { ec.message.addError(`The feed answered ${status} ${response.getReasonPhrase() || ''}`.trim()); return }
+            if (status < 200 || status >= 300) {
+                ec.logger.warn(`Calendar subscription ${calendarId} answered ${status} ${response.getReasonPhrase() || ''}`)
+                ec.message.addError('The feed could not be read'); return
+            }
             const feedText = response.text()
             if (!feedText || !String(feedText).trim()) { ec.message.addError('The feed answered with no calendar'); return }
             const stored = ec.service.sync().name('mantle.work.CalendarServices.store#CalendarFeedText')

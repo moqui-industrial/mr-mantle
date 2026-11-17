@@ -113,10 +113,14 @@ function allDigitalShopOrder(orderId) {
     const lines = productLines(orderId)
     return lines.length > 0 && lines.every(item => plainDigital(item.productId) || paidAccess(item.productId))
 }
+// A download's file is served only from the product's own folder under the content root, where an upload puts it
+// (Content.js owned: no other scheme or store, no step out with ..); a row naming any other location is not delivered.
+const productContent = () => ec.resource.script("component://mr-mantle/service/mantle/product/Content.js")
+const servedDownload = row => !!row?.contentLocation && productContent().owned(row, productContent().config({}))
 // The files a product delivers: its current PcntDownload contents.
 const downloadContents = productId =>
     rows("mantle.product.ProductContent", {productId, productContentTypeEnumId: "PcntDownload"})
-        .filter(row => lib.active(row) && row.contentLocation)
+        .filter(row => lib.active(row) && servedDownload(row))
         .sort((a, b) => Number(a.sequenceNum || 0) - Number(b.sequenceNum || 0))
 
 // ===== fulfillment =====
@@ -516,7 +520,7 @@ function grantsReached(reached) {
 // A file's public facts: its name, type and size (from the resource), never its location.
 function fileOf(content) {
     const location = content?.contentLocation
-    if (!location) return null
+    if (!location || !servedDownload(content)) return null
     const filename = String(location).split("/").pop()
     let size = null
     let mimeType = null
@@ -568,8 +572,9 @@ function grantOf(reached, downloadGrantId) {
     if (!activeGrant(row) || !fulfillment || fulfillment.stepEnumId !== "SifCompleted") notAvailable()
     return row
 }
-// issue#Download (DownloadAction): a capability of ten minutes for one reached grant (SalesOrder, Download, the grant's
-// order), rate limited by requester; the page streams the file with it at once.
+// issue#Download (DownloadAction): a capability of ten minutes for one reached grant (SalesOrder, DownloadFile, the grant's
+// order), rate limited by requester; the page streams the file with it at once. Its scope is not an order link's Download
+// (SEC-PSS-03): it reaches no downloads list and issues no successor, so its ten minutes hold.
 function issueDownload(p) {
     externalAccess().throttle("shop-download", 60, "Wait a few minutes before downloading again")
     const reached = reachDownloads(p)
@@ -578,7 +583,7 @@ function issueDownload(p) {
     const made = externalAccess().create({
         recordType: "SalesOrder",
         recordId: grant.orderId,
-        scopes: "Download",
+        scopes: "DownloadFile",
         thruDate: new Date(nowMs() + minutes * 60000),
         issuerKind: "organization"
     })
@@ -593,7 +598,7 @@ function getDownloadFile(p) {
     if (!grantRow || grantRow.productStoreId !== shop.productStoreId) notAvailable()
     const checked = externalAccess().check({
         token: text(p.downloadToken),
-        scope: "Download",
+        scope: "DownloadFile",
         recordType: "SalesOrder",
         recordId: grantRow.orderId,
         organizationPartyId: shop.store.organizationPartyId

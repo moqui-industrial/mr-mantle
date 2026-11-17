@@ -122,7 +122,7 @@ feature("the list is the caller's own and has no secret, and an account ends onl
 
 feature("an account with no password to give again signs in again instead", {
     when() {
-        // an account that signs in through a provider: no password, and no sign-in in the framework's history
+        // an account that signs in through a provider: no password, and no sign-in of this session
         lib.account(SITE, "SGA_PROVIDER", {handle: "sgaprovider"})
         const asProvider = work => {
             ec.user.internalLoginUser("SGA_PROVIDER")
@@ -147,16 +147,70 @@ feature("an account with no password to give again signs in again instead", {
         const history = () => ec.entity.find("moqui.security.UserLoginHistory").condition("userId", "SGA_PROVIDER").disableAuthz()
         history().deleteAll()
         const stale = add("sga-provider-1")
+        // ten minutes ago is not recent: the framework's window (require#RecentAuth) is five minutes
+        lib.make("moqui.security.UserLoginHistory", {
+            userId: "SGA_PROVIDER",
+            fromDate: new Date(Number(ec.user.nowTimestamp) - 10 * 60000),
+            successfulLogin: "Y"
+        })
+        const older = add("sga-provider-3")
+        // another session's sign-in now is not this session's (SEC-PFS-63): a fresh history row alone is refused
         lib.make("moqui.security.UserLoginHistory", {
             userId: "SGA_PROVIDER",
             fromDate: ec.user.nowTimestamp,
             successfulLogin: "Y"
         })
-        return {stale, recent: add("sga-provider-2")}
+        const historyOnly = add("sga-provider-6")
+        // this session signs in itself (a password sign-in notes it; the account then has no password again): recent
+        const password = lib.row("moqui.security.UserAccount", {userId: "SGA_ONE"}).currentPassword
+        lib.set("moqui.security.UserAccount", {userId: "SGA_PROVIDER"}, {currentPassword: password, passwordHashType: "SHA"})
+        ec.user.loginUser("SGA_PROVIDER", "moqui")
+        lib.set("moqui.security.UserAccount", {userId: "SGA_PROVIDER"}, {currentPassword: null})
+        const recent = add("sga-provider-2")
+        // through a remote frontend the visitor's own sign-in counts, its delegation's issue, not the account's latest
+        // anywhere (SEC-PFS-63): a delegation of ten minutes ago is refused though the account signed in just now
+        setProperty("pass_client_sgaspec_sites", SITE)
+        const delegation = (token, issued) =>
+            lib.make("moqui.security.public.DelegatedSession", {
+                delegationId: "SGA_DEL_" + token.slice(4, 7),
+                userId: "SGA_PROVIDER",
+                clientId: "sgaspec",
+                siteId: SITE,
+                tokenHash: ec.user.singleUseCodeHash(token),
+                issuedAt: new Date(Number(ec.user.nowTimestamp) - issued * 60000),
+                expiresAt: new Date(Number(ec.user.nowTimestamp) + 15 * 60000)
+            })
+        const delegated = (token, operationId) => {
+            const out = ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                siteId: SITE,
+                operation: "createAccessToken",
+                input: {name: "Delegated", operationId},
+                delegation: token,
+                clientId: "sgaspec",
+                clientVerified: true
+            })
+            ec.message.clearErrors()
+            ec.user.loginUser(lib.OPERATOR, "moqui")
+            return out.error ? {kind: out.error.code, reason: out.error.reason} : out.result
+        }
+        delegation("sga-old-delegation-token-0000000000", 10)
+        delegation("sga-new-delegation-token-0000000000", 1)
+        return {
+            stale,
+            older,
+            historyOnly,
+            recent,
+            oldDelegation: delegated("sga-old-delegation-token-0000000000", "sga-provider-4"),
+            newDelegation: delegated("sga-new-delegation-token-0000000000", "sga-provider-5")
+        }
     },
-    then({stale, recent}) {
+    then({stale, older, historyOnly, recent, oldDelegation, newDelegation}) {
+        historyOnly.reason == "recentSignInRequired"
+        oldDelegation.reason == "recentSignInRequired"
+        newDelegation.token.length > 20
         stale.kind == "AuthenticationRequired"
         stale.reason == "recentSignInRequired"
+        older.reason == "recentSignInRequired"
         recent.fingerprint.startsWith("SHA256:")
     }
 })

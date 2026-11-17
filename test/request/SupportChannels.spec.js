@@ -622,6 +622,82 @@ feature(
     }
 )
 
+feature("a case a queue's form filed is marked sender not verified until a reply comes from its address (SEC-PSS-28)", {
+    when() {
+        run(state.admin, S + "save#ServiceRoute", {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", rateLimitPerHour: 30})
+        const issued = run(state.admin, R + "create#IntakeToken", {requestCategoryId: state.queue})
+        const filed = run("john.doe", R + "create#IntakeRequest", {
+            token: issued.token,
+            firstName: "Dana",
+            lastName: "Spec",
+            emailAddress: "dana.sch@example.com",
+            requestName: "SCH typed address",
+            description: "Typed into the form"
+        })
+        run(state.admin, R + "remove#IntakeToken", {requestCategoryId: state.queue})
+        const profile = profileOf(filed.requestId)
+        const marked = one(REQUEST, {requestId: filed.requestId})?.senderVerified
+        // a reply from the typed address on the case's token
+        const reply = mail(
+            receive({fromAddress: "dana.sch@example.com", subject: "Re: [Request " + filed.requestId + "]", bodyText: "It was me."})
+        )
+        return {
+            filed,
+            profile,
+            marked,
+            mailed: one(REQUEST, {requestId: state.mailCase})?.senderVerified ?? null,
+            reply,
+            after: one(REQUEST, {requestId: filed.requestId})?.senderVerified
+        }
+    },
+    then({filed, profile, marked, mailed, reply, after}) {
+        filed.requestId != null && profile != null
+        marked == "N"
+        // a case that came by mail has no mark
+        mailed == null
+        reply.joined == true && reply.requestId == filed.requestId
+        after == "Y"
+    }
+})
+
+feature("an address past its hourly requests through a queue's form gets the neutral receipt, known or not (SEC-PSS-28)", {
+    when() {
+        run(state.admin, S + "save#ServiceRoute", {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", rateLimitPerHour: 30})
+        const issued = run(state.admin, R + "create#IntakeToken", {requestCategoryId: state.queue})
+        // five web requests of the customer's address in this hour
+        const mech = Array.from(
+            ec.entity.find("mantle.party.contact.ContactMech").condition("infoString", "dana.sch@example.com").disableAuthz().list()
+        )[0]
+        for (let i = 0; i < 5; i++)
+            run("john.doe", "create#" + REQUEST, {
+                requestName: "SCH earlier " + i,
+                statusId: "ReqSubmitted",
+                requestCategoryId: state.queue,
+                salesChannelEnumId: "ScWeb",
+                emailContactMechId: mech.contactMechId,
+                requestDate: ec.user.nowTimestamp
+            })
+        const before = ec.entity.find(REQUEST).condition("requestCategoryId", state.queue).disableAuthz().count()
+        const sixth = run("john.doe", R + "create#IntakeRequest", {
+            token: issued.token,
+            firstName: "Dana",
+            lastName: "Spec",
+            emailAddress: "dana.sch@example.com",
+            requestName: "SCH sixth",
+            description: "Over the address limit"
+        })
+        const after = ec.entity.find(REQUEST).condition("requestCategoryId", state.queue).disableAuthz().count()
+        run(state.admin, R + "remove#IntakeToken", {requestCategoryId: state.queue})
+        return {sixth, before, after}
+    },
+    then({sixth, before, after}) {
+        sixth.error == ""
+        sixth.received == true
+        sixth.requestId == null
+        after == before
+    }
+})
+
 feature("a logged call: one that reached the customer meets first response, an internal one does not; the refusals", {
     when() {
         const made = run(state.agent, S + "create#Case", {

@@ -204,10 +204,21 @@ feature("a line comment is a post with its anchor, read beside the comments Proj
             post: lib.row("mantle.forum.ForumPostState", {communicationEventId: line.postId}),
             stranger: threads("SMQ_STRANGER"),
             developer: threads("SMQ_DEV"),
-            projects: lib.run("mantle.work.GitServices.get#ReviewThreads", {mergeRequestId}).threadList
+            projects: lib.run("mantle.work.GitServices.get#ReviewThreads", {mergeRequestId}).threadList,
+            // the framework's REST read of the same threads, for a viewer (SEC-PFS-01)
+            rest: lib.service("SMQ_STRANGER", "mantle.work.GitServices.handle#GitReviewThread", {
+                operation: "find",
+                repositoryId: ids.repositoryId,
+                mergeRequestId
+            }).threadList
         }
     },
-    then({line, elsewhere, reply, old, fromProjects, resolved, anchor, post, stranger, developer, projects}) {
+    then({line, elsewhere, reply, old, fromProjects, resolved, anchor, post, stranger, developer, projects, rest}) {
+        // the REST names authors as Smithy's pages do: the profile's handle, never a party id (SEC-PFS-01)
+        rest.length == 3
+        rest.every(thread => thread.commentList.every(comment => !("fromPartyId" in comment)))
+        rest.find(thread => Number(thread.newLine) == 2).commentList.map(comment => comment.authorHandle) == ["smqstranger", "smqdev"]
+        !JSON.stringify(rest).includes("Smithy SMQ_")
         line.state == "published"
         elsewhere.kind == "Unprocessable"
         reply.threadId == line.threadId

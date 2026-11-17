@@ -118,7 +118,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="find" noun="CostingRates" allow-remote="false">
         <description>The labor costing rates (Accounting's LaborCostingRates; the read-only Labor costing rows of Rates) the reader
-            sees: the shared ones and those of their organizations (every organization for ACCOUNTING_ADMIN or
+            sees: the shared ones and those of their organizations (every organization for ACCOUNTING_ALL_ORGANIZATIONS or
             PEOPLE_ALL_ORGANIZATIONS, else their own), or with organizationPartyId that organization's and the shared ones (another
             refused, ORGANIZATION_DENIED); current and coming, or with showEnded every one: organization, position class, work type,
             rate type, from, thru, the amount an hour with its currency, its state, and canChange for one who may change the row's

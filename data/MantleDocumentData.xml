@@ -52,7 +52,6 @@ along with this software (see the LICENSE.md file). If not, see
         <fields fieldSeqId="16" fieldPath="roles:role:description" fieldNameAlias="role"/>
     
         <fields fieldSeqId="17" fieldPath="identifications:partyIdTypeEnumId"/>
-        <fields fieldSeqId="18" fieldPath="identifications:idValue"/>
 
         <fields fieldSeqId="20" fieldPath="contactMechs:contactMechId"/>
         <fields fieldSeqId="21" fieldPath="contactMechs:contactMechPurposeId"/>

@@ -37,4 +37,19 @@ along with this software (see the LICENSE.md file). If not, see
     <moqui.security.ArtifactAuthz artifactAuthzId="MantleIdentityServicesADMIN" userGroupId="ADMIN"
             artifactGroupId="MantleIdentityServices" authzTypeEnumId="AUTHZT_ALWAYS" authzActionEnumId="AUTHZA_ALL"/>
     <moqui.security.ArtifactAuthzFilter artifactAuthzId="MantleIdentityServicesADMIN" entityFilterSetId="MANTLE_ACTIVE_ORG"/>
+    <!-- The owner services the framework's operation screens call as the caller (org.moqui.admin.OperationServices; the
+        registrations moqui.server.RecoveryDescriptor in StoreChannelSetupData.xml and moqui.server.MailOutcomeOwner in
+        ShopFulfillmentSetupData.xml and ForumSetupData.xml): every user may call them, and each checks its own permission
+        (SEC-ADM-10): the store channel ones COMMERCE_VIEW, COMMERCE_CHANNEL_OPERATE and the store scope (a message outside
+        it is answered as held), the mail outcome owners a reader of the mail queue, the ledger's reconciliation
+        MESSAGE_DELIVERY_REVIEW. Inheritable, so their own reads and writes run as them; the registration adds no right. -->
+    <moqui.security.ArtifactGroup artifactGroupId="MantleOperationOwners" description="Mantle owner services of the operation screens"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleOperationOwners" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.product\.StoreChannelServices\.(find#MessageRecoveryTargets|recover#StoreMessage)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleOperationOwners" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="Y" artifactName="mantle\.party\.MessageServices\.(find#MailOutcomeOwners|recover#OwnedMailOutcome)"/>
+    <moqui.security.ArtifactGroupMember artifactGroupId="MantleOperationOwners" artifactTypeEnumId="AT_SERVICE" inheritAuthz="Y"
+            nameIsPattern="N" artifactName="mantle.forum.DeliveryWorkerServices.find#MailOutcomeOwners"/>
+    <moqui.security.ArtifactAuthz artifactAuthzId="MantleOperationOwnersALL" userGroupId="ALL_USERS"
+            artifactGroupId="MantleOperationOwners" authzTypeEnumId="AUTHZT_ALLOW" authzActionEnumId="AUTHZA_ALL"/>
 </entity-facade-xml>

@@ -34,6 +34,15 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="paymentCount"/>
         </out-parameters>
         <actions>
+            <!-- A check file tells the bank which checks to pay: as generate#NachaFile, the bank account's organization in the
+                caller's Accounting scope with the authority that approves a payment run there (PAYMENT_RUN_APPROVE; check#BankAccess
+                runApprove). A payment run's file (PaymentRuns.js writeFile, through EntityLib call), a ServiceJob (send#PositivePayJob,
+                which the job runner calls with authorization off) and a test call it with authorization off (SEC-BAP-08) -->
+            <if condition="!ec.artifactExecution.authzDisabled()">
+                <service-call name="mantle.account.ReconciliationServices.check#BankAccess"
+                        in-map="{paymentMethodId:paymentMethodId, need:'runApprove'}"/>
+                <if condition="ec.message.hasError()"><return/></if>
+            </if>
             <set field="paymentCount" from="0"/>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="paymentMethod"/>
             <entity-find-one entity-name="mantle.account.method.BankAccount" value-field="bankAccount"/>

@@ -31,6 +31,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="priority" type="number-integer" enable-audit-log="update"/>
         <field name="responseRequiredDate" type="date-time" enable-audit-log="update"/>
         <field name="requestResolutionEnumId" type="id" enable-audit-log="update"/>
+        <field name="senderVerified" type="text-indicator" enable-audit-log="update"><description>N for a request a public
+            form filed with the address its sender typed (SEC-PSS-28): staff see "sender not verified" until a reply comes
+            from that address or the filer opens the case signed in, which sets Y; empty for any other request (its sender
+            came by mail, a sign-in or staff)</description></field>
     </extend-entity>
     <!-- a queue's organization (F6), as Products P3 gave feature groups one -->
     <extend-entity entity-name="RequestCategory" package="mantle.request">
