@@ -1162,7 +1162,9 @@ along with this software (see the LICENSE.md file). If not, see
             and held. A comment on a line given commitId is anchored on that commit's diff when it is the merge request's
             head now, and refused plainly when the head moved since. A threadId (resolve, a reply) not anchored on this
             merge request is not found. For a repository Smithy keeps the REST refuses comment and resolve first
-            (check#RestWrite: Smithy's own operations write threads through its post gate), and find reads both shapes.</description>
+            (check#RestWrite: Smithy's own operations write threads through its post gate), and find reads both shapes, each
+            comment's author named as Smithy's pages name it (authorName the site profile's display name or handle and
+            authorHandle, when the caller is shown that profile, else empty) with no fromPartyId.</description>
         <implements service="org.moqui.git.GitServices.handle#GitReviewThread"/>
         <actions><script><![CDATA[
             threadList = null
@@ -1218,8 +1220,30 @@ along with this software (see the LICENSE.md file). If not, see
                 if (client) { threadList = []; return }
                 const out = call('get#ReviewThreads', {mergeRequestId, path: path || null})
                 if (!out) return
+                // a repository Smithy keeps names an author as Smithy's pages do (SEC-PFS-01): the site profile's display name
+                // (or handle) when the caller is shown that profile, else no name, and never a party id or a legal name
+                const smithy = ec.entity.find('mantle.smithy.SmithyRepository').condition('repositoryId', mr.repositoryId).disableAuthz().one()
+                const shown = {}
+                const authorOf = (partyId) => {
+                    if (!partyId) return {authorName: '', authorHandle: null}
+                    if (!(partyId in shown)) {
+                        const wasDisabled = ec.artifactExecution.disableAuthz()
+                        try {
+                            const core = ec.resource.script('component://mr-mantle/service/mantle/smithy/SmithyCore.js')
+                            const profile = ec.entity.find('mantle.public.PublicSiteProfile').condition({siteId: smithy.siteId, partyId}).one()
+                            shown[partyId] = profile && core.authorShown(profile, core.actor())
+                                ? {authorName: profile.displayName || profile.handle, authorHandle: profile.handle} : {authorName: '', authorHandle: null}
+                        } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+                    }
+                    return shown[partyId]
+                }
+                const comment = (entry) => {
+                    if (!smithy) return {...entry, commentId: entry.communicationEventId}
+                    const {fromPartyId, ...kept} = entry
+                    return {...kept, ...authorOf(fromPartyId), commentId: entry.communicationEventId}
+                }
                 threadList = Array.from(out.threadList || []).map((thread) => ({...thread, threadId: thread.communicationEventId,
-                    commentList: Array.from(thread.commentList || []).map((comment) => ({...comment, commentId: comment.communicationEventId}))}))
+                    commentList: Array.from(thread.commentList || []).map(comment)}))
             } else if (operation === 'comment') {
                 // a line comment is anchored at the head: one written on an older commit's diff is refused, not moved
                 if (!threadId && path && commitId && String(commitId) !== String(mr.headCommitId || '')) {
