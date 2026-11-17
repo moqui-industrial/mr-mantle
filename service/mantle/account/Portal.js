@@ -36,6 +36,10 @@ function served(siteId, app) {
     if (!mount?.targetId) unavailable()
     return mount.targetId
 }
+// A Billing or bill upload post counts against its requester first (SEC-PSS-26), as Supplier's and Support's posts do: a
+// payment start calls the gateway, a bill makes an incoming invoice and its file, a shared link a capability.
+const POST_LIMIT = 60
+const throttle = () => access.throttle("billing-post", POST_LIMIT, "Too many attempts. Wait a few minutes and try again.")
 function operationId(p) {
     const value = String(p.operationId || "")
     if (!/^[A-Za-z0-9_-]{8,40}$/.test(value)) fail("Unprocessable", "Reload the page and try again")
@@ -246,6 +250,7 @@ function findInvoices(p) {
 function issueInvoiceAccess(p) {
     let siteId
     if (p.siteId) {
+        throttle()
         if (checkInvoice(p).via !== "contact") unavailable()
         siteId = p.siteId
     } else {
@@ -307,6 +312,7 @@ function beginPayment(p) {
     return {attemptId: paymentId, resumed: false, returnKey}
 }
 function startInvoicePayment(p) {
+    throttle()
     const checked = checkInvoice(p)
     const key = operationId(p)
     if (!(p.confirm === true || p.confirm === "true")) fail("Unprocessable", "Confirm the payment")
@@ -483,6 +489,7 @@ function stage(file, noun = "bill") {
         .stage(file, noun, noun === "bill" ? "bills" : "supplier")
 }
 function submitSupplierBill(p) {
+    throttle()
     const checked = checkOrder(p)
     const key = operationId(p)
     // the organization first, as import#Bill locks it, so two submissions of one reference are serialized
