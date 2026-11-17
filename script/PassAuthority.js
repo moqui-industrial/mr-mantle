@@ -156,6 +156,15 @@ const DOWNLOADS = [
     // Smithy DG7 (§15.8): a release's file
     'downloadReleaseAsset',
 ]
+/* The type a file is answered with (SEC-PSF-08): its own when inert (an image, a font, audio or video, a PDF, plain text
+   or CSV, an archive), else application/octet-stream, so no file a visitor uploaded or pushed (a release file named x.js)
+   is a script or a style sheet for the frontend's origin. PASS's Facade.js keeps the same list for local mode. */
+const INERT_TYPES =
+    /^(?:image\/(?:png|jpeg|gif|webp|avif|svg\+xml)|font\/(?:woff2?|ttf|otf)|(?:audio|video)\/[a-z0-9.+-]+|application\/(?:pdf|zip|gzip|x-gzip|x-tar|octet-stream)|text\/(?:plain|csv))$/
+function servedType(type) {
+    const base = String(type || '').split(';')[0].trim().toLowerCase()
+    return INERT_TYPES.test(base) ? String(type) : 'application/octet-stream'
+}
 /* The Cache-Control a download may name in place of no-store, each an exact value: a public product image of the current
    generation (Shop P8, F75) for any, a theme asset by digest (Shop F55) only for its own operation. The framework's
    transports pass only these (pass_authority.rs download_cache_control). */
@@ -456,7 +465,7 @@ function run(p) {
             result: shown,
             download: {
                 location,
-                contentType: file.mimeType,
+                contentType: servedType(file.mimeType),
                 filename: String(file.filename),
                 disposition:
                     file.variant === 'thumbnail' || file.inline === true
@@ -561,4 +570,5 @@ function accountAction(action, p, raw, siteId, registered, delegation) {
     keyKind,
     // Shop F55: the Cache-Control a download may name, as the framework's transports keep it
     downloadCache,
+    servedType,
 })

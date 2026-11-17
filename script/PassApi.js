@@ -90,6 +90,8 @@ const fail = (kind, message) => {
     e.moquiErrorKind = kind
     throw e
 }
+/* A file is never a page of the site (SEC-PSF-08): its type is PassAuthority.js servedType's, and it runs nothing. */
+const SANDBOX = "default-src 'none'; sandbox"
 /* The bytes a ranged download reads and writes at a time. */
 const RANGE_WINDOW = 1024 * 1024
 /* A ranged file (Shop P6, a granted download): Accept-Ranges, a 206 of the range asked or a 416 outside the file, the bytes
@@ -114,6 +116,7 @@ function streamRanged(response, file) {
         response.setHeader('Content-Range', 'bytes ' + start + '-' + end + '/' + file.size)
     }
     response.setContentType(file.contentType)
+    response.setHeader('Content-Security-Policy', SANDBOX)
     const wasDisabled = ec.artifactExecution.disableAuthz()
     try {
         // only the range is read, a window at a time (Shop F88)
@@ -169,6 +172,7 @@ function respond(response, answer) {
             if (!wasDisabled) ec.artifactExecution.enableAuthz()
         }
         response.setContentType(file.contentType)
+        response.setHeader('Content-Security-Policy', SANDBOX)
         // Shop P8 (F75): a public product image of the current generation is the one file a shared cache may keep
         response.setHeader('Cache-Control', file.cacheControl || 'no-store')
         response.setHeader(
