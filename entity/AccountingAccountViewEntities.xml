@@ -29,6 +29,7 @@ along with this software (see the LICENSE.md file). If not, see
             <key-map field-name="ownerPartyId" related="partyId"/></member-entity>
         <alias-all entity-alias="FACC"/>
         <alias entity-alias="OPTY" name="pseudoId"/>
+        <alias entity-alias="OPTY" name="privateOwnerUserId"/>
         <alias entity-alias="OORG" name="organizationName"/>
         <alias entity-alias="OPER" name="firstName"/>
         <alias entity-alias="OPER" name="lastName"/>
@@ -397,6 +398,7 @@ along with this software (see the LICENSE.md file). If not, see
         </complex-alias></alias>
 
         <alias name="fromPseudoId" entity-alias="FPTY" field="pseudoId"/>
+        <alias name="fromPrivateOwnerUserId" entity-alias="FPTY" field="privateOwnerUserId"/>
         <alias name="fromName" function="concat_ws" type="text-medium"><complex-alias operator=",">
             <complex-alias expression="' '"/>
             <complex-alias-field entity-alias="FORG" field="organizationName"/>
@@ -408,6 +410,7 @@ along with this software (see the LICENSE.md file). If not, see
         <alias name="fromLastName" entity-alias="FPER" field="lastName"/>
         <alias name="fromRoleTypeId" entity-alias="FPRL" field="roleTypeId"/>
         <alias name="toPseudoId" entity-alias="TPTY" field="pseudoId"/>
+        <alias name="toPrivateOwnerUserId" entity-alias="TPTY" field="privateOwnerUserId"/>
         <alias name="toName" function="concat_ws" type="text-medium"><complex-alias operator=",">
             <complex-alias expression="' '"/>
             <complex-alias-field entity-alias="TORG" field="organizationName"/>

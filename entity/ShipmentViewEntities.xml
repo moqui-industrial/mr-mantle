@@ -401,6 +401,7 @@ along with this software (see the LICENSE.md file). If not, see
         <member-relationship entity-alias="SME" join-from-alias="CSM" relationship="shipmentMethodEnum"/>
         <alias-all entity-alias="CSM"/>
         <alias name="carrierPseudoId" entity-alias="CPTY" field="pseudoId"/>
+        <alias name="carrierPrivateOwnerUserId" entity-alias="CPTY" field="privateOwnerUserId"/>
         <alias name="shipmentMethodDescription" entity-alias="SME" field="description"/>
     </view-entity>
 
