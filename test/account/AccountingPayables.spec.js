@@ -510,8 +510,8 @@ feature("a user who only edits receivables cannot change a supplier's identifica
             organizationPartyId: org,
             customerPartyId: poOnly,
             side,
-            partyIdTypeEnumId: "PtidFein",
-            idValue: "12-3456789"
+            partyIdTypeEnumId: "PtidDuns",
+            idValue: "123456789"
         })
         login(users.ar)
         const asCustomer = refused("mantle.account.CustomerFinanceServices.store#CustomerIdentification", request("customer"))
