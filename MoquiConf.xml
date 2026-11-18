@@ -49,7 +49,7 @@
     </shell-providers></screen-facade>
     <webapp-list><webapp name="webroot">
         <!-- an anonymous caller reaches this servlet, so its multipart bodies are held to the PASS media limit (10 MiB,
-            PortalMedia.js maxBytes) plus the form's envelope, not the 2 GiB of webapp_max_upload (SEC-PSA-07) -->
+            PortalMedia.js maxBytes) plus the form's envelope, not the 2 GiB of webapp-list/webapp[webroot]/web-protection/requests@max-upload (SEC-PSA-07) -->
         <servlet name="PassApi" location="component://mr-mantle/script/PassApi.js" max-upload="11m">
             <url-pattern>/rest/s1/pass/v1/sites/*</url-pattern>
         </servlet>
