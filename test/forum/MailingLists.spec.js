@@ -79,7 +79,7 @@ spec({
     setupSpec() {
         login(lib.OPERATOR)
         setProperty("pass_import_dir", "runtime://tmp/mantle-mbox-import")
-        setProperty("smtp_authserv_id", "gw.example.test")
+        setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         lib.make("mantle.public.PublicSiteHost", {siteId: SITE, hostname: "mls.example.test", canonical: "Y"})
         ids.list = category("Dev", "list", "dev@" + LISTS)
@@ -602,7 +602,7 @@ feature("only the trusted gateway's Authentication-Results authenticate a sender
             subDmarc: sys(() =>
                 forum().gatewayAuthenticated(["gw.example.test; dmarc=pass header.from=team.sender.test"], "bob@team.sender.test")
             ),
-            unset: withProperty("smtp_authserv_id", null, () => check("gw.example.test; dmarc=pass header.from=sender.test"))
+            unset: withConf("smtp-server@authserv-id", null, () => check("gw.example.test; dmarc=pass header.from=sender.test"))
         }
     },
     then(out) {

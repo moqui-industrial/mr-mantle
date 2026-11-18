@@ -6,7 +6,7 @@
 // contacts matching only for their owner; the NewMail alert (notify#NewMail). The Mantle side of IronStone M5. No SMTP
 // server answers in a spec (the framework's mail sink is in its Rust tests only), so a send fails on port 1 (after the commit of the call in which it was claimed) as in
 // the framework's MailClient.spec.js, and a delivery that works later is record#SendResult, the step after one. The mail
-// capture is off for the spec, so a run with mail_capture_sends=true (the client walks) still sees the send fail. New
+// capture is off for the spec, so a run with moqui_conf__email_client__capture_sends=true (the client walks) still sees the send fail. New
 // spec, no Groovy original.
 const capture = ec.factory.getTool("MailCapture")
 const effectiveTime = Date.now()

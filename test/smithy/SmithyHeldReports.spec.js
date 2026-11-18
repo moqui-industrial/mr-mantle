@@ -44,7 +44,7 @@ spec({
     setupSpec() {
         login(lib.OPERATOR)
         setProperty("pass_route_domains", "reports.shr.test")
-        setProperty("smtp_authserv_id", "gw.example.test")
+        setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SHR", "shrgroup"))
         lib.account(SITE, "SHR_MOD", {member: true, siteRole: "moderator"})

@@ -11,7 +11,7 @@
  *   carries a host, port, user or credential, and a profile never changes the relay.
  * - Readiness (design §12 SenderReadiness): the profile in effect; the relay there, not a mail account's, not disabled, with a host,
  *   its last Admin test not failed; the sender an address, its domain one this server signs (a hosted account's domain or
- *   mail_dkim_domains) or sent through a relay whose Admin test passed; the bounce account (a hosted or shared mail account
+ *   mail-delivery/dkim@domains) or sent through a relay whose Admin test passed; the bounce account (a hosted or shared mail account
  *   bounces@ the bounce domain, which receives bounces+(delivery)@ that domain by the listener's plus-tag lookup, F76); the
  *   unsubscribe page (the PASS site's Account Email preferences when a site is named, else the server's own /u/ page). A blocked
  *   check makes the profile not ready, with its reason and the place that fixes it (a route key: Comms' mail accounts, Admin's
@@ -86,11 +86,12 @@ function relayOptions() {
         .map(row => ({value: row.emailServerId, label: row.emailServerId + (row.disabled === "Y" ? " (disabled)" : "")}))
 }
 const lastTest = emailServerId => one("moqui.server.ConnectionCheck", {adapterKey: "relay", connectionKey: emailServerId})
-// The domains this server signs with its DKIM key (moqui-mail auth.rs): mail_dkim_domains, else the hosted and shared accounts'.
+// The domains this server signs with its DKIM key (moqui-mail auth.rs): mail-delivery/dkim@domains, else the hosted and
+// shared accounts'.
 function signedDomains() {
     let configured = ""
     try {
-        configured = text(System.getProperty("mail_dkim_domains"))
+        configured = text(ec.factory.getConfValue("mail-delivery/dkim@domains"))
     } catch (error) {
         configured = ""
     }

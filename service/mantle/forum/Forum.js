@@ -5147,10 +5147,10 @@ function readAuthResults(text) {
     }
     return { authservId, results }
 }
-/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp_authserv_id, comma separated, in
-   lower case): with none configured nothing counts as authenticated. */
+/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp-server@authserv-id, comma
+   separated, in lower case): with none configured nothing counts as authenticated. */
 const trustedAuthservIds = () =>
-    String(System.getProperty('smtp_authserv_id') || '')
+    String(ec.factory.getConfValue('smtp-server@authserv-id') || '')
         .split(',')
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean)
