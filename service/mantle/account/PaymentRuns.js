@@ -755,27 +755,26 @@ function runFile(p) {
     return file(runScope(p, "PAYMENT_EDIT"))
 }
 // A bank's NACHA return file for the run's bank account (import#NachaReturn, which skips a payment already returned): a
-// returned payment is declined, which reverses its posting and unapplies it (the PaymentUnDeliverCleanup SECA). Its bills,
-// in whichever run of the bank account paid them, show Returned with the bank's reason, and the discount credits those
-// runs took on them are cancelled, so each bill is open again in full.
+// returned payment of the run is declined, which reverses its posting and unapplies it (the PaymentUnDeliverCleanup SECA).
+// Its bills show Returned with the bank's reason, and the discount credits the run took on them are cancelled, so each bill
+// is open again in full. SEC-BOS-81: only the run's own payments, each at its entry's amount on the run's bank account, are
+// returned; an entry naming any other payment is skipped. The import runs as the user, with check#BankAccess.
 function importReturn(p) {
     const run = runScope(p, "PAYMENT_EDIT")
     if (run.paymentInstrumentEnumId !== "PiAch" || !run.executeOperationKey)
         denied("RUN_NOT_ACH", "Bank returns are imported for an executed ACH run")
+    if (!has("BANK_RECONCILE") && !lib.access.systemAdmin())
+        denied("PERMISSION_DENIED", "Bank reconciliation authority is required to import a bank return")
     if (!String(p.nachaString || "").trim()) denied("RETURN_FILE_REQUIRED", "Choose the bank's return file")
-    const runIds = Array.from(
-        find(R, {organizationPartyId: run.organizationPartyId, paymentMethodId: run.paymentMethodId})
-            .condition("executeOperationKey", "is-not-null", null)
-            .list()
-    ).map(row => row.paymentRunId)
-    const paidItems = () =>
-        Array.from(find(RI).condition("paymentRunId", "in", runIds).condition("paymentId", "is-not-null", null).list())
-    const declined = () =>
-        new Set(
-            paidItems()
-                .map(row => row.paymentId)
-                .filter(paymentId => one(P, {paymentId})?.statusId === "PmntDeclined")
+    const paymentIdList = [
+        ...new Set(
+            Array.from(find(RI, {paymentRunId: run.paymentRunId}).condition("paymentId", "is-not-null", null).list()).map(
+                row => row.paymentId
+            )
         )
+    ]
+    if (!paymentIdList.length) denied("RUN_NO_PAYMENTS", "The payment run made no payments to return")
+    const declined = () => new Set(paymentIdList.filter(paymentId => one(P, {paymentId})?.statusId === "PmntDeclined"))
     const before = declined()
     ec.message.pushErrors()
     let errors = ""
@@ -783,8 +782,7 @@ function importReturn(p) {
         ec.service
             .sync()
             .name("mantle.ext.account.NachaServices.import#NachaReturn")
-            .parameters({paymentMethodId: run.paymentMethodId, nachaString: p.nachaString})
-            .disableAuthz()
+            .parameters({paymentMethodId: run.paymentMethodId, nachaString: p.nachaString, paymentIdList})
             .call()
         errors = ec.message.getErrorsString() || ""
     } finally {
@@ -880,7 +878,11 @@ function getRun(p) {
         canExecute: has("PAYMENT_EDIT") && run.statusId === "PrunApproved" && !executing,
         canResume: has("PAYMENT_EDIT") && run.statusId === "PrunApproved" && executing,
         canReadFile: has("PAYMENT_EDIT") && executing,
-        canImportReturn: has("PAYMENT_EDIT") && executing && run.paymentInstrumentEnumId === "PiAch",
+        canImportReturn:
+            has("PAYMENT_EDIT") &&
+            (has("BANK_RECONCILE") || lib.access.systemAdmin()) &&
+            executing &&
+            run.paymentInstrumentEnumId === "PiAch",
         canCancel: has("PAYABLE_EDIT") && openRunStatuses.includes(run.statusId) && !executing
     }
     return {

@@ -109,15 +109,17 @@ feature("the bank file services refuse a caller without finance authority in the
             return {
                 nacha: errorOf("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId }),
                 ofx: errorOf("mantle.ext.account.OfxServices.import#OfxVersion1", { paymentMethodId: companyBankId, ofxString: "OFXHEADER:100" }),
+                nachaReturn: errorOf("mantle.ext.account.NachaServices.import#NachaReturn", { paymentMethodId: companyBankId, nachaString: "9" }),
             }
         } finally {
             ec.artifactExecution.disableAuthz()
             login("john.doe")
         }
     },
-    then({ nacha, ofx }) {
+    then({ nacha, ofx, nachaReturn }) {
         nacha != null && nacha.includes("Accounting access is required")
         ofx != null && ofx.includes("Accounting access is required")
+        nachaReturn != null && nachaReturn.includes("Accounting access is required")
     },
 })
 
@@ -209,14 +211,23 @@ feature("Positive Pay is refused without a format", {
     },
 })
 
-feature("import a NACHA return: a returned entry declines its payment and a bad line is an error", {
+// SEC-BOS-81: the bank's channel (a system message's consume, authorization off) names payments by id too, so an entry is held
+// to the bank account's ACH payments at the entry's amount: one at another amount or of another bank account is skipped
+feature("import a NACHA return: a returned entry declines its payment, another account's or amount's is skipped, a bad line is an error", {
     when() {
         const pad = (text, n) => String(text).padEnd(n, " ").slice(0, n)
         const entry = (paymentId, amountCents) => "6" + "26" + "01100001" + "5" + pad("111222333", 17) + String(amountCents).padStart(10, "0") + pad(paymentId, 15) +
                 pad("Pat Payee", 22) + "  " + "1" + "011000010000001"
         const returnAddenda = (reason, info) => "7" + "99" + reason + "011000010000001" + "      " + "01100001" + pad(info, 44) + "011000010000009"
-        const text = [entry(achPaymentIds[0], 10025), returnAddenda("R01", "Insufficient funds"), "9" + " ".repeat(93)].join("\n")
+        // a payee's own ACH payment from its bank account, of the same amount: not this bank account's
+        const foreignId = call("create#mantle.account.payment.Payment", { fromPartyId: payeeId, toPartyId: organizationPartyId, amount: "100.25",
+                amountUomId: "USD", paymentMethodId: payeeBankId, paymentInstrumentEnumId: "PiAch", statusId: "PmntDelivered",
+                effectiveDate: effectiveTime - 3600000 }).paymentId
+        const text = [entry(foreignId, 10025), returnAddenda("R01", "Insufficient funds"), entry(achPaymentIds[0], 10026),
+                returnAddenda("R01", "Insufficient funds"), entry(achPaymentIds[0], 10025), returnAddenda("R01", "Insufficient funds"),
+                "9" + " ".repeat(93)].join("\n")
         call("mantle.ext.account.NachaServices.import#NachaReturn", { paymentMethodId: companyBankId, nachaString: text })
+        const foreign = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", foreignId).one()
         const returned = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", achPaymentIds[0]).one()
         const responses = Array.from(ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", achPaymentIds[0]).list())
         // the service adds its errors to the message facade without stopping, so read them from there
@@ -227,12 +238,13 @@ feature("import a NACHA return: a returned entry declines its payment and a bad 
             return text
         }
         const short = errorsOf("6short")
-        return { returned, responses, short }
+        return { returned, responses, short, foreign }
     },
-    then({ returned, responses, short }) {
+    then({ returned, responses, short, foreign }) {
         returned.statusId == "PmntDeclined"
-        responses.length >= 1
+        responses.length == 1
         responses.some(r => r.reasonCode == "R01")
+        foreign.statusId == "PmntDelivered"
         short.includes("Length of the line is incorrect")
     },
 })
