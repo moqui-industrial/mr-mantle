@@ -603,7 +603,7 @@ function appReadiness(p) {
     if (p.app === "supplier")
         checks.push({
             name: "bill scanning",
-            ready: !!System.getProperty("pass_scanner_service") && !!System.getProperty("pass_media_root")
+            ready: !!ec.factory.getConfValue("pass@scanner-service") && !!ec.factory.getConfValue("pass@media-root")
         })
     checks.push({name: "canonical host", ready: !!apps.pageUrl(p.siteId, p.app, "/")})
     return {checks}

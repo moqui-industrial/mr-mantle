@@ -380,7 +380,7 @@
         ).slice(0, 32)
     const isReply = subject => /^\s*(re|aw|sv|antw)\s*(\[\d+\])?:/i.test(subject || "")
     const importDir = () => {
-        const dir = System.getProperty("pass_import_dir")
+        const dir = ec.factory.getConfValue("pass@import-dir")
         if (!dir) fail("Unavailable", "The import directory is not configured")
         return String(dir).replace(/\/$/, "")
     }
@@ -577,10 +577,10 @@
         })
         bump(counts, "messages")
     }
-    /* The most bytes a message of an archive may have (pass_mbox_max_message_bytes, 10 MB by default): a larger one is
+    /* The most bytes a message of an archive may have (pass@mbox-max-message-bytes, 10 MB by default): a larger one is
        passed and counted (oversize), so what a piece holds in memory is bounded by it and a window. */
     function maxMessageBytes() {
-        const value = Number(System.getProperty("pass_mbox_max_message_bytes") || 0)
+        const value = Number(ec.factory.getConfValue("pass@mbox-max-message-bytes") || 0)
         return Number.isFinite(value) && value > 0 ? value : 10 * 1024 * 1024
     }
     const sizeOf = lines => lines.reduce((total, line) => total + line.length + 1, 0)

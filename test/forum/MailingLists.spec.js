@@ -78,7 +78,7 @@ const held = sender => list("mantle.forum.ForumHeldMail", {siteId: SITE, senderA
 spec({
     setupSpec() {
         login(lib.OPERATOR)
-        setProperty("pass_import_dir", "runtime://tmp/mantle-mbox-import")
+        setConf("pass@import-dir", "runtime://tmp/mantle-mbox-import")
         setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         lib.make("mantle.public.PublicSiteHost", {siteId: SITE, hostname: "mls.example.test", canonical: "Y"})
@@ -636,7 +636,7 @@ feature("an archive goes only into a list, and a message over the byte cap is pa
                     message("git@cap.test", "c3", "MLS cap three", "Another short one.")
             )
         const input = {contactListId: ids.list, archiveName: "mls-cap.mbox", checksum: ec.resource.digest(location, "sha256")}
-        return withProperty("pass_mbox_max_message_bytes", "1000", () => {
+        return withConf("pass@mbox-max-message-bytes", "1000", () => {
             const notList = lib.op("MLS_OWNER", SITE, "importMbox", {...input, contactListId: ids.plain})
             const started = lib.op("MLS_OWNER", SITE, "importMbox", input)
             for (let turn = 0; turn < 10; turn++) {

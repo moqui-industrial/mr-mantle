@@ -89,7 +89,7 @@
             .split('\n')[0]
             .slice(0, 200)
     function storageRoot() {
-        const root = System.getProperty('pass_media_root')
+        const root = ec.factory.getConfValue('pass@media-root')
         if (!root)
             fail(
                 'Unavailable',
@@ -647,7 +647,7 @@
             schemaVersion: SCHEMA_VERSION,
             kind,
             siteId: run.siteId,
-            authority: System.getProperty('pass_authority_name') || 'local',
+            authority: ec.factory.getConfValue('pass@authority-name') || 'local',
             createdAt: millis(now()),
             files: files.map((f) => ({
                 path: f.path,

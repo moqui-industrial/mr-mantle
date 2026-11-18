@@ -1591,7 +1591,7 @@
     function classifyPost(outboxId) {
         const box = one(F + 'ForumOutbox', { outboxId }, true)
         if (!box || box.state !== 'classify') return { classified: false }
-        const service = System.getProperty('pass_classifier_service')
+        const service = ec.factory.getConfValue('pass@classifier-service')
         const st = one(F + 'ForumPostState', {
                 communicationEventId: box.communicationEventId,
             }),

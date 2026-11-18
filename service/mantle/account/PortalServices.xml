@@ -89,7 +89,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="submit" noun="SupplierBill" authenticate="anonymous-all" allow-remote="false">
         <description>A supplier's bill for a purchase order, for the order's BillUpload token or a signed-in contact of its
-            supplier: the file is staged and scanned (pass_media_root, pass_scanner_service), then the incoming draft is made
+            supplier: the file is staged and scanned (pass@media-root, pass@scanner-service), then the incoming draft is made
             through import#Bill's core (or the receipt's self-billed draft takes it), recorded as a SupplierBillSubmission.
             A repeat of the operationId or of the bill number answers the first submission. A new one is refused
             (Conflict) while five of the supplier's bills for the order wait for review, neither approved nor rejected

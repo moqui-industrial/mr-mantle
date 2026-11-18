@@ -43,7 +43,7 @@ spec({
     requires: ["git"],
     setupSpec() {
         login(lib.OPERATOR)
-        setProperty("pass_route_domains", "reports.shr.test")
+        setConf("pass@route-domains", "reports.shr.test")
         setConf("smtp-server@authserv-id", "gw.example.test")
         lib.site(SITE)
         Object.assign(ids, lib.tracker(SITE, "SHR", "shrgroup"))

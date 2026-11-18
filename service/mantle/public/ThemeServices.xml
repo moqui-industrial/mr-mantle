@@ -665,7 +665,7 @@
         </actions>
     </service>
     <service verb="store" noun="ThemeAsset" allow-remote="false">
-        <description>A draft asset added or replaced under assets/ (UploadAsset): a stylesheet or SVG as text (an SVG cleaned to the safe set) or an image or font (png, jpg, gif, webp, woff2) as an uploaded file or base64, whose leading bytes match its type (ASSET_TYPE_MISMATCH), within its size (ASSET_TOO_LARGE) and clean by pass_scanner_service (SCANNER_UNAVAILABLE, ASSET_REFUSED). COMMERCE_THEME_EDIT and the draft revision.</description>
+        <description>A draft asset added or replaced under assets/ (UploadAsset): a stylesheet or SVG as text (an SVG cleaned to the safe set) or an image or font (png, jpg, gif, webp, woff2) as an uploaded file or base64, whose leading bytes match its type (ASSET_TYPE_MISMATCH), within its size (ASSET_TOO_LARGE) and clean by pass@scanner-service (SCANNER_UNAVAILABLE, ASSET_REFUSED). COMMERCE_THEME_EDIT and the draft revision.</description>
         <in-parameters>
             <parameter name="themeId" required="true"/>
             <parameter name="expectedRevision" type="Integer" required="true"/>

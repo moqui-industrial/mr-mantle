@@ -869,8 +869,8 @@ Accounting's customer and supplier pages are the PASS Billing and Supplier apps 
   posting guard). `authorize#OrderPayments` skips a promised payment whose attempt is unsettled, so a placement never
   authorizes a payment its provider is still deciding.
 - **Supplier bills.** `submit#SupplierBill` answers a repeat of the operation or of the supplier's bill number with the
-  first `SupplierBillSubmission`, stages the file under `pass_media_root/bills`, checks its leading bytes are the PDF,
-  PNG or JPEG it says (kept with that extension) and scans it (`pass_scanner_service`),
+  first `SupplierBillSubmission`, stages the file under `pass@media-root/bills`, checks its leading bytes are the PDF,
+  PNG or JPEG it says (kept with that extension) and scans it (`pass@scanner-service`),
   and makes the incoming draft through `import#Bill`'s core (`Payables.js` `portalBill`, the capability in place of
   `PAYABLE_IMPORT`), the file becoming its content only when clean. It never approves.
 - **Posting guard.** While Portal.js completes one checked portal payment it names it in the execution context's shared

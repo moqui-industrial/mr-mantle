@@ -569,7 +569,7 @@ function getThemeAssets(p) {
 // store#ThemeAsset: a draft asset added or replaced (UploadAsset) at a path under assets/: a stylesheet or SVG as text
 // (an SVG cleaned to the safe set, a stylesheet checked by the adapter), or an image or font as bytes (assetFile, an
 // uploaded file, or contentBase64) whose leading bytes are its type's (ASSET_TYPE_MISMATCH), at most maxAssetBytes,
-// clean by pass_scanner_service (SCANNER_UNAVAILABLE without one; ASSET_REFUSED when it is not clean).
+// clean by pass@scanner-service (SCANNER_UNAVAILABLE without one; ASSET_REFUSED when it is not clean).
 // COMMERCE_THEME_EDIT and the draft revision.
 function storeThemeAsset(p) {
     const {theme} = draftOf(p, EDIT)
@@ -608,7 +608,7 @@ function assetBytes(p, path) {
     const webp = extension !== "webp" || String.fromCharCode(...head.slice(8, 12)) === "WEBP"
     if (!matches || !webp)
         refuse("ASSET_TYPE_MISMATCH", "The file is not the ." + extension + " file its name says", "Unprocessable")
-    const scanner = System.getProperty("pass_scanner_service")
+    const scanner = ec.factory.getConfValue("pass@scanner-service")
     if (!scanner) refuse("SCANNER_UNAVAILABLE", "Images cannot be received now (no scanner is configured)", "Unavailable")
     const staged = "runtime://tmp/theme-assets/" + ec.user.randomString(32) + "." + extension
     try {

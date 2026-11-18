@@ -159,7 +159,7 @@ function routeAddress(address) {
         .toLowerCase()
     const m = /^([a-z0-9._-]{1,64})@([a-z0-9.-]{1,190})$/.exec(value)
     if (!m) invalid('A route address is local@domain without a plus tag')
-    const domains = String(System.getProperty('pass_route_domains') || '')
+    const domains = String(ec.factory.getConfValue('pass@route-domains') || '')
         .split(',')
         .map((d) => d.trim().toLowerCase())
         .filter(Boolean)

@@ -321,7 +321,7 @@
             name.includes('..')
         )
             invalid('Name an archive file in the import directory')
-        const dir = System.getProperty('pass_import_dir')
+        const dir = ec.factory.getConfValue('pass@import-dir')
         if (!dir) fail('Unavailable', 'The import directory is not configured')
         const location = String(dir).replace(/\/$/, '') + '/' + name
         if (!ec.resource.getLocationReference(location).exists) missing()
@@ -370,7 +370,7 @@
         if (!['registered', 'staged'].includes(imp.stage))
             fail('Conflict', 'This import was already imported or cancelled')
         const source =
-            String(System.getProperty('pass_import_dir')).replace(/\/$/, '') +
+            String(ec.factory.getConfValue('pass@import-dir')).replace(/\/$/, '') +
             '/' +
             imp.archiveName
         const staging = imp.stagingLocation
@@ -1514,7 +1514,7 @@
                 )
             const fileId = id()
             const stored =
-                String(System.getProperty('pass_media_root')).replace(
+                String(ec.factory.getConfValue('pass@media-root')).replace(
                     /\/$/,
                     '',
                 ) +
@@ -1541,7 +1541,7 @@
                 )
             const upload = payloadOf(siteId, 'uploads', ref.upload_id)
             const location =
-                String(System.getProperty('pass_media_root')).replace(
+                String(ec.factory.getConfValue('pass@media-root')).replace(
                     /\/$/,
                     '',
                 ) +
@@ -1567,7 +1567,7 @@
                 scanState: 'pending',
             })
             let clean = false
-            const scanner = System.getProperty('pass_scanner_service')
+            const scanner = ec.factory.getConfValue('pass@scanner-service')
             if (scanner)
                 try {
                     clean =

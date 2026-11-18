@@ -2009,9 +2009,9 @@ methods.checkReadiness = (p) => {
     let scannerReady = false
     try {
         scannerReady =
-            !!System.getProperty('pass_scanner_service') &&
+            !!ec.factory.getConfValue('pass@scanner-service') &&
             !!ec.service.getServiceDefinition(
-                System.getProperty('pass_scanner_service'),
+                ec.factory.getConfValue('pass@scanner-service'),
             )
     } catch (error) {
         ec.message.clearErrors()
@@ -2046,7 +2046,7 @@ methods.checkReadiness = (p) => {
         { name: 'scanner', ready: scannerReady },
         {
             name: 'media storage',
-            ready: !!System.getProperty('pass_media_root'),
+            ready: !!ec.factory.getConfValue('pass@media-root'),
         },
         {
             name: 'account verification',
@@ -2415,7 +2415,7 @@ methods.resolveDelivery = (p) => {
 }
 methods.storeMailSettings = (p) => {
     site(p.siteId, true)
-    const allowed = String(System.getProperty('pass_sender_addresses') || '')
+    const allowed = String(ec.factory.getConfValue('pass@sender-addresses') || '')
         .split(',')
         .map((x) => x.trim())
     if (!allowed.includes(p.senderAddress))
@@ -2423,7 +2423,7 @@ methods.storeMailSettings = (p) => {
     const template = one('moqui.basic.email.EmailTemplate', {
         emailTemplateId: p.templateId,
     })
-    const templates = String(System.getProperty('pass_mail_template_ids') || '')
+    const templates = String(ec.factory.getConfValue('pass@mail-template-ids') || '')
         .split(',')
         .map((x) => x.trim())
     if (
@@ -2585,8 +2585,8 @@ methods.stageAttachment = (p) => {
     )
     if (!counted)
         fail('Tarpit', 'limitReached: Daily upload limit reached; try again tomorrow')
-    const scanner = System.getProperty('pass_scanner_service'),
-        root = System.getProperty('pass_media_root')
+    const scanner = ec.factory.getConfValue('pass@scanner-service'),
+        root = ec.factory.getConfValue('pass@media-root')
     if (!scanner || !root)
         fail('Unavailable', 'Media scanning and storage must be configured')
     const attachmentId = id(),
