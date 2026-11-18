@@ -1,51 +1,83 @@
 # MR Mantle - Mantle Business Artifacts for MR Moqui
 
-[![license](http://img.shields.io/badge/license-CC0%201.0%20Universal-blue.svg)](https://github.com/moqui/mr-mantle/blob/master/LICENSE.md)
+> **Not ready for production (before 0.1.0).** Like [MR Moqui](https://github.com/moqui/mr-moqui#readme), which it
+> runs on, MR Mantle is in early development. Its data model and stored data change without migrations, and a
+> security review is under way with its findings recorded openly in the mr-moqui repository. Run it only on
+> development machines, with no real business data or credentials, and not exposed to the internet. The full notice
+> is at the top of the [mr-moqui README](https://github.com/moqui/mr-moqui#readme).
 
-[![Discourse Forum](https://img.shields.io/badge/moqui%20forum-discourse-blue.svg)](https://forum.moqui.org)
+Mantle is the business layer under the [MR Moqui](https://github.com/moqui/mr-moqui) applications: one data model
+and one library of services for parties, products, orders, inventory, shipments, work, accounting and the rest of
+what a business records. The applications are screens over it, so an order taken in
+[IronStone BOSS](https://github.com/moqui/mr-boss), paid on an [IronStone PASS](https://github.com/moqui/mr-pass)
+page and shown in [Marble ERP](https://github.com/moqui/mr-marble) is the same order, and an application of your own
+can start from the same ground.
 
-Mantle Business Artifacts for [MR Moqui](https://github.com/moqui/mr-moqui), in one component named `mr-mantle`:
+It has no screens of its own. To see it at work, run one of those applications.
 
-- **Universal Data Model** (`entity/`, the seed, install and demo data in `data/`), from the Java Moqui component
-  [mantle-udm](https://github.com/moqui/mantle-udm).
-- **Universal Service Library** (`service/`, its data and `test/` specs), from the Java Moqui component
-  [mantle-usl](https://github.com/moqui/mantle-usl).
+## What is in it
 
-The two were ported in the forks `mr-mantle-udm` and `mr-mantle-usl` (Groovy to JavaScript, Spock flows to JavaScript
-specs run by `moqui test`), then merged into this repository with the commit history of both. Other components depend on
-it with `<depends-on name="mr-mantle"/>`; the renames from the Java names are in the MR Moqui
-`docs/dev/Moqui-Java-Migration.md`.
+- **The Universal Data Model** (`entity/`): the entities, from party, product, order, shipment, facility and
+  inventory through work effort, request, human resources, the ledger and accounting, to marketing, the forum and
+  public sites. `data/` has their seed, install and demo data, including the demo company Ziziwork Industries.
+- **The Universal Service Library** (`service/mantle/<package>/`): the business logic, in service XML with
+  JavaScript, by package: `account`, `ledger`, `order`, `party`, `product`, `facility`, `shipment`, `work`,
+  `humanres`, `request`, `sales`, `marketing`, `forum`, `smithy`, `public`, `pass`, `search` and `other`. The ECA
+  rules that tie them together (an invoice posting to the ledger, for one) are in `service/`,
+  with the REST API in `mantle.rest.xml`.
+- **Integrations**, apart from the packages whose interfaces they implement:
+  - bank files (NACHA, Positive Pay, BAI, OFX) in `service/mantle/ext/account/`;
+  - payment processors in `ext/account/gateway/`: [Authorize.Net](docs/AuthorizeNet.md), [PayTrace](docs/PayTrace.md);
+  - [Shippo](docs/Shippo.md) for shipping rates and labels in `ext/shipment/`, and Google Maps in `ext/party/`;
+  - [X12 EDI](docs/EdiX12.md) in `service/mantle/edi/`.
+- **Report definitions** (`report/`) and email and print templates (`template/`).
 
-Services are in `service/mantle/<package>/`. Integrations with particular external systems are apart, by the same
-package, in `service/mantle/ext/`: bank files (NACHA, Positive Pay, BAI, OFX) in `ext/account/`, payment processors
-(Authorize.Net, PayTrace) in `ext/account/gateway/`, Shippo in `ext/shipment/`, Google Maps in `ext/party/`. The
-interfaces they implement and the payment, shipment and message handling around them stay in the package. X12 EDI is
-in `service/mantle/edi/`.
+## Get it
 
-```sh
-./moq component-get mr-mantle
-./moq test mr-mantle                              # the regression suite (test/), while working
-./moq test mr-mantle --spec OrderToCashBasicFlow
-./moq test-apps                                   # every app component's regression suite, before a commit
-./moq accept mr-mantle                            # the acceptance suite (test/acceptance/), when asked
+In an [mr-moqui](https://github.com/moqui/mr-moqui#quick-start) checkout, `./moq component-get mr-mantle` gets it
+alone, and getting an application gets it too. Another component depends on it with:
+
+```xml
+<depends-on name="mr-mantle"/>
 ```
 
-The two suites are described in `docs/Build-Test.md` (The two suites) in the mr-moqui repository.
+## Developing
 
-A database made before an entity's key changed needs its table rebuilt once: see [docs/Upgrading.md](docs/Upgrading.md)
-(ProductStoreProduct, dated store publication; PublicSitePage, pages by mount and route).
+Read mr-moqui's [AGENTS.md](https://github.com/moqui/mr-moqui/blob/master/AGENTS.md) and
+[application practices](https://github.com/moqui/mr-moqui/blob/master/docs/dev/Practices-App-Dev.md) first.
 
-Fixes made here to behaviour carried over from mantle-udm and mantle-usl, candidates to take upstream, are in
+```sh
+./moq test mr-mantle                              # The regression suite (test/), while working
+./moq test mr-mantle --spec OrderToCashBasicFlow  # One spec
+./moq test-apps                                   # Every app component's regression suite, before a commit
+./moq accept mr-mantle                            # The acceptance suite (test/acceptance/), when asked
+```
+
+- [test/README.md](test/README.md) has the suite's layout and notes; the two suites are described in mr-moqui's
+  [Build-Test](https://github.com/moqui/mr-moqui/blob/master/docs/Build-Test.md#the-two-suites).
+- [docs/](docs/) has the integration guides above, the record of the
+  [accounting implementation](docs/AccountingImplementation.md), and
+  [Upgrading](docs/Upgrading.md): the tables to rebuild in a database kept across a change to an entity's key. Until
+  0.1.0 the simpler way is to empty the database and load it again.
+- [plan/payments-shipping-edi.md](plan/payments-shipping-edi.md) is the plan the payment, shipping and EDI
+  integrations follow.
+
+## Coming from Moqui Java
+
+This is the Java Moqui components [mantle-udm](https://github.com/moqui/mantle-udm) (the data model) and
+[mantle-usl](https://github.com/moqui/mantle-usl) (the services) in one component named `mr-mantle`. The two were
+ported in forks (Groovy to JavaScript, Spock flows to JavaScript specs run by `moqui test`), then merged into this
+repository with the commit history of both. A component that depended on either now depends on `mr-mantle`; the
+renames are in mr-moqui's
+[Moqui Java migration notes](https://github.com/moqui/mr-moqui/blob/master/docs/dev/Moqui-Java-Migration.md).
+
+Fixes made here to behaviour carried over from the Java components, candidates to take upstream, are in
 [docs/Upstream-Fixes.md](docs/Upstream-Fixes.md).
 
-For details about Mantle see its page on moqui.org:
-
-<http://www.moqui.org/mantle.html>
-
-There is an overview of the Universal Data Model and of Mantle Business Artifacts in the **Making Apps with Moqui** book.
-Download the PDF here:
-
-<http://www.moqui.org/MakingAppsWithMoqui-1.0.pdf>
+The Universal Data Model and the Mantle Business Artifacts are introduced on
+[Mantle's page on moqui.org](https://moqui.org/mantle.html) and in the book *Making Apps with Moqui*, both written
+for Moqui Java; the model they describe is the one here. Questions are welcome on the
+[Moqui forum](https://forum.moqui.org).
 
 ## License and Contributing
 
