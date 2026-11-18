@@ -25,7 +25,9 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="storePromotionId" required="true"/>
             <parameter name="promoCodeId"/>
             <parameter name="useLimit" type="BigDecimal"/>
-            <parameter name="itemDescription"/>
+            <parameter name="itemDescription"><description>The promotion's description, put on the promotion's order items as
+                plain text, never expanded as a template (plans/Security-Review.md SEC-BAP-83); a rule without one uses its
+                own text.</description></parameter>
         </in-parameters>
     </service>
     <service verb="apply" noun="OrderPromotions">
@@ -503,7 +505,7 @@ along with this software (see the LICENSE.md file). If not, see
                                  sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                                  promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                                  isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:promoQuantity,
-                                 itemDescription:ec.resource.expand(itemDescription, '')||'New Customer Discount'}"/>
+                                 itemDescription:itemDescription||'New Customer Discount'}"/>
             </iterate>
         </actions>
     </service>
@@ -618,7 +620,7 @@ along with this software (see the LICENSE.md file). If not, see
                              sourcePercentage:discountPercent, storePromotionId:storePromotionId,
                              promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:timesToApply,
-                             itemDescription:ec.resource.expand(itemDescription, '')||('Buy ' + buyQuantity.toString() + ' Get ' + getQuantity.toString() + ' at ' + discountPercent.toString() + '% off')}"/>
+                             itemDescription:itemDescription||('Buy ' + buyQuantity.toString() + ' Get ' + getQuantity.toString() + ' at ' + discountPercent.toString() + '% off')}"/>
             </iterate>
         </actions>
     </service>
@@ -702,7 +704,7 @@ along with this software (see the LICENSE.md file). If not, see
                              itemTypeEnumId:'ItemDiscount', quantity:itemQuantity, unitAmount:toDecimal(discountAmount).multiply(-1), productId:orderItem.productId,
                              storePromotionId:storePromotionId, promoCodeId:promoCodeId, promoCodeText:storePromoCode?.promoCode,
                              isPromo:'Y', promoQuantity:promoQuantity, promoTimesUsed:eligibleQuantity,
-                             itemDescription:ec.resource.expand(itemDescription, '')||('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')}"/>
+                             itemDescription:itemDescription||('Get ' + ec.l10n.format(discountAmount, '#,##0.00') + ' off')}"/>
             </iterate>
         </actions>
     </service>

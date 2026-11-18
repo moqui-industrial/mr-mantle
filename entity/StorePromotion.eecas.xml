@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CC0 1.0 Universal plus Grant of Patent License. See LICENSE.md. -->
+<eecas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/entity-eca-3.xsd">
+    <!-- A promotion's description is plain text: the promotion rules (PromotionServices.xml apply#NewCustomerDiscount,
+        apply#BuyGetDiscount, apply#FlatDiscount) put it on the discount line as written, and store#Promotion refuses a ${.
+        A ${} written into it another way (an entity write, the entity REST API) needs DATABASE_ADMIN, as the framework's
+        Security.eecas.xml rules hold the record fields that run as script (plans/Security-Review.md SEC-BAP-83). Only a
+        value that changes is checked; a data load runs with authorization disabled and is not. -->
+    <eeca id="StorePromotionDescriptionScript" entity="mantle.product.store.ProductStorePromotion"
+            on-create="true" on-update="true" run-before="true" get-original-value="true">
+        <actions><script>
+            if (eecaOperation != "update" || itemDescription != originalValue?.itemDescription)
+                UserSecurityChecks.assertStoredTemplate(itemDescription, "ProductStorePromotion.itemDescription")
+        </script></actions>
+    </eeca>
+</eecas>
