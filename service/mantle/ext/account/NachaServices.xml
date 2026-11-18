@@ -281,9 +281,9 @@ along with this software (see the LICENSE.md file). If not, see
                     const otherPartyId = payment.fromPartyId === paymentMethod.ownerPartyId ? payment.toPartyId : payment.fromPartyId
                     const otherParty = ec.entity.find("mantle.party.PartyDetail").condition("partyId", otherPartyId).one()
 
-                    // use "X" + rightmost 14 chars if paymentId length is longer than 15 chars
+                    // use "X" + rightmost 14 chars if paymentId length is longer than 15 chars (import#NachaReturn matches them)
                     let individualId = payment.paymentId
-                    if (individualId.length > 15) individualId = "X" + individualId.substring(0, 14)
+                    if (individualId.length > 15) individualId = "X" + individualId.slice(-14)
 
                     // get Individual/Company Name
                     let indName = pmtPaymentMethod.firstNameOnAccount ?
@@ -507,12 +507,14 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="import" noun="NachaReturn">
         <description>Import the bank's NACHA return file for an internal bank account: a return entry (addenda 99)
-            declines its payment, a notification of change (98) puts it back to authorized. An entry is refused, logged by
-            its payment id and skipped while the others go on, when its payment is not found, is not an ACH payment of this
-            bank account (paid from it by its owner or received into it by its owner), differs from the entry's amount, or
-            is not among paymentIdList when that is given. A direct caller needs bank reconciliation authority in the bank
-            account's organization (check#BankAccess reconcile); the bank's system message consume runs with authorization
-            off and is held to the bank account's payments (SEC-BOS-81).</description>
+            declines its payment; a notification of change (98, a zero amount) is recorded as a gateway response with the
+            change code and the corrected data, once, and changes no payment. An entry is refused, logged by its payment id
+            and skipped while the others go on, when its payment is not found (or an X id matches more than one), is not an
+            ACH payment of this bank account (paid from it by its owner or received into it by its owner), is not among
+            paymentIdList when that is given, or for a return differs from the entry's amount. A direct caller needs bank
+            reconciliation or payment run approval authority in the bank account's organization (check#BankAccess
+            reconcile, else runApprove); the bank's system message consume runs with authorization off and is held to the
+            bank account's payments (SEC-BOS-81).</description>
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
             <parameter name="nachaString" required="true" allow-html="any"/>
@@ -521,12 +523,15 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <actions>
             <!-- A return file unapplies and reverses the payments it declines: the bank account's organization in the caller's
-                Accounting scope with bank reconciliation authority, as the other incoming bank files (SEC-BAP-08); a system
-                message's consume runs with authorization off (SEC-BOS-81). Past the check the import reads and writes with
-                authorization off, held to the bank account's payments below -->
+                Accounting scope with bank reconciliation authority, as the other incoming bank files (SEC-BAP-08), or with the
+                payment run approval a payroll run's returns need; a system message's consume runs with authorization off
+                (SEC-BOS-81). Past the check the import reads and writes with authorization off, held to the bank account's
+                payments below -->
             <if condition="!ec.artifactExecution.authzDisabled()">
+                <set field="returnNeed" from="!ec.user.hasPermission('BANK_RECONCILE') &amp;&amp;
+                    ec.user.hasPermission('PAYMENT_RUN_APPROVE') ? 'runApprove' : 'reconcile'"/>
                 <service-call name="mantle.account.ReconciliationServices.check#BankAccess"
-                        in-map="{paymentMethodId:paymentMethodId, need:'reconcile'}"/>
+                        in-map="{paymentMethodId:paymentMethodId, need:returnNeed}"/>
                 <if condition="ec.message.hasError()"><return/></if>
             </if>
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="bankMethod" disable-authz="true"/>
@@ -535,21 +540,23 @@ along with this software (see the LICENSE.md file). If not, see
             <script><![CDATA[
 
                 /*
-                 * Decode the paymentId if the original value was longer then max
-                 * length of the NACHA field (15 chars)
+                 * Decode the paymentId if the original value was longer then max length of the NACHA field (15 chars):
+                 * generate#NachaFile writes "X" and its rightmost 14 characters. An X id that matches no ACH payment of the
+                 * bank account, or more than one, is no payment (the entry is skipped, named by its X id).
                  */
                 const checkPaymentId = (paymentId) => {
-                    if (!paymentId) return null
-                    if ("X" !== paymentId[0]) {
-                        return paymentId
-                    } else {
-                        const payment = ec.entity.find("mantle.account.payment.Payment")
-                                .condition("paymentInstrumentEnumId", "PiAch")
-                                .condition("paymentMethodId", paymentMethodId)
-                                .condition(ec.entity.conditionFactory.makeCondition("paymentId", "like", "%" + paymentId.slice(-14)))
-                                .disableAuthz().one()
-                        return payment ? payment.paymentId : null
-                    }
+                    if (!paymentId) return {paymentId: null}
+                    if ("X" !== paymentId[0]) return {paymentId}
+                    const cf = ec.entity.conditionFactory
+                    const found = Array.from(ec.entity.find("mantle.account.payment.Payment")
+                            .condition("paymentInstrumentEnumId", "PiAch")
+                            .condition(cf.makeCondition([cf.makeCondition("paymentMethodId", "equals", paymentMethodId),
+                                cf.makeCondition("toPaymentMethodId", "equals", paymentMethodId)], "or"))
+                            .condition(cf.makeCondition("paymentId", "like", "%" + paymentId.slice(-14)))
+                            .selectField("paymentId").limit(2).disableAuthz().list())
+                    if (found.length === 1) return {paymentId: found[0].paymentId}
+                    return {paymentId: null, fileId: paymentId,
+                        idProblem: found.length ? "its id matches more than one payment of the bank account" : null}
                 }
 
                 const parse = (content) => {
@@ -571,13 +578,16 @@ along with this software (see the LICENSE.md file). If not, see
                                 batch.push(achEntry)
                                 achEntry = null
                             }
+                            const found = checkPaymentId(line.slice(39, 54).trim())
                             achEntry = {
                                 recordTypeCode: line[0],
                                 transactionCode: line.slice(1, 3),
                                 dfiId: line.slice(3, 11).trim(),
                                 dfiAccount: line.slice(12, 29).trim(),
                                 amount: toDecimal(line.slice(29, 39)).divide(100),
-                                paymentId: checkPaymentId(line.slice(39, 54).trim()),
+                                paymentId: found.paymentId,
+                                fileId: found.fileId,
+                                idProblem: found.idProblem,
                                 name: line.slice(54, 76).trim(),
                                 discretionaryData: line.slice(76, 78),
                                 addendaIndicator: line[78],
@@ -625,14 +635,15 @@ along with this software (see the LICENSE.md file). If not, see
                 const ownerPartyId = bankMethod.ownerPartyId
                 const admitted = paymentIdList == null ? null : new Set(Array.from(paymentIdList).map(String))
                 const refuse = (entry, reason) => {
-                    const text = `NACHA return for bank account ${paymentMethodId}: entry for payment ${entry.paymentId || "(none)"} (trace ${entry.traceNumber}) skipped, ${reason}`
+                    const text = `NACHA return for bank account ${paymentMethodId}: entry for payment ${entry.paymentId || entry.fileId || "(none)"} (trace ${entry.traceNumber}) skipped, ${reason}`
                     ec.logger.error(text)
                     ec.message.addMessage(text, "warning")
                     return null
                 }
-                const paymentOf = (entry) => {
+                // a notification of change (98) carries a zero amount: only a return is held to the payment's amount
+                const paymentOf = (entry, checkAmount = true) => {
                     const paymentId = entry.paymentId
-                    if (!paymentId) return refuse(entry, "no payment of the bank account has its id")
+                    if (!paymentId) return refuse(entry, entry.idProblem || "no payment of the bank account has its id")
                     if (admitted && !admitted.has(paymentId)) return refuse(entry, "the payment is not one of those given")
                     const payment = ec.entity.find("mantle.account.payment.Payment").condition({paymentId: paymentId}).disableAuthz().one()
                     if (!payment) return refuse(entry, "the payment is not found")
@@ -640,7 +651,7 @@ along with this software (see the LICENSE.md file). If not, see
                             ((payment.paymentMethodId === paymentMethodId && payment.fromPartyId === ownerPartyId) ||
                              (payment.toPaymentMethodId === paymentMethodId && payment.toPartyId === ownerPartyId))
                     if (!ofBank) return refuse(entry, "the payment is not an ACH payment of this bank account")
-                    if (payment.amount == null || !toDecimal(payment.amount).eq(entry.amount))
+                    if (checkAmount && (payment.amount == null || !toDecimal(payment.amount).eq(entry.amount)))
                         return refuse(entry, `the entry's amount ${entry.amount} is not the payment's`)
                     return payment
                 }
@@ -672,9 +683,16 @@ along with this software (see the LICENSE.md file). If not, see
                             }
 
                         } else if ('98' === type) {
-                            // notification of change
-                            const payment = paymentOf(entry)
-                            if (payment) {
+                            // notification of change: the bank's corrected account data, recorded once on the payment for
+                            // whoever corrects the payee's bank account; the payment itself is settled and stays as it is
+                            // (it was put back to authorized, which voided and reversed a delivered payment)
+                            const payment = paymentOf(entry, false)
+                            const recorded = payment && ec.entity.find("mantle.account.method.PaymentGatewayResponse")
+                                    .condition({paymentId: paymentId, referenceNum: lastAddenda.traceNum, reasonCode: lastAddenda.changeCode})
+                                    .disableAuthz().count() > 0
+                            if (recorded) {
+                                ec.message.addMessage(`Payment ${paymentId}'s notification of change was already recorded`)
+                            } else if (payment) {
                                 // find description of the change notification
                                 const changeReason = ec.entity.find("moqui.basic.Enumeration")
                                         .condition({enumTypeId: "ACHChangeCode", enumCode: lastAddenda.changeCode}).disableAuthz().one()
@@ -683,8 +701,7 @@ along with this software (see the LICENSE.md file). If not, see
                                         amount: entry.amount, referenceNum: lastAddenda.traceNum,
                                         amountUomId: payment.amountUomId, reasonCode: lastAddenda.changeCode,
                                         reasonMessage: (changeReason ? changeReason.description : "") + " Corrected: " + lastAddenda.correctedData}).disableAuthz().call()
-                                ec.service.sync().name("update#mantle.account.payment.Payment")
-                                        .parameters({paymentId: paymentId, statusId: "PmntAuthorized"}).disableAuthz().call()
+                                ec.message.addMessage(`Payment ${paymentId}: the bank's notification of change ${lastAddenda.changeCode} is recorded`)
                             }
                         }
                     }

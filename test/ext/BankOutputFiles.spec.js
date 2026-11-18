@@ -212,24 +212,47 @@ feature("Positive Pay is refused without a format", {
 })
 
 // SEC-BOS-81: the bank's channel (a system message's consume, authorization off) names payments by id too, so an entry is held
-// to the bank account's ACH payments at the entry's amount: one at another amount or of another bank account is skipped
-feature("import a NACHA return: a returned entry declines its payment, another account's or amount's is skipped, a bad line is an error", {
+// to the bank account's ACH payments, and a return to the entry's amount: one of another bank account, a return at another
+// amount, an X id two payments end with, and any entry when an empty list of payments is given are skipped. A notification of
+// change (98, a zero amount) is recorded once and changes no payment. An id longer than 15 is written and read as "X" and its
+// rightmost 14 characters.
+feature("import a NACHA return: returns decline their payments, the others are skipped, a change is recorded, a bad line is an error", {
     when() {
         const pad = (text, n) => String(text).padEnd(n, " ").slice(0, n)
         const entry = (paymentId, amountCents) => "6" + "26" + "01100001" + "5" + pad("111222333", 17) + String(amountCents).padStart(10, "0") + pad(paymentId, 15) +
                 pad("Pat Payee", 22) + "  " + "1" + "011000010000001"
         const returnAddenda = (reason, info) => "7" + "99" + reason + "011000010000001" + "      " + "01100001" + pad(info, 44) + "011000010000009"
+        const changeAddenda = (changeCode, corrected) => "7" + "98" + changeCode + "011000010000001" + "      " + "01100001" + pad(corrected, 29) +
+                " ".repeat(15) + "011000010000008"
+        const file = lines => lines.concat(["9" + " ".repeat(93)]).join("\n")
+        const importReturn = (nachaString, extra = {}) =>
+            call("mantle.ext.account.NachaServices.import#NachaReturn", Object.assign({ paymentMethodId: companyBankId, nachaString }, extra))
+        const payment = paymentId => ec.entity.find("mantle.account.payment.Payment").condition("paymentId", paymentId).one()
+        const responsesOf = paymentId => Array.from(ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", paymentId).list())
+        const ach = (paymentId, amount, statusId = "PmntDelivered") => call("create#mantle.account.payment.Payment", { paymentId, fromPartyId: organizationPartyId,
+                toPartyId: payeeId, amount, amountUomId: "USD", paymentMethodId: companyBankId, toPaymentMethodId: payeeBankId,
+                paymentInstrumentEnumId: "PiAch", paymentTypeEnumId: "PtInvoicePayment", statusId, effectiveDate: effectiveTime - 3600000 }).paymentId
         // a payee's own ACH payment from its bank account, of the same amount: not this bank account's
         const foreignId = call("create#mantle.account.payment.Payment", { fromPartyId: payeeId, toPartyId: organizationPartyId, amount: "100.25",
                 amountUomId: "USD", paymentMethodId: payeeBankId, paymentInstrumentEnumId: "PiAch", statusId: "PmntDelivered",
                 effectiveDate: effectiveTime - 3600000 }).paymentId
-        const text = [entry(foreignId, 10025), returnAddenda("R01", "Insufficient funds"), entry(achPaymentIds[0], 10026),
-                returnAddenda("R01", "Insufficient funds"), entry(achPaymentIds[0], 10025), returnAddenda("R01", "Insufficient funds"),
-                "9" + " ".repeat(93)].join("\n")
-        call("mantle.ext.account.NachaServices.import#NachaReturn", { paymentMethodId: companyBankId, nachaString: text })
-        const foreign = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", foreignId).one()
-        const returned = ec.entity.find("mantle.account.payment.Payment").condition("paymentId", achPaymentIds[0]).one()
-        const responses = Array.from(ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", achPaymentIds[0]).list())
+        // a long id sent in a NACHA file and returned by its X id; two long ids with the same rightmost 14 characters
+        const longId = ach("BOF_LONG_A_00000000000001", "12.34", "PmntAuthorized")
+        const sent = call("mantle.ext.account.NachaServices.generate#NachaFile", { paymentMethodId: companyBankId, paymentIdList: [longId] })
+        const twinIds = [ach("BOF_LONG_B_77700000000002", "5.00"), ach("BOF_LONG_C_77700000000002", "5.00")]
+        const nocId = ach(null, "50.00")
+        importReturn(file([entry(foreignId, 10025), returnAddenda("R01", "Insufficient funds"),
+                entry(achPaymentIds[1], 200001), returnAddenda("R01", "Insufficient funds"),
+                entry("X" + twinIds[0].slice(-14), 500), returnAddenda("R03", "No account"),
+                entry("X" + longId.slice(-14), 1234), returnAddenda("R03", "No account"),
+                entry(achPaymentIds[0], 10025), returnAddenda("R01", "Insufficient funds")]))
+        // an empty list of payments admits none
+        importReturn(file([entry(nocId, 5000), returnAddenda("R01", "Insufficient funds")]), { paymentIdList: [] })
+        const afterEmptyList = payment(nocId).statusId
+        // a notification of change has a zero amount; imported twice it is recorded once and the payment stays delivered
+        const noc = file([entry(nocId, 0), changeAddenda("C01", "998877665544")])
+        importReturn(noc)
+        importReturn(noc)
         // the service adds its errors to the message facade without stopping, so read them from there
         const errorsOf = (nachaString) => {
             ec.service.sync().name("mantle.ext.account.NachaServices.import#NachaReturn").parameters({ paymentMethodId: companyBankId, nachaString }).call()
@@ -238,13 +261,24 @@ feature("import a NACHA return: a returned entry declines its payment, another a
             return text
         }
         const short = errorsOf("6short")
-        return { returned, responses, short, foreign }
+        return { returned: payment(achPaymentIds[0]), responses: responsesOf(achPaymentIds[0]), short, foreign: payment(foreignId),
+            wrongAmount: payment(achPaymentIds[1]), sentText: sent.fileText || "", long: payment(longId), twins: twinIds.map(payment),
+            afterEmptyList, noc: payment(nocId), nocResponses: responsesOf(nocId), longId }
     },
-    then({ returned, responses, short, foreign }) {
+    then({ returned, responses, short, foreign, wrongAmount, sentText, long, twins, afterEmptyList, noc, nocResponses, longId }) {
         returned.statusId == "PmntDeclined"
         responses.length == 1
         responses.some(r => r.reasonCode == "R01")
         foreign.statusId == "PmntDelivered"
+        wrongAmount.statusId == "PmntDelivered"
+        sentText.includes("X" + longId.slice(-14))
+        long.statusId == "PmntDeclined"
+        twins.every(row => row.statusId == "PmntDelivered")
+        afterEmptyList == "PmntDelivered"
+        noc.statusId == "PmntDelivered"
+        nocResponses.length == 1
+        nocResponses[0].reasonCode == "C01"
+        nocResponses[0].reasonMessage.includes("998877665544")
         short.includes("Length of the line is incorrect")
     },
 })
