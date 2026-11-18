@@ -721,6 +721,65 @@ feature("a reply to a list's message, by its reply address or by In-Reply-To, is
     }
 })
 
+feature("the sender is the From address, never its display name: a name holding a member's address is held (SEC-PFS-81)", {
+    when() {
+        const to = "dev@" + LISTS
+        const spoof = '"<mls_member@smithy.test>" <mls_other@smithy.test>'
+        lib.settled(SITE, "MLS_MEMBER")
+        // a polled message (no stored row): the rule's from text alone, a display name holding the member's address
+        const polled = mail(spoof, to, "Spoofed by name", "MLS-SPOOF-POLLED")
+        // a stored message of the forum's own account: its parsed address and name are read
+        lib.make("moqui.basic.email.EmailMessage", {
+            emailMessageId: "MLS_SPOOF_MESSAGE",
+            emailAccountId: "MLS_FORUM_ACCOUNT",
+            statusId: "ES_VIEWED",
+            fromAddress: "mls_other@smithy.test",
+            fromName: "<mls_member@smithy.test>",
+            toAddresses: to,
+            subject: "Spoofed and stored",
+            bodyText: "MLS-SPOOF-STORED",
+            messageId: "<mls-spoof-stored@mls.test>"
+        })
+        const stored = lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+            emailAccountId: "MLS_FORUM_ACCOUNT",
+            emailMessageId: "MLS_SPOOF_MESSAGE",
+            headers: {
+                "delivered-to": to,
+                "message-id": "<mls-spoof-stored@mls.test>",
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+            },
+            fields: {from: spoof, subject: "Spoofed and stored", toList: [to]},
+            bodyPartList: [{contentType: "text/plain", contentText: "MLS-SPOOF-STORED"}]
+        }).result
+        // the member's own mail, by address alone and with a display name, still posts
+        const plain = mail("mls_member@smithy.test", to, "Mine by mail", "MLS-SPOOF-PLAIN")
+        lib.settled(SITE, "MLS_MEMBER")
+        const named = mail('"Member, MLS" <mls_member@smithy.test>', to, "Mine with my name", "MLS-SPOOF-NAMED")
+        const receipt = id => lib.row("mantle.forum.ForumInboundReceipt", {receiptId: id})
+        return {
+            polled,
+            stored,
+            plain,
+            named,
+            senders: [receipt(polled.receiptId).senderAddress, receipt(stored.receiptId).senderAddress],
+            found: posts(ids.list)
+                .filter(post => /MLS-SPOOF/.test(post.body))
+                .map(post => post.subject + " " + post.fromPartyId)
+                .sort(),
+            kept: held("mls_member@smithy.test").length + held("mls_other@smithy.test").length
+        }
+    },
+    then({polled, stored, plain, named, senders, found, kept}) {
+        polled.result == "held"
+        stored.result == "held"
+        senders == ["mls_other@smithy.test", "mls_other@smithy.test"]
+        plain.result == "posted"
+        named.result == "posted"
+        found == ["Mine by mail MLS_MEMBER", "Mine with my name MLS_MEMBER"]
+        kept == 0
+    }
+})
+
 feature("an invitation does not bring back a member staff suspended or removed; one who left joins again (SEC-PSS-43)", {
     when() {
         const hash = text => ec.user.singleUseCodeHash(text)

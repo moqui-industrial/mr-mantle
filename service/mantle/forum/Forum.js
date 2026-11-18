@@ -5038,6 +5038,31 @@ const bareAddress = (text) =>
         /([^<>"\s,;]+@[^<>"\s,;]+)/.exec(String(text || ''))?.[1] ||
         ''
     ).trim()
+/* The From mailbox of a message (SEC-PFS-81): its address and display name. A stored message's are the ones the store
+   parsed (fromAddress, the addr-spec, and fromName); a message an email rule names without a stored row (a polled one)
+   has only the rule's from text, written `name <address>` or `"name" <address>` with the addr-spec last, or the address
+   alone, so only an angle-bracketed address that ends the text is the address and what is before it the name. A display
+   name's text, whatever address it shows, is never the sender. */
+function fromMailbox(stored, from) {
+    if (stored)
+        return {
+            address: String(stored.fromAddress || '').trim(),
+            name: String(stored.fromName || '').trim(),
+        }
+    const text = String(from || '').trim()
+    const last = /<([^<>\s]+@[^<>\s]+)>$/.exec(text)
+    if (last)
+        return {
+            address: last[1],
+            name: text
+                .slice(0, last.index)
+                .trim()
+                .replace(/^"([\s\S]*)"$/, '$1'),
+        }
+    return /^[^<>"\s,;]+@[^<>"\s,;]+$/.test(text)
+        ? { address: text, name: '' }
+        : { address: '', name: text }
+}
 const messageIds = (text) =>
     String(text || '').match(/<[^<>\s]+@[^<>\s]+>/g) || []
 /* Conservative reply text: drop quoted lines, the attribution before them and anything after a signature marker. */
@@ -5262,8 +5287,10 @@ function processInbound(ctx) {
         !forumAccount(accountId, route)
     )
         return { handled: false }
+    // the sender is the From mailbox's address, never text of its display name (fromMailbox)
+    const mailbox = fromMailbox(stored, fields.from)
     const siteId = route.siteId,
-        sender = bareAddress(fields.from).toLowerCase(),
+        sender = mailbox.address.toLowerCase(),
         messageId =
             headerValues(headers, 'message-id')[0] ||
             ctx.message?.messageId ||
@@ -5357,6 +5384,14 @@ function processInbound(ctx) {
         sender === String(settings.senderAddress || '').toLowerCase()
     )
         return record('ignored', 'Message from this forum')
+    // A display name that holds an address shows a reader someone the mail may not be from (a mailbox at a member's own
+    // mail provider names the member), so the message is held: never posted, and never kept for that address. A name that
+    // is the sender's own address alone, as some mail programs write it, is the sender.
+    if (
+        mailbox.name.includes('@') &&
+        mailbox.name.replace(/^[\s<"']+|[\s>"']+$/g, '').toLowerCase() !== sender
+    )
+        return record('held', "The sender's display name holds an email address")
     // DMARC or an aligned DKIM signature passed in a field of the trusted gateway (gatewayAuthenticated)
     const authenticated = gatewayAuthenticated(
         headerValues(headers, 'authentication-results'),
@@ -5385,8 +5420,7 @@ function processInbound(ctx) {
                       siteId,
                       route,
                       sender,
-                      senderName: String(fields.from || '')
-                          .replace(/<[^<>]*>/g, '')
+                      senderName: mailbox.name
                           .replace(/[<>"]/g, '')
                           .trim()
                           .slice(0, 100),
