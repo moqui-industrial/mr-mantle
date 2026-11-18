@@ -831,3 +831,83 @@ feature(
         }
     }
 )
+
+// SEC-BOS-82: payroll owns an employee's bank accounts through People (Accounting's finance details refuse employees): a payroll
+// editor of the employer adds a payroll account and changes it at its revision, read back masked; a payroll reader, another
+// employer's payroll, a method of another person and a stale or malformed change are refused
+feature("a payroll editor adds and changes an employee's payroll bank account; others are refused, numbers never answered", {
+    when() {
+        const B = G + "store#PayrollBankAccount"
+        const add = {
+            partyRelationshipId: state.anaEmp,
+            bankName: "Ana Bank",
+            accountNumber: "123456789",
+            routingNumber: "011000015"
+        }
+        const refusals = {
+            reader: code(run(state.reader, B, add)),
+            otherPayroll: code(run(state.payrollB, B, add)),
+            routing: code(run(state.payroll, B, Object.assign({}, add, {routingNumber: "12345"}))),
+            missing: code(run(state.payroll, B, {partyRelationshipId: state.anaEmp, bankName: "Ana Bank"}))
+        }
+        const added = run(state.payroll, B, add)
+        const read = () => JSON.parse(JSON.stringify(run(state.payroll, G + "get#Compensation", {partyId: state.ana})))
+        const first = read()
+        const row = first.paymentMethods.find(method => method.paymentMethodId == added.paymentMethodId)
+        const change = {partyRelationshipId: state.anaEmp, paymentMethodId: added.paymentMethodId, bankName: "Ana New Bank"}
+        const stale = code(run(state.payroll, B, Object.assign({lastUpdatedStamp: 1}, change)))
+        const changed = run(state.payroll, B, Object.assign({lastUpdatedStamp: row.lastUpdatedStamp}, change))
+        const kitMethod = call("mantle.account.PaymentMethodServices.create#BankAccount", {
+            ownerPartyId: state.kit,
+            bankName: "Kit Bank",
+            accountNumber: "55554444",
+            routingNumber: "011000015"
+        }).paymentMethodId
+        const otherPerson = code(
+            run(state.payroll, B, {
+                partyRelationshipId: state.anaEmp,
+                paymentMethodId: kitMethod,
+                lastUpdatedStamp: rows("mantle.account.method.PaymentMethod", {paymentMethodId: kitMethod})[0].lastUpdatedStamp,
+                bankName: "Taken"
+            })
+        )
+        const method = id => rows("mantle.account.method.PaymentMethod", {paymentMethodId: id})[0]
+        const bank = id => rows("mantle.account.method.BankAccount", {paymentMethodId: id})[0]
+        return {
+            refusals,
+            added: added.error,
+            row,
+            firstText: JSON.stringify(first),
+            stale,
+            changed: changed.error,
+            newId: changed.paymentMethodId,
+            oldId: added.paymentMethodId,
+            oldEnded: method(added.paymentMethodId).thruDate != null,
+            newPurpose: method(changed.paymentMethodId)?.purposeEnumId,
+            newBank: bank(changed.paymentMethodId)?.bankName,
+            newNumber: bank(changed.paymentMethodId)?.accountNumber,
+            otherPerson
+        }
+    },
+    then(result) {
+        result.refusals ==
+            {
+                reader: "PERMISSION_DENIED",
+                otherPayroll: "RECORD_UNAVAILABLE",
+                routing: "ROUTING_NUMBER_INVALID",
+                missing: "BANK_DETAILS_REQUIRED"
+            }
+        result.added == ""
+        result.row.payroll == true
+        result.row.referenceText == "Ana Bank •••• 6789"
+        !result.firstText.includes("123456789")
+        result.stale == "REVISION_CHANGED"
+        result.changed == ""
+        result.newId != result.oldId
+        result.oldEnded
+        result.newPurpose == "PmpPayroll"
+        result.newBank == "Ana New Bank"
+        result.newNumber == "123456789"
+        result.otherPerson == "PAYMENT_METHOD_UNAVAILABLE"
+    }
+})

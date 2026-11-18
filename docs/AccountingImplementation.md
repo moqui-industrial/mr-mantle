@@ -159,9 +159,11 @@ starts the next (`SUPPLIER_TERMS_EDIT` for these finance fields; Purchasing adds
 amounts, agreements, profile rows and, by permission, its masked bank accounts, masked identifications (never a tax
 one: `PtidSsn`, `PtidFein`, `PtidFuid`) and tax registrations. The `CustomerFinanceServices` writers take `side`:
 `check#CustomerScope` counts only that side's relationship (a customer's sales or current `PrtCustomer` relationship;
-a supplier's bills, purchase orders or profile; payroll invoices left out) and refuses an internal organization and a
-current employee of the organization, whose identifications and payroll bank accounts are People's (SEC-BOS-82); a
-supplier's identifications need `PAYABLE_EDIT`, and `store#CustomerIdentification` refuses the tax types.
+a supplier's bills, purchase orders or profile; an employee's payroll invoices, those of an employment, left out, while a
+pay run's third-party payee stays a supplier) and refuses an internal organization and a current employee of any
+organization, whose identifications and payroll bank accounts are People's (SEC-BOS-82: payroll changes them with
+`store#PayrollBankAccount`, and `store#CustomerBankAccount` refuses a `PmpPayroll` account); a supplier's
+identifications need `PAYABLE_EDIT`, and `store#CustomerIdentification` refuses the tax types.
 
 **Due date.** `checkSet#InvoiceDueDate` (the `InvoiceSetDueDate` EECA): the invoice's term, else the newest agreement
 term, else for a bill the supplier's term in effect on the invoice date, else for a receivable the organization's.

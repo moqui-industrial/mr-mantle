@@ -875,8 +875,8 @@ along with this software (see the LICENSE.md file). If not, see
             PROFILE_SCHEDULED. Or, with benefitTypeId, a benefit (Mantle's EmploymentBenefit) from fromDate with its cost and the
             employer's share in percent (BENEFIT_EXISTS when it overlaps one of the type, PERCENT_INVALID, AMOUNT_INVALID), or with
             endBenefit the benefit from benefitFromDate ended from thruDate (BENEFIT_ENDED), each at the benefits' revision
-            (expectedRevision: get#Compensation's benefitRevision; P23 review). Bank details are not here: they change
-            through Accounting's payment-method services. Employment's and Employee's historical tax fields are neither read nor
+            (expectedRevision: get#Compensation's benefitRevision; P23 review). Bank details are not here: payroll bank
+            accounts change through store#PayrollBankAccount. Employment's and Employee's historical tax fields are neither read nor
             written. Needs PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED); another employer's employment is RECORD_UNAVAILABLE.
             Refuses also LOCALIZATION_INVALID, NO_FIELDS, REVISION_CHANGED, DATES_INVALID and DATE_OUTSIDE.</description>
         <in-parameters>
@@ -901,6 +901,32 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('storePayrollProfile', context)"/>
             <set field="payrollTaxProfileId" from="stored.payrollTaxProfileId"/>
             <set field="revision" from="stored.revision"/>
+        </actions>
+    </service>
+
+    <service verb="store" noun="PayrollBankAccount" allow-remote="false">
+        <description>An employee's payroll bank account (SEC-BOS-82: payroll owns an employee's bank accounts through People;
+            Accounting's customer and supplier finance refuses employees): for an employment of an employer in the caller's
+            scope (RECORD_UNAVAILABLE otherwise), a new bank account of the person with purpose PmpPayroll (bankName,
+            accountNumber, routingNumber required: BANK_DETAILS_REQUIRED, ACCOUNT_NUMBER_INVALID, ROUTING_NUMBER_INVALID),
+            or with paymentMethodId one of the person's current bank accounts changed at its lastUpdatedStamp
+            (REVISION_CHANGED, PAYMENT_METHOD_UNAVAILABLE) and made a payroll account: update#BankAccount ends it and starts
+            its successor, whose id is answered. An empty number keeps the stored one. Numbers are never answered. Needs
+            PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED).</description>
+        <in-parameters>
+            <parameter name="partyRelationshipId" required="true"/>
+            <parameter name="paymentMethodId"/>
+            <parameter name="lastUpdatedStamp" type="Timestamp"/>
+            <parameter name="bankName"/>
+            <parameter name="accountNumber"/>
+            <parameter name="routingNumber"/>
+            <parameter name="typeEnumId"/>
+            <parameter name="description"/>
+        </in-parameters>
+        <out-parameters><parameter name="paymentMethodId"/></out-parameters>
+        <actions>
+            <set field="stored" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollAssignments.js').execute('storePayrollBankAccount', context)"/>
+            <set field="paymentMethodId" from="stored.paymentMethodId"/>
         </actions>
     </service>
 

@@ -28,9 +28,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>The customer of an organization the user works in, or with side supplier its supplier: the permission
             given, a party no other user keeps private, and a relationship of that side (for a customer an invoice to it, a
             credit from it, a sales order or a current customer relationship, PrtCustomer; for a supplier a bill from it, a
-            purchase order or its supplier profile), payroll invoices left out. Refuses otherwise, and refuses an internal
-            organization (the intercompany workflow's) and a person with a current employment (PrtEmployee) with the
-            organization, whose identifications and payroll bank accounts are People's and payroll's (SEC-BOS-82).</description>
+            purchase order or its supplier profile), an employee's payroll invoices left out (net pay, an overpayment: those
+            of an employment). Refuses otherwise, and refuses an internal organization (the intercompany workflow's) and a
+            person with a current employment (PrtEmployee) with any organization, whose identifications and payroll bank
+            accounts are People's and payroll's (SEC-BOS-82).</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters><parameter name="permission"/></in-parameters>
         <out-parameters><parameter name="customer" type="Map"/></out-parameters>
@@ -57,18 +58,24 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find-count>
             <if condition="internalCount">
                 <return error="true" message="INTERCOMPANY_EXCLUDED: Internal organizations use the intercompany workflow"/></if>
+            <!-- an employee of any organization: another organization's user would otherwise reach them as a supplier -->
             <entity-find-count entity-name="mantle.party.PartyRelationship" count-field="employmentCount" disable-authz="true">
                 <date-filter/>
                 <econdition field-name="relationshipTypeEnumId" value="PrtEmployee"/>
                 <econdition field-name="fromPartyId" from="customerPartyId"/>
-                <econdition field-name="toPartyId" from="organizationPartyId"/>
             </entity-find-count>
             <if condition="employmentCount">
                 <return error="true" message="EMPLOYEE_EXCLUDED: An employee's finance details are kept in People"/></if>
             <entity-find-count entity-name="mantle.account.invoice.Invoice" count-field="invoiceCount" disable-authz="true">
-                <!-- a pay run's invoices (net pay from an employee, a payroll receivable) make no customer or supplier -->
-                <econdition field-name="invoiceTypeEnumId" operator="not-equals" value="InvoicePayroll" or-null="true"/>
-                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true"/>
+                <!-- an employee's pay run invoices (net pay from them, an overpayment to recover: an employment's) make no
+                    customer or supplier; a pay run's third-party payee (a benefit provider, an agency) stays a supplier -->
+                <econditions combine="or">
+                    <econdition field-name="partyRelationshipId" operator="is-null"/>
+                    <econditions>
+                        <econdition field-name="invoiceTypeEnumId" operator="not-equals" value="InvoicePayroll" or-null="true"/>
+                        <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true"/>
+                    </econditions>
+                </econditions>
                 <econditions combine="or">
                     <econditions>
                         <econdition field-name="fromPartyId" from="supplierSide ? customerPartyId : organizationPartyId"/>
@@ -399,8 +406,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="store" noun="CustomerBankAccount" allow-remote="false">
         <description>Add a bank account to a customer, or change one it owns (paymentMethodId with the lastUpdatedStamp
             read), through create#BankAccount or update#BankAccount; a description defaults to the bank and the last four
-            digits, never the whole number, and no number is returned. Needs PAYMENT_EDIT and BANK_RECONCILE in the
-            organization.</description>
+            digits, never the whole number, and no number is returned. Refuses a payroll bank account (purpose PmpPayroll,
+            People's store#PayrollBankAccount). Needs PAYMENT_EDIT and BANK_RECONCILE in the organization.</description>
         <implements service="mantle.account.CustomerFinanceServices.define#CustomerScope"/>
         <in-parameters>
             <parameter name="paymentMethodId"/>
@@ -430,6 +437,10 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="existing?.ownerPartyId != customerPartyId">
                     <return error="true"
                             message="PAYMENT_METHOD_UNAVAILABLE: The bank account does not belong to this customer"/></if>
+                <!-- SEC-BOS-82: a payroll bank account is payroll's, changed in People (store#PayrollBankAccount) -->
+                <if condition="existing.purposeEnumId == 'PmpPayroll'">
+                    <return error="true"
+                            message="PAYMENT_METHOD_UNAVAILABLE: A payroll bank account is changed in People's payroll"/></if>
                 <if condition="lastUpdatedStamp == null || Number(existing.lastUpdatedStamp) != Number(lastUpdatedStamp)">
                     <return error="true" message="STALE_REVISION: The bank account changed; reload before saving"/></if>
             </if>

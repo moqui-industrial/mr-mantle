@@ -10,8 +10,10 @@
 //   EmploymentSalary stays the salary and RateAmount the hourly rate, and assigning a structure changes neither;
 // - a payroll tax profile (PayrollTaxProfile) holds the values of the fields a localization declares (PayrollLocalizationField)
 //   from a date, so only the installed localizations' fields exist (the demonstration's alone in this build); Employment's and
-//   Employee's historical US tax fields are neither read nor written (F33). Bank details stay the person's payment methods,
-//   changed through Accounting's payment-method services: here only a masked reference is read;
+//   Employee's historical US tax fields are neither read nor written (F33). Bank details stay the person's payment methods:
+//   payroll adds and changes their payroll bank accounts here (store#PayrollBankAccount, purpose PmpPayroll, through
+//   Accounting's create#BankAccount and update#BankAccount; SEC-BOS-82: Accounting's finance details refuse employees), and
+//   reads them as masked references;
 // - benefits are Mantle's EmploymentBenefit rows (a type from a date, its cost and the employer's share), added and ended here;
 // - a salary (EmploymentSalary) from a date ends the row in effect on it (F4); a later row set already, or one from the same
 //   moment, is refused. The pay change (Employment.js, kind EckPayChange) writes through writeSalary after its approval.
@@ -1022,8 +1024,57 @@ function storePayrollProfile(p) {
     }
 }
 
+// ===== payroll bank accounts (SEC-BOS-82) =====
+// store#PayrollBankAccount: a payroll editor of the employer adds a payroll bank account (purpose PmpPayroll) for the employee
+// of an employment in scope, or changes one of the person's current bank accounts at its lastUpdatedStamp (update#BankAccount
+// ends it and starts its successor, which pays from then on; an open payment run paying it loses its approval). Numbers in,
+// never out: the answer is the method and its masked reference.
+const digits = value => text(value).replace(/[\s-]/g, "")
+function storePayrollBankAccount(p) {
+    const userScope = editorScope()
+    const employment = employmentIn(userScope, p.partyRelationshipId)
+    const fields = {purposeEnumId: "PmpPayroll"}
+    for (const field of ["bankName", "typeEnumId", "description"]) if (!blank(p[field])) fields[field] = text(p[field])
+    if (!blank(p.accountNumber)) {
+        if (!/^[0-9]{4,17}$/.test(digits(p.accountNumber)))
+            denied("ACCOUNT_NUMBER_INVALID", "An account number is 4 to 17 digits")
+        fields.accountNumber = digits(p.accountNumber)
+    }
+    if (!blank(p.routingNumber)) {
+        if (!/^[0-9]{9}$/.test(digits(p.routingNumber))) denied("ROUTING_NUMBER_INVALID", "A routing number is 9 digits")
+        fields.routingNumber = digits(p.routingNumber)
+    }
+    const paymentMethodId = text(p.paymentMethodId)
+    if (paymentMethodId) {
+        const method = one("mantle.account.method.PaymentMethod", {paymentMethodId})
+        if (
+            !method ||
+            method.ownerPartyId !== employment.partyId ||
+            method.paymentMethodTypeEnumId !== "PmtBankAccount" ||
+            !openAt(method, nowMs()) ||
+            !one("mantle.account.method.BankAccount", {paymentMethodId})
+        )
+            denied(
+                "PAYMENT_METHOD_UNAVAILABLE",
+                "Bank account " + paymentMethodId + " is not one of the person's current accounts"
+            )
+        if (blank(p.lastUpdatedStamp) || stampOf(method) !== ms(p.lastUpdatedStamp))
+            denied("REVISION_CHANGED", "The bank account changed since you read it; open it again")
+        const saved = call("mantle.account.PaymentMethodServices.update#BankAccount", Object.assign({paymentMethodId}, fields))
+        return {paymentMethodId: saved.paymentMethodId || paymentMethodId}
+    }
+    if (!fields.accountNumber || !fields.routingNumber)
+        denied("BANK_DETAILS_REQUIRED", "Give the account number and the routing number")
+    if (!fields.bankName) denied("BANK_DETAILS_REQUIRED", "Give the bank's name")
+    const made = call(
+        "mantle.account.PaymentMethodServices.create#BankAccount",
+        Object.assign({ownerPartyId: employment.partyId, typeEnumId: "BatChecking"}, fields)
+    )
+    return {paymentMethodId: made.paymentMethodId}
+}
+
 // ===== get#Compensation =====
-// The person's bank accounts as masked references: changed through Accounting's payment-method services, never here.
+// The person's bank accounts as masked references, payroll's first (store#PayrollBankAccount changes them).
 function paymentMethodsOf(partyId, at) {
     const methods = Array.from(
         people
@@ -1043,7 +1094,14 @@ function paymentMethodsOf(partyId, at) {
     return methods.map(row => {
         const number = String(accounts[row.paymentMethodId]?.accountNumber || "")
         const bank = accounts[row.paymentMethodId]?.bankName || row.description || "Bank account"
-        return {paymentMethodId: row.paymentMethodId, referenceText: bank + (number ? " •••• " + number.slice(-4) : "")}
+        return {
+            paymentMethodId: row.paymentMethodId,
+            referenceText: bank + (number ? " •••• " + number.slice(-4) : ""),
+            bankName: accounts[row.paymentMethodId]?.bankName || "",
+            payroll: row.purposeEnumId === "PmpPayroll",
+            purposeText: row.purposeEnumId === "PmpPayroll" ? "Payroll" : "",
+            lastUpdatedStamp: row.lastUpdatedStamp
+        }
     })
 }
 // The employment's tax profile for the localization: its declared fields with the values in effect, and its revision.
@@ -1210,6 +1268,7 @@ const operations = {
     findAssignments,
     assignPayStructure,
     storePayrollProfile,
+    storePayrollBankAccount,
     getCompensation,
     salaryAccess: p => (salaryAccess(p), {}),
     createSalary

@@ -185,22 +185,29 @@ feature("AR stores a customer identification and reads it masked; a tax identifi
     }
 })
 // SEC-BOS-82: Accounting's customer and supplier scope is a business relationship: an employee of the organization (with
-// their payroll invoices), an internal organization (rolled up into it) and a party related in another way are refused,
-// and a former employee's payroll invoices make no supplier
+// their payroll invoices) or of any other, an internal organization (rolled up into it) and a party related in another way
+// are refused, and a former employee's payroll invoices make no supplier, while a pay run's third-party payee is one; a
+// payroll bank account is refused to Accounting's bank writer (payroll changes it in People)
 feature("an employee, an internal organization and a non-customer relationship are no customer or supplier of finance", {
     when() {
         const person = (partyId, thruDate) => {
             helper().call("create#mantle.party.Party", {partyId, partyTypeEnumId: "PtyPerson"})
             helper().call("create#mantle.party.Person", {partyId, firstName: "Pay", lastName: partyId})
             helper().call("create#mantle.party.PartyRelationship", {
+                partyRelationshipId: partyId + "_EMP",
                 fromPartyId: partyId,
                 toPartyId: f.org,
                 relationshipTypeEnumId: "PrtEmployee",
                 fromDate: 0,
                 thruDate
             })
+            const employment = helper().call("create#mantle.humanres.employment.Employment", {
+                partyRelationshipId: partyId + "_EMP"
+            })
+            // net pay: a pay run's invoice of the employment
             helper().call("create#mantle.account.invoice.Invoice", {
                 invoiceTypeEnumId: "InvoicePayroll",
+                partyRelationshipId: employment.partyRelationshipId,
                 fromPartyId: partyId,
                 toPartyId: f.org,
                 statusId: "InvoiceIncoming",
@@ -235,6 +242,44 @@ feature("an employee, an internal organization and a non-customer relationship a
             relationshipTypeEnumId: "PrtContact",
             fromDate: 0
         })
+        // employed by another organization, with an ordinary bill to this one
+        const elsewhereEmployer = "NATIVE_CUST_EMPLOYER_B"
+        helper().call("create#mantle.party.Party", {partyId: elsewhereEmployer, partyTypeEnumId: "PtyOrganization"})
+        const elsewhere = "NATIVE_CUST_ELSEWHERE"
+        helper().call("create#mantle.party.Party", {partyId: elsewhere, partyTypeEnumId: "PtyPerson"})
+        helper().call("create#mantle.party.Person", {partyId: elsewhere, firstName: "Works", lastName: "Elsewhere"})
+        helper().call("create#mantle.party.PartyRelationship", {
+            fromPartyId: elsewhere,
+            toPartyId: elsewhereEmployer,
+            relationshipTypeEnumId: "PrtEmployee",
+            fromDate: 0
+        })
+        const bill = (fromPartyId, invoiceTypeEnumId) =>
+            helper().call("create#mantle.account.invoice.Invoice", {
+                invoiceTypeEnumId,
+                fromPartyId,
+                toPartyId: f.org,
+                statusId: "InvoiceIncoming",
+                invoiceDate: ec.user.nowTimestamp,
+                currencyUomId: "USD"
+            })
+        bill(elsewhere, "InvoiceSales")
+        // a pay run's third-party payee (a benefit provider): its payroll invoice names no employment
+        const provider = "NATIVE_CUST_BENEFITS"
+        helper().call("create#mantle.party.Party", {partyId: provider, partyTypeEnumId: "PtyOrganization"})
+        helper().call("create#mantle.party.Organization", {partyId: provider, organizationName: "Benefit provider"})
+        bill(provider, "InvoicePayroll")
+        // a payroll bank account on the customer (People's store#PayrollBankAccount writes these)
+        const payrollMethodId = helper().call("mantle.account.PaymentMethodServices.create#BankAccount", {
+            ownerPartyId: f.customer,
+            purposeEnumId: "PmpPayroll",
+            bankName: "Payroll bank",
+            accountNumber: "777788889999",
+            routingNumber: "111000025"
+        }).paymentMethodId
+        const payrollStamp = helper().lib.one("mantle.account.method.PaymentMethod", {
+            paymentMethodId: payrollMethodId
+        }).lastUpdatedStamp
         const customerOf = partyId =>
             helper().rejected("mantle.account.CustomerFinanceServices.get#CustomerFinance", {
                 organizationPartyId: f.org,
@@ -254,7 +299,13 @@ feature("an employee, an internal organization and a non-customer relationship a
             idValue: "P7654321"
         })
         login(f.users.ap)
-        const supplier = {employee: supplierOf(employee), former: supplierOf(former), internal: supplierOf(internal)}
+        const supplier = {
+            employee: supplierOf(employee),
+            former: supplierOf(former),
+            internal: supplierOf(internal),
+            elsewhere: supplierOf(elsewhere),
+            provider: supplierOf(provider)
+        }
         login(f.users.treasury)
         const bank = helper().rejected("mantle.account.CustomerFinanceServices.store#CustomerBankAccount", {
             organizationPartyId: f.org,
@@ -265,9 +316,16 @@ feature("an employee, an internal organization and a non-customer relationship a
             routingNumber: "111000025",
             typeEnumId: "BatChecking"
         })
-        return {customer, identification, supplier, bank}
+        const payrollBank = helper().rejected("mantle.account.CustomerFinanceServices.store#CustomerBankAccount", {
+            organizationPartyId: f.org,
+            customerPartyId: f.customer,
+            paymentMethodId: payrollMethodId,
+            lastUpdatedStamp: payrollStamp,
+            bankName: "Changed by treasury"
+        })
+        return {customer, identification, supplier, bank, payrollBank}
     },
-    then({customer, identification, supplier, bank}) {
+    then({customer, identification, supplier, bank, payrollBank}) {
         customer.employee.includes("EMPLOYEE_EXCLUDED")
         customer.internal.includes("INTERCOMPANY_EXCLUDED")
         customer.contact.includes("CUSTOMER_SCOPE_INVALID")
@@ -275,6 +333,9 @@ feature("an employee, an internal organization and a non-customer relationship a
         supplier.employee.includes("EMPLOYEE_EXCLUDED")
         supplier.former.includes("SUPPLIER_SCOPE_INVALID")
         supplier.internal.includes("INTERCOMPANY_EXCLUDED")
+        supplier.elsewhere.includes("EMPLOYEE_EXCLUDED")
+        supplier.provider == ""
+        payrollBank.includes("PAYMENT_METHOD_UNAVAILABLE")
         bank.includes("EMPLOYEE_EXCLUDED")
     }
 })
