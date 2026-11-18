@@ -1470,11 +1470,12 @@ along with this software (see the LICENSE.md file). If not, see
             The contacts hook of chat's people (the framework's org.moqui.chat.ChatPeopleServices.find#ContactPeople calls
             it, named by the chat_contact_service property or the theme value STRT_CHAT_CONTACT_SERVICE; MR Moqui
             plans/Comms-Messaging.md §11.1): of the contacts the user can see (filter#VisibleContacts), those with one of the
-            addresses of addressList (tel:+E.164 on a current telecom number, matched by its last seven digits and then the
-            whole number in E.164; email:address on a current email contact mechanism, any case; user:userId, the party of that
-            user account), at most 100. Each: {contactRef (partyId), name, url (none: the app that shows contacts names its
-            own page), addressList: its current email addresses and telecom numbers in E.164 (at most 10 together) and the
-            user account whose party it is}. The current user's; another user's only with authorization disabled, as the
+            addresses of addressList (tel:+E.164 on a current telecom number, matched on the ways it is stored and then the
+            whole number in E.164: a +1 number by its area code and local number, another by its last seven digits;
+            email:address on a current email contact mechanism, any case; user:userId, the party of that user account), at
+            most 100. Each: {contactRef (partyId), name, url (none: the app that shows contacts names its own page),
+            addressList: the user account whose party it is (always kept), then its current email addresses and telecom
+            numbers in E.164, at most 10 together}. The current user's; another user's only with authorization disabled, as the
             framework calls the hook.
         </description>
         <in-parameters>
@@ -1502,23 +1503,41 @@ along with this software (see the LICENSE.md file). If not, see
                 else if (kind === 'email' && rest.includes('@') && !emails.includes(rest.toLowerCase())) emails.push(rest.toLowerCase())
                 else if (kind === 'user' && rest && !users.includes(rest)) users.push(rest)
             }
-            // a telecom number in E.164: its country code, else the deployment's rules through the dialer's normalize
+            // a telecom number in E.164: its country code, else the deployment's rules through the dialer's normalize (its
+            // messages kept apart from the caller's)
             const e164 = (row) => {
                 const local = String(row.areaCode || '') + String(row.contactNumber || '')
                 const cc = String(row.countryCode || '').replace(/\D/g, '')
                 if (cc) return '+' + cc + local.replace(/\D/g, '')
-                const out = ec.service.sync().name('org.moqui.call.CallHandlingServices.normalize#PhoneNumber').parameter('phoneNumber', local).call() || {}
-                ec.message.clearErrors()
-                return out.number || null
+                ec.message.pushErrors()
+                try {
+                    return (ec.service.sync().name('org.moqui.call.CallHandlingServices.normalize#PhoneNumber').parameter('phoneNumber', local).call() || {}).number || null
+                } finally { ec.message.clearErrors(); ec.message.popErrors() }
             }
             const candidates = new Set()
-            // the parties of each number: candidates by the last seven digits, as stored or written 123-4567, 123 4567 or 123.4567
+            // the parties of the numbers, in one query; Mantle keeps no number in E.164, so each is matched on the ways it is
+            // stored, then checked whole. A North American number (+1, ten digits) by its area code and its local number as
+            // written 1234567, 123-4567, 123 4567 or 123.4567 (the area and number index), or the ten digits in contactNumber
+            // alone; another country's by its last seven digits anywhere in contactNumber, a LIKE with a leading wildcard that
+            // no index serves: one table scan for all of them together, only when such a number is asked.
+            const forms = (local) => [local, ...['-', ' ', '.'].map((sep) => local.slice(0, 3) + sep + local.slice(3))]
+            const exact = [], loose = []
             for (const number of tels) {
-                const last7 = number.replace(/\D/g, '').slice(-7)
-                const written = [last7, ...['-', ' ', '.'].map((sep) => last7.slice(0, 3) + sep + last7.slice(3))]
-                for (const row of ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber')
-                        .condition(cf.makeCondition(written.map((form) => cf.makeCondition('contactNumber', 'like', `%${form}%`)), 'or'))
-                        .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).limit(60).list()) if (e164(row) === number) candidates.add(row.partyId)
+                const digits = number.slice(1)
+                if (digits.length === 11 && digits.startsWith('1')) {
+                    const area = digits.slice(1, 4), local = digits.slice(4), ten = digits.slice(1)
+                    exact.push(cf.makeCondition([cf.makeCondition('areaCode', 'equals', area), cf.makeCondition('contactNumber', 'in', forms(local))], 'and'))
+                    exact.push(cf.makeCondition('contactNumber', 'in', [ten, area + '-' + local.slice(0, 3) + '-' + local.slice(3), area + '.' + local.slice(0, 3) + '.' + local.slice(3),
+                        area + ' ' + local.slice(0, 3) + ' ' + local.slice(3), '(' + area + ') ' + local.slice(0, 3) + '-' + local.slice(3)]))
+                } else {
+                    for (const form of forms(digits.slice(-7))) loose.push(cf.makeCondition('contactNumber', 'like', `%${form}%`))
+                }
+            }
+            const wanted = new Set(tels)
+            for (const conditions of [exact, loose]) {
+                if (!conditions.length) continue
+                for (const row of ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber').condition(cf.makeCondition(conditions, 'or'))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).limit(60 * tels.length).list()) if (wanted.has(e164(row))) candidates.add(row.partyId)
             }
             // the parties of each email address, any case
             for (const chunk of chunks(emails, 100)) {
@@ -1537,9 +1556,13 @@ along with this software (see the LICENSE.md file). If not, see
             const visible = Array.from(ec.service.sync().name('mantle.party.ContactBookServices.filter#VisibleContacts')
                     .parameters({userId: userId, partyIdList: Array.from(candidates)}).call()?.visiblePartyIdList || []).slice(0, 100)
             if (!visible.length) return
-            // each contact's name and own addresses
+            // each contact's name and own addresses: its user account first, so the link to a user is always inside the 10
             const addressesOf = new Map(visible.map((id) => [id, []]))
             const add = (partyId, key) => { const list = addressesOf.get(partyId); if (list && list.length < 10 && !list.includes(key)) list.push(key) }
+            for (const account of ec.entity.find('moqui.security.UserAccount').condition('partyId', 'in', visible)
+                    .selectField('userId,partyId,disabled').orderBy('userId').list()) {
+                if (account.disabled !== 'Y' && !addressesOf.get(account.partyId).some((key) => key.startsWith('user:'))) add(account.partyId, 'user:' + account.userId)
+            }
             for (const row of ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', 'in', visible)
                     .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(cf.makeConditionDate('fromDate', 'thruDate', now))
                     .selectField('partyId,infoString').list()) {
@@ -1550,10 +1573,6 @@ along with this software (see the LICENSE.md file). If not, see
                     .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).list()) {
                 const number = e164(row)
                 if (number && /^\+[0-9]{5,15}$/.test(number)) add(row.partyId, 'tel:' + number)
-            }
-            for (const account of ec.entity.find('moqui.security.UserAccount').condition('partyId', 'in', visible)
-                    .selectField('userId,partyId,disabled').orderBy('userId').list()) {
-                if (account.disabled !== 'Y' && !addressesOf.get(account.partyId).some((key) => key.startsWith('user:'))) add(account.partyId, 'user:' + account.userId)
             }
             for (const party of ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', visible).orderBy('partyId').list()) {
                 const list = addressesOf.get(party.partyId)

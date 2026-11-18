@@ -56,6 +56,13 @@ feature("an organization, two users (one an employee with a phone), a personal c
         parties.customer = call("mantle.party.PartyServices.create#Person", { firstName: "Cody", lastName: "Customer", roleTypeId: "Customer", ownerPartyId: orgId }).partyId
         call("mantle.party.ContactServices.create#TelecomNumber", { partyId: parties.customer, countryCode: "1", areaCode: "555", contactNumber: "444.0003",
                 contactMechPurposeId: "PhonePrimary" })
+        // a customer abroad, matched by its last seven digits
+        parties.abroad = call("mantle.party.PartyServices.create#Person", { firstName: "Alba", lastName: "Abroad", roleTypeId: "Customer", ownerPartyId: orgId }).partyId
+        call("mantle.party.ContactServices.create#TelecomNumber", { partyId: parties.abroad, countryCode: "44", areaCode: "20", contactNumber: "7946 0958",
+                contactMechPurposeId: "PhonePrimary" })
+        // Ben has more addresses than a contact carries: his user account stays among them
+        for (let i = 0; i < 11; i++) call("mantle.party.ContactServices.create#EmailAddress", { partyId: parties.Ben, emailAddress: `ben.${i}@example.com`,
+                contactMechPurposeId: "EmailPrimary" })
         return {}
     },
     then() {
@@ -67,7 +74,8 @@ feature("an organization, two users (one an employee with a phone), a personal c
 feature("Ann's people: her own contact by number or address, with its other address; the directory's customer and coworker; never Ben's personal contact", {
     when() {
         return {
-            ann: peopleOf(users.Ann, ["tel:+15554440001", "email:fran.friend@example.org", "tel:+15554440002", "tel:+15554440003", "user:" + users.Ben, "junk"]),
+            ann: peopleOf(users.Ann, ["tel:+15554440001", "email:fran.friend@example.org", "tel:+15554440002", "tel:+15554440003", "user:" + users.Ben, "junk",
+                "tel:+442079460958"]),
             ben: peopleOf(users.Ben, ["tel:+15554440001", "tel:+15554440002"]),
             // the current user by default
             own: as("cph.ann", () => call(SERVICE, { addressList: ["tel:+15554440010"] }).contactList),
@@ -86,7 +94,9 @@ feature("Ann's people: her own contact by number or address, with its other addr
         byRef(ann, parties.customer).addressList.includes("tel:+15554440003")
         // the coworker by user: his party, his work number and his user account
         byRef(ann, parties.Ben).addressList.includes("user:" + users.Ben)
-        byRef(ann, parties.Ben).addressList.includes("tel:+15554440010")
+        byRef(ann, parties.Ben).addressList.length == 10
+        // a number abroad, matched by its last seven digits and then whole
+        byRef(ann, parties.abroad).addressList.includes("tel:+442079460958")
         // Ben sees his own contact, not Ann's
         byRef(ben, parties.benFriend) != null
         byRef(ben, parties.annFriend) == null
