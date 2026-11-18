@@ -1370,6 +1370,43 @@ along with this software (see the LICENSE.md file). If not, see
             for (const set of partiesOf.values()) for (const id of set) if (!partyIds.includes(id)) partyIds.push(id)
             if (!partyIds.length) return
 
+            // the parties the user can see as contacts (filter#VisibleContacts)
+            const contacts = new Set(Array.from(ec.service.sync().name('mantle.party.ContactBookServices.filter#VisibleContacts')
+                    .parameters({userId: userId, partyIdList: partyIds}).call()?.visiblePartyIdList || []))
+            contactAddressList = wanted.filter((address) => Array.from(partiesOf.get(address) || []).some((id) => contacts.has(id)))
+        ]]></script></actions>
+    </service>
+
+    <service verb="filter" noun="VisibleContacts" allow-remote="false">
+        <description>
+            Internal: of partyIdList, the parties a user can see as a contact (filter#ContactAddresses and find#ContactPeople
+            share it): not disabled, and the user's own personal contact (privateOwnerUserId the user), a current member of
+            one of the user's personal books or of a shared book shared now with the user or one of the user's groups (any
+            permission), or in the directory of the user's organizations (a party with a role and no private owner, owned
+            by no organization, by _NA_, or by an internal organization the user's party is an agent, employee or member of
+            now, or one of its child organizations). Another user's personal contact never counts (IronStone R7). The
+            current user's; another user's only with authorization disabled. Out: visiblePartyIdList, in no set order.
+        </description>
+        <in-parameters>
+            <parameter name="userId" default="ec.user.userId"/>
+            <parameter name="partyIdList" type="List"><parameter name="partyId"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="visiblePartyIdList" type="List"><parameter name="partyId"/></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            visiblePartyIdList = []
+            if (!userId) return
+            if (userId !== ec.user.userId && !ec.artifactExecution.authzDisabled()) {
+                ec.message.addError('The contacts of another user are read only with authorization disabled'); return }
+            const partyIds = Array.from(new Set(Array.from(partyIdList || []).map((id) => String(id == null ? '' : id)).filter((id) => id)))
+            if (!partyIds.length) return
+            const user = ec.entity.find('moqui.security.UserAccount').condition('userId', userId).one()
+            if (user == null) return
+            const cf = ec.entity.conditionFactory
+            const now = ec.user.nowTimestamp
+            const ids = (list, field) => Array.from(new Set(Array.from(list).map((row) => row[field]).filter((id) => id)))
+
             const contacts = new Set()
             const others = new Map()
             for (const party of ec.entity.find('mantle.party.Party').condition('partyId', 'in', partyIds)
@@ -1424,7 +1461,106 @@ along with this software (see the LICENSE.md file). If not, see
                 }
             }
 
-            contactAddressList = wanted.filter((address) => Array.from(partiesOf.get(address) || []).some((id) => contacts.has(id)))
+            visiblePartyIdList = Array.from(contacts)
+        ]]></script></actions>
+    </service>
+
+    <service verb="find" noun="ContactPeople" allow-remote="false">
+        <description>
+            The contacts hook of chat's people (the framework's org.moqui.chat.ChatPeopleServices.find#ContactPeople calls
+            it, named by the chat_contact_service property or the theme value STRT_CHAT_CONTACT_SERVICE; MR Moqui
+            plans/Comms-Messaging.md §11.1): of the contacts the user can see (filter#VisibleContacts), those with one of the
+            addresses of addressList (tel:+E.164 on a current telecom number, matched by its last seven digits and then the
+            whole number in E.164; email:address on a current email contact mechanism, any case; user:userId, the party of that
+            user account), at most 100. Each: {contactRef (partyId), name, url (none: the app that shows contacts names its
+            own page), addressList: its current email addresses and telecom numbers in E.164 (at most 10 together) and the
+            user account whose party it is}. The current user's; another user's only with authorization disabled, as the
+            framework calls the hook.
+        </description>
+        <in-parameters>
+            <parameter name="userId" default="ec.user.userId"/>
+            <parameter name="addressList" type="List"><parameter name="addressKey"/></parameter>
+        </in-parameters>
+        <out-parameters>
+            <parameter name="contactList" type="List"><parameter name="contact" type="Map"/></parameter>
+        </out-parameters>
+        <actions><script><![CDATA[
+            contactList = []
+            if (!userId) return
+            if (userId !== ec.user.userId && !ec.artifactExecution.authzDisabled()) {
+                ec.message.addError('The contacts of another user are read only with authorization disabled'); return }
+            const cf = ec.entity.conditionFactory
+            const now = ec.user.nowTimestamp
+            const chunks = (list, size) => { const out = []; for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size)); return out }
+            const tels = [], emails = [], users = []
+            for (const value of Array.from(addressList || []).slice(0, 300)) {
+                const key = String(value == null ? '' : value).trim()
+                const at = key.indexOf(':')
+                if (at < 1) continue
+                const kind = key.slice(0, at).toLowerCase(), rest = key.slice(at + 1).trim()
+                if (kind === 'tel' && /^\+[0-9]{5,15}$/.test(rest) && !tels.includes(rest)) tels.push(rest)
+                else if (kind === 'email' && rest.includes('@') && !emails.includes(rest.toLowerCase())) emails.push(rest.toLowerCase())
+                else if (kind === 'user' && rest && !users.includes(rest)) users.push(rest)
+            }
+            // a telecom number in E.164: its country code, else the deployment's rules through the dialer's normalize
+            const e164 = (row) => {
+                const local = String(row.areaCode || '') + String(row.contactNumber || '')
+                const cc = String(row.countryCode || '').replace(/\D/g, '')
+                if (cc) return '+' + cc + local.replace(/\D/g, '')
+                const out = ec.service.sync().name('org.moqui.call.CallHandlingServices.normalize#PhoneNumber').parameter('phoneNumber', local).call() || {}
+                ec.message.clearErrors()
+                return out.number || null
+            }
+            const candidates = new Set()
+            // the parties of each number: candidates by the last seven digits, as stored or written 123-4567, 123 4567 or 123.4567
+            for (const number of tels) {
+                const last7 = number.replace(/\D/g, '').slice(-7)
+                const written = [last7, ...['-', ' ', '.'].map((sep) => last7.slice(0, 3) + sep + last7.slice(3))]
+                for (const row of ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber')
+                        .condition(cf.makeCondition(written.map((form) => cf.makeCondition('contactNumber', 'like', `%${form}%`)), 'or'))
+                        .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).limit(60).list()) if (e164(row) === number) candidates.add(row.partyId)
+            }
+            // the parties of each email address, any case
+            for (const chunk of chunks(emails, 100)) {
+                const mechs = Array.from(ec.entity.find('mantle.party.contact.ContactMech').condition('contactMechTypeEnumId', 'CmtEmailAddress')
+                        .condition(cf.makeCondition(chunk.map((address) => cf.makeCondition('infoString', 'equals', address, false, true)), 'or'))
+                        .selectField('contactMechId').list()).map((mech) => mech.contactMechId)
+                for (const part of chunks(mechs, 200)) {
+                    for (const pcm of ec.entity.find('mantle.party.contact.PartyContactMech').condition('contactMechId', 'in', part)
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).selectField('partyId').list()) candidates.add(pcm.partyId)
+                }
+            }
+            // the party of each user account
+            if (users.length) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', users)
+                    .selectField('userId,partyId').list()) if (account.partyId) candidates.add(account.partyId)
+            if (!candidates.size) return
+            const visible = Array.from(ec.service.sync().name('mantle.party.ContactBookServices.filter#VisibleContacts')
+                    .parameters({userId: userId, partyIdList: Array.from(candidates)}).call()?.visiblePartyIdList || []).slice(0, 100)
+            if (!visible.length) return
+            // each contact's name and own addresses
+            const addressesOf = new Map(visible.map((id) => [id, []]))
+            const add = (partyId, key) => { const list = addressesOf.get(partyId); if (list && list.length < 10 && !list.includes(key)) list.push(key) }
+            for (const row of ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('partyId', 'in', visible)
+                    .condition('contactMechTypeEnumId', 'CmtEmailAddress').condition(cf.makeConditionDate('fromDate', 'thruDate', now))
+                    .selectField('partyId,infoString').list()) {
+                const address = String(row.infoString || '').trim().toLowerCase()
+                if (address.includes('@')) add(row.partyId, 'email:' + address)
+            }
+            for (const row of ec.entity.find('mantle.party.contact.PartyContactMechTelecomNumber').condition('partyId', 'in', visible)
+                    .condition(cf.makeConditionDate('fromDate', 'thruDate', now)).list()) {
+                const number = e164(row)
+                if (number && /^\+[0-9]{5,15}$/.test(number)) add(row.partyId, 'tel:' + number)
+            }
+            for (const account of ec.entity.find('moqui.security.UserAccount').condition('partyId', 'in', visible)
+                    .selectField('userId,partyId,disabled').orderBy('userId').list()) {
+                if (account.disabled !== 'Y' && !addressesOf.get(account.partyId).some((key) => key.startsWith('user:'))) add(account.partyId, 'user:' + account.userId)
+            }
+            for (const party of ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', visible).orderBy('partyId').list()) {
+                const list = addressesOf.get(party.partyId)
+                if (!list || !list.length) continue
+                contactList.push({contactRef: party.partyId, name: party.organizationName || [party.firstName, party.lastName].filter((part) => part).join(' ') || null,
+                    url: null, addressList: list})
+            }
         ]]></script></actions>
     </service>
 </services>
