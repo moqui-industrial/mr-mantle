@@ -410,6 +410,28 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- ========== CreditCard Services ========== -->
     <!-- ========================================= -->
 
+    <service verb="clear" noun="StaleCardSecurityCodes" authenticate="anonymous-all" allow-remote="false">
+        <description>The ServiceJob clear_StaleCardSecurityCodes: a card's security code is kept only for the authorization
+            it was given for, which clears it after its attempt (authorize#SinglePayment); one still there an hour after the
+            card was last changed has no authorization coming and is cleared too (PCI DSS; SEC-BAP-05). clearedCount is
+            the cards cleared.</description>
+        <out-parameters><parameter name="clearedCount" type="Integer"/></out-parameters>
+        <actions>
+            <!-- timestamps reach scripts as epoch millis text -->
+            <script>staleBefore = String(Number(ec.user.nowTimestamp) - 3600000)</script>
+            <entity-find entity-name="mantle.account.method.CreditCard" list="staleCards" for-update="true">
+                <econdition field-name="cardSecurityCode" operator="is-not-null"/>
+                <econdition field-name="lastUpdatedStamp" operator="less" from="staleBefore"/>
+            </entity-find>
+            <iterate list="staleCards" entry="staleCard">
+                <set field="staleCard.cardSecurityCode" from="null"/>
+                <entity-update value-field="staleCard"/>
+            </iterate>
+            <set field="clearedCount" from="staleCards.length"/>
+            <if condition="clearedCount"><log message="Cleared the security codes of ${clearedCount} cards not authorized within an hour"/></if>
+        </actions>
+    </service>
+
     <service verb="create" noun="CreditCard">
         <description>Create a Credit Card (and the corresponding PaymentMethod record)</description>
         <in-parameters>

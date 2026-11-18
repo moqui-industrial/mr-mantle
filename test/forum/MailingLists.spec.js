@@ -597,6 +597,11 @@ feature("only the trusted gateway's Authentication-Results authenticate a sender
             inComment: check("gw.example.test (wrapped; dmarc=pass header.from=sender.test); spf=pass smtp.mailfrom=sender.test"),
             second: check("gw.example.test; dmarc=fail header.from=sender.test; dmarc=pass header.from=sender.test"),
             otherDomain: check("gw.example.test; dmarc=pass header.from=evil.test"),
+            // SEC-PFS-64: a parent's DKIM signature is not the sender's; its domain's DMARC pass is
+            parentDkim: sys(() => forum().gatewayAuthenticated(["gw.example.test; dkim=pass header.d=sender.test"], "bob@team.sender.test")),
+            subDmarc: sys(() =>
+                forum().gatewayAuthenticated(["gw.example.test; dmarc=pass header.from=team.sender.test"], "bob@team.sender.test")
+            ),
             unset: withProperty("smtp_authserv_id", null, () => check("gw.example.test; dmarc=pass header.from=sender.test"))
         }
     },
@@ -610,6 +615,8 @@ feature("only the trusted gateway's Authentication-Results authenticate a sender
             inComment: false,
             second: false,
             otherDomain: false,
+            parentDkim: false,
+            subDmarc: true,
             unset: false
         }
     }

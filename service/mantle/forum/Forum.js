@@ -2502,6 +2502,9 @@ methods.applyOptOut = (p) => {
     return { suppressed: true }
 }
 
+/* What one member may have staged in a site at once: files not yet on a post (SEC-PFS-02). */
+const STAGED_MAX_FILES = 20,
+    STAGED_MAX_BYTES = 50 * 1048576
 methods.stageAttachment = (p) => {
     let repositoryBytes = null
     if (p.purpose === 'avatar') {
@@ -2560,6 +2563,28 @@ methods.stageAttachment = (p) => {
         invalid('Unsupported attachment type')
     if (p.purpose === 'avatar' && !type.startsWith('image/'))
         invalid('Avatars require a raster image')
+    // A member's staged files, not yet on a post, are capped in files and bytes, and each upload is counted against
+    // the day's uploads of the member's trust level (SEC-PFS-02).
+    const staged = Array.from(
+        ec.entity
+            .find(F + 'ForumAttachment')
+            .condition({ siteId: p.siteId, ownerPartyId: partyId })
+            .condition('communicationEventId', 'is-null', null)
+            .condition('expiresAt', 'greater', now())
+            .list(),
+    )
+    const stagedBytes = staged.reduce((sum, a) => sum + Number(a.byteSize || 0), 0)
+    if (staged.length >= STAGED_MAX_FILES || stagedBytes + Number(file.size) > STAGED_MAX_BYTES)
+        fail(
+            'Tarpit',
+            'limitReached: Too many files waiting to be posted; post or remove some first',
+        )
+    // the member's row is locked for the count: in the caller's transaction, or one of its own when called outside one
+    const counted = ec.transaction.runUseOrBegin(null, 'Error counting an upload', () =>
+        core.takeDaily(p.siteId, partyId, 'uploads', 1),
+    )
+    if (!counted)
+        fail('Tarpit', 'limitReached: Daily upload limit reached; try again tomorrow')
     const scanner = System.getProperty('pass_scanner_service'),
         root = System.getProperty('pass_media_root')
     if (!scanner || !root)
@@ -5130,7 +5155,9 @@ const trustedAuthservIds = () =>
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean)
 /* Whether the mail gateway authenticated a sender's domain: in an Authentication-Results field of a trusted authserv-id,
-   DMARC passed for the From domain, or a DKIM signature passed for that domain or a parent of it (relaxed alignment).
+   DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict alignment). A parent's
+   signature is not the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the
+   organizational domain, which the gateway's DMARC finds by the public suffix list and this code does not.
    Another domain's pass, another server's field and a later result of a method count for nothing. Every path that trusts
    "authenticated by the gateway" asks this: a post by mail, a held message's sender, a report filed as an account. */
 function gatewayAuthenticated(values, sender) {
@@ -5145,7 +5172,7 @@ function gatewayAuthenticated(values, sender) {
         const signer = String(d || '')
             .replace(/^.*@/, '')
             .toLowerCase()
-        return !!signer && (domain === signer || domain.endsWith('.' + signer))
+        return !!signer && domain === signer
     }
     return values.some((value) => {
         const read = readAuthResults(value)

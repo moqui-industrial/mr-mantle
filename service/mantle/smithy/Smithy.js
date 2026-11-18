@@ -20,6 +20,10 @@ const TEXT_LIMIT = 1048576
 const RENDER_LIMIT = 524288
 const DIFF_FILES = 100
 const DIFF_LINES = 20000
+// a file larger than this is not diffed on a page of files: the page links to it alone
+const INLINE_FILE_LINES = 3000
+// one file asked by its path may be larger than a page of files
+const FILE_DIFF_LINES = 50000
 const LOG_PAGE = 30
 const SCAN_LIMIT = 2000
 const SCAN_BATCH = 200
@@ -298,20 +302,31 @@ const fileViews = files =>
         status: file.changeType,
         insertions: Number(file.insertions || 0),
         deletions: Number(file.deletions || 0),
-        binary: !!file.binary
+        binary: !!file.binary,
+        tooLarge: !!file.tooLarge
     }))
-/* The diffs a page shows: at most DIFF_FILES files and DIFF_LINES changed lines, the rest left to the file list. */
-function boundedDiffs(files) {
+/* What a page asks the host for: one file's diff (path) or a page's, bounded so that the host sends no more than the page
+ * shows, as hunks only (the page renders them). */
+const diffAsk = path => ({
+    ...(path ? {path} : {maxFileDiffLines: INLINE_FILE_LINES}),
+    maxDiffLines: path ? FILE_DIFF_LINES : DIFF_LINES,
+    withHtml: false
+})
+/* The diffs a page shows: at most DIFF_FILES files and DIFF_LINES changed lines, none of more than INLINE_FILE_LINES (one
+ * file asked by its path: FILE_DIFF_LINES), the rest left to the file list; truncated says some file's diff is left out. */
+function boundedDiffs(files, path) {
     const shown = []
     let lines = 0
     let truncated = false
+    const most = path ? FILE_DIFF_LINES : DIFF_LINES
     for (const file of Array.from(files || [])) {
+        if (path && file.path !== path) continue
         const changed = Number(file.insertions || 0) + Number(file.deletions || 0)
-        if (shown.length >= DIFF_FILES || lines + changed > DIFF_LINES) {
+        if (file.diffOmitted || shown.length >= DIFF_FILES || lines + changed > most || (!path && changed > INLINE_FILE_LINES)) {
             truncated = true
             continue
         }
-        if (file.html == null && file.unifiedDiff == null) continue
+        if (file.html == null && file.unifiedDiff == null && file.hunks == null) continue
         lines += changed
         shown.push({
             path: file.path,
@@ -738,14 +753,11 @@ methods.getCommit = p => {
     // one diff call: the file of path, or every file of a commit that changed no more than the page shows; a larger
     // commit has its file list and no diffs here, and the page asks for a file's by path
     const files = Array.from(found.fileList || [])
-    const tooMany = !p.path && files.length > DIFF_FILES
     if (p.path && !files.some(file => file.path === p.path)) missing()
+    // the first files' diffs (the host diffs at most 300); the rest are in the file list
     const diffs = boundedDiffs(
-        tooMany
-            ? []
-            : Array.from(
-                  git("get#GitCommitDiff", {repositoryId: p.repositoryId, commitId, path: p.path || null}).fileDiffList || []
-              )
+        Array.from(git("get#GitCommitDiff", {repositoryId: p.repositoryId, commitId, path: p.path || null}).fileDiffList || []),
+        p.path || null
     )
     const statuses = git("get#GitCommitStatuses", {repositoryId: p.repositoryId, commitId})
     // the issues the commit names that the caller may read, and a count of the other items it names (§8.2)
@@ -765,7 +777,7 @@ methods.getCommit = p => {
         insertions: Number(found.insertions || 0),
         deletions: Number(found.deletions || 0),
         fileDiffList: diffs.shown,
-        truncated: diffs.truncated || tooMany,
+        truncated: diffs.truncated || (!p.path && files.length > DIFF_FILES),
         statusList: Array.from(statuses.statusList || []),
         linkedIssues: named.linkedIssues,
         // the merge requests it names (!n, or #n where no issue has the number), or whose head or merge it is
@@ -796,13 +808,14 @@ methods.getCompare = p => {
         head: across ? head.fullName : head.commitId,
         ...(across ? {headRepositoryId: headRepository.repositoryId} : {}),
         withDiffs: flag(p.withDiffs),
+        ...(flag(p.withDiffs) ? diffAsk(p.path || null) : {}),
         // a trial merge only when the page asks for it
         checkMergeable: flag(p.checkMergeable)
     })
     if (/^GitNotInNetwork: /.test(text(compared.problem))) invalid("Those repositories are not forks of one repository")
     const out = compared.out
     if (compared.problem != null || !out.headCommitId || !out.baseCommitId) missing()
-    const diffs = boundedDiffs(flag(p.withDiffs) ? out.fileList : [])
+    const diffs = boundedDiffs(flag(p.withDiffs) ? out.fileList : [], p.path || null)
     const open =
         head.kind === "branch" && base.kind === "branch"
             ? Array.from(
@@ -1151,6 +1164,7 @@ const kit = {
     commitViews,
     fileViews,
     boundedDiffs,
+    diffAsk,
     // DG7: what the site's lists share with the code's (a list's query, its scan, a typed search)
     scopeOf,
     narrowed,

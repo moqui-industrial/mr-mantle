@@ -775,6 +775,9 @@ along with this software (see the LICENSE.md file). If not, see
     <!-- Service Job: Expire Subscription Access - revoke and destroy steps after each subscription ends, every 10 minutes -->
     <moqui.service.job.ServiceJob jobName="expire_SubscriptionAccess" description="Expire Subscription Access"
             serviceName="mantle.product.SubscriptionServices.expire#SubscriptionAccess" cronExpression="0 0/10 * * * ?" paused="N"/>
+    <!-- Service Job: Clear Stale Card Security Codes - a code left an hour after its card last changed, every hour (SEC-BAP-05) -->
+    <moqui.service.job.ServiceJob jobName="clear_StaleCardSecurityCodes" description="Clear Stale Card Security Codes"
+            serviceName="mantle.account.PaymentMethodServices.clear#StaleCardSecurityCodes" cronExpression="0 15 * * * ?" paused="N"/>
     <!-- Service Job: Auto-approve Orders Delayed - every 15 minutes by default -->
     <moqui.service.job.ServiceJob jobName="autoApprove_OrdersDelayed" description="Auto-approve Orders Delayed"
             serviceName="mantle.order.OrderServices.autoApprove#OrdersDelayed" cronExpression="0 0/15 * * * ?" paused="N"

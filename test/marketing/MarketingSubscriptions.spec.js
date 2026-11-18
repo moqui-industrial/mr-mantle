@@ -639,3 +639,43 @@ feature("P22 review: a text message topic offered on the site is on the preferen
         !r.published.includes("Text deals")
     }
 })
+
+feature("SEC-PSS-45: PASS's one-click unsubscribe confirms at once on a list that asks unsubscribe confirmation", {
+    when() {
+        ec.user.setEffectiveTime(Date.now() + 6000)
+        const confirmed = prefix + "_UNSUB_CONFIRM"
+        const partyId = partyOf(shared.newcomer)
+        system(() => {
+            make("mantle.marketing.contact.ContactList", {
+                contactListId: confirmed,
+                contactListName: "Confirmed leaving",
+                contactListTypeEnumId: "NEWSLETTER",
+                contactMechTypeEnumId: "CmtEmailAddress",
+                ownerPartyId: orgA
+            })
+            make("mantle.marketing.contact.ContactListEmail", {
+                contactListId: confirmed,
+                emailTypeEnumId: "CONT_UNSUB_VER",
+                fromDate: new Date(Date.now() - dayMs)
+            })
+            make(CLP, {contactListId: confirmed, partyId, fromDate: new Date(Date.now() - dayMs), statusId: "CLPT_ACCEPTED"})
+        })
+        const token = system(
+            () =>
+                lib.run("mantle.party.ConsentServices.create#UnsubscribeToken", {contactListId: confirmed, partyId, siteId: site})
+                    .token
+        )
+        logout()
+        let answer
+        try {
+            answer = lib.run("mantle.public.AccountHubServices.apply#OneClickUnsubscribe", {input: {siteId: site, token}})
+        } finally {
+            login("john.doe")
+        }
+        return {answer, status: statusOf(confirmed, partyId)}
+    },
+    then(r) {
+        r.answer.result.unsubscribed === true
+        r.status === "CLPT_UNSUBSCRIBED"
+    }
+})
