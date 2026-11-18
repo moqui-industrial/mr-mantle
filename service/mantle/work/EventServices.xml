@@ -2525,7 +2525,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="send" noun="WorkEffortReminder" authenticate="anonymous-all">
         <description>Sends one reminder of an instance (send#DueReminders): a notification on the topic WorkEffortReminder to
             the party's users (WermNotification; a party with no user gets an email), or an email to the party's primary
-            address (WermEmail; template MANTLE_CALENDAR_EMAIL, from the mantle.calendar.email.from property or the work
+            address (WermEmail; template MANTLE_CALENDAR_EMAIL, from the mantle@calendar-email-from setting or the work
             effort owner's address). Sets sentDate and clears snoozedThruDate; a party that can be reached by neither is
             logged and not tried again.</description>
         <in-parameters>
@@ -2566,7 +2566,7 @@ along with this software (see the LICENSE.md file). If not, see
                 method = 'notification'
             } else {
                 const toAddress = ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: partyId}).call()?.emailAddress
-                const fromAddress = System.getProperty('mantle.calendar.email.from') || (workEffort.ownerPartyId ? ec.service.sync()
+                const fromAddress = ec.factory.getConfValue('mantle@calendar-email-from') || (workEffort.ownerPartyId ? ec.service.sync()
                         .name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: workEffort.ownerPartyId}).call()?.emailAddress : null)
                 if (toAddress && fromAddress) {
                     const subject = `Reminder: ${name}, ${whenText}`
@@ -2578,7 +2578,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (ec.message.hasError()) return
                     method = 'email'
                 } else {
-                    ec.logger.warn(`Reminder ${reminderSeqId} of ${workEffortId} for party ${partyId}: ${toAddress ? 'no address to send from (mantle.calendar.email.from)' : 'no user and no email address'}`)
+                    ec.logger.warn(`Reminder ${reminderSeqId} of ${workEffortId} for party ${partyId}: ${toAddress ? 'no address to send from (mantle@calendar-email-from)' : 'no user and no email address'}`)
                 }
             }
             reminder.set('sentDate', ec.user.nowTimestamp)

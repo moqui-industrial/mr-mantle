@@ -1,6 +1,6 @@
 // Smithy's GitHub import (mr-pass plan/design-smithy.md §11 Import, §15.9, §18.2, DG8; SmithyImport.js), on recorded API
 // responses (test/smithy/fixtures/github, copied with the test repository's head commit into a directory that
-// smithy_github_api names): numbers are kept; GitHub's rate limit holds a run until it resets and the run goes on from
+// mantle@smithy-github-api names): numbers are kept; GitHub's rate limit holds a run until it resets and the run goes on from
 // there; a second run adds nothing; a merged pull request becomes a merged merge request with its review and an anchored
 // line comment, and one whose head is not here is kept closed and reported, as is a reaction the forum does not have; a
 // placeholder (no member, not discoverable, its login moved off a row of another GitHub id) is claimed by an account that
@@ -76,14 +76,14 @@ spec({
         lib.role(SITE, {groupId}, "SGI_MAINT", "SmrMaintainer")
     },
     cleanupSpec() {
-        setProperty("smithy_github_api", "")
+        setConf("mantle@smithy-github-api", "")
     }
 })
 
 feature("numbers are kept; the rate limit holds a run until it resets, and the run goes on from there", {
     when() {
         const groupId = lib.row("mantle.smithy.SmithyGroup", {siteId: SITE, groupPath: "acmeco"}).groupId
-        setProperty("smithy_github_api", RECORDED + "limited")
+        setConf("mantle@smithy-github-api", RECORDED + "limited")
         record("limited", "0000000000000000000000000000000000000000")
         const start = (username, key) =>
             op(username, "startGitHubImport", {
@@ -95,12 +95,12 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
             })
         const byMaintainer = start("SGI_MAINT", "m").reason
         // a clone address on another host than the API's: the token would go there, so the import is refused
-        setProperty("smithy_github_api", RECORDED + "elsewhere")
+        setConf("mantle@smithy-github-api", RECORDED + "elsewhere")
         const repository = JSON.parse(ec.resource.getLocationText(FIXTURES + "repos_acme_widgets.json", false))
         repository.body.clone_url = "https://git.example.com/acme/widgets.git"
         ec.resource.getLocationReference(RECORDED + "elsewhere/repos_acme_widgets.json").putText(JSON.stringify(repository))
         const elsewhere = start("SGI_OWNER", "e").reason
-        setProperty("smithy_github_api", RECORDED + "limited")
+        setConf("mantle@smithy-github-api", RECORDED + "limited")
         const dots = op("SGI_OWNER", "startGitHubImport", {
             groupId,
             sourceRepository: "acme/..",
@@ -109,13 +109,13 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
             operationId: "sgi-start-dots"
         }).reason
         // a private GitHub repository goes into a group wider than private only on the Owner's word (publishPrivate)
-        setProperty("smithy_github_api", RECORDED + "private")
+        setConf("mantle@smithy-github-api", RECORDED + "private")
         record("private", "0000000000000000000000000000000000000000", {"repos_acme_widgets.json": "repos_acme_widgets_private.json"})
         const privateRefused = start("SGI_OWNER", "p").reason
         // nor while GitHub's rate limit holds the token: what the repository is (private or not) is not known yet
         record("private", "0000000000000000000000000000000000000000", {"repos_acme_widgets.json": "rate-limited.json"})
         const limitedStart = start("SGI_OWNER", "l").reason
-        setProperty("smithy_github_api", RECORDED + "limited")
+        setConf("mantle@smithy-github-api", RECORDED + "limited")
         // a recycled login: an account of another GitHub id had bob's login before
         lib.make("mantle.party.Party", {partyId: "SGI_OLDBOB", partyTypeEnumId: "PtyPerson"})
         lib.make("mantle.smithy.SmithyAccount", {siteId: SITE, partyId: "SGI_OLDBOB", githubLogin: "bob", githubUserId: "999999", placeholder: "Y", revision: 1})
@@ -146,7 +146,7 @@ feature("numbers are kept; the rate limit holds a run until it resets, and the r
         const before = {stage: held.statusId, issue1: !!issueRow(1), issue3: !!issueRow(3)}
         const again = step(started.importId)
         // the limit resets
-        setProperty("smithy_github_api", RECORDED + "open")
+        setConf("mantle@smithy-github-api", RECORDED + "open")
         lib.set("mantle.smithy.SmithyImportRun", {importId: started.importId}, {waitingUntil: null})
         const ended = steps(started.importId)
         const repo = lib.row("mantle.smithy.SmithyRepository", {repositoryId: started.repositoryId})
@@ -594,7 +594,7 @@ feature("work as an account ends its borrowed login without touching the account
 feature("a run into an archived repository fails at once; a private repository's GitHub addresses are not there; the forum's cancel route stays", {
     when() {
         const groupId = lib.row("mantle.smithy.SmithyGroup", {siteId: SITE, groupPath: "acmeco"}).groupId
-        setProperty("smithy_github_api", RECORDED + "open")
+        setConf("mantle@smithy-github-api", RECORDED + "open")
         const started = op("SGI_OWNER", "startGitHubImport", {
             groupId,
             sourceRepository: "acme/widgets",
