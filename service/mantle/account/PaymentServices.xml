@@ -1864,6 +1864,16 @@ along with this software (see the LICENSE.md file). If not, see
                 <service-call name="update#mantle.account.payment.Payment"
                         in-map="{paymentId:payment.paymentId, paymentRefNum:paymentGatewayResponse.referenceNum}"/>
             </else-if></if>
+            <!-- the card's security code is not kept after an authorization attempt, whatever its result: declined, an
+                error or pending too (PCI DSS; SEC-BAP-05) -->
+            <if condition="payment.paymentMethodId">
+                <entity-find-one entity-name="mantle.account.method.CreditCard" value-field="attemptedCard" for-update="true">
+                    <field-map field-name="paymentMethodId" from="payment.paymentMethodId"/></entity-find-one>
+                <if condition="attemptedCard?.cardSecurityCode">
+                    <set field="attemptedCard.cardSecurityCode" from="null"/>
+                    <entity-update value-field="attemptedCard"/>
+                </if>
+            </if>
         </actions>
     </service>
 

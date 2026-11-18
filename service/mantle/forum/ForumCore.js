@@ -1293,6 +1293,7 @@ const TRUST_EFFECTS = {
         pipelineRun: 5,
         invitation: 20,
         listInvitation: 50,
+        uploads: 10,
     },
     basic: {
         topics: 10,
@@ -1307,6 +1308,7 @@ const TRUST_EFFECTS = {
         pipelineRun: 20,
         invitation: 100,
         listInvitation: 200,
+        uploads: 50,
     },
     member: {
         topics: 20,
@@ -1321,6 +1323,7 @@ const TRUST_EFFECTS = {
         pipelineRun: 50,
         invitation: 300,
         listInvitation: 500,
+        uploads: 200,
     },
     regular: {
         topics: 20,
@@ -1335,6 +1338,7 @@ const TRUST_EFFECTS = {
         pipelineRun: 50,
         invitation: 500,
         listInvitation: 1000,
+        uploads: 400,
     },
 }
 /* The day's counter of a kind. A name kind (a fork, a repository, a group, a pipeline run) is counted only when the

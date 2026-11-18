@@ -116,6 +116,37 @@ feature("the always-decline and failure test gateways", {
     },
 })
 
+// PCI DSS: a card's security code is not kept once its authorization has been tried, declined too, and one no
+// authorization used is cleared by the hourly job (SEC-BAP-05)
+const cardCode = () => ec.entity.find("mantle.account.method.CreditCard").condition("paymentMethodId", cardId).one().cardSecurityCode
+function setCardCode(code) {
+    const card = ec.entity.find("mantle.account.method.CreditCard").condition("paymentMethodId", cardId).one()
+    card.set("cardSecurityCode", code)
+    card.update()
+}
+feature("a card's security code is cleared after a declined authorization, and by the job an hour after it was given", {
+    when() {
+        setCardCode("123")
+        const beforeAttempt = cardCode()
+        call("mantle.account.PaymentServices.authorize#SinglePayment", { paymentId: cardPayment(15), paymentGatewayConfigId: "TEST_DECLINE" })
+        const afterDecline = cardCode()
+        setCardCode("456")
+        const freshRun = call("mantle.account.PaymentMethodServices.clear#StaleCardSecurityCodes", {})
+        const afterFreshRun = cardCode()
+        ec.user.setEffectiveTime(Date.now() + 2 * 3600000)
+        let staleRun
+        try { staleRun = call("mantle.account.PaymentMethodServices.clear#StaleCardSecurityCodes", {}) } finally { ec.user.setEffectiveTime(effectiveTime) }
+        return { beforeAttempt, afterDecline, freshRun, afterFreshRun, staleRun, afterStaleRun: cardCode() }
+    },
+    then({ beforeAttempt, afterDecline, afterFreshRun, staleRun, afterStaleRun }) {
+        beforeAttempt == "123"
+        afterDecline == null
+        afterFreshRun == "456"
+        staleRun.clearedCount >= 1
+        afterStaleRun == null
+    },
+})
+
 feature("direct release and refund test gateway services", {
     when() {
         const release = call("mantle.account.PaymentTestServices.alwaysApprove#PaymentRelease", { paymentId, paymentGatewayConfigId: "TEST_APPROVE" })

@@ -225,3 +225,54 @@ feature("an upload is a staged file of the caller's, of the purpose repositoryFi
         large.kind == "Unprocessable"
     }
 })
+
+// SEC-PFS-02: a member may have at most 20 files staged and not yet on a post in a site, and stages no more each day than
+// the trust level's uploads; both refusals come before anything is written
+feature("a member's staged files and the day's uploads are capped", {
+    when() {
+        // the file comes beside the input, as the transport passes it
+        const stage = () =>
+            lib.as("SME_DEV", () => {
+                const out = ec.resource.script("component://mr-mantle/script/PassAuthority.js").handle({
+                    siteId: SITE,
+                    operation: "stageAttachment",
+                    input: {purpose: "repositoryFile", repositoryId: ids.repositoryId},
+                    file: uploadedFile("a.txt", "abc"),
+                    sessionChecked: true
+                })
+                return out.error ? {kind: out.error.code, reason: out.error.reason} : out.result
+            })
+        const devParty = lib.row("moqui.security.UserAccount", {username: "SME_DEV"}).partyId
+        const pending = {siteId: SITE, ownerPartyId: devParty}
+        for (let at = 0; at < 20; at++)
+            lib.make("mantle.forum.ForumAttachment", {
+                attachmentId: "SME_CAP_" + at,
+                ...pending,
+                purpose: "repositoryFile",
+                location: "runtime://tmp/sme-cap",
+                filename: "cap.txt",
+                mimeType: "text/plain",
+                byteSize: 1,
+                scanState: "clean",
+                expiresAt: Date.now() + 86400000
+            })
+        const full = stage()
+        // the day's count was not taken by a refused upload
+        const countedOnFull = lib.row("mantle.forum.ForumMemberState", {siteId: SITE, partyId: devParty}).dailyCounts
+        ec.entity.find("mantle.forum.ForumAttachment").condition(pending).condition("attachmentId", "like", "SME_CAP_%").disableAuthz().deleteAll()
+        lib.set("mantle.forum.ForumMemberState", {siteId: SITE, partyId: devParty}, {
+            dayKey: new Date(Number(ec.user.nowTimestamp)).toISOString().slice(0, 10),
+            dailyCounts: JSON.stringify({uploads: 50})
+        })
+        const spent = stage()
+        lib.settled(SITE, devParty)
+        return {full, countedOnFull, spent}
+    },
+    then({full, countedOnFull, spent}) {
+        !String(countedOnFull || "").includes("uploads")
+        full.kind == "Tarpit"
+        full.reason == "limitReached"
+        spent.kind == "Tarpit"
+        spent.reason == "limitReached"
+    }
+})
