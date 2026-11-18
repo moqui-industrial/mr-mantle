@@ -55,7 +55,7 @@
     },
     getCompare: {
         service: "mantle.smithy.SmithyServices.get#Compare",
-        fields: ["siteId", "repositoryId", "base", "head", "headRepositoryPath", "withDiffs", "checkMergeable"]
+        fields: ["siteId", "repositoryId", "base", "head", "headRepositoryPath", "path", "withDiffs", "checkMergeable"]
     },
     findRefs: {
         service: "mantle.smithy.SmithyServices.find#Refs",
