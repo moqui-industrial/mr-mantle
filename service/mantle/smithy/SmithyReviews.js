@@ -461,8 +461,13 @@ kit => {
         return out
     }
     /* What a merge request changes, as the host compares it (a hidden one's head is read for those who see it). */
-    function diffOf(mr, withDiffs) {
-        const {out, problem} = hosted(REVIEW + "get#MergeRequestDiff", {mergeRequestId: mr.mergeRequestId, withDiffs})
+    function diffOf(mr, withDiffs, path) {
+        const {out, problem} = hosted(REVIEW + "get#MergeRequestDiff", {
+            mergeRequestId: mr.mergeRequestId,
+            withDiffs,
+            // no more than the page shows: one file's diff, or a page's bounded, as hunks
+            ...(withDiffs ? kit.diffAsk(path || null) : {})
+        })
         if (problem != null) missing()
         return out
     }
@@ -494,10 +499,10 @@ kit => {
             }
         }
         const withDiffs = flag(p.withDiffs)
-        const diff = diffOf(mr, withDiffs)
+        const diff = diffOf(mr, withDiffs, p.path)
         const files = Array.from(diff.fileList || [])
         if (p.path && !files.some(file => file.path === p.path)) missing()
-        const diffs = kit.boundedDiffs(withDiffs ? files.filter(file => !p.path || file.path === p.path) : [])
+        const diffs = kit.boundedDiffs(withDiffs ? files : [], p.path || null)
         const signed = agreement().commitsSigned(r, held, Array.from(diff.commitList || []))
         return {
             diffRefused: false,
@@ -969,8 +974,8 @@ kit => {
         if (!path || (oldLine == null && newLine == null)) invalid("A line comment names a path and an old or a new line")
         let lineText = c.lineText ? text(c.lineText) : null
         if (lineText == null) {
-            // the line is one of the diff's
-            const file = Array.from(diffOf(mr, true).fileList || []).find(entry => entry.path === path)
+            // the line is one of the diff's (only that file's diff is read)
+            const file = Array.from(diffOf(mr, true, path).fileList || []).find(entry => entry.path === path)
             const found = Array.from(file?.hunks || [])
                 .flatMap(hunk => Array.from(hunk.lines || []))
                 .find(entry => (newLine != null ? Number(entry.newNo) === newLine : Number(entry.oldNo) === oldLine))
