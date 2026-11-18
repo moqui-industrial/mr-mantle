@@ -371,13 +371,15 @@ function storeEmailPreferences(p) {
     }
     return getEmailPreferences({siteId: site.siteId})
 }
-// apply#OneClickUnsubscribe: RFC 8058's one-click POST to a list link: the token's list unsubscribed.
+// apply#OneClickUnsubscribe: RFC 8058's one-click POST to a list link: the token's list unsubscribed at once, as
+// unsubscribe#ContactListParty confirms a one-click call, even on a list that asks unsubscribe confirmation (SEC-PSS-45)
 function oneClick(p) {
     siteOf(p.siteId)
     const resolved = call("mantle.party.ConsentServices.resolve#UnsubscribeToken", {token: text(p.token)})
-    call("mantle.party.ConsentServices.apply#UnsubscribePreferences", {
+    call("mantle.party.ConsentServices.unsubscribe#ContactListParty", {
         token: text(p.token),
-        listChoices: [{contactListId: resolved.contactListId, subscribed: false}]
+        contactListId: resolved.contactListId,
+        listUnsubscribe: "One-Click"
     })
     return {unsubscribed: true}
 }
