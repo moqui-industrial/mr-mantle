@@ -2021,7 +2021,7 @@ methods.checkReadiness = (p) => {
         {
             name: 'SSO package',
             ready:
-                !System.getProperty('pass_sso_flows') ||
+                !ec.factory.getConfValue('pass-authority@sso-flows') ||
                 ec.service.ssoAvailable,
         },
         {
@@ -2050,7 +2050,7 @@ methods.checkReadiness = (p) => {
         },
         {
             name: 'account verification',
-            ready: !!System.getProperty('pass_verification_template'),
+            ready: !!ec.factory.getConfValue('pass-authority@verification-template'),
         },
         {
             name: 'mail conversion',
@@ -2842,7 +2842,7 @@ methods.getSiteInfo = (p) => {
         },
         ssoFlows: String(
             ec.service.ssoAvailable
-                ? System.getProperty('pass_sso_flows') || ''
+                ? ec.factory.getConfValue('pass-authority@sso-flows') || ''
                 : '',
         )
             .split(',')
