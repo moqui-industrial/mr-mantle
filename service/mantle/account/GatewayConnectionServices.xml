@@ -94,7 +94,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="check" noun="LabelUrl" authenticate="anonymous-all" allow-remote="false">
         <description>Internal, for the label fetches (SEC-BAP-06): why the server does not fetch the label or document file
             at url (a route segment's labelUrl, returnLabelUrl or invoice URL), or empty refusal when it may: an https URL
-            only, and on a production instance (instance_purpose) a host one of the registered shipping gateway types
+            only, and on a production instance (instance@purpose) a host one of the registered shipping gateway types
             names for its label files only.</description>
         <in-parameters><parameter name="url" allow-html="any"/></in-parameters>
         <out-parameters><parameter name="refusal"/></out-parameters>

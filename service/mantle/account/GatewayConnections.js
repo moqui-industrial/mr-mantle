@@ -34,7 +34,7 @@ const STORE = "mantle.product.store.ProductStore"
 const STORE_GATEWAY = "mantle.product.store.ProductStorePaymentGateway"
 const SHIPPING = "mantle.shipment.carrier.ShippingGatewayConfig"
 const TAX = "mantle.other.tax.TaxGatewayConfig"
-const production = () => text(System.getProperty("instance_purpose")) === "production"
+const production = () => text(ec.factory.getConfValue("instance@purpose")) === "production"
 const nowMs = () => ms(ec.user.nowTimestamp)
 const current = (row, at = nowMs()) => (ms(row.fromDate) ?? -Infinity) <= at && (ms(row.thruDate) ?? Infinity) > at
 const count = (entity, conditions) => Number(find(entity, conditions).count())

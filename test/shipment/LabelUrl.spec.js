@@ -12,7 +12,7 @@ feature("a label URL is https, and on a production instance at a carrier's label
             elsewhere: refusal("https://files.example.com/l.pdf"),
             internal: refusal("https://10.0.0.5/l.pdf")
         }
-        const production = withProperty("instance_purpose", "production", () => ({
+        const production = withConf("instance@purpose", "production", () => ({
             shippo: refusal("https://shippo-delivery.s3.amazonaws.com/abc.pdf?Expires=1"),
             elsewhere: refusal("https://files.example.com/l.pdf"),
             disguised: refusal("https://shippo-delivery.s3.amazonaws.com@files.example.com/l.pdf"),
