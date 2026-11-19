@@ -246,7 +246,8 @@ along with this software (see the LICENSE.md file). If not, see
             the new project, design-projects.md §5 "The work item tree"): its parent stays only when it is in the new project
             (else it becomes a top-level task there; a parentWorkEffortId given with it must be in the new project), and the
             memberships of the subtree in the old project's milestones, releases, sprints and components end. A parent given is a
-            task (PARENT_NOT_TASK).</description>
+            task (PARENT_NOT_TASK). A user (authorization on) moves a task only into a project they see (get#VisibleProjectInfo,
+            PROJECT_UNAVAILABLE).</description>
         <in-parameters>
             <parameter name="workEffortId" required="true"/>
             <auto-parameters entity-name="mantle.work.effort.WorkEffort" include="nonpk"/>
@@ -271,6 +272,13 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="rootWorkEffortId">
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="before"/>
                 <if condition="before != null &amp;&amp; before.workEffortTypeEnumId == 'WetTask' &amp;&amp; before.rootWorkEffortId != rootWorkEffortId">
+                    <!-- a user moves a task only into a project they see (get#VisibleProjectInfo; SEC-BOS-110); an app's own rule, such
+                        as membership, is its own check before it calls this -->
+                    <if condition="ec.user.userId &amp;&amp; !ec.artifactExecution.authzDisabled()">
+                        <service-call name="mantle.work.ProjectServices.get#VisibleProjectInfo" out-map="visibleInfo"/>
+                        <if condition="!visibleInfo.allProjects &amp;&amp; !Array.from(visibleInfo.visibleProjectIds || []).includes(rootWorkEffortId)">
+                            <return error="true" message="PROJECT_UNAVAILABLE: Project ${rootWorkEffortId} is not available"/></if>
+                    </if>
                     <set field="movedProject" from="true"/>
                     <set field="newParentId" from="parentWorkEffortId || before.parentWorkEffortId"/>
                     <if condition="newParentId">
