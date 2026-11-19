@@ -318,7 +318,8 @@ feature(
                     headers: {
                         "delivered-to": to,
                         "message-id": "<" + ec.user.randomString(16) + "@smithy.test>",
-                        "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                        "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                        from
                     },
                     fields: {from, subject: "Re: an issue", toList: [to]},
                     bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}]

@@ -5048,23 +5048,35 @@ const fromMailbox = (stored, from) =>
               name: String(stored.fromName || '').trim(),
           }
         : core.fieldMailbox(from)
-/* Why a message's From is not one plain mailbox, or null: more than one From field or address, a Sender field of another
-   address, or a display name that shows an address other than the sender's (SEC-PFS-81). Each lets a mailbox at the
-   domain the gateway authenticated show a reader another person as the author. */
-function fromProblem(headers, mailbox, sender) {
+/* Why a message's From is not one plain mailbox, or null (SEC-PFS-81): no From field, or stored fields cut short where a
+   second one could be; more than one From field or address, or a From field whose own address is not the sender (a quoted
+   local part hides from the count); a display name that shows an address other than the sender's; and, unless the
+   gateway authenticated the sender's domain (DMARC proves the first From only), a Sender field of another address. Each
+   lets a mailbox at the domain show a reader another person as the author. */
+function fromProblem(headers, mailbox, sender, authenticated, headersCut) {
     const froms = headerValues(headers, 'from')
-    if (froms.length > 1 || froms.some((value) => core.fieldAddressCount(value) > 1))
-        return 'The message names more than one From address'
-    const senders = headerValues(headers, 'sender')
+    if (!froms.length) return 'The message has no From field'
+    if (headersCut) return 'The stored header fields were cut short'
     if (
-        senders.length > 1 ||
-        senders.some(
-            (value) => core.fieldMailbox(value).address.toLowerCase() !== sender,
+        froms.length > 1 ||
+        froms.some(
+            (value) =>
+                core.fieldAddressCount(value) > 1 ||
+                core.fieldMailbox(value).address.toLowerCase() !== sender,
         )
     )
-        return 'The Sender field names another address than From'
+        return 'The message names more than one From address'
     if (core.nameShowsOtherAddress(mailbox.name, sender))
         return "The sender's display name shows another email address"
+    const senders = headerValues(headers, 'sender')
+    if (
+        !authenticated &&
+        (senders.length > 1 ||
+            senders.some(
+                (value) => core.fieldMailbox(value).address.toLowerCase() !== sender,
+            ))
+    )
+        return 'The Sender field names another address than From'
     return null
 }
 const messageIds = (text) =>
@@ -5388,15 +5400,15 @@ function processInbound(ctx) {
         sender === String(settings.senderAddress || '').toLowerCase()
     )
         return record('ignored', 'Message from this forum')
-    // A From that is not one plain mailbox (fromProblem) is held: never posted, and never kept for an address to claim.
-    // The receipt names why, on the site's mail screen.
-    const problem = fromProblem(headers, mailbox, sender)
-    if (problem) return record('held', problem)
     // DMARC or an aligned DKIM signature passed in a field of the trusted gateway (gatewayAuthenticated)
     const authenticated = gatewayAuthenticated(
         headerValues(headers, 'authentication-results'),
         sender,
     )
+    // A From that is not one plain mailbox (fromProblem) is held: never posted, and never kept for an address to claim.
+    // The receipt names why, on the site's mail screen.
+    const problem = fromProblem(headers, mailbox, sender, authenticated, !!ctx.headersCut)
+    if (problem) return record('held', problem)
     // A report address (a security address) files through its app whatever the message names: a reply address's tag
     // and the threads it answers are not read, so a report never becomes a reply in a public conversation.
     const reportRoute = !!route.targetType && route.targetType !== 'category'
@@ -5760,6 +5772,7 @@ methods.retryInbound = (p) => {
 }
 /* A stored message as the context an email rule gets: its header fields, sender, subject, recipients and text. Its
    files are not read. */
+const STORED_HEADERS_MAX = 65536
 function storedContext(email) {
     const headers = {}
     let last = null
@@ -5778,12 +5791,18 @@ function storedContext(email) {
     }
     if (email.messageId && !headers['message-id'])
         headers['message-id'] = email.messageId
+    // the store keeps at most 64 KiB of the header block (crates/moqui-mail/src/store.rs HEADERS_MAX) and marks no cut, so
+    // a block that long may have lost the fields after it: processInbound holds it (fromProblem)
+    let headerBytes = 0
+    for (const char of String(email.headersString || ''))
+        headerBytes += char.codePointAt(0) < 0x80 ? 1 : char.codePointAt(0) < 0x800 ? 2 : char.codePointAt(0) < 0x10000 ? 3 : 4
     if (email.inReplyTo && !headers['in-reply-to'])
         headers['in-reply-to'] = email.inReplyTo
     return {
         emailMessageId: email.emailMessageId,
         emailAccountId: email.emailAccountId || null,
         headers,
+        headersCut: headerBytes >= STORED_HEADERS_MAX - 1024,
         fields: {
             from: email.fromAddress,
             subject: email.subject,

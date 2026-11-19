@@ -63,7 +63,8 @@ const mail = (from, to, subject, text, more = {}) =>
         headers: {
             "delivered-to": to,
             "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
-            "authentication-results": "gw.example.test; dmarc=pass header.from=" + from.replace(/^.*@|>.*$/g, "")
+            "authentication-results": "gw.example.test; dmarc=pass header.from=" + from.replace(/^.*@|>.*$/g, ""),
+            from
         },
         fields: {from, subject, toList: [to]},
         bodyPartList: [{contentType: "text/plain; charset=utf-8", contentText: text}],
@@ -462,7 +463,8 @@ feature("mail the gateway marked as spam is held for review: not posted, not dro
                 "delivered-to": to,
                 "message-id": "<mls-spam-2@mls.test>",
                 "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
-                "x-spam-flag": "YES"
+                "x-spam-flag": "YES",
+                from: "mls_member@smithy.test"
             },
             fields: {from: "mls_member@smithy.test", subject: "Buy more", toList: [to]},
             bodyPartList: [{contentType: "text/plain", contentText: "MLS-SPAM-TWO"}]
@@ -532,7 +534,7 @@ feature(
                     bodyText: "MLS-JUNK " + subject,
                     messageId: "<" + emailMessageId + "@mls.test>",
                     headersString:
-                        "Delivered-To: dev@" +
+                        "From: mls_member@smithy.test\nDelivered-To: dev@" +
                         LISTS +
                         "\nAuthentication-Results: gw.example.test;\n dmarc=pass header.from=smithy.test\nX-Spam-Status: Yes, score=9.4"
                 })
@@ -725,6 +727,7 @@ feature("a reply to a list's message, by its reply address or by In-Reply-To, is
                     "delivered-to": address,
                     "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
                     "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                    from,
                     ...more
                 },
                 fields: {from, subject, toList: [address]},
@@ -798,7 +801,8 @@ feature("the sender is the From address, never its display name: a name holding 
             headers: {
                 "delivered-to": to,
                 "message-id": "<mls-spoof-stored@mls.test>",
-                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                from: spoof
             },
             fields: {from: spoof, subject: "Spoofed and stored", toList: [to]},
             bodyPartList: [{contentType: "text/plain", contentText: "MLS-SPOOF-STORED"}]
@@ -812,27 +816,49 @@ feature("the sender is the From address, never its display name: a name holding 
                 from: "=?utf-8?q?=3Cmls=5Fmember=40smithy=2Etest=3E?= <mls_other@smithy.test>"
             }
         })
-        // two From addresses, or a Sender of another address: the domain alone is authenticated, so neither is posted
-        const withHeaders = more => ({
+        // two From addresses (one with a quoted local part, which the count does not see), no From field, a Sender of another
+        // address where the gateway authenticated nothing, and stored fields cut short where a second From could be
+        const withHeaders = (more, authenticated = true) => ({
             headers: {
                 "delivered-to": to,
                 "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
-                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                ...(authenticated ? {"authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"} : {}),
                 ...more
             }
         })
-        const twoFrom = mail("mls_member@smithy.test", to, "Two authors", "MLS-SPOOF-TWO",
-            withHeaders({from: "mls_member@smithy.test, mls_other@smithy.test"}))
-        const otherSender = mail("mls_member@smithy.test", to, "Sent by another", "MLS-SPOOF-SENDER",
-            withHeaders({from: "mls_member@smithy.test", sender: "Other <mls_other@smithy.test>"}))
-        // the member's own mail, by address alone, with a display name, and with a name that shows the member's own
-        // address (as some mail programs write it), still posts
-        const plain = mail("mls_member@smithy.test", to, "Mine by mail", "MLS-SPOOF-PLAIN")
+        const member = "mls_member@smithy.test"
+        const twoFrom = mail(member, to, "Two authors", "MLS-SPOOF-TWO", withHeaders({from: member + ", mls_other@smithy.test"}))
+        const quotedLocal = mail(member, to, "Quoted local part", "MLS-SPOOF-QUOTED",
+            withHeaders({from: '"mls_member"@smithy.test, mls_other@smithy.test'}))
+        const noFrom = mail(member, to, "No From field", "MLS-SPOOF-NOFROM", withHeaders({}))
+        const otherSender = mail(member, to, "Sent by another", "MLS-SPOOF-SENDER",
+            withHeaders({from: member, sender: "Other <mls_other@smithy.test>"}, false))
+        lib.make("moqui.basic.email.EmailMessage", {
+            emailMessageId: "MLS_CUT_MESSAGE",
+            emailAccountId: "MLS_FORUM_ACCOUNT",
+            statusId: "ES_VIEWED",
+            emailFolderId: "MLS_JUNK",
+            fromAddress: member,
+            toAddresses: to,
+            subject: "Cut fields",
+            bodyText: "MLS-SPOOF-CUT",
+            messageId: "<mls-cut@mls.test>",
+            headersString:
+                "From: " + member + "\nDelivered-To: " + to +
+                "\nAuthentication-Results: gw.example.test; dmarc=pass header.from=smithy.test\nX-Pad: " + "x".repeat(66000)
+        })
+        const cut = lib.run("mantle.forum.DeliveryServices.process#JunkInbound", {emailMessageId: "MLS_CUT_MESSAGE"}).result
+        // the member's own mail, by address alone, with a display name, with a name that shows the member's own address (as
+        // some mail programs write it), and sent through another Sender where the gateway's DMARC passed, still posts
+        const plain = mail(member, to, "Mine by mail", "MLS-SPOOF-PLAIN")
         lib.settled(SITE, "MLS_MEMBER")
         const named = mail('"Member, MLS" <mls_member@smithy.test>', to, "Mine with my name", "MLS-SPOOF-NAMED")
         lib.settled(SITE, "MLS_MEMBER")
-        const ownAddress = mail('"Member (mls_member@smithy.test)" <mls_member@smithy.test>', to, "Mine with my address",
-            "MLS-SPOOF-OWN", withHeaders({sender: "mls_member@smithy.test"}))
+        const ownName = '"Member (mls_member@smithy.test)" <mls_member@smithy.test>'
+        const ownAddress = mail(ownName, to, "Mine with my address", "MLS-SPOOF-OWN", withHeaders({from: ownName}))
+        lib.settled(SITE, "MLS_MEMBER")
+        const sentFor = mail(member, to, "Mine through an assistant", "MLS-SPOOF-SENTFOR",
+            withHeaders({from: member, sender: "Assistant <mls_other@smithy.test>"}))
         const receipt = id => lib.row("mantle.forum.ForumInboundReceipt", {receiptId: id})
         return {
             polled,
@@ -840,7 +866,8 @@ feature("the sender is the From address, never its display name: a name holding 
             plain,
             named,
             ownAddress,
-            heldReasons: [encoded, twoFrom, otherSender].map(out => out.result + ": " + out.reason),
+            sentFor,
+            heldReasons: [encoded, twoFrom, quotedLocal, noFrom, otherSender, cut].map(out => out.result + ": " + out.reason),
             senders: [receipt(polled.receiptId).senderAddress, receipt(stored.receiptId).senderAddress],
             found: posts(ids.list)
                 .filter(post => /MLS-SPOOF/.test(post.body))
@@ -849,7 +876,7 @@ feature("the sender is the From address, never its display name: a name holding 
             kept: held("mls_member@smithy.test").length + held("mls_other@smithy.test").length
         }
     },
-    then({polled, stored, plain, named, ownAddress, heldReasons, senders, found, kept}) {
+    then({polled, stored, plain, named, ownAddress, sentFor, heldReasons, senders, found, kept}) {
         polled.result == "held"
         stored.result == "held"
         senders == ["mls_other@smithy.test", "mls_other@smithy.test"]
@@ -857,12 +884,22 @@ feature("the sender is the From address, never its display name: a name holding 
             [
                 "held: The sender's display name shows another email address",
                 "held: The message names more than one From address",
-                "held: The Sender field names another address than From"
+                "held: The message names more than one From address",
+                "held: The message has no From field",
+                "held: The Sender field names another address than From",
+                "held: The stored header fields were cut short"
             ]
         plain.result == "posted"
         named.result == "posted"
         ownAddress.result == "posted"
-        found == ["Mine by mail MLS_MEMBER", "Mine with my address MLS_MEMBER", "Mine with my name MLS_MEMBER"]
+        sentFor.result == "posted"
+        found ==
+            [
+                "Mine by mail MLS_MEMBER",
+                "Mine through an assistant MLS_MEMBER",
+                "Mine with my address MLS_MEMBER",
+                "Mine with my name MLS_MEMBER"
+            ]
         kept == 0
     }
 })
