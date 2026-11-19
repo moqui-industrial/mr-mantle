@@ -243,6 +243,12 @@ feature("a rate of no project may be an organization's: it bills that organizati
         if (!one("mantle.work.effort.WorkEffort", { workEffortId: "TBL_OTHER" }))
             call("create#mantle.work.effort.WorkEffort", { workEffortId: "TBL_OTHER", workEffortTypeEnumId: "WetProject", workEffortName: "Billing walk other",
                 ownerPartyId: CLIENT, statusId: "WeInProgress" })
+        // a project the client holds and Ziziwork Services works as its Vendor: the vendor's rates apply
+        if (!one("mantle.work.effort.WorkEffort", { workEffortId: "TBL_VENDOR" })) {
+            call("create#mantle.work.effort.WorkEffort", { workEffortId: "TBL_VENDOR", workEffortTypeEnumId: "WetProject", workEffortName: "Billing walk vendor",
+                ownerPartyId: CLIENT, statusId: "WeInProgress" })
+            call("create#mantle.work.effort.WorkEffortParty", { workEffortId: "TBL_VENDOR", partyId: "ORG_ZIZI_SERVICES", roleTypeId: "Vendor", fromDate: at(1, 1, 0) })
+        }
         const rate = (rateAmount, organizationPartyId) => call(`${RATE}.create#RateAmount`, { ratePurposeEnumId: "RaprClient", rateTypeEnumId: "TBL_RATE_ORG",
             timePeriodUomId: "TF_hr", rateCurrencyUomId: "USD", rateAmount, organizationPartyId, fromDate: at(1, 1, 0) }).rateAmountId
         made.rateShared = rate(100, null)
@@ -250,13 +256,15 @@ feature("a rate of no project may be an organization's: it bills that organizati
         made.rateClient = rate(90, CLIENT)
         const lookup = (workEffortId) => call(`${TIME}.find#RateAmount`, { ratePurposeEnumId: "RaprClient", rateTypeEnumId: "TBL_RATE_ORG",
             rateCurrencyUomId: "USD", workEffortId, partyId: "ORG_ZIZI_BD", fromDate: at(4, 13, 9) })
-        const out = { services: lookup("TBL"), other: lookup("TBL_OTHER"), stored: one("mantle.humanres.rate.RateAmount", { rateAmountId: made.rateServices }) }
+        const out = { services: lookup("TBL"), other: lookup("TBL_OTHER"), vendor: lookup("TBL_VENDOR"),
+            stored: one("mantle.humanres.rate.RateAmount", { rateAmountId: made.rateServices }) }
         call("update#mantle.humanres.rate.RateAmount", { rateAmountId: made.rateClient, thruDate: at(1, 2, 0) })
         out.sharedOnly = lookup("TBL_OTHER")
         for (const rateAmountId of [made.rateShared, made.rateServices]) call("update#mantle.humanres.rate.RateAmount", { rateAmountId, thruDate: at(1, 2, 0) })
         return out
     },
-    then({ services, other, stored, sharedOnly }) {
+    then({ services, other, vendor, stored, sharedOnly }) {
+        vendor.rateAmountId == made.rateServices
         stored.organizationPartyId == "ORG_ZIZI_SERVICES"
         services.rateAmountId == made.rateServices
         other.rateAmountId == made.rateClient

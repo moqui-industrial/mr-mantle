@@ -1233,9 +1233,9 @@ along with this software (see the LICENSE.md file). If not, see
             possible of: emplPositionClassId, workTypeEnumId, payGradeId (from Employment if there is one for the partyId).
 
             A rate of no project may be an organization's (organizationPartyId, SEC-BOS-101): it applies only to the time of
-            that organization, the owner of the work effort's project (or of the work effort, else employerPartyId), and is
-            preferred to a shared one (no organization) of the same kind (with or without the party). A labor costing rate
-            (RaprCost) keeps its own organization rule (get#CostingRate).
+            that organization, a current Vendor of the work effort's project (or of the work effort) or else its owner (never the
+            client, which employerPartyId names for the employment), and is preferred to a shared one (no organization) of the
+            same kind (with or without the party). A labor costing rate (RaprCost) keeps its own organization rule (get#CostingRate).
         </description>
         <in-parameters>
             <parameter name="fromDate" type="Timestamp"/>
@@ -1270,14 +1270,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="rootWorkEffort">
                     <field-map field-name="workEffortId" from="taskWorkEffort.rootWorkEffortId"/></entity-find-one>
             </if>
-            <set field="rateOrgId" from="rootWorkEffort?.ownerPartyId || taskWorkEffort?.ownerPartyId || employerPartyId || null"/>
+            <script><![CDATA[
+                // the organizations whose rates of no project apply: the project's current Vendor parties, else its owner (SEC-BOS-101)
+                const projectWork = rootWorkEffort || taskWorkEffort
+                const vendors = projectWork ? Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', projectWork.workEffortId)
+                        .condition('roleTypeId', 'Vendor').conditionDate('fromDate', 'thruDate', fromDate || ec.user.nowTimestamp)
+                        .selectField('partyId').list()).map((row) => row.partyId) : []
+                rateOrgIds = Array.from(new Set(vendors.length ? vendors : [projectWork?.ownerPartyId].filter(Boolean)))
+            ]]></script>
             <set field="orgRatesApply" from="ratePurposeEnumId != 'RaprCost'"/>
 
             <!-- get all possible rates in one query, then do maximal match -->
             <entity-find entity-name="mantle.humanres.rate.RateAmount" list="rateAmountList">
                 <econditions combine="or">
                     <econdition field-name="organizationPartyId" from="null" ignore="!orgRatesApply"/>
-                    <econdition field-name="organizationPartyId" from="rateOrgId" ignore="!orgRatesApply || !rateOrgId"/>
+                    <econdition field-name="organizationPartyId" operator="in" from="rateOrgIds" ignore="!orgRatesApply || !rateOrgIds.length"/>
                 </econditions>
                 <date-filter valid-date="fromDate || ec.user.nowTimestamp"/>
                 <econdition field-name="partyId" from="partyId" or-null="true"/>
@@ -1372,8 +1379,9 @@ along with this software (see the LICENSE.md file). If not, see
                 // Do a maximal match on the rates that do not have a partyId.
                 nonPartyRaList = rateAmountList.filter((ra) => ra.partyId == null)
                 // an organization's rates of no project before the shared ones of the same kind (SEC-BOS-101)
-                const preferOrganization = (list) => !orgRatesApply || !rateOrgId || !list.some((ra) => !ra.workEffortId && ra.organizationPartyId === rateOrgId)
-                        ? list : list.filter((ra) => ra.workEffortId || ra.organizationPartyId === rateOrgId)
+                const ofOrganization = (ra) => !!ra.organizationPartyId && rateOrgIds.includes(ra.organizationPartyId)
+                const preferOrganization = (list) => !orgRatesApply || !rateOrgIds.length || !list.some((ra) => !ra.workEffortId && ofOrganization(ra))
+                        ? list : list.filter((ra) => ra.workEffortId || ofOrganization(ra))
                 if (partyRaList != null && partyRaList.length) partyRateAmountToUse = findMaximalMatch(preferOrganization(partyRaList), matchFields)
                 nonPartyRaList = preferOrganization(nonPartyRaList)
                 nonPartyRateAmountToUse = findMaximalMatch(nonPartyRaList, matchFields)
