@@ -7,7 +7,7 @@
 // who reported it is told to the site's staff only; the site's staff and an Owner of a group above hide, staff what they
 // may not view too; a hidden repository or group is Not Found to all but its Owners and the site's staff, on the pages
 // and in git, and so is a fork of a hidden repository, which is not forked and whose pipelines do not run; what the site's
-// staff hid, an Owner does not show again; and a new account makes one repository, two forks and five pipeline runs a
+// staff hid, an Owner does not show again, nor moves out of a hidden group; and a new account makes one repository, two forks and five pipeline runs a
 // day. Spec-local site, group, db repositories and accounts. Regression suite: these are rules.
 // Run: ./moq test mr-mantle --spec SmithyModerationTargets
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
@@ -261,7 +261,7 @@ feature(
     }
 )
 
-feature("a hidden group hides what is in it; its own Owner does not hide it, the site's staff do", {
+feature("a hidden group hides what is in it; its own Owner neither hides it nor moves a repository out of it, the site's staff do", {
     when() {
         const owner = hide("SMT_OWNER", "group", true)
         const staff = hide("SMT_MOD", "group", true)
@@ -272,10 +272,17 @@ feature("a hidden group hides what is in it; its own Owner does not hide it, the
             git: lib.authz("SMT_STRANGER", ids.repositoryId, "VIEW") == lib.authz("SMT_OWNER", ids.repositoryId, "VIEW"),
             owner: op("SMT_OWNER", "getGroup", {groupId: ids.groupId}).group?.hidden
         }
+        // moved to its Owner's namespace it would have no hidden group above it (SEC-PFS-101)
+        const moved = op("SMT_OWNER", "transferRepository", {
+            repositoryId: ids.repositoryId,
+            expectedRevision: Number(repository().revision || 1)
+        })
         const shown = hide("SMT_MOD", "group", false, "Reviewed")
-        return {owner, staff, hidden, shown, after: kind(op("SMT_STRANGER", "getGroup", {groupId: ids.groupId}))}
+        return {owner, staff, hidden, moved, shown, after: kind(op("SMT_STRANGER", "getGroup", {groupId: ids.groupId}))}
     },
-    then({owner, staff, hidden, shown, after}) {
+    then({owner, staff, hidden, moved, shown, after}) {
+        moved.kind == "Conflict"
+        moved.reason == "repositoryHidden"
         owner.reason == "accessDenied"
         staff.hidden == true
         hidden == {group: "NotFound", repository: "NotFound", issues: "NotFound", git: false, owner: true}

@@ -863,6 +863,10 @@ kit => {
     }
     methods.transferRepository = p => {
         const {r, repo, partyId, access} = repositoryFor(p, "SmrOwner", true)
+        // a hidden repository (itself or a group above it) stays where staff hid it: moved out of a hidden group it would
+        // be shown again, so only the site's staff move it, as only they show it
+        if (r.hidden && !r.access.staff)
+            fail("Conflict", "repositoryHidden: This repository is hidden by a moderator and is not moved")
         const before = revisionOf(repo)
         fresh(before, p.expectedRevision)
         const s = core.settings(p.siteId)
