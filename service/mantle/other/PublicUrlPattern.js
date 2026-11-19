@@ -14,4 +14,14 @@ function fill(pattern, values) {
     )
 }
 
-;({fill})
+// The names a space's public page address may hold: those the wiki's page values carry (Knowledge.js publicLink, mr-marble's
+// wiki.xml pageValues). unknownNames(pattern) gives each ${...} of a pattern that is not one of them, so a settings form
+// refuses an address meant as a template with a message (SEC-BAP-87).
+const pageNames = ["pagePath", "pageName", "versionName", "wikiPageId", "wikiSpaceId"]
+function unknownNames(pattern, names = pageNames) {
+    return Array.from(String(pattern || "").matchAll(/\$\{([^}]*)\}?/g))
+        .filter(match => !(match[0].endsWith("}") && names.includes(match[1].trim())))
+        .map(match => match[0])
+}
+
+;({fill, pageNames, unknownNames})
