@@ -222,8 +222,9 @@ function adjustmentRow(scope, date, byKey, row, index) {
         amount = lib.amount(row.amount, scope.currencyUomId)
     let glAccountId = row.glAccountId
     // A prompt-payment discount the invoice's due schedule offers on the date posts to the discount account and is issued
-    // at once (create#InvoiceCreditMemo promptDiscount); any other discount or write-off names its account, and on a bill
-    // its credit is approved, which needs INVOICE_APPROVE.
+    // at once (create#InvoiceCreditMemo promptDiscount); any other discount or write-off names its account, and its credit
+    // is approved (a bill's) or issued (a customer's) at once, which needs INVOICE_APPROVE on either side (SEC-BOS-127: a
+    // receivables clerk does not write off a customer's balance alone).
     // within the terms only on the side's discount account: a discount on another account is a write-off of the bill
     let discountAccount = null
     if (row.itemTypeEnumId === "ItemPromptDiscount")
@@ -242,10 +243,12 @@ function adjustmentRow(scope, date, byKey, row, index) {
                 denied("DISCOUNT_NOT_AVAILABLE", "The invoice's terms offer no discount of this amount on the date and today")
         }
         glAccountId = discountAccount
-    } else if (scope.direction === "payable" && !lib.has("INVOICE_APPROVE"))
+    } else if (!lib.has("INVOICE_APPROVE"))
         denied(
             "ADJUSTMENT_APPROVAL_REQUIRED",
-            "A write-off or a discount outside the bill's terms is approved as a credit; ask a user who approves bills"
+            scope.direction === "payable"
+                ? "A write-off or a discount outside the bill's terms is approved as a credit; ask a user who approves bills"
+                : "A write-off or a discount outside the invoice's terms is issued as a credit; ask a user who approves invoices"
         )
     if (!glAccountId) denied("ADJUSTMENT_ACCOUNT_REQUIRED", "Choose an explicit adjustment account")
     const account = policy.account(scope.organizationPartyId, glAccountId, date.timestamp)

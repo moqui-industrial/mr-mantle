@@ -17,6 +17,8 @@ function previewRequest() {
         allocations: [{sourceKey, targetKey, amount: "1"}]
     })
 }
+// the receivables user who also approves invoices, who writes off (SEC-BOS-127)
+let arApprover
 function refusal(action) {
     try {
         action()
@@ -138,33 +140,36 @@ feature("a reader, a Projects editor and a treasury user cannot review a settlem
         denied.every(message => message.includes("PERMISSION_DENIED"))
     }
 })
-feature("a write-off and a discount are credit memos on the chosen account that settle the invoice", {
+feature("a write-off and a discount are credit memos on the chosen account that settle the invoice; a receivables clerk alone is refused them", {
     when() {
         const h = helper()
+        const adjustments = [
+            {invoiceId, itemTypeEnumId: "ItemWriteOff", amount: "10", glAccountId: "550000000", reason: "Small residual"},
+            {invoiceId, itemTypeEnumId: "ItemPromptDiscount", amount: "5", glAccountId: "550000000", reason: "Early pay"}
+        ]
+        // SEC-BOS-127: a write-off of a customer's balance needs INVOICE_APPROVE, as a bill's does
         login(f.users.ar)
+        const clerk = refusal(() => h.review(f, [], adjustments))
+        login("john.doe")
+        arApprover = h.user(f, "ARAPPROVE", ["RECEIVABLE_EDIT", "RECEIVABLE_VIEW", "INVOICE_APPROVE"])
+        login(arApprover)
         const accounts = h.native("find#SettlementAdjustmentAccounts", {
             organizationPartyId: f.org,
             effectiveDate: f.timestamp,
             text: "5500",
             selectedIdList: ["550000000"]
         })
-        const preview = h.review(
-            f,
-            [],
-            [
-                {invoiceId, itemTypeEnumId: "ItemWriteOff", amount: "10", glAccountId: "550000000", reason: "Small residual"},
-                {invoiceId, itemTypeEnumId: "ItemPromptDiscount", amount: "5", glAccountId: "550000000", reason: "Early pay"}
-            ]
-        )
+        const preview = h.review(f, [], adjustments)
         const applied = h.confirm(preview)
         login("john.doe")
         const credits = applied.adjustmentInvoiceIds.map(id => ({
             invoice: h.lib.one(h.lib.invoiceEntity, {invoiceId: id}),
             items: h.lib.rows("mantle.account.invoice.InvoiceItem", {invoiceId: id})
         }))
-        return {accounts, applied, credits, invoice: h.lib.one(h.lib.invoiceEntity, {invoiceId})}
+        return {clerk, accounts, applied, credits, invoice: h.lib.one(h.lib.invoiceEntity, {invoiceId})}
     },
-    then({accounts, applied, credits, invoice}) {
+    then({clerk, accounts, applied, credits, invoice}) {
+        clerk.includes("ADJUSTMENT_APPROVAL_REQUIRED")
         accounts.rows.some(row => row.glAccountId === "550000000")
         accounts.selectedRows[0].glAccountId == "550000000"
         applied.adjustmentInvoiceIds.length == 2
@@ -187,7 +192,7 @@ feature("an adjustment without an account or with another item type is refused b
         const h = helper(),
             a = h.invoice(f, "10"),
             before = h.count(A)
-        login(f.users.ar)
+        login(arApprover)
         const messages = [
             {itemTypeEnumId: "ItemWriteOff", amount: "5", reason: "No account"},
             {itemTypeEnumId: "ItemTimeEntry", amount: "5", glAccountId: "550000000", reason: "Wrong type"}
