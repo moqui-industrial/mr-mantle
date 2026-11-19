@@ -348,6 +348,11 @@ feature("an identity document or work permit needs an expiry; its number is the 
         }
         const stored = permit({thruDate: stamp(90)})
         state.permit = stored.partyQualificationId
+        // a long number is kept whole, its ciphertext longer still (SEC-BOS-116: the column is text-long)
+        const longNumber = "LONG-" + "7".repeat(195)
+        const long = permit({thruDate: stamp(90), referenceNumber: longNumber, title: "Long permit"})
+        out.longKept = long.error ? long.error : ec.entity.find(QUALIFICATION).condition("partyQualificationId", long.partyQualificationId)
+            .disableAuthz().one().referenceNumber === longNumber
         const list = username => run(username, D + "find#Qualifications", {partyId: state.ana})
         const mine = run(state.uAna, D + "find#Qualifications", {mine: true})
         out.ownNumber = rowOf(mine, state.permit)?.referenceNumber
@@ -395,6 +400,7 @@ feature("an identity document or work permit needs an expiry; its number is the 
         out.noExpiry == "EXPIRY_REQUIRED" && out.devSubmits == "PERMISSION_DENIED"
         out.ownNumber == "WP-1234" && out.hrNumber == "WP-1234" && out.devNumber == null && out.devCertNumber == "WELD-778899"
         out.storedNumber.startsWith(":") && !out.storedNumber.includes("WP-1234")
+        out.longKept === true
         out.managerBefore == "absent"
         out.devVerifies == "PERMISSION_DENIED" && out.hrVerifies == ""
         out.managerRow.validity == "valid" || out.managerRow.validity == "expiring"

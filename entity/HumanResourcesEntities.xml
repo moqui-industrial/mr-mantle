@@ -104,9 +104,10 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="qualificationTypeEnumId" type="id"/>
         <field name="title" type="text-medium"><description>Its name, such as the degree or certificate</description></field>
         <field name="issuerName" type="text-medium"/>
-        <field name="referenceNumber" type="text-medium" ai-opt-out="true" encrypt="true"><description>The document or certificate
+        <field name="referenceNumber" type="text-long" ai-opt-out="true" encrypt="true"><description>The document or certificate
             number; restricted for an identity document or work permit, and kept from every model tool (PE-21); stored encrypted,
-            as PartyIdentification.idValue is (SEC-BOS-116), so nothing finds by it</description></field>
+            as PartyIdentification.idValue is (SEC-BOS-116), so nothing finds by it; text-long, as its ciphertext is longer than
+            the number</description></field>
         <field name="fromDate" type="date-time"><description>Issued, or valid from</description></field>
         <field name="thruDate" type="date-time"><description>Expires: required for an identity document or work permit</description></field>
         <field name="verificationStatusId" type="id" enable-audit-log="true"/>
