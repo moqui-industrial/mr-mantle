@@ -548,3 +548,24 @@ feature("deleting a wiki page takes its comment, activity and follower joins fir
         events == eventIds.length
     },
 })
+
+feature("a record's changes leave out a field its entity keeps from readers: ai-opt-out, and one it no longer has (SEC-BAP-94)", {
+    when() {
+        // the user's own qualification, which they see (its number is ai-opt-out)
+        const partyId = ec.user.userAccount.partyId
+        call("create#mantle.humanres.ability.PartyQualification", { partyQualificationId: "RL-PQ1", partyId, title: "Licence" })
+        const audit = (changedFieldName, newValueText) =>
+            call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.humanres.ability.PartyQualification",
+                changedFieldName, pkPrimaryValue: "RL-PQ1", oldValueText: "before", newValueText, changedDate: ec.user.nowTimestamp,
+                changedByUserId: "EX_JOHN_DOE" })
+        audit("verificationStatusId", "RL-SHOWN")
+        audit("referenceNumber", "RL-SECRET-NUMBER")
+        audit("noSuchField", "RL-GONE")
+        const out = timeline("mantle.humanres.ability.PartyQualification", "RL-PQ1", { kinds: "changes" })
+        return { values: Array.from(out.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue) }
+    },
+    then({ values }) {
+        values.includes("RL-SHOWN")
+        !values.includes("RL-SECRET-NUMBER") && !values.includes("RL-GONE")
+    }
+})
