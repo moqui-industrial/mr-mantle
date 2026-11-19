@@ -236,8 +236,36 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="search" noun="MantleFiltered">
+        <description>A search of the documents of indexName (Marble's mantle index): every one, or the documentType named, which
+            must be a DataDocument of indexName whose primary entity the user may view (SEC-DAT-81: mail, chat, drive files,
+            other indexes and the telemetry stores are not searched here; another type finds nothing, with a message). The
+            user's organization filter set limits every search: a Party or Product search by its own set, any other by the
+            Product or else the Party set, so a type with no ownerPartyId finds nothing for a user with one.</description>
         <implements service="org.moqui.search.SearchServices.search#DataDocuments"/>
         <actions>
+            <!-- the types are the index's own, each one the user may view (SEC-DAT-81) -->
+            <script><![CDATA[
+                refusedType = null
+                if (documentType != null && !String(documentType).trim()) documentType = null
+                if (documentType) {
+                    const types = String(documentType).split(',').map(type => type.trim()).filter(type => type)
+                    refusedType = types.find(type => {
+                        const document = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', type)
+                                .useCache(true).disableAuthz().one()
+                        return !document || document.indexName !== indexName ||
+                                !ec.artifactExecution.isPermitted(document.primaryEntityName, 'AT_ENTITY', 'view')
+                    }) || null
+                    if (!types.length) documentType = null
+                }
+            ]]></script>
+            <if condition="refusedType">
+                <script>ec.message.addPublic(`Search type ${refusedType} is not available`, 'warning')</script>
+                <set field="documentList" from="[]"/><set field="documentListCount" from="0"/>
+                <set field="documentListPageIndex" from="pageIndex"/><set field="documentListPageSize" from="pageSize"/>
+                <set field="documentListPageMaxIndex" from="0"/><set field="documentListPageRangeLow" from="0"/>
+                <set field="documentListPageRangeHigh" from="0"/>
+                <return/>
+            </if>
             <!-- add wildcards to query string for partial words -->
             <set field="queryString" from="elasticQueryAutoWildcard(queryString, false)"/>
 
@@ -253,10 +281,12 @@ along with this software (see the LICENSE.md file). If not, see
                     const findFilters = ec.artifactExecution.getFindFiltersForUser(entityName);
                     return findFilters && findFilters.length > 0 ? findFilters[0].entityFilterSetId : null;
                 }
+                // any other type (or several) is limited as no type is: a type with no organization is not searched across
+                // organizations (SEC-DAT-81)
                 let entityFilterSetId = null;
-                if (!documentType) entityFilterSetId = filterSetFor('mantle.product.Product') || filterSetFor('mantle.party.Party');
-                else if (documentType === 'MantleParty') entityFilterSetId = filterSetFor('mantle.party.Party');
+                if (documentType === 'MantleParty') entityFilterSetId = filterSetFor('mantle.party.Party');
                 else if (documentType === 'MantleProduct') entityFilterSetId = filterSetFor('mantle.product.Product');
+                else entityFilterSetId = filterSetFor('mantle.product.Product') || filterSetFor('mantle.party.Party');
 
                 // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
                 let ownerPartyIds = null;

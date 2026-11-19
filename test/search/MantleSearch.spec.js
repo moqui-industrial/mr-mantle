@@ -272,3 +272,35 @@ feature("a user limited to their organizations finds only their records", {
         unowned.length == 0
     },
 })
+
+// the general search takes only the index's own document types, each limited by the user's organizations: a type of
+// another index (the sales items here; mail, chat and telemetry alike) is refused, and a typed search of a type with no
+// organization field finds nothing for a user limited to their organizations (SEC-DAT-81)
+feature("the general search takes only its index's types, each under the user's organization limit", {
+    when() {
+        const typed = (documentType) => call("mantle.GeneralServices.search#MantleFiltered",
+            { indexName: "mantle", documentType, queryString: "*:*", pageSize: 100 })
+        const adminOrders = num(typed("MantleOrder").documentListCount)
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            const otherIndex = typed("MantleSalesOrderItem")
+            const messages = String(ec.message.messagesString || "")
+            const orders = typed("MantleOrder")
+            return { adminOrders, otherIndex, messages, orders }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ adminOrders, otherIndex, messages, orders }) {
+        adminOrders > 0
+        num(otherIndex.documentListCount) == 0
+        otherIndex.documentList.length == 0
+        messages.includes("MantleSalesOrderItem is not available")
+        num(orders.documentListCount) < adminOrders
+    },
+})
