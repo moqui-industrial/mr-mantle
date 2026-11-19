@@ -562,6 +562,57 @@ along with this software (see the LICENSE.md file). If not, see
 
         </actions>
     </service>
+    <service verb="filter" noun="VisibleParties" allow-remote="false">
+        <description>Of partyIdList, the parties the user may reach as people to message or look up (SEC-BOS-98, SEC-BOS-99,
+            SEC-BOS-100): read with authorization on, so the calling app's entity filters decide (MANTLE_USER_ORG's
+            organizations, MANTLE_PRIVATE_CONTACT: not another user's personal contact), not disabled unless includeDisabled;
+            and a party that works for an internal organization (a current agent, employee or member relationship to a party
+            with the OrgInternal role, as UserAccountOrganization counts it) only when one of those organizations is one the
+            user may see too, so another organization's staff member whose party is shared (_NA_) is not reached (the owner's
+            decision, 2026-11-19). With authorization disabled (internal work) every party that exists is kept; with no user
+            and authorization on, none. The order of partyIdList is kept.</description>
+        <in-parameters>
+            <parameter name="partyIdList" type="List"/>
+            <parameter name="includeDisabled" type="Boolean" default="false"/>
+        </in-parameters>
+        <out-parameters><parameter name="visiblePartyIdList" type="List"/></out-parameters>
+        <actions><script><![CDATA[
+            const cf = ec.entity.conditionFactory
+            const ids = Array.from(new Set(Array.from(partyIdList || []).map((id) => String(id || '')).filter((id) => id)))
+            visiblePartyIdList = []
+            if (!ids.length) return
+            if (ec.artifactExecution.authzDisabled()) {
+                const exists = new Set(Array.from(ec.entity.find('mantle.party.Party').condition('partyId', 'in', ids).selectField('partyId').list()).map((row) => row.partyId))
+                visiblePartyIdList = ids.filter((id) => exists.has(id))
+                return
+            }
+            if (!ec.user.userId) return
+            const visible = cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null), cf.makeCondition('privateOwnerUserId', 'equals', ec.user.userId)], 'or')
+            // with authorization on: the calling app's filters
+            let find = ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', ids).condition(visible).selectField('partyId')
+            if (!includeDisabled) find = find.condition(cf.makeCondition('disabled', 'not-equals', 'Y', true))
+            const seen = new Set(Array.from(find.list()).map((row) => row.partyId))
+            if (!seen.size) return
+            // the internal organizations each works for, read as the system: a relationship is no record the user reads here
+            const orgsOf = {}
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const relationships = Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', 'in', Array.from(seen))
+                        .condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']).conditionDate('fromDate', 'thruDate', null)
+                        .selectField('fromPartyId').selectField('toPartyId').list())
+                const targets = Array.from(new Set(relationships.map((row) => row.toPartyId)))
+                const internal = new Set(targets.length ? Array.from(ec.entity.find('mantle.party.PartyRole').condition('partyId', 'in', targets)
+                        .condition('roleTypeId', 'OrgInternal').selectField('partyId').list()).map((row) => row.partyId) : [])
+                for (const row of relationships) if (internal.has(row.toPartyId)) (orgsOf[row.fromPartyId] || (orgsOf[row.fromPartyId] = [])).push(row.toPartyId)
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+            const organizations = Array.from(new Set(Object.values(orgsOf).flat()))
+            // the organizations the user may see, under the same filters
+            const seenOrganizations = new Set(organizations.length ? Array.from(ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', organizations)
+                    .selectField('partyId').list()).map((row) => row.partyId) : [])
+            visiblePartyIdList = ids.filter((id) => seen.has(id) && (!orgsOf[id] || orgsOf[id].some((org) => seenOrganizations.has(org))))
+        ]]></script></actions>
+    </service>
+
     <service verb="get" noun="PartyInternalOrgIds">
         <description>The internal organizations a party works in: the targets of its agent, employee and member
             relationships that have the OrgInternal role, and their direct child organizations (PrtOrgRollup) that have it too:

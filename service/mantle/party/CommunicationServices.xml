@@ -160,6 +160,15 @@ along with this software (see the LICENSE.md file). If not, see
                             .selectField('partyId').disableAuthz().list()).map((party) => party.partyId))
                     const missing = named.filter((id) => !found.has(id))
                     if (missing.length) { ec.message.addError(`Party ${missing.join(', ')} not found`); return }
+                    // an internal message reaches only parties the sender may (filter#VisibleParties: the app's filters, and
+                    // another organization's staff only with that organization; SEC-BOS-98); internal work with authorization
+                    // off is not asked. Any other is not found, as one that does not exist.
+                    if (communicationEventTypeId === 'Message') {
+                        const reachable = new Set(Array.from(ec.service.sync().name('mantle.party.PartyServices.filter#VisibleParties')
+                                .parameters({partyIdList: named, includeDisabled: true}).call()?.visiblePartyIdList || []))
+                        const unreached = named.filter((id) => !reachable.has(id))
+                        if (unreached.length) { ec.message.addError(`Party ${unreached.join(', ')} not found`); return }
+                    }
                 }
                 toPartyId = toIds.length ? toIds[0] : null
 
