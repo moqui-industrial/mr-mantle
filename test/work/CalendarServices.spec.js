@@ -1132,3 +1132,23 @@ feature("get#FreeBusy answers only a party the caller may reach: not another use
         !parties.includes(zed)
     },
 })
+
+// SEC-BOS-108/112 (review): naming another party (a contact's calendar tab, a REST caller's partyId) shows its events the user
+// may not open as Busy: Ben asks for Ada's week and sees her dentist visit's time only, Ada sees it whole
+feature("an event in only because another asked party is on it is Busy unless the user may open it", {
+    when() {
+        setTime(19)
+        const dentist = as("Ada", () => event("Dentist visit", { estimatedStartDate: at(3 * 24 + 8), estimatedCompletionDate: at(3 * 24 + 9),
+                assignToPartyId: party.Ada, location: "Main Street clinic" }))
+        const ben = as("Ben", () => week({ partyId: party.Ada, includeAllUsers: false }).find((item) => item.workEffortId === dentist))
+        const ada = as("Ada", () => week({ partyId: party.Ada, includeAllUsers: false }).find((item) => item.workEffortId === dentist))
+        return { ben, ada }
+    },
+    then({ ben, ada }) {
+        ben.title == "Busy"
+        ben.freeBusyOnly == true
+        ben.location == null
+        ben.ownerName == null
+        ada.title.includes("Dentist visit")
+    },
+})

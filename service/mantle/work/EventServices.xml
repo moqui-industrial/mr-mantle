@@ -61,7 +61,8 @@ along with this software (see the LICENSE.md file). If not, see
             is answered as free/busy: title Busy, freeBusyOnly, no url, location or organizer (§2 of impl-maintenance: a busy
             interval the caller may not open carries no title or attendee). An unmanaged resource's bookings are as before.
             An event only the people on it see (WevRestricted, WevConfidential) that the user may not open (check#EventAccess: a
-            viewer of its calendar who is not on it) is answered the same way, as it is on a publish link (SEC-BOS-107).
+            viewer of its calendar who is not on it) is answered the same way, as it is on a publish link (SEC-BOS-107), and so is
+            an event that is in only because another asked party owns it or is on it, when the user may not open it.
         </description>
         <in-parameters>
             <parameter name="facilityId"/>
@@ -347,6 +348,12 @@ along with this software (see the LICENSE.md file). If not, see
             // publish link, which no one on it follows (SEC-BOS-107)
             const restrictedHidden = (workEffort, id) => ['WevRestricted', 'WevConfidential'].includes(workEffort.visibilityEnumId)
                     && (!!publishToken || !canOpen(id))
+            // an event in only because another asked party owns it or is on it (a contact's calendar tab, a REST caller's partyId)
+            // is Busy unless the user may open it (check#EventAccess), so naming a party shows no titles, places or organizers
+            // of its events (SEC-BOS-108/112, the review of Nov 19, 2026)
+            const viaOtherParty = (member, workEffort, id) => !member.calendarIds.length && !member.allUsers && !member.resource && !member.project
+                    && (member.owner || member.partyRows.length > 0) && !(userPartyId && (workEffort.ownerPartyId === userPartyId
+                        || member.partyRows.some((row) => row.partyId === userPartyId))) && !canOpen(id)
             const seen = new Map()
             const canOpen = (id) => {
                 if (!seen.has(id)) {
@@ -366,6 +373,7 @@ along with this software (see the LICENSE.md file). If not, see
                         && !member.partyRows.length && !member.owner && !member.allUsers && !member.resource && !member.project)
                         || (member.managed && !canOpen(instance.seriesWorkEffortId || instance.workEffortId))
                         || restrictedHidden(workEffort, instance.seriesWorkEffortId || instance.workEffortId)
+                        || viaOtherParty(member, workEffort, instance.seriesWorkEffortId || instance.workEffortId)
                 const partyRow = member.partyRows.find((row) => row.partyId === userPartyId) || member.partyRows[0] || null
                 let url = ''
                 if (urlGString && !freeBusyOnly) {
