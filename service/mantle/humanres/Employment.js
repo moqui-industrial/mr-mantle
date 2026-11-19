@@ -1361,7 +1361,10 @@ function relatedByName(nameCondition, organizationPartyIds) {
     ).slice(0, matchLimit)
 }
 // Whether a chosen person is one the caller may hire by id: related to one of their employers (as relatedByName reads it), or
-// matched by the exact email given. Anyone else is refused as missing (RECORD_UNAVAILABLE), so an id names no one.
+// matched by the exact email given and held by no one else: with no user account and no current employment outside the
+// caller's employers (SEC-BOS-118: a hire makes the person staff to the caller, whose HR then changes their shared Person
+// record; one employed elsewhere is hired by an HR editor of both employers). Anyone else is refused as missing
+// (RECORD_UNAVAILABLE), so an id names no one.
 function personAdmitted(partyId, p, userScope) {
     const orgIds = userScope.organizationPartyIds
     if (orgIds.length) {
@@ -1390,9 +1393,15 @@ function personAdmitted(partyId, p, userScope) {
             return true
     }
     const term = text(p.term)
-    return unique([text(p.workEmail), isEmail(term) ? term : ""].filter(Boolean)).some(email =>
+    const byEmail = unique([text(p.workEmail), isEmail(term) ? term : ""].filter(Boolean)).some(email =>
         personsByEmail(email).includes(partyId)
     )
+    if (!byEmail) return false
+    if (find("moqui.security.UserAccount").condition("partyId", partyId).count()) return false
+    let elsewhere = people
+        .current(find(RELATIONSHIP).condition("fromPartyId", partyId).condition("relationshipTypeEnumId", "PrtEmployee"), nowMs())
+    if (orgIds.length) elsewhere = elsewhere.condition("toPartyId", "not-in", orgIds)
+    return elsewhere.count() === 0
 }
 const relationshipTexts = {
     employment: "Employment",
