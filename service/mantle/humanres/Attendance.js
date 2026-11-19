@@ -1195,7 +1195,9 @@ const importAnswer = batch => ({
 })
 // preview#Import: a device file for an employer read into an import and its rows, each resolved and named: ready, known (its source
 // key is recorded already), duplicate (repeated in the file) or refused with its reason (WORKER_UNKNOWN, WORKER_AMBIGUOUS,
-// NOT_EMPLOYED, EMPLOYMENT_AMBIGUOUS, TIME_INVALID, TIME_FUTURE, DIRECTION_INVALID, ROW_INVALID). Nothing is recorded. Refuses the
+// NOT_EMPLOYED, EMPLOYMENT_AMBIGUOUS, TIME_INVALID, TIME_FUTURE, DIRECTION_INVALID, ROW_INVALID, and SELF_APPROVAL for the
+// importer's own time, which the clock or another importer records, as a person's own correction waits for approval; SEC-BOS-117).
+// Nothing is recorded. Refuses the
 // file (ORGANIZATION_REQUIRED, ORGANIZATION_DENIED, SOURCE_REQUIRED, ZONE_INVALID, WORKER_KIND_INVALID, FILE_REQUIRED,
 // FILE_TOO_LARGE, FILE_UNREADABLE, COLUMN_MISSING).
 function previewImport(p) {
@@ -1278,6 +1280,8 @@ function previewImport(p) {
                 // a person the employer never employed is unknown here, as one who does not exist
                 if (!partyId) refuse("WORKER_UNKNOWN", "No person is " + (out.workerText || "named"))
                 else if (partyId === "_AMBIGUOUS_") refuse("WORKER_AMBIGUOUS", "More than one person has that work email")
+                else if (partyId === (ec.user.userAccount?.partyId || null))
+                    refuse("SELF_APPROVAL", "Your own time is recorded by the clock or another importer")
                 else if (punchMs == null) refuse("TIME_INVALID", "The time is not read as yyyy-MM-dd HH:mm")
                 else if (punchMs > now + futureSlackMs) refuse("TIME_FUTURE", "The time is later than now")
                 else if (!directionEnumId) refuse("DIRECTION_INVALID", "The direction is in or out")
@@ -1344,6 +1348,9 @@ function importRecords(p) {
             ec.transaction.runRequireNew(null, "Attendance import row " + row.rowSeqId + " failed", () => {
                 const employment = employmentRow(row.partyRelationshipId)
                 if (!employment) denied("NOT_EMPLOYED", "The employment is not available")
+                // another importer's preview: never the one who imports it (SEC-BOS-117)
+                if (row.partyId && row.partyId === (ec.user.userAccount?.partyId || null))
+                    denied("SELF_APPROVAL", "Your own time is recorded by the clock or another importer")
                 const recorded = recordPunch({
                     employment,
                     directionEnumId: row.directionEnumId,

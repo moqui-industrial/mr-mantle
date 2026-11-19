@@ -328,10 +328,15 @@ feature("clocking follows the employer's default unless HR sets the employment a
     }
 })
 
-feature("an import needs PEOPLE_IMPORT and the employer: HR without it and another employer's HR are refused", {
+feature("an import needs PEOPLE_IMPORT and the employer: HR without it and another employer's HR are refused; the importer's own time too", {
     when() {
-        // B's HR officer, whom A never employed, is unknown to A's file as one who does not exist
-        const text = file([state.ana + ",2026-03-09 08:00,in,P1,door", state.hrBParty + ",2026-03-09 08:00,in,P2,door"])
+        // B's HR officer, whom A never employed, is unknown to A's file as one who does not exist; the importer's own punch is
+        // refused as their own (SEC-BOS-117)
+        const text = file([
+            state.ana + ",2026-03-09 08:00,in,P1,door",
+            state.hrBParty + ",2026-03-09 08:00,in,P2,door",
+            state.hrParty + ",2026-03-09 08:00,in,P3,door"
+        ])
         const allowed = importOf(text)
         return {
             allowed,
@@ -343,8 +348,11 @@ feature("an import needs PEOPLE_IMPORT and the employer: HR without it and anoth
         }
     },
     then({allowed, allowedRows, noImport, otherEmployer, otherRuns}) {
-        allowed.error == "" && allowed.readyCount == 1 && allowed.errorCount == 1
-        allowedRows.map(row => row.reasonCode).join(",") == "WORKER_UNKNOWN"
+        allowed.error == "" && allowed.readyCount == 1 && allowed.errorCount == 2
+        allowedRows
+            .map(row => row.reasonCode)
+            .sort()
+            .join(",") == "SELF_APPROVAL,WORKER_UNKNOWN"
         code(noImport) == "PERMISSION_DENIED"
         code(otherEmployer) == "ORGANIZATION_DENIED"
         otherRuns.length == 0

@@ -290,6 +290,49 @@ feature(
     }
 )
 
+// SEC-BOS-117: an HR editor grants no leave to their own employment, by an allocation or an opening balance; the same terms
+// reach another employee, and an assignment with no opening balance is not refused
+feature("an HR editor's own employment is refused a grant and an opening balance, another employee's is not", {
+    when() {
+        const calHr = user("CALHR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [], state.cal)
+        const outcomes = out => (out.error ? code(out) : out.rows.map(row => row.personName + ":" + (row.reasonCode || row.outcome)).join(","))
+        const grant = run(calHr, L + "preview#Allocation", {
+            leavePolicyId: state.policy,
+            partyRelationshipIds: [state.calEmp, state.benEmp],
+            amount: "3",
+            periodFromDate: "2026-04-01",
+            periodThruDate: "2026-06-30",
+            reason: "Second quarter"
+        })
+        // a policy of another type, so the two are under no other then
+        const sick = run(state.hr, L + "store#Policy", {
+            organizationPartyId: orgA,
+            policyName: "Sick leave",
+            leaveTypeEnumId: "PltSick",
+            unitEnumId: "LuDays",
+            accrualFrequencyEnumId: "LafMonthly",
+            fromDate: "2025-01-01"
+        }).leavePolicyId
+        const assign = openingAmount =>
+            outcomes(
+                run(calHr, L + "assign#Policy", {
+                    leavePolicyId: sick,
+                    partyRelationshipIds: [state.calEmp, state.benEmp],
+                    fromDate: "2026-01-01",
+                    openingAmount,
+                    reason: "Spec",
+                    preview: true
+                })
+            )
+        return {grant: outcomes(grant), opening: assign("5"), noOpening: assign(null)}
+    },
+    then({grant, opening, noOpening}) {
+        grant === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || grant === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        opening === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || opening === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        noOpening === "Leave BEN:ready,Leave CAL:ready" || noOpening === "Leave CAL:ready,Leave BEN:ready"
+    }
+})
+
 feature(
     "The accrual run twice posts once: one employment that fails is logged while the others post; a year's carry-over and a grant's expiry post once; the steps by service, the part rounding and the cap",
     {
