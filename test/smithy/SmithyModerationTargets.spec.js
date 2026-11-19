@@ -283,6 +283,7 @@ feature("a hidden group hides what is in it; its own Owner neither hides it nor 
     then({owner, staff, hidden, moved, shown, after}) {
         moved.kind == "Conflict"
         moved.reason == "repositoryHidden"
+        moved.message.includes("The site's staff hid")
         owner.reason == "accessDenied"
         staff.hidden == true
         hidden == {group: "NotFound", repository: "NotFound", issues: "NotFound", git: false, owner: true}
