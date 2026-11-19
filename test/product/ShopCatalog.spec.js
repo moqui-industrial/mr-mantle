@@ -538,3 +538,63 @@ feature("a product's name and description are read only from its own content fol
         !JSON.stringify(free.result).includes("mantle")
     }
 })
+
+feature("every product and category content type takes a location only in its record's own folder; a staff screen streams no other file (SEC-BAP-138)", {
+    when() {
+        const refusal = work =>
+            system(() => {
+                try {
+                    work()
+                    return "done"
+                } catch (error) {
+                    ec.message.clearErrors()
+                    return String(error.message || error)
+                }
+            })
+        const P = "mantle.product.ProductServices."
+        const category = prefix + "_LOC_CAT"
+        system(() => {
+            make("mantle.product.category.ProductCategory", {productCategoryId: category, categoryName: "Location spec"})
+            // an image row as the demo data makes one: a component's image
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_IMG_DEMO",
+                productId: ids.free,
+                productContentTypeEnumId: "PcntImageSmall",
+                contentLocation: "component://mr-marble/screen/ssstatic/images/Sales.png"
+            })
+        })
+        const content = ec.resource.script("component://mr-mantle/service/mantle/product/Content.js")
+        const served = location =>
+            content.served({productId: ids.free, contentLocation: location}, content.config({recordKind: "product"}))
+        return {
+            image: refusal(() =>
+                call(P + "create#ProductContent", {
+                    productId: ids.free,
+                    productContentTypeEnumId: "PcntImageSmall",
+                    contentLocation: "runtime://conf/MoquiDevConf.xml"
+                })
+            ),
+            categoryRow: refusal(() =>
+                call(P + "create#ProductCategoryContent", {
+                    productCategoryId: category,
+                    categoryContentTypeEnumId: "PcctImageUrl",
+                    contentLocation: "file:///etc/passwd"
+                })
+            ),
+            moved: refusal(() =>
+                call(P + "update#ProductContent", {productContentId: prefix + "_IMG_DEMO", contentLocation: "https://elsewhere.test/x.png"})
+            ),
+            // the demo image's other fields still change
+            described: refusal(() => call(P + "update#ProductContent", {productContentId: prefix + "_IMG_DEMO", description: "Demo"})),
+            demoServed: served("component://mr-marble/screen/ssstatic/images/Sales.png"),
+            confServed: served("component://mr-mantle/MoquiConf.xml"),
+            runtimeServed: served("runtime://conf/MoquiDevConf.png")
+        }
+    },
+    then(r) {
+        r.image.includes("a location is not taken") && r.categoryRow.includes("a location is not taken")
+        r.moved.includes("a location is not taken")
+        r.described == "done"
+        r.demoServed == true && r.confServed == false && r.runtimeServed == false
+    }
+})

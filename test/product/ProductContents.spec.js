@@ -100,7 +100,8 @@ feature("same-name text documents have independent resources and category refere
                 filename: "description.html",
                 contentText: "Second"
             }).productContentId
-            categoryId = call(L + "create#ProductCategoryContent", {
+            // a reference made before SEC-BAP-138 (create#ProductCategoryContent now takes no outside location): the row as data
+            categoryId = call("create#mantle.product.category.ProductCategoryContent", {
                 productCategoryId: "CND_CAT",
                 categoryContentTypeEnumId: "PcctDescription",
                 contentLocation: "https://example.invalid/do-not-fetch.html"
