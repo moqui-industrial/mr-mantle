@@ -550,3 +550,41 @@ feature(
         }
     }
 )
+
+feature("a change raising an approved order's total over the customer's credit limit leaves a Credit hold (SEC-BAP-91)", {
+    when() {
+        const orderId = salesOrder([["SOC_A", 2, 5]])
+        const more = approvedCommercial(state.salesChange, orderId, "OckQuantity", [{orderItemSeqId: "01", quantity: 4}])
+        // a hold policy whose limit the customer's open orders pass, for this feature only
+        const policy = call("create#mantle.account.billing.CustomerCreditPolicy", {
+            organizationPartyId: org,
+            customerPartyId: customer,
+            currencyUomId: "USD",
+            creditLimit: 1,
+            actionEnumId: "CpaHold",
+            fromDate: ec.user.nowTimestamp
+        }).customerCreditPolicyId
+        try {
+            const preview = run(state.sales, S + "preview#OrderChange", {requestId: more.requestId}).preview
+            const applied = salesApply(more)
+            return {
+                preview,
+                applied,
+                credits: openHolds(orderId, "OhtCredit"),
+                status: one("mantle.order.OrderHeader", {orderId}).statusId
+            }
+        } finally {
+            call("update#mantle.account.billing.CustomerCreditPolicy", {
+                customerCreditPolicyId: policy,
+                thruDate: ec.user.nowTimestamp
+            })
+        }
+    },
+    then(r) {
+        r.preview.effects.creditText.includes("over its credit limit now")
+        r.applied.error === ""
+        r.applied.result.stillHeld === true
+        r.credits.length === 1
+        r.status === "OrderHold"
+    }
+})

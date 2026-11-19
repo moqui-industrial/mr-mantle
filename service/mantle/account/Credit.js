@@ -159,11 +159,23 @@ function evaluate(p) {
     // most organizations have no credit policy: one indexed count and the check is done
     if (!vendors.length || !find(POLICY).condition("organizationPartyId", "in", vendors).count()) return pass
     const internal = partyId => !!partyId && !!one("mantle.party.PartyRole", {partyId, roleTypeId: "OrgInternal"})
+    // an order change (SEC-BAP-91): a part held by the change's own Change hold alone is checked as the status it returns to,
+    // and a change (or its preview, forChange) checks an approved part too
+    const changeHold = p.changeHoldReasonId ? one(HOLD, {orderHoldReasonId: p.changeHoldReasonId}) : null
+    const openHolds = changeHold ? rows(HOLD, {orderId: p.orderId}).filter(row => !row.releasedDate) : []
+    const statusOf = part =>
+        changeHold &&
+        part.statusId === "OrderHold" &&
+        (!changeHold.orderPartSeqId || changeHold.orderPartSeqId === part.orderPartSeqId) &&
+        openHolds.every(row => row.orderHoldReasonId === changeHold.orderHoldReasonId)
+            ? changeHold.returnStatusId || "OrderPlaced"
+            : part.statusId
+    const checked = ["OrderPlaced", "OrderProcessing"].concat(changeHold || p.forChange ? ["OrderApproved"] : [])
     const salesParts = allParts.filter(
         part =>
             (!p.orderPartSeqId || part.orderPartSeqId === p.orderPartSeqId) &&
-            // only a part awaiting approval: an approved, held or completed part is never checked or held
-            ["OrderPlaced", "OrderProcessing"].includes(part.statusId) &&
+            // only a part awaiting approval: an approved, held or completed part is never checked or held, but for a change
+            checked.includes(statusOf(part)) &&
             internal(part.vendorPartyId) &&
             part.customerPartyId &&
             !internal(part.customerPartyId)
