@@ -1209,19 +1209,14 @@ function accountCard(p) {
     const organizationPartyId = served(p.siteId)
     if (!ec.user.userId) signInRequired()
     const customers = actingFor(organizationPartyId).map(row => row.partyId)
-    // the customers' cases, by their Customer party as find#CustomerCases reads them, less a public form's case its sender has
-    // not confirmed, which is no case of the account's yet (SEC-PSS-87)
+    // the customers' open cases, by their current Customer party as find#CustomerCases reads them, counted in one join, less
+    // a public form's case its sender has not confirmed, which is no case of the account's yet (SEC-PSS-87)
     const cf = ec.entity.conditionFactory
-    const linked = customers.length
-        ? Array.from(
-              find("mantle.request.RequestParty").condition("partyId", "in", customers).condition("roleTypeId", "Customer").list()
-          )
-              .filter(link => lib.active(link))
-              .map(link => link.requestId)
-        : []
-    const openCases = linked.length
-        ? find("mantle.request.Request")
-              .condition("requestId", "in", linked)
+    const openCases = customers.length
+        ? find("mantle.request.RequestAndParty")
+              .condition("partyId", "in", customers)
+              .condition("roleTypeId", "Customer")
+              .conditionDate("fromDate", "thruDate", now())
               .condition("statusId", "in", openStatuses)
               .condition(
                   cf.makeCondition(
@@ -1229,6 +1224,8 @@ function accountCard(p) {
                       "or"
                   )
               )
+              .selectField("requestId")
+              .distinct(true)
               .count()
         : 0
     const returns = customers.length
