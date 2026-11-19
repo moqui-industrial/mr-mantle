@@ -106,3 +106,26 @@ feature("SEC-PFS-89: a category's own moderator reads a member's scope there, no
         siteModerator.memberState.trustLevel == "basic"
     }
 })
+
+feature("SEC-PFS-97: a join request is asked once, and a member suspended from the site asks none", {
+    when() {
+        const join = username => op(username, "joinCategory", {contactListId: ids.approval})
+        const first = join("FSR_BEN")
+        const second = join("FSR_BEN")
+        lib.sanction(SITE, "FSR_SUS", "suspend")
+        return {
+            first,
+            second,
+            requests: count("mantle.marketing.contact.ContactListParty", {contactListId: ids.approval, partyId: "FSR_BEN"}),
+            suspended: join("FSR_SUS"),
+            suspendedRows: count("mantle.marketing.contact.ContactListParty", {contactListId: ids.approval, partyId: "FSR_SUS"})
+        }
+    },
+    then({first, second, requests, suspended, suspendedRows}) {
+        first.state == "pending"
+        second.state == "pending"
+        requests == 1
+        suspended.kind == "Unauthorized"
+        suspendedRows == 0
+    }
+})

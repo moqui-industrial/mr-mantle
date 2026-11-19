@@ -3127,15 +3127,31 @@ methods.joinCategory = (p) => {
     site(p.siteId)
     const partyId = requireUser(),
         a = category(p.contactListId, p.siteId)
+    // A current, active member of the site, as site() tests one: in its dates and not suspended there.
+    const m = member(p.siteId)
     // Joining a help category would open every other member's thread; staff add help members.
     if (
-        member(p.siteId)?.state !== 'active' ||
+        !active(m) ||
+        m.state !== 'active' ||
+        sanctioned(p.siteId, partyId, p.contactListId, 'suspend') ||
         !a.canRead ||
         a.category.visibility === 'help'
     )
         fail('Unauthorized', 'Joining is not permitted')
-    const old = listMember(p.contactListId, partyId)
-    if (old) return { state: 'active' }
+    // a current request or membership is answered as it stands, so asking again adds no row for the moderators
+    const old = Array.from(
+        find('mantle.marketing.contact.ContactListParty', {
+            contactListId: p.contactListId,
+            partyId,
+        })
+            .condition('statusId', 'in', ['CLPT_PENDING', 'CLPT_ACCEPTED'])
+            .conditionDate('fromDate', 'thruDate', now())
+            .orderBy('-fromDate')
+            .limit(1)
+            .list(),
+    )[0]
+    if (old)
+        return { state: old.statusId === 'CLPT_PENDING' ? 'pending' : 'active' }
     const values = {
         contactListId: p.contactListId,
         partyId,
