@@ -148,7 +148,8 @@ along with this software (see the LICENSE.md file). If not, see
             ProjWorkTypes, a JSON object whose offered is a comma list of WorkType enumIds; with no setting (or one that does not
             read) the services work types Development, Design, Testing, Meeting, Support, Project Management, Consulting and
             Travel. offeredList: [{enumId, label}] of those that exist; typeList: every WorkType with its label, whether it is
-            offered and its place (sequence).</description>
+            offered and its place (sequence), and isOwn for one the organization made (WktpOrg, the organization in enumCode). A
+            work type another organization made is in neither list.</description>
         <in-parameters>
             <parameter name="partyId"><description>The person; default the user's party</description></parameter>
             <parameter name="organizationPartyId"/>
@@ -177,14 +178,18 @@ along with this software (see the LICENSE.md file). If not, see
                     }
                 }
                 if (!offered || !offered.length) offered = defaults
+                // a work type an organization made (WktpOrg, its organization in enumCode) is that organization's alone: another's is
+                // neither listed nor offered here (SEC-BOS-131)
+                const othersOwn = (type) => String(type.enumId).startsWith('WktpOrg') && type.enumCode !== (organizationPartyId || null)
                 const types = Array.from(ec.entity.find('moqui.basic.Enumeration').condition('enumTypeId', 'WorkType').useCache(true).list())
+                        .filter((type) => !othersOwn(type))
                 const labels = {}
                 for (const type of types) labels[type.enumId] = type.description || type.enumId
                 offeredList = offered.filter((id) => labels[id]).map((id) => ({enumId: id, label: labels[id]}))
                 typeList = types.map((type) => {
                     const at = offered.indexOf(type.enumId)
                     return {enumId: type.enumId, label: labels[type.enumId], offered: at >= 0, sequence: at >= 0 ? at + 1 : null,
-                        isOwn: String(type.enumId).startsWith('WktpOrg')}
+                        isOwn: String(type.enumId).startsWith('WktpOrg') && type.enumCode === organizationPartyId}
                 })
                 typeList.sort((a, b) => (a.offered === b.offered ? 0 : a.offered ? -1 : 1) || (a.sequence ?? 0) - (b.sequence ?? 0) || String(a.label).localeCompare(String(b.label)))
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
