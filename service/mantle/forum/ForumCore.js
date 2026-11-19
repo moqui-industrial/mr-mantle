@@ -782,6 +782,33 @@ function internalMemberIds(contactListId) {
             .map((v) => v.partyId),
     )
 }
+/* A member's HTML (a post, a bio) cleaned, with an image kept only when it is one of the site's own attachment downloads
+   (a relative .../download?attachmentId=...): a reader's browser loads no other image, so no same-site route (a write
+   transition, reached with the reader's cookie) and no outside tracker is fetched by showing it (SEC-PSF-81). Any other
+   image is a link to its outside address, or its alt text for a relative one. In mail (mail true) every image is a link
+   or its text: there no page policy applies, and a mail client that loads images tells the sender who read when. */
+const ATTACHMENT_SRC =
+    /^(?:\/[A-Za-z0-9._~\/-]*)?\/download\?attachmentId=[A-Za-z0-9_-]{1,64}(?:&amp;variant=thumbnail)?$/
+function memberHtml(html, mail = false) {
+    const cleaned = StringUtilities.cleanHtml(html || '')
+    if (!/<img\b/i.test(cleaned)) return cleaned
+    const attribute = (tag, name) =>
+        (new RegExp('\\s' + name + '="([^"]*)"', 'i').exec(tag) || [])[1] || ''
+    return StringUtilities.cleanHtml(
+        cleaned.replace(/<img\b[^>]*>/gi, (tag) => {
+            const src = attribute(tag, 'src'),
+                alt = WebUtilities.encodeHtml(
+                    attribute(tag, 'alt')
+                        .replace(/&quot;/g, '"')
+                        .replace(/&amp;/g, '&'),
+                )
+            if (!mail && ATTACHMENT_SRC.test(src)) return tag
+            if (/^https?:\/\//i.test(src))
+                return '<a href="' + src + '">' + (alt || 'image') + '</a>'
+            return alt
+        }),
+    )
+}
 /* Sanitized HTML as plain text; templates escape it once. */
 function plainText(html) {
     return StringUtilities.cleanHtml(html || '')
@@ -1633,7 +1660,7 @@ function sourceFormatOf(value) {
 /* A revision's source as the cleaned HTML that is stored and shown: Markdown is rendered (CommonMark, fenced code as
    code) and then cleaned exactly as rich text is. */
 const renderSource = (format, text) =>
-    StringUtilities.cleanHtml(
+    memberHtml(
         format === 'markdown'
             ? ec.resource.markdownHtml(String(text || ''))
             : text,
@@ -1987,6 +2014,7 @@ function privateTopic(t) {
     revision,
     bump,
     sanctioned,
+    memberHtml,
     categoryChain,
     categorySubtree,
     routeAddress,

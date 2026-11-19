@@ -119,10 +119,10 @@ function postProjection(state, event, a, t) {
             ? ''
             : a.record
               ? core.recordText(
-                    StringUtilities.cleanHtml(event.body || ''),
+                    core.memberHtml(event.body || ''),
                     state.rootCommEventId,
                 )
-              : StringUtilities.cleanHtml(event.body || ''),
+              : core.memberHtml(event.body || ''),
         postKind: state.postKind || null,
         visibility: state.visibility,
         parentCommEventId: event.parentCommEventId || null,
@@ -644,7 +644,7 @@ methods.storeProfile = (p) => {
         avatarId,
         handle: p.handle,
         displayName: String(p.displayName || p.handle).slice(0, 100),
-        bio: StringUtilities.cleanHtml(p.bio || ''),
+        bio: core.memberHtml(p.bio || ''),
         discoverability: p.discoverability || 'members',
         locale: p.locale,
         timeZone: p.timeZone,
@@ -695,6 +695,7 @@ methods.getProfile = (p) => {
                 v,
                 'handle displayName avatarId bio locale timeZone revision',
             ),
+            bio: core.memberHtml(v.bio || ''),
             ...(v.partyId === me()
                 ? { discoverability: v.discoverability }
                 : {}),
@@ -3167,7 +3168,7 @@ methods.getDraft = (p) => {
             body:
                 d.sourceFormat === 'markdown'
                     ? d.sourceText || ''
-                    : StringUtilities.cleanHtml(d.sourceText || ''),
+                    : core.memberHtml(d.sourceText || ''),
             sourceFormat: d.sourceFormat === 'markdown' ? 'markdown' : 'html',
             attachments: rows(
                 F + 'ForumAttachment',

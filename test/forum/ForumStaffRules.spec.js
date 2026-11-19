@@ -348,3 +348,37 @@ feature("SEC-PFS-100: a list's archive is named in the site's own import directo
         own.runId != null
     }
 })
+
+feature("SEC-PSF-81: a member's HTML keeps an image only of the site's attachment downloads, and in mail none", {
+    when() {
+        lib.settled(SITE, "FSR_BEN")
+        const html =
+            '<p>FSR images<img src="/shop/Checkout/begin" alt="a cart"><img src="https://tracker.example/p.gif" alt="pixel">' +
+            '<img src="/forum/t/1/a/download?attachmentId=FSRATT1" alt="photo"></p>'
+        const topic = op("FSR_BEN", "publishPost", {contactListId: ids.general, title: "FSR images", body: html, operationId: operationId()})
+        const profile = op("FSR_BEN", "storeProfile", {
+            handle: "fsrben",
+            displayName: "Ben",
+            bio: '<p>Hi<img src="/shop/Checkout/begin"></p>',
+            expectedRevision: Number(lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}).revision)
+        })
+        const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        return {
+            body: lib.row("mantle.party.communication.CommunicationEvent", {communicationEventId: topic.rootCommEventId}).body,
+            bio: lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}).bio,
+            profile,
+            mail: core.memberHtml(html, true)
+        }
+    },
+    then({body, bio, profile, mail}) {
+        profile.kind == null
+        !body.includes('src="/shop')
+        body.includes("a cart")
+        !body.includes('src="https://tracker.example')
+        body.includes('href="https://tracker.example/p.gif"')
+        body.includes('src="/forum/t/1/a/download?attachmentId=FSRATT1"')
+        !bio.includes("<img")
+        !mail.includes("<img")
+        mail.includes("photo")
+    }
+})

@@ -503,7 +503,7 @@
                           ' · post ' +
                           st.ordinal +
                           '</p>' +
-                          StringUtilities.cleanHtml(event.body || '') +
+                          core.memberHtml(event.body || '') +
                           '</blockquote>'
                     : author +
                           ' · post ' +

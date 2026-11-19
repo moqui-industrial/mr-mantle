@@ -300,7 +300,7 @@
                           return st && event
                               ? {
                                     title: event.subject,
-                                    body: StringUtilities.cleanHtml(
+                                    body: core.memberHtml(
                                         event.body || '',
                                     ),
                                     revision: st.revision,
@@ -2177,7 +2177,7 @@
         return context.map((v) => ({
             postId: v.communicationEventId,
             ordinal: Number(v.ordinal),
-            body: StringUtilities.cleanHtml(v.body || ''),
+            body: core.memberHtml(v.body || ''),
         }))
     }
     methods.escalateReview = (p) => {
