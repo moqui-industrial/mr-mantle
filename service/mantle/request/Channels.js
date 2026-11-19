@@ -304,6 +304,29 @@ function headerBytes(headers) {
 // Anyone can write a From, so without that the address names no one: the mail joins no case, reopens none, confirms no
 // typed address and makes no case; it is held for review with why. For a mailbox synced from a provider, the provider's
 // authserv-id is the one to name.
+// The authserv-ids a message's account is proved under: a synced mailbox's (its server has a store host) its providers'
+// (mantle@mail-provider-authserv-ids), any other the mail listener's own (ForumCore.js listenerAuthservIds). With none, nothing
+// is trusted, logged once a process as a warning.
+function trustedIdsOf(message) {
+    const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+    const account = message.emailAccountId ? one("moqui.basic.email.EmailAccount", {emailAccountId: message.emailAccountId}) : null
+    const server = account?.emailServerId ? one("moqui.basic.email.EmailServer", {emailServerId: account.emailServerId}) : null
+    const synced = !!String(server?.storeHost || "").trim()
+    const ids = synced ? core.providerAuthservIds() : core.listenerAuthservIds()
+    if (!ids.length) {
+        const warned = ec.cache.getCache("mantle.request.MailTrustWarned")
+        const key = synced ? "synced" : "listener"
+        if (!warned.get(key)) {
+            warned.put(key, "Y")
+            ec.logger.warn(
+                "Service queue mail: no mail gateway is trusted for " +
+                    (synced ? "synced mailboxes (set mantle@mail-provider-authserv-ids)" : "the mail listener (set smtp-server@authserv-id)") +
+                    ", so every message is held for review"
+            )
+        }
+    }
+    return {synced, ids}
+}
 function senderTrust(message) {
     const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
     const headers = message.headersString
@@ -321,7 +344,14 @@ function senderTrust(message) {
         return refused("The message names more than one From address")
     if (core.nameShowsOtherAddress(message.fromName, address))
         return refused("The sender's display name shows another email address")
-    if (!core.gatewayAuthenticated(headerValues(headers, "Authentication-Results"), address))
+    const trusted = trustedIdsOf(message)
+    if (!trusted.ids.length)
+        return refused(
+            trusted.synced
+                ? "No mail provider is trusted for this synced mailbox (mantle@mail-provider-authserv-ids)"
+                : "No mail gateway is trusted (smtp-server@authserv-id)"
+        )
+    if (!core.gatewayAuthenticated(headerValues(headers, "Authentication-Results"), address, trusted.ids))
         return refused("The mail gateway did not authenticate the sender's address")
     return {authenticated: true, problem: null}
 }

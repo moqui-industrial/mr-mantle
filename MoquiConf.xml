@@ -7,9 +7,14 @@
         calendar-email-from the sender of calendar reminders (the work effort owner's organization's when empty),
         content-root the location under which a record's files and text content are written (a task's, an order's, a
         Smithy release's notes and files, and the others), content-large-root the same for binary files. The roots are
-        settings, never a user's preference: a user who could set one would choose where the server writes. -->
+        settings, never a user's preference: a user who could set one would choose where the server writes.
+        mail-provider-authserv-ids the authserv-ids (comma separated) of the mail providers a synced (IMAP or POP) mailbox's
+        mail comes from, whose topmost Authentication-Results field proves its sender's domain for a service queue's mail
+        (mx.google.com for Gmail, for one); mail the listener takes is proved under the listener's own id
+        (smtp-server@authserv-id, else its hostname when it verifies mail itself), never this list (SEC-BAP-84). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
-            content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"/>
+            content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
+            mail-provider-authserv-ids=""/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->

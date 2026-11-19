@@ -551,6 +551,50 @@ feature("mail the gateway did not authenticate, or whose From is not one plain m
     }
 })
 
+feature("the listener's own authserv-id is trusted when the conf names none; only the topmost field counts; a synced mailbox's by its provider's id (SEC-BAP-84)", {
+    when() {
+        const token = "More [Request " + state.mailCase + "]"
+        const joinedBy = (headersString, extra = {}) => {
+            const id = receive(Object.assign({fromAddress: "dana.sch@example.com", subject: token, bodyText: "Again.", headersString}, extra))
+            return mail(id).joined
+        }
+        const from = "From: dana.sch@example.com\r\n"
+        const pass = id => "Authentication-Results: " + id + "; dmarc=pass header.from=example.com"
+        call("store#moqui.basic.email.EmailServer", {emailServerId: prefix + "_IMAP", storeHost: "imap.provider.test"})
+        call("store#moqui.basic.email.EmailAccount", {
+            emailAccountId: prefix + "_SYNCED",
+            ownerUserId: state.admin,
+            accountKindEnumId: "EakExternal",
+            emailServerId: prefix + "_IMAP",
+            emailAddress: "help@sch.example",
+            statusId: "EasActive"
+        })
+        const synced = {emailAccountId: prefix + "_SYNCED"}
+        return {
+            // the conf names no id; a listener that verifies mail writes under its hostname
+            ownHost: withConf("smtp-server@authserv-id", "", () =>
+                withConf("smtp-server@internet", "true", () =>
+                    withConf("smtp-server@hostname", "mx.sch.test", () => joinedBy(from + pass("mx.sch.test")))
+                )
+            ),
+            // behind a gateway with no id, nothing is trusted
+            noneTrusted: withConf("smtp-server@authserv-id", "", () => joinedBy(from + pass(GATEWAY))),
+            // a trusted id lower than the topmost field is a sender's own
+            lower: joinedBy(from + "Authentication-Results: other.test; dmarc=none\r\n" + pass(GATEWAY)),
+            // a synced mailbox: its provider's id, never the listener's
+            provider: withConf("mantle@mail-provider-authserv-ids", "mx.provider.test", () => joinedBy(from + pass("mx.provider.test"), synced)),
+            listenerOnSynced: withConf("mantle@mail-provider-authserv-ids", "mx.provider.test", () => joinedBy(from + pass(GATEWAY), synced))
+        }
+    },
+    then({ownHost, noneTrusted, lower, provider, listenerOnSynced}) {
+        ownHost == true
+        noneTrusted == false
+        lower == false
+        provider == true
+        listenerOnSynced == false
+    }
+})
+
 feature("an automatic reply attaches to its case as no reply, sends nothing and makes no case; one on no case makes nothing", {
     when() {
         const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})

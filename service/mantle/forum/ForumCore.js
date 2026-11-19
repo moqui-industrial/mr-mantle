@@ -926,21 +926,38 @@ function readAuthResults(text) {
     }
     return { authservId, results }
 }
-/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp-server@authserv-id, comma
-   separated, in lower case): with none configured nothing counts as authenticated. */
-const trustedAuthservIds = () =>
-    String(ec.factory.getConfValue('smtp-server@authserv-id') || '')
+/* The authserv-id the mail listener writes its Authentication-Results under, or keeps the gateway's under
+   (crates/moqui-mail/src/delivery.rs listener_options): smtp-server@authserv-id, else, on a listener that verifies mail
+   itself (smtp-server@internet, or an edge node), its hostname (smtp-server@hostname, else the webroot's http-host, else
+   localhost, as crates/moqui-mail/src/mx.rs hostname). A listener behind a gateway with no id keeps every field as it came,
+   so none is trusted. Lower case; empty for none. */
+function listenerAuthservIds() {
+    const conf = (selector) => String(ec.factory.getConfValue(selector) ?? '').trim()
+    const named = conf('smtp-server@authserv-id').toLowerCase()
+    if (named) return [named]
+    const verifies =
+        conf('smtp-server@internet').toLowerCase() === 'true' ||
+        ['front', 'front_edge', 'edge'].includes(conf('instance@node-role').toLowerCase())
+    if (!verifies) return []
+    return [(conf('smtp-server@hostname') || conf('webapp-list/webapp[webroot]@http-host') || 'localhost').toLowerCase()]
+}
+/* The authserv-ids of the providers a synced (IMAP or POP) mailbox's mail comes from, whose topmost Authentication-Results
+   field is trusted for that mail (mantle@mail-provider-authserv-ids, comma separated; SEC-BAP-84). */
+const providerAuthservIds = () =>
+    String(ec.factory.getConfValue('mantle@mail-provider-authserv-ids') || '')
         .split(',')
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean)
-/* Whether the mail gateway authenticated a sender's domain: in an Authentication-Results field of a trusted authserv-id,
-   DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict alignment). A parent's
-   signature is not the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the
-   organizational domain, which the gateway's DMARC finds by the public suffix list and this code does not.
-   Another domain's pass, another server's field and a later result of a method count for nothing. Every path that trusts
-   "authenticated by the gateway" asks this: a post by mail, a held message's sender, a report filed as an account. */
-function gatewayAuthenticated(values, sender) {
-    const trusted = trustedAuthservIds()
+const trustedAuthservIds = listenerAuthservIds
+/* Whether the mail gateway authenticated a sender's domain: in the topmost Authentication-Results field, which the
+   receiving server wrote last, under a trusted authserv-id (the listener's own by default; trusted, a list, for a synced
+   mailbox's provider), DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict
+   alignment). A lower field of a trusted id is no proof: a sender can write one (SEC-BAP-84). A parent's signature is not
+   the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the organizational domain,
+   which the gateway's DMARC finds by the public suffix list and this code does not. Another domain's pass, another
+   server's field and a later result of a method count for nothing. Every path that trusts "authenticated by the gateway"
+   asks this: a post by mail, a held message's sender, a report filed as an account, a service queue's mail. */
+function gatewayAuthenticated(values, sender, trusted = trustedAuthservIds()) {
     const domain = String(sender || '')
         .split('@')
         .pop()
@@ -953,7 +970,7 @@ function gatewayAuthenticated(values, sender) {
             .toLowerCase()
         return !!signer && domain === signer
     }
-    return values.some((value) => {
+    return Array.from(values || []).slice(0, 1).some((value) => {
         const read = readAuthResults(value)
         if (!read || !trusted.includes(read.authservId)) return false
         const dmarc = read.results.dmarc
@@ -1935,6 +1952,8 @@ function privateTopic(t) {
     nameShowsOtherAddress,
     readAuthResults,
     gatewayAuthenticated,
+    listenerAuthservIds,
+    providerAuthservIds,
     now,
     millis,
     dayKey,
