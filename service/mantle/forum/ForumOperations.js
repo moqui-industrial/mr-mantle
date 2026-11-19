@@ -290,6 +290,15 @@
         const jobType = OPERATIONS[p.operation]
         if (!jobType) invalid('Unknown operation')
         if (!p.reason) invalid('A reason is required')
+        // one pending run of an operation per site: the queue every site shares holds no burst of one site's
+        if (
+            find(F + 'ForumJobRun', {
+                siteId: p.siteId,
+                jobType,
+                state: 'pending',
+            }).count()
+        )
+            fail('Conflict', 'That operation is already running on this site')
         const config = { contactListId: p.contactListId || null, after: null }
         if (p.operation === 'retention') {
             const policy = retentionPolicy(p.siteId)
@@ -893,22 +902,26 @@
         if (!member(p.siteId, partyId)) missing()
         if (!['export', 'erasure'].includes(p.kind))
             invalid('Request an export or an erasure')
-        if (p.kind === 'erasure') {
-            if (p.confirm !== true)
-                invalid(
-                    'Confirm that your profile will be anonymized and your memberships ended',
-                )
-            if (
-                find(F + 'ForumDataRequest', {
-                    siteId: p.siteId,
-                    partyId,
-                    kind: 'erasure',
-                })
-                    .condition('state', 'in', ['requested', 'running'])
-                    .count()
+        if (p.kind === 'erasure' && p.confirm !== true)
+            invalid(
+                'Confirm that your profile will be anonymized and your memberships ended',
             )
-                fail('Conflict', 'An erasure request is already open')
-        }
+        // one open request of each kind per member and site: an export waits for the one before it to finish
+        if (
+            find(F + 'ForumDataRequest', {
+                siteId: p.siteId,
+                partyId,
+                kind: p.kind,
+            })
+                .condition('state', 'in', ['requested', 'running'])
+                .count()
+        )
+            fail(
+                'Conflict',
+                p.kind === 'erasure'
+                    ? 'An erasure request is already open'
+                    : 'An export request is already open',
+            )
         const requestId = id()
         const fields = {
             requestId,
@@ -1147,16 +1160,40 @@
         }
         return done
     }
+    /* The oldest pending runs taken in turn across sites (each site's oldest, then each one's next), so one site's burst
+       does not hold back every other site's erasures, retention and imports. */
+    function fairRuns(pending, most) {
+        const bySite = new Map()
+        for (const run of pending) {
+            if (!bySite.has(run.siteId)) bySite.set(run.siteId, [])
+            bySite.get(run.siteId).push(run)
+        }
+        const queues = [...bySite.values()],
+            out = []
+        for (let at = 0; out.length < most; at++) {
+            let any = false
+            for (const queue of queues)
+                if (at < queue.length && out.length < most) {
+                    out.push(queue[at])
+                    any = true
+                }
+            if (!any) break
+        }
+        return out
+    }
     function dispatchJobs(p) {
         const was = ec.artifactExecution.disableAuthz()
         try {
             let processed = 0
-            for (const run of Array.from(
-                find(F + 'ForumJobRun', { state: 'pending' })
-                    .condition('jobType', 'like', 'op-%')
-                    .orderBy('createdAt,runId')
-                    .limit(50)
-                    .list(),
+            for (const run of fairRuns(
+                Array.from(
+                    find(F + 'ForumJobRun', { state: 'pending' })
+                        .condition('jobType', 'like', 'op-%')
+                        .orderBy('createdAt,runId')
+                        .limit(500)
+                        .list(),
+                ),
+                50,
             )) {
                 try {
                     // Small transactions, so a cancel waits for at most one chunk of items.
@@ -1477,6 +1514,17 @@
         site(p.siteId)
         const { siteStaff } = reportScope(p)
         const { from, thru } = period(p)
+        // a staff member makes at most mantle@forum-report-exports-per-day report files a day on a site
+        const most = Number(
+            ec.factory.getConfValue('mantle@forum-report-exports-per-day') || 20,
+        )
+        if (
+            find(F + 'ForumExport', { siteId: p.siteId, partyId: requireUser() })
+                .condition('kind', 'like', 'report-%')
+                .condition('createdAt', 'greater', stamp(millis(now()) - DAY))
+                .count() >= most
+        )
+            fail('Tarpit', 'At most ' + most + ' report exports a day')
         let header, lines
         if (p.report === 'activity') {
             const a = methods.getActivity(p)

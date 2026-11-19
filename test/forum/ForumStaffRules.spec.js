@@ -239,3 +239,27 @@ feature("SEC-PFS-92: a draft is a member's, within the post's length and the mem
         left == 1
     }
 })
+
+feature("SEC-PFS-93: one open export per member, a day's report files per staff member, one pending operation per site", {
+    when() {
+        setConf("mantle@forum-report-exports-per-day", "1")
+        const out = {
+            firstExport: op("FSR_BEN", "requestPersonalDataAction", {kind: "export"}),
+            secondExport: op("FSR_BEN", "requestPersonalDataAction", {kind: "export"}),
+            firstReport: op("FSR_MOD", "exportReport", {report: "activity"}),
+            secondReport: op("FSR_MOD", "exportReport", {report: "activity"}),
+            firstRun: op("FSR_OWNER", "startOperation", {operation: "rebuild-counters", reason: "Check"}),
+            secondRun: op("FSR_OWNER", "startOperation", {operation: "rebuild-counters", reason: "Again"})
+        }
+        setConf("mantle@forum-report-exports-per-day", "")
+        return out
+    },
+    then({firstExport, secondExport, firstReport, secondReport, firstRun, secondRun}) {
+        firstExport.state == "running"
+        secondExport.kind == "Conflict"
+        firstReport.exportId != null
+        secondReport.kind == "Tarpit"
+        firstRun.runId != null
+        secondRun.kind == "Conflict"
+    }
+})

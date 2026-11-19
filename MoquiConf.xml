@@ -23,13 +23,14 @@
         day from one requester and for one buyer address (each up to its tickets' places), marketing-tickets-per-address how
         many reservations a day name one attendee address, which is mailed each ticket (SEC-PSS-88). -->
     <!-- The forum's limits: forum-drafts-per-member how many drafts a member keeps on a site (SEC-PFS-92), forum-draft-days
-        after how many days untouched a draft is removed (0 keeps them). -->
+        after how many days untouched a draft is removed (0 keeps them), forum-report-exports-per-day how many report files
+        a staff member makes on a site a day (SEC-PFS-93). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
             content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
             shop-payment-calls="120" shop-payment-forms="10" shop-renewal-resumes="2"
             marketing-reservations-per-offer="20" marketing-tickets-per-address="10"
             mail-provider-authserv-ids="" forum-inbound-accounts=""
-            forum-drafts-per-member="50" forum-draft-days="90"/>
+            forum-drafts-per-member="50" forum-draft-days="90" forum-report-exports-per-day="20"/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->
