@@ -140,8 +140,10 @@ const salariesOf = partyRelationshipId =>
 const salaryRevision = partyRelationshipId => revisionOf(rows(SALARY, {partyRelationshipId}))
 // A salary from fromMs: the row in effect then ends on it, and the new one starts; a row from the same moment, or a later one set
 // already, is refused, so a change never silently chooses between two rows. Written with authorization off: the caller has been
-// checked (create#EmploymentSalary for PAYROLL_EDIT, the pay change by its request and approval).
+// checked (create#EmploymentSalary for PAYROLL_EDIT, the pay change by its request and approval). Never the caller's own
+// employment (SEC-BOS-114: a repair, the employees import's first salary, a pay change applied): notOwnPay.
 function writeSalary(partyRelationshipId, values, reason) {
+    notOwnPay(one(RELATIONSHIP, {partyRelationshipId})?.fromPartyId || null)
     const fromMs = values.fromMs
     checkSalaryDate(partyRelationshipId, fromMs)
     const inEffect = salariesOf(partyRelationshipId).find(row => openAt(row, fromMs))

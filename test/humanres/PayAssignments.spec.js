@@ -1018,6 +1018,24 @@ feature("a payroll editor changes no pay input of their own employment; a tax pr
                     fromDate: since
                 })
             )
+        // round 2: the editor's own assignment and pay rate another editor set, ended or changed by the editor; the benefit
+        // branch; a first salary by a repairer who is the employee; and the same profile store answered for another employee
+        const ownAssigned = run(state.payroll, G + "assign#PayStructure", {partyRelationshipIds: [selfEmp], payrollStructureId: state.extra,
+            payrollGroupId: state.group, isPrimary: "N", fromDate: dayText(-30)}).rows?.[0]?.payrollAssignmentId
+        const ownAssignment = rows("mantle.humanres.payroll.PayrollAssignment", {payrollAssignmentId: ownAssigned})[0]
+        const endOwn = code(run(editor, G + "assign#PayStructure", {end: true, payrollAssignmentId: ownAssigned,
+            expectedRevision: String(ms(ownAssignment.lastUpdatedStamp)), reason: "Spec"}))
+        const ownRateId = run(state.payroll, "mantle.humanres.RateServices.create#RateAmount", {partyId: self, ratePurposeEnumId: "RaprVendor",
+            rateAmount: "50", rateCurrencyUomId: "USD", fromDate: since}).rateAmountId
+        const updateOwnRate = code(run(editor, "mantle.humanres.RateServices.update#RateAmount", {rateAmountId: ownRateId, rateAmount: "90"}))
+        const ownBenefit = code(run(editor, G + "store#PayrollProfile", {partyRelationshipId: selfEmp, benefitTypeId: "Health",
+            fromDate: dayText(-30), expectedRevision: "0", cost: "10"}))
+        const repairParty = person("SELFREPAIR")
+        const repairEmp = employ(repairParty, orgA)
+        const repairer = user("SELFREPAIR", ["PEOPLE_DIRECTORY_VIEW", "PAYROLL_VIEW", "PAYROLL_EDIT", "PAYROLL_REPAIR"], [orgA], repairParty)
+        const ownSalary = code(run(repairer, SALARY, {partyRelationshipId: repairEmp, amount: "9000", currencyUomId: "USD",
+            timePeriodTypeId: "PayrollMonth", fromDate: dayText(-10)}))
+        const otherProfile = profile(state.cyEmp)
         const stored = String(
             ec.entity.runSqlStatement(
                 "transactional",
@@ -1026,15 +1044,25 @@ feature("a payroll editor changes no pay input of their own employment; a tax pr
             ).records[0][0]
         )
         return {
-            own: {profile: profile(selfEmp), assign: assign(selfEmp), rate: rate(self)},
-            other: {assign: assign(state.cyEmp), rate: rate(state.cy)},
+            own: {profile: profile(selfEmp), assign: assign(selfEmp), rate: rate(self), end: endOwn, rateUpdate: updateOwnRate,
+                benefit: ownBenefit, salary: ownSalary},
+            other: {assign: assign(state.cyEmp), rate: rate(state.cy), profile: otherProfile},
             stored,
             read: rows("mantle.humanres.payroll.PayrollTaxProfile", {partyRelationshipId: state.anaEmp})[0].profileValues
         }
     },
     then({own, other, stored, read}) {
-        own == {profile: "SELF_APPROVAL", assign: ["SELF_APPROVAL"], rate: "SELF_APPROVAL"}
-        other == {assign: ["ready"], rate: ""}
+        own ==
+            {
+                profile: "SELF_APPROVAL",
+                assign: ["SELF_APPROVAL"],
+                rate: "SELF_APPROVAL",
+                end: "SELF_APPROVAL",
+                rateUpdate: "SELF_APPROVAL",
+                benefit: "SELF_APPROVAL",
+                salary: "SELF_APPROVAL"
+            }
+        other == {assign: ["ready"], rate: "", profile: ""}
         stored.startsWith(":")
         read.includes("NORTH")
     }
