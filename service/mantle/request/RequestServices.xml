@@ -816,7 +816,9 @@ along with this software (see the LICENSE.md file). If not, see
             queue, past which the address gets the neutral receipt and nothing is made (a refusal would tell a known address
             from one the queue ignores); a customer the organization serves (found by the address) makes a case, anyone else is held for review
             (Channels.js formRequest), and a held one is not confirmed. Its sender is marked not verified (Request
-            senderVerified N, SEC-PSS-28) until a reply comes from the typed address or its filer opens it signed in.
+            senderVerified N, SEC-PSS-28) until a reply comes from the typed address, or, from a site's form, the signed-in filer
+            typed one of their account's verified addresses (SupportPortal.js intakeCase); opening it signed in later never
+            confirms it (SEC-PSS-87).
             organizationPartyId, from a site's form (a PASS Support mount), is the organization the site serves: a queue's
             token of another organization is not available there (SEC-PSS-66); a project's form token is never a site's.
         </description>
@@ -998,7 +1000,8 @@ along with this software (see the LICENSE.md file). If not, see
             - A message already on a request is left (running the rules again makes nothing twice).
             - A reply in a request's thread (its In-Reply-To or References name a message on the request, or its thread's
               first message is on it) joins that request's conversation and makes nothing new, when the trusted mail gateway
-              authenticated its sender (find#EmailRequest, SEC-BAP-84).
+              authenticated its sender (find#EmailRequest, SEC-BAP-84); one from the address a form was given marks the
+              request's sender verified (SupportCases.js confirmSender, SEC-BOS-103).
             - A value that names a service queue (Customer Service P6, F10, F11; Channels.js mailIntake) files into the queue
               by its route: references, then a verified case token; an automatic message ignored or attached only, never
               acknowledged; a customer's message a case timed by its received date and acknowledged once; staff, another
@@ -1058,6 +1061,10 @@ along with this software (see the LICENSE.md file). If not, see
                     requestId = thread.requestId
                     joined = true
                     ec.service.sync().name('mantle.request.RequestServices.file#RequestEmail').parameters({requestId: requestId, emailMessageId: emailMessageId}).call()
+                    // a reply from the address a project's form was given confirms it, as a queue's mail does (SEC-BOS-103;
+                    // find#EmailRequest joins only mail the trusted gateway authenticated)
+                    if (!channels.automaticReason(message))
+                        ec.resource.script('component://mr-mantle/service/mantle/request/SupportCases.js').confirmSender(requestId, {address: message.fromAddress})
                     return
                 }
                 const project = ec.service.sync().name('mantle.request.RequestServices.find#EmailIntakeProject').parameters({emailMessageId: emailMessageId,

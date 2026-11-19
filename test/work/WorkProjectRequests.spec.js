@@ -239,6 +239,31 @@ feature("a reply in the request's thread joins its conversation and makes no req
     },
 })
 
+feature("a reply from the address the project's form was given confirms its sender; one from another address does not (SEC-BOS-103)", {
+    when() {
+        // the form request's own message, as its confirmation is
+        const sent = receive({ fromAddress: "support@rqp.example", toAddresses: "fern.formby@example.com", subject: "RQP The export is empty" })
+        call("create#mantle.request.RequestEmailMessage", { requestId: made.formRequest, emailMessageId: sent })
+        const first = one("moqui.basic.email.EmailMessage", { emailMessageId: sent })
+        const reply = (fromAddress) => {
+            const id = receive({ fromAddress, toAddresses: "support+rqp@rqp.example", subject: "Re: RQP The export is empty",
+                bodyText: "Still empty.", inReplyTo: first.messageId, referencesHeader: first.messageId })
+            runRules([id])
+            return all("mantle.request.RequestEmailMessage", { emailMessageId: id })[0]?.requestId || null
+        }
+        const otherJoined = reply("dana.rqp@example.com")
+        const afterOther = request(made.formRequest).senderVerified
+        const typedJoined = reply("Fern.Formby@example.com")
+        return { otherJoined, afterOther, typedJoined, afterTyped: request(made.formRequest).senderVerified }
+    },
+    then({ otherJoined, afterOther, typedJoined, afterTyped }) {
+        otherJoined == made.formRequest
+        afterOther == "N"
+        typedJoined == made.formRequest
+        afterTyped == "Y"
+    },
+})
+
 feature("a rule whose owner is not on the project files no project: the request waits for triage with none", {
     when() {
         call("store#moqui.basic.email.EmailRule", { emailRuleId: "RQP_STRANGER", ownerUserId: "joe@public.com", emailAccountId: "RQP_ACCOUNT",
