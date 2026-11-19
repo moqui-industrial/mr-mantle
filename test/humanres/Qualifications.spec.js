@@ -351,6 +351,14 @@ feature("an identity document or work permit needs an expiry; its number is the 
         const list = username => run(username, D + "find#Qualifications", {partyId: state.ana})
         const mine = run(state.uAna, D + "find#Qualifications", {mine: true})
         out.ownNumber = rowOf(mine, state.permit)?.referenceNumber
+        // stored encrypted (SEC-BOS-116), read back as typed
+        out.storedNumber = String(
+            ec.entity.runSqlStatement(
+                "transactional",
+                `SELECT REFERENCE_NUMBER FROM PARTY_QUALIFICATION WHERE PARTY_QUALIFICATION_ID = '${state.permit}'`,
+                1
+            ).records[0][0]
+        )
         out.hrNumber = rowOf(list(state.hr), state.permit)?.referenceNumber
         const developRow = rowOf(list(state.dev), state.permit)
         out.devNumber = developRow ? developRow.referenceNumber : "absent"
@@ -386,6 +394,7 @@ feature("an identity document or work permit needs an expiry; its number is the 
     then(out) {
         out.noExpiry == "EXPIRY_REQUIRED" && out.devSubmits == "PERMISSION_DENIED"
         out.ownNumber == "WP-1234" && out.hrNumber == "WP-1234" && out.devNumber == null && out.devCertNumber == "WELD-778899"
+        out.storedNumber.startsWith(":") && !out.storedNumber.includes("WP-1234")
         out.managerBefore == "absent"
         out.devVerifies == "PERMISSION_DENIED" && out.hrVerifies == ""
         out.managerRow.validity == "valid" || out.managerRow.validity == "expiring"
