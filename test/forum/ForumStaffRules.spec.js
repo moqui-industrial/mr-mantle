@@ -263,3 +263,34 @@ feature("SEC-PFS-93: one open export per member, a day's report files per staff 
         secondRun.kind == "Conflict"
     }
 })
+
+feature("SEC-PFS-99: a site's owner sends as a registered sender of the site's own domain only; the operator any", {
+    when() {
+        setConf("pass@sender-addresses", "forum@" + HOST + ",forum@other.test")
+        setConf("pass@mail-template-ids", "FSR_OWN,FSR_OTHER")
+        for (const [emailTemplateId, fromAddress] of [
+            ["FSR_OWN", "forum@" + HOST],
+            ["FSR_OTHER", "forum@other.test"]
+        ])
+            lib.make("moqui.basic.email.EmailTemplate", {
+                emailTemplateId,
+                description: emailTemplateId,
+                fromAddress,
+                subject: "${title}",
+                bodyScreenLocation: "component://mr-mantle/screen/NoScreen.xml"
+            })
+        const store = (username, senderAddress, templateId, expectedRevision) =>
+            op(username, "storeMailSettings", {senderAddress, senderName: "FSR", templateId, expectedRevision})
+        const other = store("FSR_OWNER", "forum@other.test", "FSR_OTHER", 0)
+        const own = store("FSR_OWNER", "forum@" + HOST, "FSR_OWN", 0)
+        const operator = store(lib.OPERATOR, "forum@other.test", "FSR_OTHER", 1)
+        const back = store(lib.OPERATOR, "forum@" + HOST, "FSR_OWN", 2)
+        return {other, own, operator, back}
+    },
+    then({other, own, operator, back}) {
+        other.kind == "Unprocessable"
+        own.revision == 1
+        operator.revision == 2
+        back.revision == 3
+    }
+})

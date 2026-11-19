@@ -2478,6 +2478,20 @@ methods.storeMailSettings = (p) => {
         .map((x) => x.trim())
     if (!allowed.includes(p.senderAddress))
         invalid('Sender must be registered by the operator')
+    // The registered senders are the deployment's: a site's owner takes only one of the site's own domain, the domain of
+    // one of its hosts or one above it (forum.example.com sends as example.com), so one site's mail never goes out as
+    // another's (SEC-PFS-99); the operator stores any registered sender.
+    if (!isOperator()) {
+        const domain = String(p.senderAddress).split('@').pop().trim().toLowerCase()
+        const hosts = rows(S + 'PublicSiteHost', { siteId: p.siteId }, 100).map(
+            (h) => String(h.hostname || '').toLowerCase(),
+        )
+        if (
+            !domain ||
+            !hosts.some((h) => h === domain || h.endsWith('.' + domain))
+        )
+            invalid("The sender's domain must be one of this site's host domains")
+    }
     const template = one('moqui.basic.email.EmailTemplate', {
         emailTemplateId: p.templateId,
     })
