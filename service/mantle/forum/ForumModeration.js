@@ -59,6 +59,8 @@
     } = core
     /* What a decision on a held message does: ForumLists.js gives it (Forum.js, once both are made). */
     let heldDecider = null
+    // a released private message goes to its conversation's participants (Forum.js allocatePrivate)
+    let privateAllocator = null
     methods.flagPost = (p) =>
         receipt(p, 'flagPost', () => {
             const st = one(F + 'ForumPostState', {
@@ -319,8 +321,11 @@
                                     rootCommEventId: st.rootCommEventId,
                                 })
                               : null
+                          // a private message held as spam is shown alone: no report opened its conversation
                           return t?.kind === 'private'
-                              ? privateContext(r, st)
+                              ? r.reasonFamily === 'mail-verdict'
+                                  ? []
+                                  : privateContext(r, st)
                               : null
                       })()
                     : null,
@@ -513,8 +518,15 @@
                         approvedContributions:
                             Number(m.approvedContributions) + 1,
                     })
-                // A record's post has no category of its own and no internal mailbox.
-                if (t.kind !== 'record')
+                // A private message goes to its conversation's internal participants; a record's post has no category
+                // of its own and no internal mailbox.
+                if (t.kind === 'private')
+                    privateAllocator(
+                        r.targetId,
+                        st.rootCommEventId,
+                        event.fromPartyId,
+                    )
+                else if (t.kind !== 'record')
                     allocateInternal(
                         r.targetId,
                         event.contactListId,
@@ -2253,6 +2265,9 @@
     return {
         onHeld: (decide) => {
             heldDecider = decide
+        },
+        onPrivateApproved: (allocate) => {
+            privateAllocator = allocate
         },
         recount,
         recomputeTrust,

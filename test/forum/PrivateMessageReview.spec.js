@@ -1,7 +1,9 @@
 // A private message reaches a site's staff only through a participant's report (plans/Security-Review-Medium.md
 // SEC-PFS-83; mr-pass plan/design-forum.md: staff do not browse private messages): a site rule that would flag or hold a
 // post files a review item for a topic of a category, never for a private conversation's post or its edit; a
-// participant's report still files one. ForumCore.js gate, Forum.js publishPost and updatePost. Spec-local site and
+// participant's report still files one; a reply the mail gateway held as spam files a review item of the site's staff,
+// shown alone, which releases it to the conversation (ForumModeration.js decideReview). ForumCore.js gate, Forum.js
+// publishPost and updatePost. Spec-local site and
 // accounts, through the PASS authority as a page's call arrives. Run: ./moq test mr-mantle --spec PrivateMessageReview
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
 const SITE = "PMR_SITE"
@@ -93,7 +95,7 @@ feature("a rule flags a category's post for review, never a private message or i
     }
 })
 
-feature("an approve rule holds a category's post, never a private reply, and a reply held as spam files no review", {
+feature("an approve rule holds a category's post, never a private reply; a reply held as spam is the staff's to release", {
     when() {
         lib.settled(SITE, "PMR_BEN")
         const held = lib.op("PMR_BEN", SITE, "publishPost", {
@@ -123,24 +125,49 @@ feature("an approve rule holds a category's post, never a private reply, and a r
             }).result
         )
         const state = postId => lib.row("mantle.forum.ForumPostState", {communicationEventId: postId})
+        const spamState = state(spam.postId)
+        const spamReviews = reviewsOf(spam.postId)
+        // the site's staff see the held message alone, no other post of the conversation, and release it
+        const shown = lib.op("PMR_OWNER", SITE, "getReview", {reviewId: spamReviews[0]?.reviewId})
+        const member = lib.op("PMR_ANN", SITE, "getReview", {reviewId: spamReviews[0]?.reviewId})
+        const released = lib.op("PMR_OWNER", SITE, "decideReview", {
+            reviewId: spamReviews[0]?.reviewId,
+            decision: "approved",
+            reason: "Not spam",
+            expectedRevision: Number(spamReviews[0]?.revision || 1)
+        })
         return {
             held,
             heldReviews: reviewsOf(held.rootCommEventId),
             reply,
             replyReviews: reviewsOf(reply.postId),
             spam,
-            spamState: spam?.postId ? state(spam.postId) : null,
-            spamReviews: spam?.postId ? reviewsOf(spam.postId) : []
+            spamState,
+            spamReviews,
+            shown,
+            member,
+            released,
+            after: state(spam.postId),
+            outbox: Array.from(
+                ec.entity.find("mantle.forum.ForumOutbox").condition({communicationEventId: spam.postId}).disableAuthz().list()
+            ).length
         }
     },
-    then({held, heldReviews, reply, replyReviews, spam, spamState, spamReviews}) {
+    then({held, heldReviews, reply, replyReviews, spam, spamState, spamReviews, shown, member, released, after, outbox}) {
         held.kind == null
         heldReviews.map(review => review.reasonFamily).includes("rule")
         reply.kind == null
         replyReviews.length == 0
         spam.postId != null
         spamState.visibility == "pending"
-        spamReviews.length == 0
+        spamReviews.map(review => review.reasonFamily) == ["mail-verdict"]
+        spamReviews[0].contactListId == null
+        shown.post.body.includes("Buy now")
+        shown.context == []
+        member.kind == "Unauthorized"
+        released.kind == null
+        after.visibility == "approved"
+        outbox == 1
     }
 })
 

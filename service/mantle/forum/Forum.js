@@ -258,6 +258,7 @@ const lists = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumLists.js',
 )(core, methods, operations)
 moderation.onHeld(lists.decideHeld)
+moderation.onPrivateApproved(allocatePrivate)
 /* The scope of a read (scopeContactListId, mr-pass plan/design-smithy.md §12.5): a category and every category below it,
    as a set of ids; null with no scope. A scope the caller may not read is Not Found, as a category is, and every access
    rule of what is inside it is unchanged. */
@@ -1537,12 +1538,13 @@ methods.publishPost = (p) => {
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
         gateCommit(gated, { pending })
-        // a private message held (the mail gateway's spam verdict, the only hold a private post has) stays with its author
-        // and files no review item: staff read a private message only from a participant's report (SEC-PFS-83)
-        if (pending && !isPrivate)
+        // A held post waits in the review queue for its staff to release or reject it. A private message is held only
+        // for the mail gateway's spam verdict; its item is the site staff's, as a participant's report on it would be,
+        // and shows that message alone (SEC-PFS-83: no rule holds or flags a private message for review).
+        if (pending)
             review(
                 p.siteId,
-                a.category.contactListId,
+                isPrivate ? null : a.category.contactListId,
                 'post',
                 postId,
                 1,
