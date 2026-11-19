@@ -1045,6 +1045,24 @@ function requestException(p) {
         denied("RETURN_NOT_OPEN", "Return " + header.returnId + " is " + statusText(header.statusId))
     return requestExceptionCore(header.returnId, p.reason)
 }
+// Whether the user asked for the return's exception at the revision (its RdExceptionRequested row) or entered the return (the
+// first status of its audit log).
+function exceptionAuthor(returnId, revision, userId) {
+    if (!userId) return false
+    if (
+        rows(DECISION, {returnId, sourceRevision: revision, decisionEnumId: "RdExceptionRequested"}).some(
+            row => row.decidedByUserId === userId
+        )
+    )
+        return true
+    const entered = Array.from(
+        find("moqui.entity.EntityAuditLog", {changedEntityName: HEADER, changedFieldName: "statusId", pkPrimaryValue: returnId})
+            .orderBy("changedDate")
+            .limit(1)
+            .list()
+    )[0]
+    return entered?.changedByUserId === userId
+}
 // decide#ReturnException (RETURN_EXCEPTION_APPROVE): a manager approves or refuses the exceptions of an open return at its
 // revision; a stale revision is refused naming the current one (STALE_REVISION), and from a topic a message with no revision
 // is refused (REVISION_REQUIRED, F46). A refusal needs a reason.
@@ -1064,6 +1082,9 @@ function decide(p, fromTopic = false) {
     const decision = String(p.decision || "")
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse")
     if (decision === "refuse" && blank(p.reason)) denied("REASON_REQUIRED", "Give the reason for refusing")
+    // four eyes: who asked for the exception at this revision, or entered the return, does not approve it (SEC-BAP-112)
+    if (decision === "approve" && exceptionAuthor(header.returnId, current, ec.user.userId))
+        denied("SELF_APPROVAL", "You asked for this exception or entered return " + header.returnId + "; another approver decides it")
     const core = evaluateCore({returnId: header.returnId})
     if (!core.exceptions.length) denied("NO_EXCEPTION", "Return " + header.returnId + " needs no exception")
     const exceptionText = core.exceptions.map(code => exceptionTexts[code] || code).join(", ")
