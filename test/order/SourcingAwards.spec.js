@@ -242,6 +242,32 @@ feature(
     "The comparison in the demand's unit: the pack per each first, the tier price, a currency without a rate Not comparable",
     {
         when() {
+            // SEC-BAP-90: a supplier price row of another supplier naming A's quote line is refused, and one of A's naming D's
+            // line, written past the rule (here as the system), does not price D's line
+            const lineA = lineOf(state.quoteA)
+            const planted = {
+                productId: lineA.productId,
+                vendorPartyId: supplierD,
+                customerPartyId: org,
+                priceTypeEnumId: "PptCurrent",
+                pricePurposeEnumId: "PppPurchase",
+                priceUomId: "USD",
+                price: 1,
+                minQuantity: 0,
+                sourceOrderId: state.quoteA,
+                sourceOrderItemSeqId: lineA.orderItemSeqId
+            }
+            const foreignSource = run(state.buyer, "mantle.product.PriceServices.store#ProductPrice", planted)
+            const lineD = lineOf(state.quoteD)
+            call(
+                "create#mantle.product.ProductPrice",
+                Object.assign({}, planted, {
+                    vendorPartyId: supplierA,
+                    sourceOrderId: state.quoteD,
+                    sourceOrderItemSeqId: lineD.orderItemSeqId,
+                    fromDate: ec.user.nowTimestamp
+                })
+            )
             const compared = run(state.buyer, S + "compare#SupplierQuotes", {
                 requestId: state.requestId,
                 displayCurrencyUomId: "USD"
@@ -256,12 +282,16 @@ feature(
                 a: offer(state.quoteA),
                 pack: offer(state.quoteB, state.packLine),
                 c: offer(state.quoteC),
+                d: offer(state.quoteD),
                 csv,
                 reader,
-                marks
+                marks,
+                foreignSource
             }
         },
-        then({compared, a, pack, c, csv, reader, marks}) {
+        then({compared, a, pack, c, d, csv, reader, marks, foreignSource}) {
+            foreignSource.error.includes("not this supplier's line")
+            d.normalizedPrice == "4.8"
             compared.error == ""
             compared.demandRows.length == 1
             compared.demandRows[0].comparedQuantity == "10"

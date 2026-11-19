@@ -224,9 +224,17 @@ function basisOf(cache, line, item) {
     }
 }
 // The price of a quote line at a quantity of its own unit: the quote's published tier row in effect with the highest minimum
-// quantity at or below it (publish#SupplierQuotePrice), else the line's quoted price; null when nothing is quoted.
+// quantity at or below it (publish#SupplierQuotePrice), else the line's quoted price; null when nothing is quoted. A tier row is
+// the quote's only when it is the line's product from the quote's supplier to its buying organization (SEC-BAP-90).
 function priceAt(line, currencyUomId, lineQuantity) {
-    const tier = rows(PRICE, {sourceOrderId: line.orderId, sourceOrderItemSeqId: line.orderItemSeqId})
+    const part = one("mantle.order.OrderPart", {orderId: line.orderId, orderPartSeqId: line.orderPartSeqId})
+    const tier = rows(PRICE, {
+        sourceOrderId: line.orderId,
+        sourceOrderItemSeqId: line.orderItemSeqId,
+        productId: line.productId || "_NA_",
+        vendorPartyId: part?.vendorPartyId || "_NA_",
+        customerPartyId: part?.customerPartyId || "_NA_"
+    })
         .filter(row => lib.active(row) && (!row.priceUomId || row.priceUomId === currencyUomId))
         .filter(row => dec(row.minQuantity).compare(lineQuantity) <= 0 && dec(row.price).compare(0) > 0)
         .sort((a, b) => dec(b.minQuantity).compare(dec(a.minQuantity)))[0]
