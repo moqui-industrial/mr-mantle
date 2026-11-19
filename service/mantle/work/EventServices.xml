@@ -1584,8 +1584,10 @@ along with this software (see the LICENSE.md file). If not, see
                     const organizerEmail = ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: organizerId}).call()?.emailAddress
                     const fromAddress = ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: partyId}).call()?.emailAddress
                     if (organizerEmail && fromAddress) {
-                        const maps = ec.service.sync().name('mantle.work.EventServices.get#EventIcsMaps').parameters({workEffortIdList: [workEffortId]}).call()?.eventMapList || []
-                        // the REPLY names the replier only, not the other attendees
+                        // read as the system (SEC-BOS-88: get#EventIcsMaps gives the user only the addresses they may reach), so the
+                        // REPLY keeps its ORGANIZER, the address it is sent to; it names the replier only, not the other attendees
+                        const maps = ec.service.sync().name('mantle.work.EventServices.get#EventIcsMaps').parameters({workEffortIdList: [workEffortId]})
+                                .disableAuthz().call()?.eventMapList || []
                         const ics = ec.factory.getTool('ICalendar').write({method: 'REPLY', attendee: fromAddress, events: maps})
                         const subject = `${responderName} ${wordsOf[String(response).toLowerCase()]}: ${event.workEffortName || workEffortId}`
                         ec.service.sync().name('org.moqui.mail.EmailServices.send#EmailTemplate').parameters({emailTemplateId: 'MANTLE_CALENDAR_EMAIL',

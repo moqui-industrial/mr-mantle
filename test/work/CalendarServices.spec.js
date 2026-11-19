@@ -1019,3 +1019,40 @@ feature("an organizer outside gets an iMIP REPLY by email that carries the reply
         emails.includes("Cy Calendarspec declined: Supplier visit")
     },
 })
+
+feature("a REPLY to an organizer the replier may not reach keeps the organizer's address, while their own calendar file leaves it out (SEC-BOS-88)", {
+    when() {
+        setTime(17.5)
+        // Yuri, Ada's personal contact with no user, organizes: Ben may not reach Yuri's address
+        const yuri = call("create#mantle.party.Party", { partyTypeEnumId: "PtyPerson", privateOwnerUserId: user.Ada }).partyId
+        call("create#mantle.party.Person", { partyId: yuri, firstName: "Yuri", lastName: "Private" })
+        call("mantle.party.ContactServices.create#EmailAddress", { partyId: yuri, emailAddress: "yuri.private@example.com", contactMechPurposeId: "EmailPrimary" })
+        const visit = event("Private visit", { ownerPartyId: yuri, estimatedStartDate: at(31 * 24 + 10), estimatedCompletionDate: at(31 * 24 + 11) })
+        invite(visit, party.Ben)
+        // the event services as an app's screen grants them, to a group of Ben's, so they run for him with authorization on
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_EVENT_CALLER", description: "Spec event callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_EVENT_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_EVENT_SERVICES", description: "Spec event services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_EVENT_SERVICES", artifactName: "mantle\\.work\\.EventServices\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_EVENT_AUTHZ", userGroupId: "CS_EVENT_CALLER", artifactGroupId: "CS_EVENT_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        const asBen = (run) => as("Ben", () => {
+            const wasDisabled = ec.artifactExecution.authzDisabled()
+            ec.artifactExecution.enableAuthz()
+            try { return run() } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+        })
+        const own = asBen(() => call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [visit] }).eventMapList[0])
+        const reply = asBen(() => call(`${EV}.respond#EventInvitation`, { workEffortId: visit, response: "accept" }))
+        ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_EVENT_AUTHZ").deleteAll()
+        ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_EVENT_SERVICES").deleteAll()
+        ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_EVENT_SERVICES").deleteAll()
+        ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_EVENT_CALLER").deleteAll()
+        ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_EVENT_CALLER").deleteAll()
+        return { own, parsed: ec.factory.getTool("ICalendar").parse(reply.replyIcsText) }
+    },
+    then({ own, parsed }) {
+        own.organizer.email == null
+        parsed.events[0].organizer.email == "yuri.private@example.com"
+    },
+})
