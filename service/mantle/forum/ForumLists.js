@@ -1005,7 +1005,7 @@
     /* The day's list invitations of a site's owners, all lists together, up to mantle@forum-owner-invitations-per-day: a
        ForumImportMap row by the site and the day, locked. {left, take(n)}. */
     function ownerDaily(siteId) {
-        const most = Number(ec.factory.getConfValue("mantle@forum-owner-invitations-per-day") || 2000)
+        const most = limits().limit("forum-owner-invitations-per-day")
         const key = {siteId, sourceType: "site-invite-day", sourceId: (siteId + "|" + core.dayKey()).slice(0, 60)}
         const row = one(MAP, key, true)
         const used = Number(json(row?.payload, {}).count || 0)
