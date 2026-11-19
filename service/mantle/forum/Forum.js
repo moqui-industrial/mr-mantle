@@ -6110,5 +6110,7 @@ function execute(operation, p) {
     advanceRun: operations.advanceRun,
     runJobItem: operations.runItem,
     cleanupExports: operations.cleanupExports,
+    // the runs the dispatcher takes next, in turn across sites (ForumOperations.js)
+    fairRuns: operations.fairRuns,
     sourceGate,
 })

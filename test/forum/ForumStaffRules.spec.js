@@ -281,17 +281,14 @@ feature("SEC-PFS-92: a draft is a member's, within the post's length and the mem
 
 feature("SEC-PFS-93: one open export per member, a day's report files per staff member, one pending operation per site", {
     when() {
-        setConf("mantle@forum-report-exports-per-day", "1")
-        const out = {
+        return withConf("mantle@forum-report-exports-per-day", "1", () => ({
             firstExport: op("FSR_BEN", "requestPersonalDataAction", {kind: "export"}),
             secondExport: op("FSR_BEN", "requestPersonalDataAction", {kind: "export"}),
             firstReport: op("FSR_MOD", "exportReport", {report: "activity"}),
             secondReport: op("FSR_MOD", "exportReport", {report: "activity"}),
             firstRun: op("FSR_OWNER", "startOperation", {operation: "rebuild-counters", reason: "Check"}),
             secondRun: op("FSR_OWNER", "startOperation", {operation: "rebuild-counters", reason: "Again"})
-        }
-        setConf("mantle@forum-report-exports-per-day", "")
-        return out
+        }))
     },
     then({firstExport, secondExport, firstReport, secondReport, firstRun, secondRun}) {
         firstExport.state == "running"
@@ -300,6 +297,39 @@ feature("SEC-PFS-93: one open export per member, a day's report files per staff 
         secondReport.kind == "Tarpit"
         firstRun.runId != null
         secondRun.kind == "Conflict"
+    }
+})
+
+feature("SEC-PFS-93: the dispatcher takes each site's oldest pending run in turn, whatever another site has waiting", {
+    when() {
+        // a busy site with 60 runs waiting since an hour ago, and a quiet one with one run made now
+        const at = ec.user.timestampMillis(ec.user.nowTimestamp)
+        const run = (siteId, n, createdAt) =>
+            lib.make("mantle.forum.ForumJobRun", {
+                runId: siteId + "_" + n,
+                siteId,
+                jobType: "op-rebuild-counters",
+                state: "pending",
+                checkpoint: "{}",
+                createdAt,
+                successCount: 0,
+                failedCount: 0
+            })
+        lib.site("FSR_BUSY")
+        lib.site("FSR_QUIET")
+        for (let n = 0; n < 60; n++) run("FSR_BUSY", n, new Date(at - 3600000 + n))
+        run("FSR_QUIET", 0, new Date(at))
+        const taken = lib.privileged(() => forum().fairRuns(50)).map(row => row.siteId)
+        for (const row of Array.from(
+            ec.entity.find("mantle.forum.ForumJobRun").condition("runId", "like", "FSR_%").disableAuthz().list()
+        ))
+            lib.set("mantle.forum.ForumJobRun", {runId: row.runId}, {state: "complete"})
+        return {taken}
+    },
+    then({taken}) {
+        taken.length == 50
+        taken.includes("FSR_QUIET")
+        taken.filter(siteId => siteId === "FSR_BUSY").length >= 25
     }
 })
 
