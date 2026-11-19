@@ -91,3 +91,18 @@ feature("SEC-PFS-88: a sanction is ended only by staff of a higher rank than its
         owner.revision == 2
     }
 })
+
+feature("SEC-PFS-89: a category's own moderator reads a member's scope there, not the membership or the site's statistics", {
+    when() {
+        const ask = username => op(username, "getMember", {contactListId: ids.general, targetPartyId: "FSR_ANN"})
+        return {listModerator: ask("FSR_LMOD"), siteModerator: ask("FSR_MOD")}
+    },
+    then({listModerator, siteModerator}) {
+        listModerator.kind == null
+        listModerator.membership == null
+        listModerator.memberState == null
+        listModerator.scopeActivity.postCount == 0
+        siteModerator.membership.state == "active"
+        siteModerator.memberState.trustLevel == "basic"
+    }
+})

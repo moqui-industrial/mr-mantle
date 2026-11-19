@@ -998,9 +998,10 @@
     }
     methods.getMember = (p) => {
         const a = staff(p.siteId, p.contactListId)
-        // An Owner of a group or repository moderates its category and nothing of the site: they see the member's
-        // sanctions and actions in that scope and their posts there, never the member's activity across the site.
-        if (a?.scopeOwnerOnly) {
+        // An Owner of a group or repository, or a category's own owner or moderator, moderates the category and nothing
+        // of the site: they see the member's sanctions and actions in that scope and their posts there, never the
+        // member's membership or activity across the site, which are the site's staff's.
+        if (a && !a.siteStaff) {
             const scope = [...core.categorySubtree(p.siteId, p.contactListId)]
             return {
                 membership: null,

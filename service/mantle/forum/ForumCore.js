@@ -357,6 +357,8 @@ function evaluateCategoryAccess(contactListId, actor, seen) {
         // moderates only as an Owner of the scope the category is bound to: not the site's or the category's staff,
         // so what is the site's (a member's activity across it) is not theirs to read
         scopeOwnerOnly: moderate && !staffModerate,
+        // moderates as the site's staff (an owner or moderator of the site, or the operator), not only the category's
+        siteStaff: moderate && (staff || (actor === me() && isOperator())),
         canInvite: owner || categoryStaff,
     }
 }
