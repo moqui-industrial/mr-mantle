@@ -19,6 +19,7 @@ const ids = {
     host: "checkout.shco.example.test",
     hosted: prefix + "_HOSTED",
     unknown: prefix + "_UNKNOWN",
+    form: prefix + "_FORM",
     book: prefix + "_BOOK",
     mug: prefix + "_MUG",
     free: prefix + "_FREE",
@@ -189,7 +190,16 @@ spec({
                 authorizeServiceName: T + "alwaysUnknown#PaymentAuthorization",
                 detailsServiceName: T + "alwaysPending#PaymentDetails"
             })
-            for (const paymentGatewayConfigId of [ids.hosted, ids.unknown])
+            // a hosted page that takes a posted form token, as Authorize.Net Accept Hosted (the relay's form)
+            make("mantle.account.method.PaymentGatewayConfig", {
+                paymentGatewayConfigId: ids.form,
+                paymentGatewayTypeEnumId: "PgtTest",
+                description: "Checkout form-token test gateway",
+                authorizeServiceName: T + "hostedForm#PaymentAuthorization",
+                captureServiceName: T + "alwaysApprove#PaymentCapture",
+                detailsServiceName: T + "alwaysApprove#PaymentDetails"
+            })
+            for (const paymentGatewayConfigId of [ids.hosted, ids.unknown, ids.form])
                 make("mantle.account.method.PaymentGatewayOrganization", {
                     organizationPartyId: ids.org,
                     paymentGatewayConfigId,
@@ -782,5 +792,41 @@ feature("a checkout's visitor key: its digest kept at the freeze, not the submit
         r.placed.marketingVisitorKeyHash == null
         r.malformed.result.checkout.state == "completed"
         r.freeOrder.marketingVisitorKeyHash == null
+    }
+})
+feature("only the cart's holder is given the payment form; the reference and key read the state, and forms are bounded", {
+    when() {
+        const {token, view} = readyCart(ids.book, 1)
+        // SEC-PSS-84, SEC-PSF-82: the store's page takes a posted form token for this checkout
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {checkoutId: checkoutRow(token).checkoutId, paymentGatewayConfigId: ids.form})
+        )
+        const submitted = submit(token, view.checkout.revision)
+        const reference = submitted.result.checkout.reference
+        const key = submitted.result.returnKey
+        // a visitor with another shopper's reference and key (a link): the state, never the payment page
+        const byReference = checkout("get#CheckoutPaymentResult", {reference, key})
+        const formByReference = checkout("get#CheckoutPaymentForm", {reference, key})
+        const byCart = checkout("get#CheckoutPaymentResult", {reference, key, token})
+        const formByCart = checkout("get#CheckoutPaymentForm", {reference, key, token})
+        // a bounded number of forms for one attempt (the conf's limit, two here, the call above the first)
+        const bounded = withConf("mantle@shop-payment-forms", "2", () => [
+            checkout("get#CheckoutPaymentForm", {reference, key, token}),
+            checkout("get#CheckoutPaymentForm", {reference, key, token})
+        ])
+        return {submitted, byReference, formByReference, byCart, formByCart, bounded}
+    },
+    then({submitted, byReference, formByReference, byCart, formByCart, bounded}) {
+        submitted.result.checkout.state == "paymentPending"
+        byReference.result.checkout.minimal == true
+        byReference.result.checkout.attempt.state == "pending"
+        byReference.result.checkout.attempt.providerForm == false
+        byReference.result.checkout.attempt.providerUrl == null
+        formByReference.error.includes("NOT_AVAILABLE")
+        byCart.result.checkout.attempt.providerForm == true
+        formByCart.result.formUrl == "https://test.authorize.net/payment/payment"
+        !!formByCart.result.fields.token == true
+        !!bounded[0].result?.formUrl == true
+        bounded[1].error.includes("RATE_LIMITED")
     }
 })
