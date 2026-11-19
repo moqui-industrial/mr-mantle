@@ -1473,7 +1473,8 @@ function confirmedParty(partyId) {
 /* g: siteId, actorPartyId, contactListId (the scope category), kind ('topic' | 'reply' | 'issue' | 'comment' |
    'mergeRequest' | 'review' | 'reviewComment' | 'fork' | 'repository' | 'group' | 'pipelineRun'), title and body (the
    cleaned text of the revision; either may be absent), source (the text as typed, for the length), sourceFormat,
-   canModerate (the caller moderates the scope: limits and holds do not apply), isPrivate (no first-post hold),
+   canModerate (the caller moderates the scope: limits and holds do not apply), isPrivate (no first-post hold; rules only
+   block or censor, never hold or flag),
    confirmed (true: the caller has checked the address),
    slowIntervalSeconds and rootCommEventId (a reply in a topic in slow mode), mailVerdict ({spam, reason}), edit (a new
    revision of a post that is there: no interval, limit or first-post hold).
@@ -1653,6 +1654,12 @@ function gate(g) {
         approve = approve || ruled.approve
         flag = flag || ruled.flag
     }
+    // A private message reaches staff only through a participant's report (SEC-PFS-83): on it a rule blocks or censors,
+    // and one that would hold or flag it files no review item.
+    if (g.isPrivate) {
+        approve = false
+        flag = false
+    }
     if (nameKind) {
         if (approve)
             return refuse(
@@ -1709,7 +1716,7 @@ function gate(g) {
         decision: 'allow',
         body,
         title,
-        flag: flag || (!!g.isPrivate && approve),
+        flag,
         memberState,
         counter,
     }

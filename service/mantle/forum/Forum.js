@@ -1417,7 +1417,8 @@ methods.publishPost = (p) => {
         const postId = id(),
             root = existing?.t.rootCommEventId || postId,
             ordinal = existing ? Number(existing.t.nextOrdinal) : 1
-        // Private messages are not queued for staff by default; a held rule still files a scoped review.
+        // Private messages are not queued for staff, and no rule holds or flags one: a participant's report alone files a
+        // review of a private post (SEC-PFS-83).
         const pending = gated.decision === 'hold' && !staffOnly,
             counted = !pending && !staffOnly
         create(E + 'CommunicationEvent', {
@@ -1642,6 +1643,7 @@ methods.updatePost = (p) => {
             source: p.body ?? '',
             sourceFormat: format,
             canModerate: a.canModerate,
+            isPrivate: t.kind === 'private',
             edit: true,
         }),
     )
