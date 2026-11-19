@@ -588,10 +588,17 @@ feature("a manager who raised a team quote's quantities past an amount rule does
         })
         const asked = as(users.repB, "request#QuoteApproval", {orderId, orderRevision: revision(orderId)})
         const editorDecides = as(manager, "decide#Quote", {orderId, orderRevision: revision(orderId)}).refused
+        // a refusal between does not make the editor an approver (SEC-BAP-113 review)
+        const refusedFirst = as(users.approverB, "decide#Quote", {orderId, orderRevision: revision(orderId), decision: "refuse",
+            reason: "Too large"})
+        as(users.repB, "request#QuoteApproval", {orderId, orderRevision: revision(orderId)})
+        const editorAfterRefusal = as(manager, "decide#Quote", {orderId, orderRevision: revision(orderId)}).refused
         const approved = as(users.approverB, "decide#Quote", {orderId, orderRevision: revision(orderId)})
-        return {line, raised, asked, editorDecides, approved}
+        return {line, raised, asked, editorDecides, refusedFirst, editorAfterRefusal, approved}
     },
-    then({line, raised, asked, editorDecides, approved}) {
+    then({line, raised, asked, editorDecides, refusedFirst, editorAfterRefusal, approved}) {
+        refusedFirst.refused == ""
+        editorAfterRefusal.includes("SELF_APPROVAL")
         line.refused == ""
         raised.refused == ""
         asked.refused == ""

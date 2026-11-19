@@ -672,12 +672,12 @@ function lineFinding(rule, item, context) {
             return null
     }
 }
-// The users who entered or changed the order's lines (all, or those of seqIds) since its last decided approval of the purpose
-// (the audit log of OrderItem's quantity, price and product): each is an author of a requirement those lines meet, so an editor
-// of a quote's quantities does not approve its amount rule (SEC-BAP-113).
+// The users who entered or changed the order's lines (all, or those of seqIds) since its last approval of the purpose (the
+// audit log of OrderItem's quantity, price and product): each is an author of a requirement those lines meet, so an editor
+// of a quote's quantities does not approve its amount rule, a refusal between included (SEC-BAP-113).
 function lineEditors(orderId, purposeEnumId, seqIds = null) {
     const decided = rows(DECISION, {orderId, decisionPurposeEnumId: purposeEnumId})
-        .filter(row => row.decisionResultEnumId === results.approved || row.decisionResultEnumId === results.refused)
+        .filter(row => row.decisionResultEnumId === results.approved)
         .map(row => Number(ms(row.decisionDate) || 0))
     const since = decided.length ? Math.max(...decided) : 0
     let query = find("moqui.entity.EntityAuditLog")
