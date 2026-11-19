@@ -305,10 +305,31 @@ feature("a gateway the shipment's lookup does not offer rates and buys nothing f
             rates: run("wsh_shipper", T + "get#ShipmentRates", {shipmentId: sh.shipmentId, shippingGatewayConfigId: "WSH_NOFIND"}),
             label: run("wsh_shipper", T + "request#PackageLabels", labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})),
             labels: carrierLabels(sh.shipmentId).length,
-            segment: rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: sh.shipmentId})[0].shippingGatewayConfigId
+            segment: rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: sh.shipmentId})[0].shippingGatewayConfigId,
+            ...(() => {
+                // WSH_NOFIND is used by no organization: the system administrator's; a gateway the organization alone uses is its own
+                call("create#mantle.product.store.ProductStore", {productStoreId: "WSH_BIND_STORE", storeName: "WSH binding store", organizationPartyId: org})
+                call("create#mantle.shipment.carrier.ShippingGatewayConfig", {shippingGatewayConfigId: "WSH_OWN_GW", description: "WSH own"})
+                call("mantle.party.PartyServices.store#PartySetting", {partyId: org, partySettingTypeId: "DefaultShipmentGatewayConfigId",
+                    settingValue: "WSH_OWN_GW"})
+                const result = {
+                    otherDefault: run("wsh_admin", "mantle.party.PartyServices.store#PartySetting", {partyId: org,
+                        partySettingTypeId: "DefaultShipmentGatewayConfigId", settingValue: "WSH_NOFIND"}),
+                    otherBinding: run("wsh_admin", "mantle.shipment.carrier.CarrierSetupServices.store#StoreShippingGateway",
+                        {productStoreId: "WSH_BIND_STORE", carrierPartyId: carrier, shippingGatewayConfigId: "WSH_NOFIND"}),
+                    ownBinding: run("wsh_admin", "mantle.shipment.carrier.CarrierSetupServices.store#StoreShippingGateway",
+                        {productStoreId: "WSH_BIND_STORE", carrierPartyId: carrier, shippingGatewayConfigId: "WSH_OWN_GW"})
+                }
+                call("delete#mantle.party.PartySetting", {partyId: org, partySettingTypeId: "DefaultShipmentGatewayConfigId"})
+                return result
+            })()
         }
     },
-    then({rates, label, labels, segment}) {
+    then({rates, label, labels, segment, otherDefault, otherBinding, ownBinding}) {
+        // a default gateway or a store binding only of a gateway the user's organizations configure (review)
+        otherDefault.error.includes("GATEWAY_INVALID")
+        otherBinding.error.includes("GATEWAY_INVALID")
+        ownBinding.error == ""
         rates.error.includes("GATEWAY_INVALID")
         label.error.includes("GATEWAY_INVALID")
         labels == 0

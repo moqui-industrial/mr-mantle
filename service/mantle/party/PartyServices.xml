@@ -1627,6 +1627,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!new RegExp('^(?:' + partySettingType.validRegexp + ')$').test(settingValue)">
                     <return error="true" message="Value ${settingValue} is not valid"/></if>
             </else-if></if>
+            <!-- a party's default shipping gateway makes it one the party's shipments offer and counts the party among the
+                gateway's users: only a gateway whose every use the user's organizations hold, or any for a system administrator
+                (Shipping.js gatewayManaged; SEC-BAP-101), whoever writes it -->
+            <if condition="partySettingTypeId == 'DefaultShipmentGatewayConfigId'
+                    &amp;&amp; !ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js').gatewayManaged(settingValue)">
+                <return error="true" message="GATEWAY_INVALID: Shipping gateway ${settingValue} is not one your organizations configure"/></if>
         </actions>
     </service>
 

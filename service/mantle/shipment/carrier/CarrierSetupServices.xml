@@ -141,4 +141,27 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
         </actions>
     </service>
+    <service verb="store" noun="StoreShippingGateway" allow-remote="false">
+        <description>A store's binding of a carrier to a shipping gateway (ProductStoreShippingGateway), made or changed: the
+            store one of the user's organizations', and the gateway one whose every use the user's organizations hold, or any
+            for a system administrator (Shipping.js gatewayManaged): a binding makes the gateway one the store's shipments
+            offer and counts its organization among the gateway's users, so another organization's gateway is never bound
+            here (SEC-BAP-101).</description>
+        <in-parameters>
+            <auto-parameters entity-name="mantle.product.store.ProductStoreShippingGateway" include="all"/>
+            <parameter name="productStoreId" required="true"/>
+            <parameter name="carrierPartyId" required="true"/>
+            <parameter name="shippingGatewayConfigId" required="true"/>
+        </in-parameters>
+        <actions>
+            <entity-find-one entity-name="mantle.product.store.ProductStore" value-field="store" disable-authz="true"/>
+            <set field="facilityScope" from="ec.resource.script('component://mr-mantle/service/mantle/facility/FacilityScope.js')"/>
+            <if condition="store == null || !facilityScope.owns(facilityScope.scope(), store.organizationPartyId)">
+                <return error="true" message="RECORD_UNAVAILABLE: Store ${productStoreId} is not available"/></if>
+            <entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayConfig" value-field="gateway" disable-authz="true"/>
+            <if condition="gateway == null || !ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js').gatewayManaged(shippingGatewayConfigId)">
+                <return error="true" message="GATEWAY_INVALID: Shipping gateway ${shippingGatewayConfigId} is not one your organizations configure"/></if>
+            <service-call name="store#mantle.product.store.ProductStoreShippingGateway" in-map="context" disable-authz="true"/>
+        </actions>
+    </service>
 </services>
