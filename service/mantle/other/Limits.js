@@ -13,7 +13,8 @@ const NAMES = [
     "forum-draft-days",
     "forum-report-exports-per-day",
     "forum-owner-invitations-per-day",
-    "forum-archive-reads-per-day"
+    "forum-archive-reads-per-day",
+    "calendar-feed-max-bytes"
 ]
 /* Why the setting is not a count, or null. */
 function problem(name) {
