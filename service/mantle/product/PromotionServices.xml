@@ -240,18 +240,31 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="add" noun="OrderPromoCode">
+        <description>A promotion code on an order, by its text (ignoring case), else by its record id; with promoCodeId, only
+            that code and only when its text is the promoCode given (Shop's cart, which has already chosen the store's code a
+            customer may enter: a shopper's text is never taken as a record id, SEC-PSS-81). Checks the code's and promotion's
+            store, dates, customer and use limits, and re-applies the order's promotions.</description>
         <in-parameters>
             <parameter name="orderId" required="true"/>
             <parameter name="promoCode" required="true"/>
+            <parameter name="promoCodeId"><description>The code chosen; its text must be promoCode. No fallback by id.</description></parameter>
         </in-parameters>
         <actions>
             <set field="openStatusIdList" from="['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']"/>
 
             <!-- make sure code is valid -->
-            <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
-                <econdition field-name="promoCode" ignore-case="true"/></entity-find>
-            <set field="storePromoCode" from="storePromoCodeList[0]"/>
-            <if condition="storePromoCode == null">
+            <if condition="promoCodeId">
+                <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
+                    <field-map field-name="promoCodeId"/></entity-find-one>
+                <if condition="storePromoCode != null &amp;&amp; String(storePromoCode.promoCode || '').toUpperCase() != String(promoCode).toUpperCase()">
+                    <set field="storePromoCode" from="null"/></if>
+                <else>
+                    <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
+                        <econdition field-name="promoCode" ignore-case="true"/></entity-find>
+                    <set field="storePromoCode" from="storePromoCodeList[0]"/>
+                </else>
+            </if>
+            <if condition="storePromoCode == null &amp;&amp; !promoCodeId">
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
                     <field-map field-name="promoCodeId" from="promoCode"/></entity-find-one>
             </if>

@@ -246,6 +246,7 @@ spec({
                 promoCodeId: ids.code,
                 storePromotionId: ids.promotion,
                 promoCode: ids.code,
+                userEntered: "Y",
                 requireParty: "N",
                 useLimitPerCode: 1
             })
