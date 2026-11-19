@@ -18,8 +18,10 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Creates a RateAmount, its time period unit defaulted (each for a piece rate, else hour). A worker pay rate
             (RaprVendor) of a person who is an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) is the
             employee's pay: only with PAYROLL_EDIT, refused without it. A labor costing rate (RaprCost) only for finance
-            administration of its organization, or of every organization for a shared one (store#CostingRate's scope); a rate of
-            another purpose carries no organization (organizationPartyId is cleared).</description>
+            administration of its organization, or of every organization for a shared one (store#CostingRate's scope). A client
+            billing or worker pay rate of no project keeps organizationPartyId, the organization whose time it applies to
+            (SEC-BOS-101; empty for a rate shared by every organization), which the caller checks (Projects' store#Rate); one of a
+            project carries none (the project's), nor does a rate of another purpose.</description>
         <in-parameters>
             <auto-parameters entity-name="mantle.humanres.rate.RateAmount" include="nonpk">
                 <exclude field-name="rateTypeEnumId"/>
@@ -46,6 +48,8 @@ along with this software (see the LICENSE.md file). If not, see
                 impl-people P10: PERMISSION_DENIED, ORGANIZATION_DENIED); the rates of the other purposes carry no organization -->
             <if condition="ratePurposeEnumId == 'RaprCost'">
                 <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('checkWrite', {organizationPartyId: organizationPartyId || null})</script>
+                <else-if condition="!workEffortId &amp;&amp; ['RaprClient', 'RaprVendor'].includes(ratePurposeEnumId)">
+                    <set field="organizationPartyId" from="organizationPartyId || null"/></else-if>
                 <else><set field="organizationPartyId" from="null"/></else>
             </if>
             <service-call name="create#mantle.humanres.rate.RateAmount" in-map="context" out-map="context"/>

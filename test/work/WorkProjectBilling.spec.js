@@ -235,3 +235,31 @@ feature("Home's unbilled amount counts the project's for john.doe; a cancelled i
         row.lastInvoiceId == null && row.draftInvoiceList.length == 0
     },
 })
+
+feature("a rate of no project may be an organization's: it bills that organization's projects, before a shared one, and no other's (SEC-BOS-101)", {
+    when() {
+        if (!one("moqui.basic.Enumeration", { enumId: "TBL_RATE_ORG" }))
+            call("create#moqui.basic.Enumeration", { enumId: "TBL_RATE_ORG", enumTypeId: "RateType", description: "Billing walk organization rate" })
+        if (!one("mantle.work.effort.WorkEffort", { workEffortId: "TBL_OTHER" }))
+            call("create#mantle.work.effort.WorkEffort", { workEffortId: "TBL_OTHER", workEffortTypeEnumId: "WetProject", workEffortName: "Billing walk other",
+                ownerPartyId: CLIENT, statusId: "WeInProgress" })
+        const rate = (rateAmount, organizationPartyId) => call(`${RATE}.create#RateAmount`, { ratePurposeEnumId: "RaprClient", rateTypeEnumId: "TBL_RATE_ORG",
+            timePeriodUomId: "TF_hr", rateCurrencyUomId: "USD", rateAmount, organizationPartyId, fromDate: at(1, 1, 0) }).rateAmountId
+        made.rateShared = rate(100, null)
+        made.rateServices = rate(130, "ORG_ZIZI_SERVICES")
+        made.rateClient = rate(90, CLIENT)
+        const lookup = (workEffortId) => call(`${TIME}.find#RateAmount`, { ratePurposeEnumId: "RaprClient", rateTypeEnumId: "TBL_RATE_ORG",
+            rateCurrencyUomId: "USD", workEffortId, partyId: "ORG_ZIZI_BD", fromDate: at(4, 13, 9) })
+        const out = { services: lookup("TBL"), other: lookup("TBL_OTHER"), stored: one("mantle.humanres.rate.RateAmount", { rateAmountId: made.rateServices }) }
+        call("update#mantle.humanres.rate.RateAmount", { rateAmountId: made.rateClient, thruDate: at(1, 2, 0) })
+        out.sharedOnly = lookup("TBL_OTHER")
+        for (const rateAmountId of [made.rateShared, made.rateServices]) call("update#mantle.humanres.rate.RateAmount", { rateAmountId, thruDate: at(1, 2, 0) })
+        return out
+    },
+    then({ services, other, stored, sharedOnly }) {
+        stored.organizationPartyId == "ORG_ZIZI_SERVICES"
+        services.rateAmountId == made.rateServices
+        other.rateAmountId == made.rateClient
+        sharedOnly.rateAmountId == made.rateShared
+    },
+})

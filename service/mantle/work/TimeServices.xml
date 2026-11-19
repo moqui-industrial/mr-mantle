@@ -1231,6 +1231,11 @@ along with this software (see the LICENSE.md file). If not, see
 
             If a partyId is passed, take the greater of the rates with and without the party to match on as many as
             possible of: emplPositionClassId, workTypeEnumId, payGradeId (from Employment if there is one for the partyId).
+
+            A rate of no project may be an organization's (organizationPartyId, SEC-BOS-101): it applies only to the time of
+            that organization, the owner of the work effort's project (or of the work effort, else employerPartyId), and is
+            preferred to a shared one (no organization) of the same kind (with or without the party). A labor costing rate
+            (RaprCost) keeps its own organization rule (get#CostingRate).
         </description>
         <in-parameters>
             <parameter name="fromDate" type="Timestamp"/>
@@ -1260,9 +1265,20 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="taskWorkEffort">
                     <field-map field-name="workEffortId"/></entity-find-one>
             </if>
+            <!-- the organization whose rates of no project apply (SEC-BOS-101): the project's owner, else the work effort's, else the employer -->
+            <if condition="taskWorkEffort?.rootWorkEffortId &amp;&amp; taskWorkEffort.rootWorkEffortId != taskWorkEffort.workEffortId">
+                <entity-find-one entity-name="mantle.work.effort.WorkEffort" value-field="rootWorkEffort">
+                    <field-map field-name="workEffortId" from="taskWorkEffort.rootWorkEffortId"/></entity-find-one>
+            </if>
+            <set field="rateOrgId" from="rootWorkEffort?.ownerPartyId || taskWorkEffort?.ownerPartyId || employerPartyId || null"/>
+            <set field="orgRatesApply" from="ratePurposeEnumId != 'RaprCost'"/>
 
             <!-- get all possible rates in one query, then do maximal match -->
             <entity-find entity-name="mantle.humanres.rate.RateAmount" list="rateAmountList">
+                <econditions combine="or">
+                    <econdition field-name="organizationPartyId" from="null" ignore="!orgRatesApply"/>
+                    <econdition field-name="organizationPartyId" from="rateOrgId" ignore="!orgRatesApply || !rateOrgId"/>
+                </econditions>
                 <date-filter valid-date="fromDate || ec.user.nowTimestamp"/>
                 <econdition field-name="partyId" from="partyId" or-null="true"/>
                 <econditions combine="or">
@@ -1355,6 +1371,11 @@ along with this software (see the LICENSE.md file). If not, see
 
                 // Do a maximal match on the rates that do not have a partyId.
                 nonPartyRaList = rateAmountList.filter((ra) => ra.partyId == null)
+                // an organization's rates of no project before the shared ones of the same kind (SEC-BOS-101)
+                const preferOrganization = (list) => !orgRatesApply || !rateOrgId || !list.some((ra) => !ra.workEffortId && ra.organizationPartyId === rateOrgId)
+                        ? list : list.filter((ra) => ra.workEffortId || ra.organizationPartyId === rateOrgId)
+                if (partyRaList != null && partyRaList.length) partyRateAmountToUse = findMaximalMatch(preferOrganization(partyRaList), matchFields)
+                nonPartyRaList = preferOrganization(nonPartyRaList)
                 nonPartyRateAmountToUse = findMaximalMatch(nonPartyRaList, matchFields)
             ]]></script>
 
