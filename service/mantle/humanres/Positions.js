@@ -9,7 +9,9 @@
 //   period its own row keyed by its start, the user's call of Nov 12, 2026: a change starts a new row, a requirement removed is
 //   ended, never deleted, and one required again starts a new row). Classes are shared by every employer: a staff
 //   reader reads them, an HR editor (PEOPLE_HR_VIEW and PEOPLE_HR_EDIT) changes them, and a used class is ended (thruDate), never
-//   deleted, so its positions keep it and no new position takes it;
+//   deleted, so its positions keep it and no new position takes it. A class a current position of an employer outside the
+//   editor's scope holds is another employer's too: only a holder of PEOPLE_ALL_ORGANIZATIONS changes, ends or re-requires it
+//   (CLASS_SHARED, SEC-BOS-120);
 // - a position is a dated seat, an EmplPosition of its legal employer (organizationPartyId, which create#Employment checks), in a
 //   department (departmentPartyId, an OrgDepartment that rolls up to the employer), of a class, with a pay grade by name only.
 //   A new position is planned (EmpsPlanned); its activation is an approval decision (P5: request#PositionApproval and
@@ -859,7 +861,8 @@ function getJobClass(p) {
 }
 // store#JobClass: a new job class, or a class's title, description, work types or end. Refused: a caller without PEOPLE_HR_VIEW
 // and PEOPLE_HR_EDIT (PERMISSION_DENIED); no title (TITLE_REQUIRED); a work type that is not one (WORK_TYPE_INVALID); a missing
-// class (RECORD_UNAVAILABLE); an end of an ended class (CLASS_ENDED); a revision other than the one read (REVISION_CHANGED).
+// class (RECORD_UNAVAILABLE); an end of an ended class (CLASS_ENDED); a revision other than the one read (REVISION_CHANGED); a
+// class another employer's current position holds, for one without PEOPLE_ALL_ORGANIZATIONS (CLASS_SHARED).
 function workTypeIds(value) {
     const list = (Array.isArray(value) ? value : value == null || value === "" ? [] : String(value).split(","))
         .map(text)
@@ -873,8 +876,26 @@ function workTypeIds(value) {
     if (unknown) denied("WORK_TYPE_INVALID", unknown + " is not a work type")
     return ids
 }
+// CLASS_SHARED (SEC-BOS-120): a class a current position of an employer outside the caller's scope holds changes only for a
+// holder of PEOPLE_ALL_ORGANIZATIONS, as its title, end and requirements are what that employer's positions and staffing read.
+function checkClassReach(userScope, positionClass) {
+    if (userScope.allOrganizations || userScope.capabilities.allOrganizations) return
+    const cf = ec.entity.conditionFactory
+    const orgIds = userScope.organizationPartyIds.length ? userScope.organizationPartyIds : ["_NA_"]
+    const outside = find(POSITION)
+        .condition("emplPositionClassId", positionClass.emplPositionClassId)
+        .condition("organizationPartyId", "not-in", orgIds)
+        .condition(cf.makeCondition([cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater-than", ec.user.nowTimestamp)], "or"))
+        .count()
+    if (outside)
+        denied(
+            "CLASS_SHARED",
+            (positionClass.title || positionClass.emplPositionClassId) +
+                " is held by another employer's positions; only an administrator of every organization changes it"
+        )
+}
 function storeJobClass(p) {
-    editorScope("Changing a job class")
+    const userScope = editorScope("Changing a job class")
     if (!text(p.emplPositionClassId)) {
         if (!text(p.title)) denied("TITLE_REQUIRED", "A job class has a title")
         const workTypes = workTypeIds(p.workTypeEnumIds)
@@ -886,6 +907,7 @@ function storeJobClass(p) {
     const id = text(p.emplPositionClassId)
     const positionClass = one(CLASS, {emplPositionClassId: id})
     if (!positionClass) denied("RECORD_UNAVAILABLE", "Job class " + id + " is not available")
+    checkClassReach(userScope, positionClass)
     const revision = classRevision(id)
     if (text(p.expectedRevision) !== revision)
         denied("REVISION_CHANGED", "This job class changed since you read it; open it again (revision " + revision + ")")
@@ -924,10 +946,11 @@ function storeJobClass(p) {
 // (LEVEL_INVALID); a qualification type that is not one or ended (TYPE_INVALID, VALUE_ENDED); a revision other than the one read
 // (REVISION_CHANGED).
 function storeJobRequirement(p) {
-    editorScope("Changing a job class")
+    const userScope = editorScope("Changing a job class")
     const id = text(p.emplPositionClassId)
     const positionClass = id ? one(CLASS, {emplPositionClassId: id}) : null
     if (!positionClass) denied("RECORD_UNAVAILABLE", "Job class " + id + " is not available")
+    checkClassReach(userScope, positionClass)
     if ((ms(positionClass.thruDate) ?? Infinity) <= nowMs()) denied("CLASS_ENDED", (positionClass.title || id) + " has ended")
     const skillTypeEnumId = text(p.skillTypeEnumId)
     if (!skillTypeEnumId) denied("SKILL_REQUIRED", "Choose the skill")
