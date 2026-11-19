@@ -84,11 +84,16 @@ const ruled = row => !!row.visibleService || !!(row.parentEntityName && row.pare
 // Whether a registration's codeRule stands: Y on a type of the fixed list only.
 const codeRuleHolds = row => row.codeRule === "Y" && codeRuled.has(String(row.recordEntityName))
 // What is wrong with a registration as loaded (the RecordLinkTypeRuleless EECA logs it), or null.
+// Whether a registration names a rule (visibleService, a parent, an organization field) for a type get#RecordLinkInfo rules itself:
+// that rule is never used there, so another component cannot replace Mantle's own (an order's, a message's).
+const overridesCode = row => codeRuled.has(String(row.recordEntityName)) && ruled(row)
 function problemOf(row) {
     if (row.disabled === "Y") return null
+    if (overridesCode(row))
+        return "names a visibility rule for a type get#RecordLinkInfo rules itself; the rule is ignored and Mantle's own applies"
     if (row.codeRule === "Y" && !codeRuled.has(String(row.recordEntityName)))
         return "claims codeRule, but get#RecordLinkInfo has no rule of its own for it; only a system administrator sees its records until it names its rule"
     if (ruled(row) || codeRuleHolds(row) || row.publicRead === "Y") return null
     return "has no visibility rule: only a system administrator sees its records until it names visibleService, parentEntityName and parentField, or organizationField, or says publicRead"
 }
-;({codeRuled, codeRuleHolds, problemOf})
+;({codeRuled, codeRuleHolds, overridesCode, problemOf})

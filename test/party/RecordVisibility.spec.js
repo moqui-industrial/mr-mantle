@@ -510,6 +510,29 @@ feature("an order is seen by its organizations' members, its parties and its ent
     },
 })
 
+// a component's row for a type Mantle rules itself does not replace Mantle's rule (SEC-BOS-87 review): an order keeps its own
+feature("a registration naming a rule for a type get#RecordLinkInfo rules itself is ignored, and Mantle's rule applies (SEC-BOS-87)", {
+    when() {
+        const ORDER = "mantle.order.OrderHeader"
+        const row = ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", ORDER).one()
+        const before = row ? row.getMap() : null
+        const seen = () => as("rv.pat", () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: ORDER, recordId: "RV-O1", checkOnly: true }).call()?.recordVisible)
+        const plain = seen()
+        try {
+            // an organization field no order's value is an organization of: it would refuse every user
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: ORDER, organizationField: "orderId" })
+            return { plain, overridden: seen() }
+        } finally {
+            if (before) call("store#mantle.party.communication.RecordLinkType", Object.assign({}, before, { organizationField: null }))
+        }
+    },
+    then({ plain, overridden }) {
+        plain == true
+        overridden == true
+    },
+})
+
 feature("a user who may not see a wiki page reads none of its timeline; a member reads the wiki page's", {
     when() {
         const oz = as("rv.oz", () => errorOf(`${COMM}.get#RecordTimeline`, { recordEntityName: WIKI, recordId: "RV_WP3" }))

@@ -3009,8 +3009,14 @@ along with this software (see the LICENSE.md file). If not, see
                     const orgIds = userOrganizationIds()
                     if (orgIds != null && !orgRecord[entityName](value).some((partyId) => !!partyId && orgIds.includes(partyId))) return false
                 }
-                // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization
-                const registration = registrations[entityName]
+                // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization;
+                // never for a type get#RecordLinkInfo rules itself, whose rule below no registration replaces (logged)
+                const linkTypes = ec.resource.script('component://mr-mantle/service/mantle/party/RecordLinkTypes.js')
+                let registration = registrations[entityName]
+                if (registration && linkTypes.overridesCode(registration)) {
+                    ec.logger.error(`Record type ${entityName}: its registration's visibility rule is ignored; get#RecordLinkInfo rules it itself`)
+                    registration = null
+                }
                 // in a transaction of its own, so an app check that refuses inside it cannot mark the caller's rollback-only
                 if (registration?.visibleService) return ec.service.sync().name(registration.visibleService)
                         .parameters({recordEntityName: entityName, recordId: id}).requireNewTransaction(true).disableAuthz().call()?.recordVisible === true
