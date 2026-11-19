@@ -123,8 +123,8 @@
     </actions>
   </service>
   <service verb="import" noun="Mbox" authenticate="anonymous-all" allow-remote="false">
-    <description>Operation importMbox: a mailing list's archive, an mbox file the operator put in the import directory
-      (archiveName, with its SHA-256 as checksum), is imported into a category by the list's owners (the site's owners and
+    <description>Operation importMbox: a mailing list's archive, an mbox file the operator put in the site's own directory under
+      the import directory, &lt;pass@import-dir&gt;/&lt;siteId&gt;/ (archiveName, with its SHA-256 as checksum), is imported into a category by the list's owners (the site's owners and
       operators, the category's staff, an Owner of the group or repository it is bound to) as a checkpointed run: messages
       become topics and posts with their dates, threaded by Message-ID, In-Reply-To and References, and by subject for a
       "Re:" with no parent in the archive. text/plain is taken before text/html (cleaned), format=flowed and encoded words

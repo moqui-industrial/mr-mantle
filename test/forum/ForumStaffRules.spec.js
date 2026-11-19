@@ -371,34 +371,61 @@ feature("SEC-PFS-94: a site's owners invite at most a day's count of addresses, 
     }
 })
 
-feature("SEC-PFS-100: a list's archive is named in the site's own import directory, one answer for missing and wrong", {
+feature("SEC-PFS-100: a list's archive is named in the site's own import directory, read once and a bounded number of times a day", {
     when() {
-        setConf("pass@import-dir", "runtime://tmp/fsr-import")
         const put = (location, text) => {
             ec.resource.getLocationReference(location).putText(text)
             return ec.resource.digest(location, "sha256")
         }
         const mbox = "From a@fsr.test Mon Jan  1 00:00:00 2024\nFrom: a@fsr.test\nSubject: FSR\n\nText\n"
-        // another site's archive at the top of the shared directory, and one of this site's
-        const otherSum = put("runtime://tmp/fsr-import/fsr-other.mbox", mbox + "other\n")
-        const ownSum = put("runtime://tmp/fsr-import/" + SITE + "/fsr-own.mbox", mbox)
-        const start = (archiveName, checksum) => op("FSR_OWNER", "importMbox", {contactListId: ids.list, archiveName, checksum})
-        const other = start("fsr-other.mbox", otherSum)
-        const missing = start("fsr-none.mbox", otherSum)
-        const wrong = start("fsr-own.mbox", otherSum)
-        const own = start("fsr-own.mbox", ownSum)
-        return {
-            other: [other.kind, other.message],
-            missing: [missing.kind, missing.message],
-            wrong: [wrong.kind, wrong.message],
-            own
-        }
+        return withConf("pass@import-dir", "runtime://tmp/fsr-import", () => {
+            // another site's archive at the top of the shared directory, and two of this site's
+            const otherSum = put("runtime://tmp/fsr-import/fsr-other.mbox", mbox + "other\n")
+            const ownSum = put("runtime://tmp/fsr-import/" + SITE + "/fsr-own.mbox", mbox)
+            put("runtime://tmp/fsr-import/" + SITE + "/fsr-second.mbox", mbox + "second\n")
+            const start = (archiveName, checksum) => op("FSR_OWNER", "importMbox", {contactListId: ids.list, archiveName, checksum})
+            const reads = () =>
+                JSON.parse(
+                    lib.row("mantle.forum.ForumImportMap", {
+                        siteId: SITE,
+                        sourceType: "mbox-read-day",
+                        sourceId: (SITE + "|" + core().dayKey()).slice(0, 40)
+                    })?.payload || "{}"
+                ).count || 0
+            return withConf("mantle@forum-archive-reads-per-day", "2", () => {
+                const other = start("fsr-other.mbox", otherSum)
+                const missing = start("fsr-none.mbox", otherSum)
+                const wrong = start("fsr-own.mbox", otherSum)
+                // the same file of the same size and time is not read again for another wrong checksum
+                const wrongAgain = start("fsr-own.mbox", "0".repeat(64))
+                const afterWrong = reads()
+                const own = start("fsr-own.mbox", ownSum)
+                // a second file is a second read; a third read in the day is refused
+                const second = start("fsr-second.mbox", "0".repeat(64))
+                put("runtime://tmp/fsr-import/" + SITE + "/fsr-own.mbox", mbox + "changed\n")
+                const third = start("fsr-own.mbox", "0".repeat(64))
+                return {
+                    other: [other.kind, other.message],
+                    missing: [missing.kind, missing.message],
+                    wrong: [wrong.kind, wrong.message],
+                    wrongAgain: [wrongAgain.kind, wrongAgain.message],
+                    afterWrong,
+                    own,
+                    second: second.kind,
+                    third: [third.kind, third.reason]
+                }
+            })
+        })
     },
-    then({other, missing, wrong, own}) {
+    then({other, missing, wrong, wrongAgain, afterWrong, own, second, third}) {
         other[0] == "Conflict"
         missing == wrong
         other == wrong
+        wrongAgain == wrong
+        afterWrong == 1
         own.runId != null
+        second == "Conflict"
+        third == ["Tarpit", "limitReached"]
     }
 })
 

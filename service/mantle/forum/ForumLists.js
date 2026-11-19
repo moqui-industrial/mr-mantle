@@ -3,7 +3,8 @@
  * its own address (a ForumMailRoute of the category). Forum.js calls this with the shared core, its methods map and the
  * operations module (the run dispatcher).
  * - listHeaders: a list category's own List-Id, List-Post and List-Archive, by its address.
- * - importMbox: a list's archive (an mbox file the operator put in the import directory) becomes topics and posts with
+ * - importMbox: a list's archive (an mbox file the operator put in the site's own directory under the import directory,
+ *   <pass@import-dir>/<siteId>/) becomes topics and posts with
  *   their dates, threaded by Message-ID, In-Reply-To and References; a checkpointed run, resumable and safe to run
  *   twice (ForumImportMap rows keyed by the category and the Message-ID). An author is a profile with no account, by
  *   the hash of the address (the address is never stored); the person's posts become theirs when an account verifies
@@ -50,6 +51,7 @@
         nameShowsOtherAddress
     } = core
     const MAP = F + "ForumImportMap"
+    const limits = () => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js")
     const HELD = F + "ForumHeldMail"
     const LIST = "mantle.marketing.contact."
     const publicApps = () => ec.resource.script("component://mr-mantle/service/mantle/public/PublicApps.js")
@@ -455,6 +457,31 @@
         if (!imp || imp.siteId !== siteId || !String(imp.stage).startsWith("mbox-")) missing()
         return imp
     }
+    /* An archive's SHA-256, read once for a file's size and time: a ForumImportMap row by the site and the file's name
+       keeps the last one, so a wrong checksum tried again reads nothing; each read of a file is counted against the site's
+       day (mantle@forum-archive-reads-per-day, Tarpit past it), so the staff of a site do not make the server read its
+       archives without end. */
+    function archiveDigest(siteId, name, ref, location) {
+        const stamp = String(ref.getSize()) + "|" + String(ref.getLastModified())
+        const key = {siteId, sourceType: "mbox-digest", sourceId: String(hash(name)).slice(0, 40)}
+        const known = json(one(MAP, key)?.payload, {})
+        if (known.stamp === stamp && known.sha256) return known.sha256
+        const most = limits().limit("forum-archive-reads-per-day")
+        // the count and the digest are kept in a transaction of their own, so a refused checksum keeps them too
+        return ec.transaction.runRequireNew(null, "Error reading an archive's checksum", () => {
+            const dayKey = {siteId, sourceType: "mbox-read-day", sourceId: (siteId + "|" + core.dayKey()).slice(0, 40)}
+            const day = one(MAP, dayKey, true)
+            const used = Number(json(day?.payload, {}).count || 0)
+            if (used >= most) return null
+            const count = JSON.stringify({count: used + 1})
+            day ? update(day, {payload: count}) : create(MAP, {...dayKey, state: "index", payload: count})
+            const sha256 = ec.resource.digest(location, "sha256")
+            const payload = JSON.stringify({stamp, sha256})
+            const cached = one(MAP, key, true)
+            cached ? update(cached, {payload}) : create(MAP, {...key, state: "index", payload})
+            return sha256
+        }) ?? fail("Tarpit", "limitReached: This site's archives were read as often as a day allows; try tomorrow")
+    }
     methods.importMbox = p => {
         site(p.siteId)
         listStaff(p)
@@ -469,8 +496,9 @@
         const location = importDir() + "/" + p.siteId + "/" + name
         const notThere = () => fail("Conflict", "No archive of that name and checksum is in this site's import directory")
         if (!/^[0-9a-f]{64}$/.test(lower(p.checksum))) notThere()
-        if (!ec.resource.getLocationReference(location).exists) notThere()
-        const checksum = ec.resource.digest(location, "sha256")
+        const ref = ec.resource.getLocationReference(location)
+        if (!ref.exists) notThere()
+        const checksum = archiveDigest(p.siteId, name, ref, location)
         if (checksum !== lower(p.checksum)) notThere()
         // the same archive into the same category again is the same import, run again: what it has is not made twice
         one(S + "PublicSite", {siteId: p.siteId}, true)

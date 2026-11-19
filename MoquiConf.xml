@@ -34,8 +34,9 @@
     <!-- The forum's limits: forum-drafts-per-member how many drafts a member keeps on a site (SEC-PFS-92), forum-draft-days
         after how many days untouched a draft is removed, forum-report-exports-per-day how many report files
         a staff member makes on a site a day (SEC-PFS-93), forum-owner-invitations-per-day how many list invitations a
-        site's owners send a day, all lists together (operators are not counted; SEC-PFS-94).
-        forum-sender-sites (no count) names the sites a registered sender (pass@sender-addresses) serves besides those whose host name is its domain,
+        site's owners send a day, all lists together (operators are not counted; SEC-PFS-94), forum-archive-reads-per-day how
+        many times a day a site's list archives are read to check a checksum (SEC-PFS-100). forum-sender-sites (no count)
+        names the sites a registered sender (pass@sender-addresses) serves besides those whose host name is its domain,
         as "address=SITE_A;SITE_B, ..." (SEC-PFS-99). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
             content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
@@ -43,7 +44,7 @@
             marketing-reservations-per-offer="20" marketing-tickets-per-address="10"
             mail-provider-authserv-ids="" forum-inbound-accounts=""
             forum-drafts-per-member="50" forum-draft-days="90" forum-report-exports-per-day="20"
-            forum-owner-invitations-per-day="2000" forum-sender-sites="" allow-test-gateways="false"/>
+            forum-owner-invitations-per-day="2000" forum-archive-reads-per-day="20" forum-sender-sites="" allow-test-gateways="false"/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->
