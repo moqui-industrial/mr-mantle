@@ -1,16 +1,19 @@
 // The forum's staff and member limits (plans/Security-Review-Low.md, the SEC-PFS and SEC-PSF entries named in each feature):
-// ending a sanction asks what setting one asks (ForumModeration.js endSanction); a category's own staff read a member's
-// scope, not the member's site-wide state (getMember); a join request is asked once, by a member in good standing
-// (Forum.js joinCategory); an owner's membership is changed only after the caller signs in again (setMembership); the
-// author or staff take earlier versions out of a post's public history (updatePost); drafts and previews are held to the
-// post's limits, a member's draft count and an expiry (storeDraft, previewPost, cleanup#Drafts); a member asks one export
-// at a time, a staff member makes a bounded number of report files a day, and a site runs one operation of a kind at a
-// time (ForumOperations.js); a site's owners invite a bounded number of addresses a day (ForumLists.js inviteListMembers);
-// a site's owner sends only as a sender of the site's own domain (storeMailSettings); a list's archive is named only in
-// the site's own import directory, with one answer for a missing file and a wrong checksum (importMbox); and a member's
-// HTML keeps an image only of the site's attachment downloads, in mail none (ForumCore.js memberHtml).
-// Spec-local site, categories and accounts, through the PASS authority as a page's call arrives. Regression suite: these
-// are rules. Run: ./moq test mr-mantle --spec ForumStaffRules
+// ending a sanction asks a rank above its member's, as setting one does (ForumModeration.js endSanction); a category's own
+// staff read a member's scope, not the member's site-wide state (getMember); a join request is asked once, by a member in
+// good standing (Forum.js joinCategory); an owner's membership is changed only after a recent sign-in (setMembership,
+// require#RecentAuth); the author or staff hide a post's earlier versions from readers as they edit or later, and show
+// them again (updatePost, setPostHistory); drafts and previews are held to the post's limits, a member's draft count and
+// an expiry (storeDraft, previewPost, cleanup#Drafts); a member asks one export at a time, a staff member makes a bounded
+// number of report files a day, a site runs one operation of a kind at a time, and the dispatcher takes each site's oldest
+// run in turn (ForumOperations.js); a site's owners invite a bounded number of addresses a day (ForumLists.js
+// inviteListMembers); a site sends only as a sender of its own host name or one the operator names for it, checked again
+// at send time (storeMailSettings, ForumCore.js mailSettings); a list's archive is named only in the site's own import
+// directory, with one answer for a missing file and a wrong checksum, read once for its size and time and a bounded number
+// of times a day (importMbox); a topic links and shows only what is the site's (linkDiscussion, getTopicLinks); and a
+// member's HTML keeps an image only of the site's attachment downloads under its forum mount, in mail none (ForumCore.js
+// memberHtml). Spec-local site, categories and accounts, through the PASS authority as a page's call arrives. Regression
+// suite: these are rules. Run: ./moq test mr-mantle --spec ForumStaffRules
 const lib = ec.resource.script("component://mr-mantle/test/smithy/SmithySpecLib.js")
 const SITE = "FSR_SITE"
 const HOST = "fsr.example.test"
@@ -41,6 +44,23 @@ function category(name, mode, more = {}) {
     })
     return contactListId
 }
+/* An operation as a user signed in by an internal login, which is no recent sign-in (require#RecentAuth): as the user of
+   a session whose sign-in is older than five minutes. */
+function internalOp(username, operation, input = {}) {
+    ec.user.logoutUser()
+    ec.user.internalLoginUser(username)
+    try {
+        const out = ec.resource
+            .script("component://mr-mantle/script/PassAuthority.js")
+            .handle({siteId: SITE, operation, input, sessionChecked: true})
+        return out.error ? {kind: out.error.code, reason: out.error.reason, message: out.error.message} : out.result
+    } finally {
+        ec.message.clearErrors()
+        ec.user.loginUser(lib.OPERATOR, "moqui")
+    }
+}
+const forum = () => ec.resource.script("component://mr-mantle/service/mantle/forum/Forum.js")
+const core = () => ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
 const membershipRevision = partyId => Number(lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId}).revision)
 
 spec({
@@ -51,13 +71,14 @@ spec({
         lib.account(SITE, "FSR_OWNER", {member: true, siteRole: "owner", handle: "fsrowner"})
         lib.account(SITE, "FSR_OWNER2", {member: true, siteRole: "owner", handle: "fsrowner2"})
         lib.account(SITE, "FSR_MOD", {member: true, siteRole: "moderator", handle: "fsrmod"})
+        lib.account(SITE, "FSR_MOD2", {member: true, siteRole: "moderator", handle: "fsrmod2"})
         lib.account(SITE, "FSR_LMOD", {member: true, handle: "fsrlmod"})
         lib.account(SITE, "FSR_ANN", {member: true, handle: "fsrann"})
         lib.account(SITE, "FSR_BEN", {member: true, handle: "fsrben"})
         lib.account(SITE, "FSR_SUS", {member: true, handle: "fsrsus"})
         // an account of the deployment that is no member of the site
         lib.account(SITE, "FSR_OUT")
-        for (const partyId of ["FSR_OWNER", "FSR_OWNER2", "FSR_MOD", "FSR_LMOD", "FSR_ANN", "FSR_BEN", "FSR_SUS"])
+        for (const partyId of ["FSR_OWNER", "FSR_OWNER2", "FSR_MOD", "FSR_MOD2", "FSR_LMOD", "FSR_ANN", "FSR_BEN", "FSR_SUS"])
             lib.settled(SITE, partyId)
         ids.general = category("FSR general", "discussion")
         ids.approval = category("FSR approval", "discussion", {joinApprovalRequired: "Y"})
@@ -69,6 +90,7 @@ spec({
             statusId: "CLPT_ACCEPTED",
             fromDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 1000
         })
+        // for the whole spec, and put back after it (setConf)
         setConf("pass@media-root", "runtime://tmp/fsr-media")
     }
 })
@@ -162,7 +184,7 @@ feature("SEC-PFS-96: an owner's membership is changed only after the caller sign
     }
 })
 
-feature("SEC-PFS-86: the author's or staff's edit takes the earlier versions out of the post's public history", {
+feature("SEC-PFS-86: the author or staff hide a post's earlier versions from readers, as they edit or later, and show them again", {
     when() {
         lib.settled(SITE, "FSR_ANN")
         const topic = op("FSR_ANN", "publishPost", {
@@ -173,7 +195,13 @@ feature("SEC-PFS-86: the author's or staff's edit takes the earlier versions out
         })
         const postId = topic.rootCommEventId
         const edited = op("FSR_ANN", "updatePost", {postId, body: "<p>Call me</p>", expectedRevision: 1, hideHistory: true})
-        // a staff edit of another member's post hides them unless the editor says otherwise
+        const reader = revisions(op("FSR_BEN", "getPostHistory", {postId}))
+        const compare = kind(op("FSR_BEN", "comparePostRevisions", {postId, fromRevision: 1, toRevision: 2}))
+        const author = revisions(op("FSR_ANN", "getPostHistory", {postId}))
+        // the author shows them again
+        const shown = op("FSR_ANN", "setPostHistory", {postId, history: "shown"})
+        const readerAgain = revisions(op("FSR_BEN", "getPostHistory", {postId}))
+        // a staff edit of another member's post keeps its history readable unless the editor asks
         lib.settled(SITE, "FSR_BEN")
         const reply = op("FSR_BEN", "publishPost", {rootCommEventId: postId, body: "<p>FSR abuse</p>", operationId: operationId()})
         const moderated = op("FSR_MOD", "updatePost", {
@@ -182,24 +210,25 @@ feature("SEC-PFS-86: the author's or staff's edit takes the earlier versions out
             expectedRevision: 1,
             reason: "Abuse"
         })
-        return {
-            edited,
-            moderated,
-            reader: revisions(op("FSR_BEN", "getPostHistory", {postId})),
-            compare: kind(op("FSR_BEN", "comparePostRevisions", {postId, fromRevision: 1, toRevision: 2})),
-            author: revisions(op("FSR_ANN", "getPostHistory", {postId})),
-            staff: revisions(op("FSR_MOD", "getPostHistory", {postId})),
-            replyReader: revisions(op("FSR_ANN", "getPostHistory", {postId: reply.postId}))
-        }
+        const keptByDefault = revisions(op("FSR_ANN", "getPostHistory", {postId: reply.postId}))
+        const staffHides = op("FSR_MOD", "setPostHistory", {postId: reply.postId, history: "hidden", reason: "Abuse"})
+        const hiddenByStaff = revisions(op("FSR_ANN", "getPostHistory", {postId: reply.postId}))
+        // a reader who is neither the author nor staff does not
+        const stranger = op("FSR_ANN", "setPostHistory", {postId: reply.postId, history: "shown"})
+        return {edited, reader, compare, author, shown, readerAgain, moderated, keptByDefault, staffHides, hiddenByStaff, stranger}
     },
-    then({edited, moderated, reader, compare, author, staff, replyReader}) {
+    then({edited, reader, compare, author, shown, readerAgain, moderated, keptByDefault, staffHides, hiddenByStaff, stranger}) {
         edited.kind == null
-        moderated.kind == null
         reader == [2]
         compare == "NotFound"
         author == [2, 1]
-        staff == [2, 1]
-        replyReader == [2]
+        shown.history == "shown"
+        readerAgain == [2, 1]
+        moderated.kind == null
+        keptByDefault == [2, 1]
+        staffHides.history == "hidden"
+        hiddenByStaff == [2]
+        stranger.kind == "Unauthorized"
     }
 })
 

@@ -1675,11 +1675,10 @@ methods.updatePost = (p) => {
         invalid('Only the author changes attachments')
     if (a.canModerate && event.fromPartyId !== me() && !p.reason)
         invalid('Staff edits require a reason')
-    // The author or staff may take the earlier versions out of the post's public history, so text an edit removes (an
-    // address, a secret, abuse) is no longer shown to readers or restored by a wiki editor; staff editing another's post
-    // do so unless they say otherwise. The author and staff still read every version.
-    const staffEdit = a.canModerate && event.fromPartyId !== me()
-    const hideHistory = p.hideHistory == null ? staffEdit : p.hideHistory === true
+    // The author or staff may take the earlier versions out of the post's public history when they edit, so text an
+    // edit removes (an address, a secret, abuse) is no longer shown to readers or restored by a wiki editor; the history
+    // stays readable unless they ask (setPostHistory hides or shows it later). The author and staff read every version.
+    const hideHistory = p.hideHistory === true
     if (hideHistory && !a.canModerate && event.fromPartyId !== me())
         fail('Unauthorized', 'Only the author or staff hide earlier versions')
     // An edit keeps the post's authoring format unless it names one.
@@ -4537,6 +4536,9 @@ methods.getPostHistory = (p) => {
         rootCommEventId: st.rootCommEventId,
         revision: Number(st.revision),
         canRestore: canEditPost(st, event, historyAccess(p).a),
+        // the author and staff hide the earlier versions from readers, or show them again (setPostHistory)
+        canSetHistory:
+            !!me() && (historyAccess(p).a.canModerate || event.fromPartyId === me()),
         revisionList: list,
     }
 }
@@ -4585,6 +4587,36 @@ methods.restorePostRevision = (p) => {
         reason: p.reason || 'Restored revision ' + r.revision,
         hideHistory: p.hideHistory ?? false,
     })
+}
+/* The author or staff hide a post's earlier versions from its readers (history 'hidden'), or show them again ('shown'):
+   every revision before the current one is marked publicHistoryAllowed N or Y. The author and staff read them either way. */
+methods.setPostHistory = (p) => {
+    requireUser()
+    if (!['hidden', 'shown'].includes(p.history))
+        invalid('history is hidden or shown')
+    const { st, event, a } = historyAccess(p)
+    if (!a.canModerate && event.fromPartyId !== me())
+        fail('Unauthorized', 'Only the author or staff hide or show earlier versions')
+    one(F + 'ForumPostState', { communicationEventId: p.postId }, true)
+    const flag = p.history === 'hidden' ? 'N' : 'Y'
+    for (const r of Array.from(
+        find(F + 'ForumPostRevision', { communicationEventId: p.postId })
+            .condition('revision', 'less', Number(st.revision))
+            .list(),
+    ))
+        if (r.publicHistoryAllowed !== flag) update(r, { publicHistoryAllowed: flag })
+    if (a.canModerate && event.fromPartyId !== me())
+        audit(
+            p.siteId,
+            a.category.contactListId,
+            'post',
+            p.postId,
+            'history-' + p.history,
+            p.reason || '',
+            null,
+            null,
+        )
+    return { history: p.history }
 }
 /* A participant of a private conversation (its sender or a recipient) releases a message of it the mail gateway held as
    spam: it is delivered to the conversation as a sent message is. No review item and no staff: a private message is

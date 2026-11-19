@@ -101,6 +101,7 @@
     ['GET', 'posts/{postId}/revisions', 'getPostHistory'],
     ['GET', 'posts/{postId}/revisions/compare', 'comparePostRevisions'],
     ['POST', 'posts/{postId}/restore', 'restorePostRevision'],
+    ['POST', 'posts/{postId}/history', 'setPostHistory'],
     ['POST', 'posts/{postId}/release', 'releaseHeldMessage'],
     ['DELETE', 'posts/{postId}', 'deletePost'],
     ['GET', 'rules', 'findRules'],

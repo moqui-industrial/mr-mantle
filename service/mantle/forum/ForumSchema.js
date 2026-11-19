@@ -619,6 +619,10 @@
             'hideHistory',
         ],
     },
+    setPostHistory: {
+        service: 'mantle.forum.ForumServices.set#PostHistory',
+        fields: ['siteId', 'postId', 'history', 'reason'],
+    },
     releaseHeldMessage: {
         service: 'mantle.forum.ForumServices.release#HeldMessage',
         fields: ['siteId', 'postId', 'expectedRevision'],
