@@ -98,6 +98,7 @@ const changeTexts = {
     quoteExpired: () => "Your delivery choice is no longer offered. Choose a delivery option again.",
     tax: change => "The tax changed from " + change.before + " to " + change.after + ".",
     promotionLimit: change => "The promotion " + change.name + " has reached its limit. Remove its code to check out.",
+    promotionEmail: change => "This code was already used with this email address (" + change.name + "). Remove it to check out.",
     terms: () => "The terms of sale changed. Review them and accept them again."
 }
 
@@ -1118,7 +1119,7 @@ function freeze(p) {
     const limited = call("mantle.product.StorePromotionServices.check#OrderPromotionLimits", {orderId: order.orderId, lock: true})
     if (!limited.withinLimits)
         for (const limit of Array.from(limited.exceeded || []))
-            changes.push({kind: "promotionLimit", name: limit.label || "in your cart"})
+            changes.push({kind: limit.byEmail ? "promotionEmail" : "promotionLimit", name: limit.label || "in your cart"})
     // delivery: the fresh quote of the chosen method, applied when it differs; gone, the choice is cleared
     if (p.quoteNeeded) {
         const before = shippingTotal(order.orderId)

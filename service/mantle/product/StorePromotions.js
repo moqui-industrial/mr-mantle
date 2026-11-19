@@ -204,6 +204,35 @@ function placedUses(conditions, exceptOrderId) {
     const row = Array.from(query.list())[0]
     return num(row?.promoTimesUsed)
 }
+// A Shop order's checkout contact email, lower case and trimmed ("" when it has none yet).
+function checkoutEmail(orderId) {
+    const checkout = Array.from(
+        find("mantle.order.StoreCheckout", {orderId}).selectField("contactEmail").orderBy("-checkoutId").limit(1).list()
+    )[0]
+    return String(checkout?.contactEmail || "").trim().toLowerCase()
+}
+// The placed uses (a promotion's or a code's, by conditions) of the other orders whose Shop checkout has this contact email.
+function emailUses(conditions, email, exceptOrderId) {
+    const orderIds = unique(
+        Array.from(
+            find("mantle.order.StoreCheckout")
+                .condition(ec.entity.conditionFactory.makeCondition("contactEmail", "equals", email).ignoreCase())
+                .condition("orderId", "not-equals", exceptOrderId)
+                .selectField("orderId")
+                .limit(1000)
+                .list()
+        ).map(row => row.orderId)
+    )
+    if (!orderIds.length) return 0
+    const row = Array.from(
+        find(USES, conditions)
+            .condition("orderId", "in", orderIds)
+            .condition("statusId", "in", placedStatuses)
+            .selectField("promoTimesUsed")
+            .list()
+    )[0]
+    return num(row?.promoTimesUsed)
+}
 // The placed uses of each promotion (or code) of a list, by id, in one grouped query.
 function usesBy(field, ids) {
     if (!ids.length) return {}
@@ -987,10 +1016,12 @@ function checkOrderPromotionLimits(p) {
     const asked = items.filter(item => placingIds.has(item.orderPartSeqId) && num(item.promoTimesUsed) > 0)
     if (!asked.length) return none
     const customerPartyId = (parts.find(part => part.customerPartyId) || {}).customerPartyId || null
-    // a Shop guest's cart (access rows, none with a verified customer) has no customer to count: its guest party is new on
-    // each checkout, so a per-customer limit admits no use of it (SEC-PSS-85; apply#OrderPromotions applies none)
+    // a Shop guest's cart (access rows, none with a verified customer) gets a new guest party on each checkout, so its
+    // per-customer uses are counted by its checkout's contact email, lower case and trimmed: the placed orders whose
+    // checkouts have that email (SEC-PSS-85); before the guest gives one, only this order's own uses count
     const accessRows = rows("mantle.order.StoreCartAccess", {orderId: order.orderId})
     const shopGuest = accessRows.length > 0 && !accessRows.some(row => row.customerPartyId)
+    const guestEmail = shopGuest ? checkoutEmail(order.orderId) : ""
 
     // the rows read first, unlocked: only those with a limit the order uses are locked and counted
     const promotionIds = unique(asked.map(item => item.storePromotionId)).sort()
@@ -1042,7 +1073,8 @@ function checkOrderPromotionLimits(p) {
             const requested = sum(mine)
             if (!requested) continue
             let used
-            if (limit.per === "customer" && shopGuest) used = allowed
+            const byEmail = limit.per === "customer" && shopGuest
+            if (byEmail) used = (guestEmail ? emailUses({[field]: id}, guestEmail, order.orderId) : 0) + ownPlaced
             else if (limit.per === "customer")
                 used = customerPartyId ? placedUses({[field]: id, customerPartyId}, order.orderId) + ownPlaced : ownPlaced
             else used = placedUses({[field]: id}, order.orderId) + ownPlaced
@@ -1055,7 +1087,8 @@ function checkOrderPromotionLimits(p) {
                     limitText: limit.label,
                     limit: allowed,
                     used,
-                    requested
+                    requested,
+                    ...(byEmail ? {byEmail: true} : {})
                 })
         }
     }

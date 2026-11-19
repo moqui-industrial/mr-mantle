@@ -56,14 +56,6 @@ along with this software (see the LICENSE.md file). If not, see
             </entity-find>
             <set field="firstOrderPart" from="orderPartList?.[0]"/>
             <set field="customerPartyId" from="firstOrderPart?.customerPartyId"/>
-            <!-- a Shop guest's cart (cart access rows, none with a verified customer) has no customer a per-customer limit
-                can count: its guest party is new on each checkout, so a per-customer code or promotion is a signed-in
-                customer's (SEC-PSS-85) -->
-            <script>shopGuest = (() => {
-                const accessList = Array.from(ec.entity.find('mantle.order.StoreCartAccess').condition('orderId', orderId)
-                    .disableAuthz().limit(20).list())
-                return accessList.length > 0 &amp;&amp; !accessList.some(access => access.customerPartyId)
-            })()</script>
 
             <!-- the promotion uses of this order's other parts not yet placed (each part is priced alone, and the placed ones are
                 counted below), by 'P:' storePromotionId and 'C:' promoCodeId: counted against the per-code, per-customer and total
@@ -162,7 +154,6 @@ along with this software (see the LICENSE.md file). If not, see
                             </then><else>
                                 <set field="curUseLimit" from="toDecimal(storePromoCode.useLimitPerCustomer).subtract(toDecimal(otherPartPromoUses['C:' + storePromoCode.promoCodeId] ?? 0))"/>
                             </else></if>
-                            <if condition="shopGuest"><set field="curUseLimit" from="toDecimal(0)"/></if>
                             <!-- if no use limit available treat as not applicable code -->
                             <if condition="curUseLimit.compare(0) &lt;= 0"><continue/></if>
                             <if condition="curUseLimit.compare(useLimitMin) &lt; 0"><set field="useLimitMin" from="curUseLimit"/></if>
@@ -208,7 +199,6 @@ along with this software (see the LICENSE.md file). If not, see
                     </then><else>
                         <set field="curUseLimit" from="toDecimal(storePromo.useLimitPerCustomer).subtract(toDecimal(otherPartPromoUses['P:' + storePromo.storePromotionId] ?? 0))"/>
                     </else></if>
-                    <if condition="shopGuest"><set field="curUseLimit" from="toDecimal(0)"/></if>
                     <if condition="curUseLimit.compare(useLimitMin) &lt; 0"><set field="useLimitMin" from="curUseLimit"/></if>
                 </if>
 
@@ -328,14 +318,6 @@ along with this software (see the LICENSE.md file). If not, see
                 <econdition field-name="orderId"/><order-by field-name="orderPartSeqId"/></entity-find>
             <set field="firstOrderPart" from="orderPartList?.[0]"/>
             <set field="customerPartyId" from="firstOrderPart?.customerPartyId"/>
-            <!-- a Shop guest's cart (cart access rows, none with a verified customer) has no customer a per-customer limit
-                can count: its guest party is new on each checkout, so a per-customer code or promotion is a signed-in
-                customer's (SEC-PSS-85) -->
-            <script>shopGuest = (() => {
-                const accessList = Array.from(ec.entity.find('mantle.order.StoreCartAccess').condition('orderId', orderId)
-                    .disableAuthz().limit(20).list())
-                return accessList.length > 0 &amp;&amp; !accessList.some(access => access.customerPartyId)
-            })()</script>
 
             <!-- check storePromoCode.requireParty -->
             <if condition="storePromoCode.requireParty == 'Y'">
@@ -368,10 +350,6 @@ along with this software (see the LICENSE.md file). If not, see
                 </if>
             </if>
             <!-- check storePromoCode.useLimitPerCustomer -->
-            <if condition="(storePromoCode.useLimitPerCustomer || storePromotion.useLimitPerCustomer) &amp;&amp; shopGuest">
-                <script>ec.message.addPublic(`Promotion code ${promoCode} is for signed-in customers: sign in to use it`, "warning")</script>
-                <return/>
-            </if>
             <if condition="storePromoCode.useLimitPerCustomer">
                 <if condition="customerPartyId"><then>
                     <entity-find entity-name="mantle.order.OrderItemAndPartSummary" list="itemSummaryList">

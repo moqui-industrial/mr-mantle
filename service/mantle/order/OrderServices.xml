@@ -1150,7 +1150,7 @@ General Order Placement and eCommerce Usage
             <service-call name="mantle.product.StorePromotionServices.check#OrderPromotionLimits" out-map="promotionLimitsOut"
                     in-map="{orderId:orderId, orderPartSeqId:orderPartSeqId}" disable-authz="true"/>
             <if condition="promotionLimitsOut?.withinLimits === false">
-                <set field="promotionLimitText" from="promotionLimitsOut.exceeded.map((limit) =&gt; (limit.kind == 'code' ? 'code ' : '') + limit.label + ' allows ' + limit.limit + ' ' + limit.limitText + ' (' + limit.used + ' used, this order ' + limit.requested + ')').join('; ')"/>
+                <set field="promotionLimitText" from="promotionLimitsOut.exceeded.map((limit) =&gt; limit.byEmail ? (limit.kind == 'code' ? 'code ' : '') + limit.label + ' was already used with this email address' : (limit.kind == 'code' ? 'code ' : '') + limit.label + ' allows ' + limit.limit + ' ' + limit.limitText + ' (' + limit.used + ' used, this order ' + limit.requested + ')').join('; ')"/>
                 <!-- NOTE: return with error=true causes TX rollback -->
                 <return error="true" message="PROMOTION_LIMIT_REACHED: Not placing order ${orderId}: ${promotionLimitText}. Reprice the order (its discount is taken off) and place it again."/>
             </if>
