@@ -2196,6 +2196,12 @@
             site(p.siteId, true)
             if (!detail.escalation)
                 fail('Conflict', 'No escalation was requested')
+            // by another owner than the one who asked for it (SEC-PFS-83, the owner's decision of 2026-11-18)
+            if (detail.escalation.requestedBy === me())
+                fail(
+                    'Unauthorized',
+                    'Another site owner approves an escalation you asked for',
+                )
             detail.escalation.approvedBy = me()
             detail.escalation.approvedAt = millis(now())
             detail.escalation.approvalReason = p.reason
