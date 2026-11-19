@@ -351,3 +351,28 @@ feature("Mantle's aging view puts an invoice 121 days past due in its last bucke
         carrier.length == 0 || carrier[0].totalDue == null
     }
 })
+
+feature("a payroll-origin invoice is no template: a schedule of one is refused, and one whose template is such cannot be previewed (SEC-BOS-92)", {
+    when() {
+        login(f.users.ar)
+        const payroll = helper().draft(f, "2100")
+        const later = helper().draft(f, "900")
+        const request = {organizationPartyId: f.org, description: "Payroll copy", intervalUomId: "TF_mon", intervalQuantity: 1, startDate: day(0)}
+        const laterSchedule = recurring("store#Schedule", Object.assign({}, request, {templateInvoiceId: later.invoiceId})).invoiceScheduleId
+        login("john.doe")
+        // the mark a pay run's finalization writes (PayrollObligations.js)
+        for (const invoiceId of [payroll.invoiceId, later.invoiceId])
+            svc("update#mantle.account.invoice.Invoice", {invoiceId, payrollOrigin: "Y"})
+        login(f.users.ar)
+        const scheduled = refused(
+            "mantle.account.RecurringInvoiceServices.store#Schedule",
+            Object.assign({}, request, {templateInvoiceId: payroll.invoiceId})
+        )
+        const previewed = refused("mantle.account.RecurringInvoiceServices.preview#Period", {invoiceScheduleId: laterSchedule})
+        return {scheduled, previewed}
+    },
+    then({scheduled, previewed}) {
+        scheduled.includes("TEMPLATE_UNAVAILABLE")
+        previewed.includes("TEMPLATE_UNAVAILABLE")
+    }
+})
