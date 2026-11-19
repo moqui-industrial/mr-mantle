@@ -261,7 +261,10 @@ along with this software (see the LICENSE.md file). If not, see
             </then><else>
                 <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
                     <econdition field-name="promoCode" ignore-case="true"/></entity-find>
-                <set field="storePromoCode" from="storePromoCodeList[0]"/>
+                <!-- a text is unique only within a store's organization (SEC-BAP-108): the order's store's code -->
+                <entity-find-one entity-name="mantle.order.OrderHeader" value-field="codeOrder"/>
+                <set field="storePromoCode" from="codeOrder?.productStoreId ? (Array.from(storePromoCodeList).find((row) =&gt;
+                        row.storePromotion?.productStoreId == codeOrder.productStoreId) || null) : (Array.from(storePromoCodeList).length == 1 ? Array.from(storePromoCodeList)[0] : null)"/>
             </else></if>
             <if condition="storePromoCode == null &amp;&amp; !promoCodeId">
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">

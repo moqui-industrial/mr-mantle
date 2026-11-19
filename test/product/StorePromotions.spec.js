@@ -435,6 +435,47 @@ feature(
     }
 )
 
+feature("a code's text is unique within its store's organization: another organization's taken texts and prefix counts are not answered, and an order takes its own store's code (SEC-BAP-108)", {
+    when() {
+        const theirs = run(users.other, P + "store#Promotion", {
+            productStoreId: ids.other,
+            serviceRegisterId: "FlatDiscount",
+            itemDescription: "Other organization's codes",
+            requireCode: "Y"
+        })
+        const storePromotionId = theirs.storePromotionId
+        // texts organization A has (the codes feature's)
+        const same = run(users.other, P + "store#PromoCode", {storePromotionId, promoCode: prefix + "SPRING"})
+        const sameNumbered = run(users.other, P + "store#PromoCode", {storePromotionId, promoCode: prefix + "N4", userEntered: "Y"})
+        const preview = run(users.other, P + "generate#PromoCodes", {
+            storePromotionId,
+            count: 5,
+            prefix: prefix + "N",
+            numbered: true,
+            preview: true
+        })
+        // an order of organization A's store takes A's code of that text, not B's
+        const order = cart(customer("Own store"))
+        addCode(order, prefix + "N4")
+        const applied = list("mantle.order.OrderPromoCode", {orderId: order}).map(row => row.promoCodeId)
+        const ownCode = list(S + "ProductStorePromoCode", {promoCode: prefix + "N4"}).filter(row =>
+            list(S + "ProductStorePromotion", {storePromotionId: row.storePromotionId})[0]?.productStoreId === ids.store
+        )
+        return {theirs, same, sameNumbered, preview, applied, ownCode: ownCode.map(row => row.promoCodeId)}
+    },
+    then({theirs, same, sameNumbered, preview, applied, ownCode}) {
+        theirs.error == ""
+        code(same) == ""
+        code(sameNumbered) == ""
+        ownCode.length == 1
+        // B's own N4 is the one taken; A's N1 to N5 are not counted
+        preview.taken == [prefix + "N4"]
+        preview.existingWithPrefix == 1
+        preview.makeCount == 4
+        applied == ownCode
+    }
+})
+
 feature("a store order whose promotions set no limit is placed as before and locks nothing", {
     when() {
         const {storePromotionId, productId} = flatPromotion("No limit")

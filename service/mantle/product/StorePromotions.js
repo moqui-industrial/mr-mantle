@@ -575,19 +575,40 @@ function codeRow(code, promotion, names, uses) {
         stores.rowDates(code)
     )
 }
-// The code text, refused when it is not one word of letters, digits, - and _ (2 to 40), or another code has it, ignoring
-// case (add#OrderPromoCode finds a code ignoring case).
-function codeTextOf(value, exceptPromoCodeId) {
+// The code text, refused when it is not one word of letters, digits, - and _ (2 to 40), or another code of the store's
+// organization has it, ignoring case (add#OrderPromoCode and Shop find a code ignoring case, within the order's store).
+function codeTextOf(value, exceptPromoCodeId, organizationPartyId) {
     const code = text(value)
     if (!codePattern.test(code)) denied("VALUE_INVALID", "A code is 2 to 40 letters, digits, - or _")
-    if (codeTaken(code, exceptPromoCodeId)) denied("CODE_TAKEN", "The code " + code + " is taken")
+    if (codeTaken(code, exceptPromoCodeId, organizationPartyId))
+        denied("CODE_TAKEN", "The code " + code + " is taken")
     return code
 }
-function codeTaken(code, exceptPromoCodeId) {
+// The promotions of the organization's stores: a code's text is unique among their codes only, so whether a text is taken,
+// and how many codes a prefix has, say nothing of another organization's stores (SEC-BAP-108).
+function organizationPromotionIds(organizationPartyId) {
+    const storeIds = organizationPartyId
+        ? rows(STORE, {organizationPartyId}).map(row => row.productStoreId)
+        : []
+    if (!storeIds.length) return ["_NONE_"]
+    const ids = Array.from(
+        find(PROMOTION).condition("productStoreId", "in", storeIds).selectField("storePromotionId").list()
+    ).map(row => row.storePromotionId)
+    return ids.length ? ids : ["_NONE_"]
+}
+const organizationCodes = organizationPartyId =>
+    find(CODE).condition("storePromotionId", "in", organizationPromotionIds(organizationPartyId))
+const organizationOf = promotion => (promotion ? one(STORE, {productStoreId: promotion.productStoreId})?.organizationPartyId : null)
+function codeTaken(code, exceptPromoCodeId, organizationPartyId) {
     const factory = ec.entity.conditionFactory
-    let query = find(CODE).condition(factory.makeCondition("promoCode", "equals", code).ignoreCase())
+    let query = organizationCodes(organizationPartyId).condition(
+        factory.makeCondition("promoCode", "equals", code).ignoreCase()
+    )
     if (exceptPromoCodeId) query = query.condition("promoCodeId", "not-equals", exceptPromoCodeId)
-    return query.count() > 0 || (!!one(CODE, {promoCodeId: code}) && code !== exceptPromoCodeId)
+    if (query.count() > 0) return true
+    // a record id equal to the text (add#OrderPromoCode's fallback by id), within the organization too
+    const byId = code !== exceptPromoCodeId ? one(CODE, {promoCodeId: code}) : null
+    return !!byId && organizationOf(one(PROMOTION, {storePromotionId: byId.storePromotionId})) === organizationPartyId
 }
 
 // find#PromoCodes: the codes of the user's stores' promotions (or one promotion, or one store), by code ignoring case,
@@ -681,7 +702,12 @@ function storePromoCode(p) {
             // unchanged
         } else if (code && usesBy("promoCodeId", [code.promoCodeId])[code.promoCodeId])
             denied("CODE_REDEEMED", "The code has been used; it keeps its text (expire it and make a new one)")
-        else values.promoCode = wanted ? codeTextOf(wanted, code?.promoCodeId) : drawCodes("", 1, 8, new Set())[0]
+        else {
+            const organizationPartyId = organizationOf(promotion)
+            values.promoCode = wanted
+                ? codeTextOf(wanted, code?.promoCodeId, organizationPartyId)
+                : drawCodes("", 1, 8, new Set(), undefined, organizationPartyId)[0]
+        }
     }
     const changeReason = text(p.changeReason) || null
     if (code) {
@@ -705,7 +731,7 @@ function storePromoCode(p) {
 
 // Codes drawn at random: the prefix and a suffix from codeAlphabet, none taken (ignoring case) nor repeated in the batch;
 // a draw that collides is drawn again, and the number of collisions is counted on the set's `collisions`.
-function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}) {
+function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}, organizationPartyId = null) {
     const codes = []
     let tries = 0
     while (codes.length < count) {
@@ -717,7 +743,7 @@ function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}
             suffix += codeAlphabet[random.charCodeAt(index % random.length) % codeAlphabet.length]
         const code = prefix + suffix
         const key = code.toUpperCase()
-        if (taken.has(key) || codeTaken(code)) {
+        if (taken.has(key) || codeTaken(code, null, organizationPartyId)) {
             counter.collisions++
             continue
         }
@@ -727,7 +753,7 @@ function drawCodes(prefix, count, suffixLength, taken, counter = {collisions: 0}
     return codes
 }
 // Numbered codes: the prefix and numbers from startNumber, zero padded to the widest; those taken are named.
-function numberedCodes(prefix, count, startNumber) {
+function numberedCodes(prefix, count, startNumber, organizationPartyId) {
     const width = String(startNumber + count - 1).length
     const codes = []
     for (let number = startNumber; number < startNumber + count; number++)
@@ -735,13 +761,18 @@ function numberedCodes(prefix, count, startNumber) {
     const factory = ec.entity.conditionFactory
     const existing = new Set(
         Array.from(
-            find(CODE)
+            organizationCodes(organizationPartyId)
                 .condition(factory.makeCondition("promoCode", "like", likeText(prefix).slice(1)).ignoreCase())
                 .selectField("promoCode")
                 .list()
         ).map(row => String(row.promoCode).toUpperCase())
     )
-    return {codes, taken: codes.filter(code => existing.has(code.toUpperCase()) || !!one(CODE, {promoCodeId: code}))}
+    return {
+        codes,
+        taken: codes.filter(
+            code => existing.has(code.toUpperCase()) || codeTaken(code, null, organizationPartyId)
+        )
+    }
 }
 
 // generate#PromoCodes: a bounded batch of codes of a promotion (count up to 500, a prefix, random suffixes of a length, or
@@ -765,8 +796,9 @@ function generatePromoCodes(p) {
     if (numbered && (!Number.isInteger(startNumber) || startNumber < 0)) denied("VALUE_INVALID", "Numbers start at 0 or more")
     const values = codeValues(p, null)
     const factory = ec.entity.conditionFactory
+    const organizationPartyId = store.organizationPartyId
     const existingWithPrefix = prefix
-        ? find(CODE)
+        ? organizationCodes(organizationPartyId)
               .condition(factory.makeCondition("promoCode", "like", likeText(prefix).slice(1)).ignoreCase())
               .count()
         : null
@@ -781,7 +813,7 @@ function generatePromoCodes(p) {
     }
     if (isTrue(p.preview)) {
         if (numbered) {
-            const planned = numberedCodes(prefix, count, startNumber)
+            const planned = numberedCodes(prefix, count, startNumber, organizationPartyId)
             const taken = new Set(planned.taken)
             return {
                 preview: true,
@@ -794,7 +826,7 @@ function generatePromoCodes(p) {
             }
         }
         const counter = {collisions: 0}
-        const codes = drawCodes(prefix, count, suffixLength, new Set(), counter)
+        const codes = drawCodes(prefix, count, suffixLength, new Set(), counter, organizationPartyId)
         return {
             preview: true,
             count,
@@ -810,12 +842,13 @@ function generatePromoCodes(p) {
     if (again) return again
     const counter = {collisions: 0}
     const planned = numbered
-        ? numberedCodes(prefix, count, startNumber).codes
-        : drawCodes(prefix, count, suffixLength, new Set(), counter)
+        ? numberedCodes(prefix, count, startNumber, organizationPartyId).codes
+        : drawCodes(prefix, count, suffixLength, new Set(), counter, organizationPartyId)
     const results = []
     for (const promoCode of planned) {
         try {
-            if (codeTaken(promoCode)) denied("CODE_TAKEN", "The code " + promoCode + " is taken")
+            if (codeTaken(promoCode, null, organizationPartyId))
+                denied("CODE_TAKEN", "The code " + promoCode + " is taken")
             const out = lib.probe(
                 "create#" + CODE,
                 Object.assign({userEntered: "Y", requireParty: "N"}, values, {
