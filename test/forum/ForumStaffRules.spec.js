@@ -95,22 +95,28 @@ spec({
     }
 })
 
-feature("SEC-PFS-88: a sanction is ended only by staff of a higher rank than its member, never by the member", {
+feature("SEC-PFS-88: a sanction is ended only by staff of a higher rank than its member, never by the member or a peer", {
     when() {
-        const silence = op("FSR_OWNER", "setSanction", {
-            targetPartyId: "FSR_MOD",
-            kind: "silence",
-            reason: "Cool off",
-            operationId: operationId()
-        })
-        const end = (username, reason) =>
-            op(username, "endSanction", {sanctionId: silence.sanctionId, expectedRevision: 1, reason})
-        return {silence, own: end("FSR_MOD", "Mine to end"), owner: end("FSR_OWNER", "Done")}
+        const sanction = (target, kind) =>
+            op("FSR_OWNER", "setSanction", {targetPartyId: target, kind, reason: "Cool off", operationId: operationId()})
+        const end = (username, sanctionId, reason) => op(username, "endSanction", {sanctionId, expectedRevision: 1, reason})
+        const silence = sanction("FSR_MOD", "silence")
+        // the owner suspends one moderator; another moderator, of the same rank, does not lift it
+        const suspension = sanction("FSR_MOD2", "suspend")
+        return {
+            silence,
+            own: end("FSR_MOD", silence.sanctionId, "Mine to end"),
+            owner: end("FSR_OWNER", silence.sanctionId, "Done"),
+            peer: end("FSR_MOD", suspension.sanctionId, "A peer's"),
+            ownerEnds: end("FSR_OWNER", suspension.sanctionId, "Done")
+        }
     },
-    then({silence, own, owner}) {
+    then({silence, own, owner, peer, ownerEnds}) {
         silence.sanctionId != null
         own.kind == "Unprocessable"
         owner.revision == 2
+        peer.kind == "Unauthorized"
+        ownerEnds.revision == 2
     }
 })
 
