@@ -349,6 +349,10 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="add" noun="OrderItemToReturn">
+        <description>Add an order line to a return, up to what was billed of it less what is already returned. The line's order
+            part is the return's customer's and organization's (ORDER_MISMATCH, the same as for a missing line: SEC-BAP-93); a
+            cancelled, completed or manual-response return takes none, and one past Requested, whose new item is born approved,
+            takes one only from a return authorizer (RETURN_AUTHORIZE; RETURN_NOT_OPEN).</description>
         <in-parameters>
             <parameter name="returnId" required="true"/>
             <parameter name="orderId" required="true"/>
@@ -375,6 +379,18 @@ along with this software (see the LICENSE.md file). If not, see
                 is returnable; every caller (Warehouse's NewReturn, ReturnPolicyServices.save#ReturnItem) takes it -->
             <entity-find-one entity-name="mantle.order.OrderItem" value-field="orderItem" for-update="true"/>
             <if condition="orderItem == null"><return error="true" message="Could not find Order Item ${orderId}:${orderItemSeqId}"/></if>
+            <!-- SEC-BAP-93: the line is one of an order between the return's own customer and organization, the same answer for
+                another's as for a missing one; and an item joins a return past Requested (born approved) only for a return
+                authorizer -->
+            <entity-find-one entity-name="mantle.order.OrderPart" value-field="orderPart">
+                <field-map field-name="orderId" from="orderItem.orderId"/>
+                <field-map field-name="orderPartSeqId" from="orderItem.orderPartSeqId"/></entity-find-one>
+            <if condition="orderPart == null || orderPart.customerPartyId != returnHeader.customerPartyId
+                    || orderPart.vendorPartyId != returnHeader.vendorPartyId">
+                <return error="true" message="ORDER_MISMATCH: Could not find Order Item ${orderId}:${orderItemSeqId} of this return's customer and organization"/></if>
+            <if condition="!['ReturnCreated', 'ReturnRequested'].includes(returnHeader.statusId) &amp;&amp; ec.user.userId
+                    &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                <return error="true" message="RETURN_NOT_OPEN: Return ${returnId} is ${returnHeader.status?.description}; only a return authorizer adds an item to it"/></if>
 
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" in-map="context" out-map="context"/>
             <set field="returnPrice" from="returnPrice != null &amp;&amp; !toDecimal(returnPrice).isZero() ? toDecimal(returnPrice) : toDecimal(orderItem.unitAmount ?? 0)"/>

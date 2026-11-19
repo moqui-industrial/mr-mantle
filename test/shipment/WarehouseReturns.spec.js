@@ -213,8 +213,34 @@ feature("an approved RMA's label request prepares its package once, and the retu
             returnReasonEnumId: "RrsnDefective",
             returnResponseEnumId: "RrspCredit"
         })
+        // SEC-BAP-93: another customer's order line is refused like a missing one, and once approved only a return
+        // authorizer adds to the return (the receiver is refused)
+        organization("WRT_OTHER_CUST", "Customer")
+        const otherSale = call("mantle.order.OrderServices.create#Order", {
+            vendorPartyId: org,
+            customerPartyId: "WRT_OTHER_CUST",
+            currencyUomId: "USD",
+            facilityId: facility
+        })
+        call("mantle.order.OrderServices.add#OrderProductQuantity", {
+            orderId: otherSale.orderId,
+            orderPartSeqId: otherSale.orderPartSeqId,
+            productId: "WRT_KETTLE",
+            quantity: 1,
+            unitAmount: 20
+        })
+        const line = orderId => ({
+            returnId,
+            orderId,
+            orderItemSeqId: rows("mantle.order.OrderItem", {orderId}).find(row => row.productId === "WRT_KETTLE").orderItemSeqId,
+            returnQuantity: 1,
+            returnReasonEnumId: "RrsnDefective",
+            returnResponseEnumId: "RrspCredit"
+        })
+        const otherCustomer = invoke(R + "add#OrderItemToReturn", line(otherSale.orderId))
         const early = run("wrt_shipper", T + "request#ReturnLabel", {operationKey: key(), returnId})
         call(R + "approve#Return", {returnId})
+        const receiverAdds = run("wrt_receiver", R + "add#OrderItemToReturn", line(ids.saleId))
         ids.returnId = returnId
         ids.returnShipmentId = shipmentOf(returnId)
         const labelKey = key()
@@ -228,9 +254,11 @@ feature("an approved RMA's label request prepares its package once, and the retu
             recordId: returnId,
             checkRecord: false
         })
-        return {early, denied, label, retry, packages, file, info}
+        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds}
     },
-    then({early, denied, label, retry, packages, file, info}) {
+    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds}) {
+        otherCustomer.error.includes("ORDER_MISMATCH")
+        receiverAdds.error.includes("RETURN_NOT_OPEN")
         early.error.includes("RETURN_NOT_APPROVED")
         denied.error.includes("PERMISSION_DENIED")
         label.error == ""
