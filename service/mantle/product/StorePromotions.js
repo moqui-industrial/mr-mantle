@@ -854,40 +854,26 @@ function generatePromoCodes(p) {
     const op = lib.operation(p, "PromoCodeBatch", store.organizationPartyId, request)
     const again = lib.previous(op)
     if (again) return again
+    // the codes are made in the operation's own transaction, under the scope's lock taken there, so two batches at once make
+    // no text twice and a rollback takes the codes with the operation: a retry makes one batch, never a second (review)
+    lockScope(organizationPartyId)
     const counter = {collisions: 0}
     const planned = numbered
         ? numberedCodes(prefix, count, startNumber, organizationPartyId).codes
         : drawCodes(prefix, count, suffixLength, new Set(), counter, organizationPartyId)
     const results = []
     for (const promoCode of planned) {
-        try {
-            // checked and made in one transaction under the scope's lock, so two batches at once make no text twice
-            const out = ec.transaction.runRequireNew(null, "Promotion code " + promoCode + " not made", () => {
-                lockScope(organizationPartyId)
-                if (codeTaken(promoCode, null, organizationPartyId))
-                    denied("CODE_TAKEN", "The code " + promoCode + " is taken")
-                return call(
-                    "create#" + CODE,
-                    Object.assign({userEntered: "Y", requireParty: "N"}, values, {
-                        storePromotionId: promotion.storePromotionId,
-                        promoCode
-                    })
-                )
-            })
-            results.push({promoCode, promoCodeId: out.promoCodeId, ok: true, code: null, message: "Made"})
-        } catch (error) {
-            const reason = lib.reasonCode(error) || "ERROR"
-            if (reason !== "CODE_TAKEN")
-                ec.logger.error(
-                    "Promotion code " + promoCode + " of " + promotion.storePromotionId + " not made: " + error.message
-                )
-            results.push({
-                promoCode,
-                ok: false,
-                code: reason,
-                message: String(error.message || error).replace(/^(Error: )?[A-Z][A-Z0-9_]+: /, "")
-            })
+        // a text taken since it was drawn (or numbered) is that code's result; a failed write fails the batch, its
+        // operation with it, so nothing half made stays behind
+        if (codeTaken(promoCode, null, organizationPartyId)) {
+            results.push({promoCode, ok: false, code: "CODE_TAKEN", message: "The code " + promoCode + " is taken"})
+            continue
         }
+        const out = call(
+            "create#" + CODE,
+            Object.assign({userEntered: "Y", requireParty: "N"}, values, {storePromotionId: promotion.storePromotionId, promoCode})
+        )
+        results.push({promoCode, promoCodeId: out.promoCodeId, ok: true, code: null, message: "Made"})
     }
     const answer = {
         results,

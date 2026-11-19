@@ -379,6 +379,28 @@ feature(
             const ended = run(users.reader, P + "find#PromoCodes", {storePromotionId, state: "ended"})
             const all = run(users.reader, P + "find#PromoCodes", {storePromotionId, pageSize: 50})
             const otherRead = run(users.other, P + "get#PromoCode", {promoCodeId: one.promoCodeId})
+            // a batch whose caller's transaction rolls back leaves no code; its retry makes the one batch (review)
+            const rolledKey = key()
+            const rolled = {storePromotionId, count: 2, prefix: prefix + "B-", operationKey: rolledKey}
+            login(users.manager)
+            const was = ec.artifactExecution.disableAuthz()
+            try {
+                ec.transaction.runRequireNew(null, "Spec batch rolled back", () => {
+                    ec.service.sync().name(P + "generate#PromoCodes").parameters(rolled).call()
+                    throw new Error("SPEC_ROLLBACK: the caller's transaction rolls back")
+                })
+            } catch (error) {
+                // rolled back on purpose
+            } finally {
+                ec.message.clearErrors()
+                if (!was) ec.artifactExecution.enableAuthz()
+                login("john.doe")
+            }
+            const batchCodes = () => ec.entity.find(S + "ProductStorePromoCode")
+                .condition(ec.entity.conditionFactory.makeCondition("promoCode", "like", prefix + "B-%")).disableAuthz().count()
+            const afterRollback = batchCodes()
+            const rolledRetry = run(users.manager, P + "generate#PromoCodes", rolled)
+            const afterRetry = batchCodes()
             const audit = list("moqui.entity.EntityAuditLog", {
                 changedEntityName: S + "ProductStorePromoCode",
                 pkPrimaryValue: one.promoCodeId,
@@ -401,6 +423,9 @@ feature(
                 ended,
                 all,
                 otherRead,
+                afterRollback,
+                rolledRetry,
+                afterRetry,
                 audit
             }
         },
@@ -430,6 +455,9 @@ feature(
             r.ended.codes.map(row => row.promoCodeId) == [r.one.promoCodeId]
             r.all.codesCount == 9
             code(r.otherRead) == "RECORD_UNAVAILABLE"
+            r.afterRollback == 0
+            r.rolledRetry.doneCount == 2
+            r.afterRetry == 2
             r.audit.map(row => row.changeReason).includes("Spec")
         }
     }
