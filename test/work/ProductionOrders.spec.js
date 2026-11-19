@@ -694,6 +694,16 @@ feature("the draft header, equipment and people are stored with the revision; a 
             )
         const supervisor = party("PO5_SUPER", "Manager")
         const outsider = party("PO5_OUTSIDER", "Assignee")
+        // a customer of the organization (PrtCustomer) is no operator, though related to it (SEC-BAP-105)
+        call("create#mantle.party.Party", {partyId: "PO5_CUST_PERSON", partyTypeEnumId: "PtyPerson"})
+        call("create#mantle.party.Person", {partyId: "PO5_CUST_PERSON", firstName: "Customer", lastName: "Person"})
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtCustomer",
+            fromPartyId: "PO5_CUST_PERSON",
+            toPartyId: org,
+            fromDate: "2000-01-01T00:00:00Z"
+        })
+        const customerPerson = party("PO5_CUST_PERSON", "Assignee")
         const role = party("PO5_SUPER", "Customer")
         const resources = run("po5_reader", P + "get#ProductionResources", {workEffortId})
         // another run cannot take the robot over the same days until this one ends its assignment
@@ -728,6 +738,7 @@ feature("the draft header, equipment and people are stored with the revision; a 
             stockAsset,
             supervisor,
             outsider,
+            customerPerson,
             role,
             resources,
             clash,
@@ -747,6 +758,7 @@ feature("the draft header, equipment and people are stored with the revision; a 
         r.stockAsset.error.includes("EQUIPMENT_INVALID")
         r.supervisor.error == ""
         r.outsider.error.includes("PARTY_UNAVAILABLE")
+        r.customerPerson.error.includes("PARTY_UNAVAILABLE")
         r.role.error.includes("ROLE_INVALID")
         r.resources.equipmentRows.length == 2
         r.resources.peopleRows.some(row => row.partyId === "PO5_SUPER" && row.roleText === "Supervisor")
