@@ -1683,7 +1683,7 @@ feature("SEC-PSS-88: a free place is confirmed only for a verified buyer or by t
     }
 })
 
-feature("SEC-PSS-89: the provider's return looks a registration's payment up at once the first time, then paced as a page's read", {
+feature("SEC-PSS-89: the provider's return looks a payment up at once the first time, then paced; the buyer's account calls count", {
     when() {
         // a payment whose lookup stays pending at the provider
         system(() =>
@@ -1712,10 +1712,29 @@ feature("SEC-PSS-89: the provider's return looks a registration's payment up at 
         const first = checks()
         returned(siteA, reserved.token)
         returned(siteA, reserved.token)
-        return {first, after: checks()}
+        // the signed-in buyer reaching its own reservation by its id: each call counts against the requester as a capability's
+        const buyer = accountWith(prefix + "_PACED_BUYER", "paced.buyer@mkrg.example.test", true)
+        const mine = asAccount(buyer, "reserve#Registration", {
+            siteId: siteA,
+            registrationPolicyId: offer.registrationPolicyId,
+            lines: JSON.stringify([{ticketTypeId: offer.ticketTypeId, quantity: 1}]),
+            buyerName: "Paced buyer",
+            buyerEmail: "paced.buyer@mkrg.example.test",
+            operationId: key()
+        })
+        const lookups = () => {
+            const requesterKey = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+            const bucketId = ec.user.singleUseCodeHash("mkt-token:" + requesterKey + ":" + Math.floor(Date.now() / 600000))
+            return Number(row("moqui.security.public.AccountAttempt", {bucketId})?.attemptCount || 0)
+        }
+        const before = lookups()
+        const read = asAccount(buyer, "get#Registration", {siteId: siteA, reservationId: mine.registration.reference})
+        return {first, after: checks(), read, counted: lookups() - before}
     },
     then(r) {
         r.first == 1
         r.after == 1
+        r.read.registration.reference != null
+        r.counted == 1
     }
 })
