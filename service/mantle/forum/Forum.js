@@ -5111,14 +5111,17 @@ const textHtml = (text) =>
         .join('')
 /* Whether a mail account is one of the forum's own inbound accounts for a route: hosted or shared, fed by the mail
    listener (its server has no store host, so the gateway wrote its trace and authentication fields, not a mailbox's
-   owner), and holding the route's address as its own or as an identity. A user's synced mailbox, whose header fields
-   its owner controls, never is. */
+   owner), owned by no user or organization, and holding the route's address as its own or as an identity. A user's
+   synced mailbox, whose header fields its owner controls, never is, nor a person's or an organization's own mailbox
+   (SEC-PFS-85). */
 function forumAccount(emailAccountId, route) {
     const account = emailAccountId
         ? one('moqui.basic.email.EmailAccount', { emailAccountId })
         : null
     if (!account || !['EakHosted', 'EakShared'].includes(account.accountKindEnumId))
         return false
+    // a person's or an organization's own mailbox is never the forum's (SEC-PFS-85): its owner's mail is not the site's
+    if (account.ownerUserId || account.ownerPartyId) return false
     const server = account.emailServerId
         ? one('moqui.basic.email.EmailServer', {
               emailServerId: account.emailServerId,

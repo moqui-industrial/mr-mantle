@@ -165,7 +165,34 @@ function routeAddress(address) {
         .filter(Boolean)
     if (!domains.includes(m[2]))
         invalid('The route domain is not registered for this deployment')
+    if (ownedMailAddress(value))
+        invalid("That address is a person's or an organization's mail address, not a route")
     return value
+}
+/* Whether an address is someone's own (SEC-PFS-85): a user account's address, or the address or an identity of a mail account
+   a user or an organization owns (a person's hosted mailbox, an organization's shared one). A route takes the mail of its
+   address into the site's forum, so a site owner may name only an address of the forum's own inbound account, which has
+   no owner (Forum.js forumAccount). */
+function ownedMailAddress(address) {
+    const same = (field) =>
+        ec.entity.conditionFactory
+            .makeCondition(field, 'equals', address)
+            .ignoreCase()
+    if (find('moqui.security.UserAccount').condition(same('emailAddress')).count() > 0)
+        return true
+    const owned = (emailAccountId) => {
+        const account = one('moqui.basic.email.EmailAccount', { emailAccountId })
+        return !!account && !!(account.ownerUserId || account.ownerPartyId)
+    }
+    for (const account of Array.from(
+        find('moqui.basic.email.EmailAccount').condition(same('emailAddress')).limit(20).list(),
+    ))
+        if (account.ownerUserId || account.ownerPartyId) return true
+    for (const identity of Array.from(
+        find('moqui.basic.email.EmailIdentity').condition(same('emailAddress')).limit(20).list(),
+    ))
+        if (owned(identity.emailAccountId)) return true
+    return false
 }
 
 function listMember(contactListId, partyId) {

@@ -951,3 +951,43 @@ feature("an invitation does not bring back a member staff suspended or removed; 
         unredeemed == null
     }
 })
+
+feature("a route address is never a person's or an organization's own mail address: a user's, an owned mailbox's or its identity's (SEC-PFS-85)", {
+    when() {
+        const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        sys(() => {
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_ALICE_MAILBOX",
+                accountKindEnumId: "EakHosted",
+                ownerUserId: "MLS_MEMBER",
+                emailAddress: "alice@" + LISTS
+            })
+            lib.make("moqui.basic.email.EmailIdentity", {
+                emailIdentityId: "MLS_ALICE_ALIAS",
+                emailAccountId: "MLS_ALICE_MAILBOX",
+                emailAddress: "a.smith@" + LISTS
+            })
+            lib.set("moqui.security.UserAccount", {userId: "MLS_OTHER"}, {emailAddress: "Other@" + LISTS})
+        })
+        const refusal = address =>
+            withConf("pass@route-domains", LISTS, () =>
+                sys(() => {
+                    try {
+                        return "taken " + core.routeAddress(address)
+                    } catch (error) {
+                        return String(error.message || error)
+                    }
+                })
+            )
+        return {
+            mailbox: refusal("alice@" + LISTS),
+            identity: refusal("a.smith@" + LISTS),
+            user: refusal("other@" + LISTS),
+            forumOwn: refusal("dev@" + LISTS)
+        }
+    },
+    then({mailbox, identity, user, forumOwn}) {
+        mailbox.includes("not a route") && identity.includes("not a route") && user.includes("not a route")
+        forumOwn == "taken dev@" + LISTS
+    }
+})
