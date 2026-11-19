@@ -423,6 +423,11 @@ feature(
             for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
                 call("create#moqui.security.UserGroupPermission", {userGroupId: state.reviser, userPermissionId: permission, fromDate: since})
             const reviser = run(state.reviser, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r2})
+            // nor once the Change hold is released and the order is back to Placed at the same revision (SEC-BAP-110 review)
+            const changeHold = rows("mantle.order.OrderHoldReason", {orderId: state.orderId}).find(row => row.holdTypeEnumId == "OhtChange")
+            call("update#mantle.order.OrderHoldReason", {orderHoldReasonId: changeHold.orderHoldReasonId, releasedDate: ec.user.nowTimestamp})
+            call("update#mantle.order.OrderHeader", {orderId: state.orderId, statusId: "OrderPlaced"})
+            const reviserReleased = run(state.reviser, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r2})
             for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
                 ec.entity.find("moqui.security.UserGroupPermission").condition({userGroupId: state.reviser, userPermissionId: permission})
                     .disableAuthz().deleteAll()
@@ -450,11 +455,12 @@ feature(
             const hold = rows("mantle.order.OrderHoldReason", {orderId: state.orderId}).find(
                 row => row.holdTypeEnumId == "OhtChange"
             )
-            return {stale, reviser, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
+            return {stale, reviser, reviserReleased, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
         },
-        then({stale, reviser, decided, approved, sent, issued, before, now, hold, mailed}) {
+        then({stale, reviser, reviserReleased, decided, approved, sent, issued, before, now, hold, mailed}) {
             stale.error.includes("STALE_REVISION")
             reviser.error.includes("SELF_APPROVAL")
+            reviserReleased.error.includes("SELF_APPROVAL")
             hold.changedByUserIds == state.reviser
             decided.error == ""
             approved == "OrderApproved"

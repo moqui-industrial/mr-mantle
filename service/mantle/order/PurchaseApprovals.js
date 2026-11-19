@@ -264,12 +264,12 @@ function orderSource(po) {
         revision: Number(order.orderRevision ?? 1),
         statusId: order.statusId,
         label: "purchase order " + po.orderId,
-        // who entered or placed it, and who applied the revision waiting for approval (the open Change hold's
-        // changedByUserIds, SEC-BAP-110)
+        // who entered or placed it, and who applied the current revision (every Change hold of it, released or not, by its
+        // changedByUserIds: a release does not make its reviser an approver; SEC-BAP-110)
         submittedBy: (userId, partyId) =>
             orders().placedBy(order, userId, partyId) ||
             rows("mantle.order.OrderHoldReason", {orderId: po.orderId})
-                .filter(hold => !hold.releasedDate && !blank(hold.appliedRevision))
+                .filter(hold => !blank(hold.appliedRevision) && Number(hold.appliedRevision) === Number(order.orderRevision ?? 1))
                 .some(hold =>
                     String(hold.changedByUserIds || "")
                         .split(",")
