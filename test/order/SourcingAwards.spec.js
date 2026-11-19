@@ -258,6 +258,13 @@ feature(
                 sourceOrderItemSeqId: lineA.orderItemSeqId
             }
             const foreignSource = run(state.buyer, "mantle.product.PriceServices.store#ProductPrice", planted)
+            // the editor's own organization's quote line, its own supplier and product: the row is stored with no source, as
+            // only publish#SupplierQuotePrice names one (SEC-BAP-90 review)
+            const ownSource = run(
+                state.buyer,
+                "mantle.product.PriceServices.store#ProductPrice",
+                Object.assign({}, planted, {vendorPartyId: supplierA, minQuantity: 2})
+            )
             const lineD = lineOf(state.quoteD)
             call(
                 "create#mantle.product.ProductPrice",
@@ -286,11 +293,19 @@ feature(
                 csv,
                 reader,
                 marks,
-                foreignSource
+                foreignSource,
+                ownSourceRow: ownSource.productPriceId
+                    ? one("mantle.product.ProductPrice", {productPriceId: ownSource.productPriceId})
+                    : null,
+                foreignRow: foreignSource.productPriceId
+                    ? one("mantle.product.ProductPrice", {productPriceId: foreignSource.productPriceId})
+                    : null
             }
         },
-        then({compared, a, pack, c, d, csv, reader, marks, foreignSource}) {
-            foreignSource.error.includes("not this supplier's line")
+        then({compared, a, pack, c, d, csv, reader, marks, foreignSource, ownSourceRow, foreignRow}) {
+            // a price editor's source fields are not taken (refused by a check before, now left out)
+            foreignRow == null || foreignRow.sourceOrderId == null
+            ownSourceRow != null && ownSourceRow.sourceOrderId == null
             d.normalizedPrice == "4.8"
             compared.error == ""
             compared.demandRows.length == 1

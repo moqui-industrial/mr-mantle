@@ -34,8 +34,10 @@ const optional = [
     "agreementId",
     "agreementItemSeqId"
 ]
+// sourceOrderId and sourceOrderItemSeqId are not among them: only publish#SupplierQuotePrice names a quote line as a price's
+// source, writing them itself after the store (SEC-BAP-90), so no price editor's store, correction or import sets them
 const writeFields =
-    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason,sourceOrderId,sourceOrderItemSeqId".split(
+    "productId,productStoreId,vendorPartyId,customerPartyId,priceTypeEnumId,pricePurposeEnumId,fromDate,thruDate,minQuantity,price,priceUomId,termUomId,taxInPrice,taxAmount,taxPercentage,taxAuthorityId,agreementId,agreementItemSeqId,otherPartyItemName,otherPartyItemId,comments,quantityIncrement,quantityIncluded,quantityUomId,preferredOrderEnumId,supplierRatingTypeEnumId,standardLeadTimeDays,canDropShip,changeReason".split(
         ","
     )
 const pick = (p, keys) =>
