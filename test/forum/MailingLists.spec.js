@@ -135,7 +135,7 @@ feature("a list category's mail carries the list's own List-Id, List-Post and Li
 
 feature("an mbox archive is imported once: threaded, its text read, a duplicate and a second run adding nothing", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-list.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-list.mbox"
         ec.resource
             .getLocationReference(location)
             .putText(ec.resource.getLocationText("component://mr-mantle/test/forum/fixtures/list.mbox", false))
@@ -628,7 +628,7 @@ feature("only the trusted gateway's Authentication-Results authenticate a sender
 
 feature("an archive goes only into a list, and a message over the byte cap is passed and counted; an author's handle is no reserved word", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-cap.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-cap.mbox"
         const message = (from, id, subject, body) =>
             "From " + from + " Mon Jan  1 10:00:00 2024\nFrom: Git <" + from + ">\nMessage-ID: <" + id + "@cap.test>\nSubject: " +
             subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\n" + body + "\n\n"
@@ -668,7 +668,7 @@ feature("an archive goes only into a list, and a message over the byte cap is pa
 
 feature("an archived From that names a member's address in its name, or two addresses, is no one's: the member never claims it (SEC-PFS-81)", {
     when() {
-        const location = "runtime://tmp/mantle-mbox-import/mls-spoof.mbox"
+        const location = "runtime://tmp/mantle-mbox-import/" + SITE + "/mls-spoof.mbox"
         const message = (from, id, subject) =>
             "From x@spoof.test Mon Jan  1 10:00:00 2024\nFrom: " + from + "\nMessage-ID: <" + id + "@spoof.test>\nSubject: " +
             subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\nMLS-MBOX-" + id + "\n\n"

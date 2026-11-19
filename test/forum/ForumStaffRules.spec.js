@@ -317,3 +317,34 @@ feature("SEC-PFS-94: a site's owners invite at most a day's count of addresses, 
         second.limitedCount == 1
     }
 })
+
+feature("SEC-PFS-100: a list's archive is named in the site's own import directory, one answer for missing and wrong", {
+    when() {
+        setConf("pass@import-dir", "runtime://tmp/fsr-import")
+        const put = (location, text) => {
+            ec.resource.getLocationReference(location).putText(text)
+            return ec.resource.digest(location, "sha256")
+        }
+        const mbox = "From a@fsr.test Mon Jan  1 00:00:00 2024\nFrom: a@fsr.test\nSubject: FSR\n\nText\n"
+        // another site's archive at the top of the shared directory, and one of this site's
+        const otherSum = put("runtime://tmp/fsr-import/fsr-other.mbox", mbox + "other\n")
+        const ownSum = put("runtime://tmp/fsr-import/" + SITE + "/fsr-own.mbox", mbox)
+        const start = (archiveName, checksum) => op("FSR_OWNER", "importMbox", {contactListId: ids.list, archiveName, checksum})
+        const other = start("fsr-other.mbox", otherSum)
+        const missing = start("fsr-none.mbox", otherSum)
+        const wrong = start("fsr-own.mbox", otherSum)
+        const own = start("fsr-own.mbox", ownSum)
+        return {
+            other: [other.kind, other.message],
+            missing: [missing.kind, missing.message],
+            wrong: [wrong.kind, wrong.message],
+            own
+        }
+    },
+    then({other, missing, wrong, own}) {
+        other[0] == "Conflict"
+        missing == wrong
+        other == wrong
+        own.runId != null
+    }
+})

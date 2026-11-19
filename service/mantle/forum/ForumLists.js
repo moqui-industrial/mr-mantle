@@ -462,10 +462,15 @@
         const name = String(p.archiveName || "")
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/.test(name) || name.includes(".."))
             invalid("Name an mbox file in the import directory")
-        const location = importDir() + "/" + name
-        if (!ec.resource.getLocationReference(location).exists) missing()
+        // a site's archives are in its own directory under the import directory, where the operator puts them, so the
+        // staff of one site name no other site's file; a missing file and a wrong checksum get the one answer, and the
+        // file is read only when its checksum is the one given
+        const location = importDir() + "/" + p.siteId + "/" + name
+        const notThere = () => fail("Conflict", "No archive of that name and checksum is in this site's import directory")
+        if (!/^[0-9a-f]{64}$/.test(lower(p.checksum))) notThere()
+        if (!ec.resource.getLocationReference(location).exists) notThere()
         const checksum = ec.resource.digest(location, "sha256")
-        if (checksum !== lower(p.checksum)) fail("Conflict", "The archive checksum does not match")
+        if (checksum !== lower(p.checksum)) notThere()
         // the same archive into the same category again is the same import, run again: what it has is not made twice
         one(S + "PublicSite", {siteId: p.siteId}, true)
         let imp =
