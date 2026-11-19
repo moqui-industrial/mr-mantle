@@ -6,8 +6,8 @@
 // Inviting, resending, revoking and reading need ADMIN_IDENTITY_MANAGE (reading ADMIN_IDENTITY_VIEW) and an organization the
 // caller administers, as Identity.js's scope() answers it (called by name; impl-admin P5 relies on it, and on the
 // organization entity filters of UserInvitation under an app's authz). The proposal is checked as the inviter by the framework's
-// check#GrantProposal, and an invitation never carries a privileged group or a group granting a sealed permission (ADMIN among
-// them), whoever sends it.
+// check#GrantProposal, and an invitation never carries a privileged group (ADMIN among them), whoever sends it, nor a group
+// granting a sealed permission the inviter does not hold (SEC-BOS-84).
 //
 // The token is mailed (EmailTemplate MANTLE_STAFF_INVITATION, sent with no EmailMessage record) or, when the instance cannot
 // send mail (the template's mail server has no SMTP host), shown once to whoever issued it: reveal#InvitationLink makes a new
@@ -155,25 +155,41 @@ function scopedInvitation(invitationId) {
 }
 
 // ===== the grant proposal of an invitation =====
-// What no invitation carries, whoever sends it: a privileged group (ADMIN among them) or a group granting a sealed permission;
-// the reason of the first such bundle, or null.
-function invitationRefusal(ids) {
+// What an invitation does not carry: a privileged group (ADMIN among them), whoever sends it, and a group granting a sealed
+// permission the inviter (inviterUserId) does not hold, as only a holder gives a membership that carries one (an app
+// administrator group with its every-organization permission, SEC-BOS-84: an ADMIN invites into it, an access administrator of
+// one organization does not); the reason of the first such bundle, or null. Checked as the inviter when the invitation is made
+// or resent, and again from the inviter's records at acceptance.
+function invitationRefusal(ids, inviterUserId) {
     const privileged = new Set(Array.from(UserSecurityChecks.privilegedGroups()))
     const sealed = new Set(Array.from(UserSecurityChecks.sealedPermissions()))
     const at = nowMs()
+    const groups = inviterUserId ? userGroups(inviterUserId) : null
     for (const groupId of ids) {
         if (groupId === "ADMIN" || privileged.has(groupId))
             return refused("PRIVILEGED_GROUP", groupId + " is a privileged group: an invitation never grants it")
         const grant = rows("moqui.security.UserGroupPermission", {userGroupId: groupId}).find(
-            row => (ms(row.thruDate) ?? Infinity) > at && sealed.has(row.userPermissionId)
+            row =>
+                (ms(row.thruDate) ?? Infinity) > at &&
+                sealed.has(row.userPermissionId) &&
+                !(groups && holds(inviterUserId, row.userPermissionId, groups))
         )
         if (grant)
             return refused(
                 "SEALED_PERMISSION",
-                groupId + " grants the sealed permission " + grant.userPermissionId + ": an invitation never grants it"
+                groupId + " grants the sealed permission " + grant.userPermissionId + ": only a holder of it invites into it"
             )
     }
     return null
+}
+// Whether a group grants a sealed permission now: its membership at acceptance is written with authorization off, after
+// inviterRefusal found the inviter holds each one (the framework's EECA asks the current user, the invitee, who does not).
+function grantsSealed(groupId) {
+    const sealed = new Set(Array.from(UserSecurityChecks.sealedPermissions()))
+    const at = nowMs()
+    return rows("moqui.security.UserGroupPermission", {userGroupId: groupId}).some(
+        row => (ms(row.thruDate) ?? Infinity) > at && sealed.has(row.userPermissionId)
+    )
 }
 // Whether userId holds permissionId now through its current groups (ALL_USERS among them), ADMIN holding every one, as the
 // framework's hasPermission reads it for the current user.
@@ -221,7 +237,7 @@ function inviterRefusal(row, authority = {}) {
     }
     const ids = bundleIds(row)
     if (!ids.length) return refused("GRANT_CHANGED", "The invitation names no access")
-    const blocked = invitationRefusal(ids)
+    const blocked = invitationRefusal(ids, inviter.userId)
     if (blocked) return refused("GRANT_CHANGED", blocked.reason)
     for (const groupId of ids) {
         const bundle = one("moqui.security.CapabilityBundle", {userGroupId: groupId})
@@ -434,7 +450,7 @@ function invitationProposal(p) {
     if (pending) return {refusal: refused("INVITATION_EXISTS", emailAddress + " already has a pending invitation: resend it")}
     const outside = identityRefusal(invitedParty(partyId, emailAddress), userScope.organizationIds, ec.user.hasPermission(GLOBAL))
     if (outside) return {refusal: outside}
-    const blocked = invitationRefusal(ids)
+    const blocked = invitationRefusal(ids, ec.user.userId)
     if (blocked) return {refusal: blocked}
     const proposal = callService("org.moqui.admin.AccessServices.check#GrantProposal", {bundleGroupIdList: ids})
     if (!proposal.allowed) return {refusal: refused(proposal.reasonCode, proposal.reason)}
@@ -656,7 +672,7 @@ function resendInvitation(p) {
     )
     if (outside) return outside
     const ids = bundleIds(row)
-    const blocked = invitationRefusal(ids)
+    const blocked = invitationRefusal(ids, ec.user.userId)
     if (blocked) return blocked
     const proposal = callService("org.moqui.admin.AccessServices.check#GrantProposal", {bundleGroupIdList: ids})
     if (!proposal.allowed) return refused(proposal.reasonCode, proposal.reason)
@@ -911,7 +927,15 @@ function acceptInvitation(p) {
             if (current) continue
             const value = ec.entity.makeValue(MEMBER)
             value.setFields({userGroupId: groupId, userId: account.userId, fromDate: iso(now)}, true, null, null)
-            value.create()
+            if (grantsSealed(groupId)) {
+                // the inviter holds its sealed permissions (inviterRefusal, just above): their grant, not the invitee's
+                ec.artifactExecution.disableAuthz()
+                try {
+                    value.create()
+                } finally {
+                    ec.artifactExecution.enableAuthz()
+                }
+            } else value.create()
             added.push(groupId)
         }
     } finally {
