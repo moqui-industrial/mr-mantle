@@ -17,7 +17,8 @@ const org = prefix + "_ORG",
 const P = "mantle.order.PurchaseServices.",
     O = "mantle.order.OrderServices.",
     B = "mantle.other.BudgetServices."
-const ORDER = "mantle.order.OrderHeader"
+const ORDER = "mantle.order.OrderHeader",
+    DECISION = "mantle.order.purchase.PurchaseApprovalDecision"
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
 const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
@@ -293,7 +294,7 @@ feature(
             const direct = run(state.first, O + "approve#Order", {orderId})
             const again = run(state.first, P + "decide#PurchaseApproval", {orderId})
             const second = run(state.second, P + "decide#PurchaseApproval", {orderId, orderRevision: revisionOf(orderId)})
-            const decisions = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId})
+            const decisions = rows(DECISION, {sourceEntityName: ORDER, sourceId: orderId})
             return {
                 placed,
                 firstNotice,
@@ -338,7 +339,7 @@ feature(
             const item = rows("mantle.order.OrderItem", {orderId})[0]
             call(O + "update#OrderItem", {orderId, orderItemSeqId: item.orderItemSeqId, quantity: 21})
             const revised = revisionOf(orderId)
-            const decision = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId})[0]
+            const decision = rows(DECISION, {sourceEntityName: ORDER, sourceId: orderId})[0]
             const resent = waiting("PurchaseOrderApproval", orderId)
             const stale = run(state.second, P + "approve#PurchaseSource", {
                 recordEntityName: ORDER,
@@ -412,7 +413,7 @@ feature(
                 budgetOverrideReason: "Urgent repair",
                 operationKey: orderId + "-approve"
             })
-            const decisionCount = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: orderId}).length
+            const decisionCount = rows(DECISION, {sourceEntityName: ORDER, sourceId: orderId}).length
             const reserved = rows("mantle.other.budget.BudgetCommitment", {sourceEntityName: "mantle.order.OrderHeader", sourceId: orderId, statusId: "BcReserved"})
             const cancelled = run(state.buyer, P + "cancel#PurchaseOrder", {orderId, reason: "No longer needed"})
             const released = rows("mantle.other.budget.BudgetCommitment", {sourceEntityName: "mantle.order.OrderHeader", sourceId: orderId, statusId: "BcReleased"})

@@ -24,6 +24,7 @@ const R = "mantle.request.RequestServices.",
     B = "mantle.other.BudgetServices.",
     O = "mantle.order.OrderServices."
 const REQUEST = "mantle.request.Request"
+const DECISION = "mantle.order.purchase.PurchaseApprovalDecision"
 const find = (entity, conditions = {}) => ec.entity.find(entity).condition(conditions).disableAuthz()
 const one = (entity, conditions) => find(entity, conditions).one()
 const rows = (entity, conditions) => Array.from(find(entity, conditions).list())
@@ -340,7 +341,7 @@ feature("a refusal leaves the request submitted with the refused decision; its a
             decision: "refuse",
             reason: "Use stock"
         })
-        const decision = rows("mantle.order.purchase.PurchaseApprovalDecision", {sourceId: requestId})[0] || {}
+        const decision = rows(DECISION, {sourceEntityName: REQUEST, sourceId: requestId})[0] || {}
         return {refused, decision, unpriced, message, status: statusOf(requestId)}
     },
     then(r) {
