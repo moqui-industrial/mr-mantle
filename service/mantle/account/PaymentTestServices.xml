@@ -17,6 +17,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="alwaysApprove" noun="PaymentAuthorization">
         <implements service="mantle.account.PaymentServices.authorize#Payment"/>
         <actions>
+            <!-- SEC-BOS-129: the test gateways approve nothing on a production instance (instance@purpose), whatever binds them -->
+            <if condition="ec.factory.getConfValue('instance@purpose') == 'production'">
+                <return error="true" message="TEST_GATEWAY_PRODUCTION: A test payment gateway takes no payment on a production instance"/></if>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoAuthorize',
@@ -79,6 +82,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="alwaysApprove" noun="PaymentCapture">
         <implements service="mantle.account.PaymentServices.capture#Payment"/>
         <actions>
+            <!-- SEC-BOS-129: the test gateways approve nothing on a production instance (instance@purpose), whatever binds them -->
+            <if condition="ec.factory.getConfValue('instance@purpose') == 'production'">
+                <return error="true" message="TEST_GATEWAY_PRODUCTION: A test payment gateway takes no payment on a production instance"/></if>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoCapture',
@@ -102,6 +108,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="alwaysApprove" noun="PaymentRelease">
         <implements service="mantle.account.PaymentServices.release#Payment"/>
         <actions>
+            <!-- SEC-BOS-129: the test gateways approve nothing on a production instance (instance@purpose), whatever binds them -->
+            <if condition="ec.factory.getConfValue('instance@purpose') == 'production'">
+                <return error="true" message="TEST_GATEWAY_PRODUCTION: A test payment gateway takes no payment on a production instance"/></if>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRelease',
@@ -113,6 +122,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="alwaysApprove" noun="PaymentRefund">
         <implements service="mantle.account.PaymentServices.refund#Payment"/>
         <actions>
+            <!-- SEC-BOS-129: the test gateways approve nothing on a production instance (instance@purpose), whatever binds them -->
+            <if condition="ec.factory.getConfValue('instance@purpose') == 'production'">
+                <return error="true" message="TEST_GATEWAY_PRODUCTION: A test payment gateway takes no payment on a production instance"/></if>
             <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/>
             <service-call name="create#mantle.account.method.PaymentGatewayResponse" out-map="context"
                     in-map="{paymentGatewayConfigId:paymentGatewayConfigId, paymentOperationEnumId:'PgoRefund',

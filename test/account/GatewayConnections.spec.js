@@ -389,3 +389,26 @@ feature("a payment gateway another organization uses is read, changed and tested
         out.adminListed.includes(ids.local)
     }
 })
+
+// SEC-BOS-129: on a production instance the always-approve test gateway is permitted for no organization and approves nothing,
+// whatever binds it; on this test instance both are answered
+feature("a test payment gateway is bound to no organization and approves nothing on a production instance", {
+    when() {
+        const authorize = () =>
+            invoke("mantle.account.PaymentTestServices.alwaysApprove#PaymentAuthorization", {
+                paymentId: "SPEC_GWC_NO_PAYMENT",
+                paymentGatewayConfigId: "TEST_APPROVE"
+            }).error
+        const production = withConf("instance@purpose", "production", () => ({
+            bound: admin(() => bind("TEST_APPROVE", {reason: "Spec"})).error,
+            authorize: authorize()
+        }))
+        const test = admin(() => bind("TEST_APPROVE", {reason: "Spec"}))
+        return {production, test}
+    },
+    then({production, test}) {
+        production.bound.includes("TEST_GATEWAY_PRODUCTION")
+        production.authorize.includes("TEST_GATEWAY_PRODUCTION")
+        test.error == "" && test.applied === true
+    }
+})
