@@ -2037,7 +2037,7 @@ along with this software (see the LICENSE.md file). If not, see
                     if (wanted.length) {
                         for (const id of wanted) requestSeen.set(id, false)
                         const rows = Array.from(ec.entity.find('mantle.request.Request').condition('requestId', 'in', wanted)
-                                .selectField('requestId').selectField('filedByPartyId').selectField('rootWorkEffortId').list())
+                                .selectField('requestId').selectField('filedByPartyId').selectField('rootWorkEffortId').selectField('senderVerified').list())
                         const inProject = rows.filter((row) => row.filedByPartyId !== me && projects.has(row.rootWorkEffortId)).map((row) => row.requestId)
                         const byParty = new Set(inProject.length && orgSide.size ? Array.from(ec.entity.find('mantle.request.RequestParty')
                                 .condition('requestId', 'in', inProject).condition('partyId', 'in', Array.from(orgSide))
@@ -2046,7 +2046,9 @@ along with this software (see the LICENSE.md file). If not, see
                         // app (impl-customer-service P2, F68); a project's case stays its client's, in Projects (F-P2-3)
                         const cases = new Set(Array.from(ec.entity.find('mantle.request.support.CaseProfile').condition('requestId', 'in', wanted)
                                 .selectField('requestId').list()).map((row) => row.requestId))
-                        for (const row of rows) requestSeen.set(row.requestId, !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
+                        // a public form's request whose typed address is not confirmed (senderVerified N, SEC-BOS-103) is staff's
+                        // alone, as the Support portal keeps such a case from the matched customer (SEC-PSS-87)
+                        for (const row of rows) requestSeen.set(row.requestId, row.senderVerified !== 'N' && !(cases.has(row.requestId) && !row.rootWorkEffortId) && (row.filedByPartyId === me
                                 || (projects.has(row.rootWorkEffortId) && (orgSide.has(row.filedByPartyId) || byParty.has(row.requestId)))))
                     }
                     return ids.filter((id) => requestSeen.get(id))
