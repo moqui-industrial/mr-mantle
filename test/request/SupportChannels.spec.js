@@ -337,17 +337,36 @@ feature("a route names a team's text block only where the editor is in the team'
             ackTextBlockId: prefix + "_ACK_AGENT",
             fromDate: new Date(Date.now() - 60000)
         }).serviceRouteId
+        // a mail route of no account does not lend its block to a save that is the account's route (another route's key)
+        const noAccount = call("create#mantle.request.support.ServiceRoute", {
+            organizationPartyId: org,
+            channelEnumId: "SrcEmail",
+            requestCategoryId: state.queue,
+            acknowledge: "N",
+            ackTextBlockId: prefix + "_ACK_AGENT",
+            fromDate: new Date(Date.now() - 60000)
+        }).serviceRouteId
+        const otherKey = run(state.admin, S + "save#ServiceRoute", {
+            serviceRouteId: noAccount,
+            requestCategoryId: state.queue,
+            channelEnumId: "SrcEmail",
+            emailAccountId: account,
+            acknowledge: "Y",
+            ackTextBlockId: prefix + "_ACK_AGENT"
+        })
+        run(state.admin, S + "save#ServiceRoute", {serviceRouteId: noAccount, end: true})
         const kept = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT", rateLimitPerHour: 25})
         const ended = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT"})
         const otherRoute = save({serviceRouteId: state.mailRoute, ackTextBlockId: prefix + "_ACK_AGENT"})
         // the form route ends, as the later features start their own
         run(state.admin, S + "save#ServiceRoute", {serviceRouteId: kept.serviceRouteId, end: true})
-        return {team, notMember, otherTeam, kept, ended, otherRoute}
+        return {team, notMember, otherTeam, otherKey, kept, ended, otherRoute}
     },
-    then({team, notMember, otherTeam, kept, ended, otherRoute}) {
+    then({team, notMember, otherTeam, otherKey, kept, ended, otherRoute}) {
         code(team) == ""
         code(notMember) == "TEXT_BLOCK_UNAVAILABLE"
         code(otherTeam) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherKey) == "TEXT_BLOCK_UNAVAILABLE"
         code(kept) == ""
         code(ended) == "TEXT_BLOCK_UNAVAILABLE"
         code(otherRoute) == "TEXT_BLOCK_UNAVAILABLE"
