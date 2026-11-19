@@ -792,14 +792,34 @@ function internalMemberIds(contactListId) {
             .map((v) => v.partyId),
     )
 }
-/* A member's HTML (a post, a bio) cleaned, with an image kept only when it is one of the site's own attachment downloads
-   (a relative .../download?attachmentId=...): a reader's browser loads no other image, so no same-site route (a write
-   transition, reached with the reader's cookie) and no outside tracker is fetched by showing it (SEC-PSF-81). Any other
-   image is a link to its outside address, or its alt text for a relative one. In mail (mail true) every image is a link
-   or its text: there no page policy applies, and a mail client that loads images tells the sender who read when. */
-const ATTACHMENT_SRC =
-    /^(?:\/[A-Za-z0-9._~\/-]*)?\/download\?attachmentId=[A-Za-z0-9_-]{1,64}(?:&amp;variant=thumbnail)?$/
-function memberHtml(html, mail = false) {
+/* A member's HTML (a post, a bio) cleaned, with an image kept only when it is one of the site's own attachment downloads:
+   a relative path under one of the site's forum mounts (its pathPrefix), of plain segments (no empty, '.' or '..' one, so
+   no '//host' and no step out of the mount), ending in /download?attachmentId=<id>. A reader's browser then loads no
+   other image, so no same-site route (a write transition, reached with the reader's cookie) and no outside tracker is
+   fetched by showing it (SEC-PSF-81). Any other image is a link to its outside address, or its alt text for a relative
+   one. In mail (mail true) every image is a link or its text: there no page policy applies, and a mail client that loads
+   images tells the sender who read when. With no site every image goes. */
+const ATTACHMENT_PATH =
+    /^((?:\/[A-Za-z0-9_~-][A-Za-z0-9._~-]*)*)\/download\?attachmentId=[A-Za-z0-9_-]{1,64}(?:&amp;variant=thumbnail)?$/
+const forumMounts = new Map()
+function forumPrefixes(siteId) {
+    if (!forumMounts.has(siteId))
+        forumMounts.set(
+            siteId,
+            rows(S + 'PublicSiteApp', { siteId, app: 'forum' }, 20)
+                .filter((row) => row.enabled === 'Y')
+                .map((row) => String(row.pathPrefix || '').replace(/\/+$/, '')),
+        )
+    return forumMounts.get(siteId)
+}
+function siteAttachment(src, siteId) {
+    const path = ATTACHMENT_PATH.exec(src)
+    if (!siteId || !path) return false
+    return forumPrefixes(siteId).some(
+        (prefix) => path[1] === prefix || path[1].startsWith(prefix + '/'),
+    )
+}
+function memberHtml(html, siteId, mail = false) {
     const cleaned = StringUtilities.cleanHtml(html || '')
     if (!/<img\b/i.test(cleaned)) return cleaned
     const attribute = (tag, name) =>
@@ -812,7 +832,7 @@ function memberHtml(html, mail = false) {
                         .replace(/&quot;/g, '"')
                         .replace(/&amp;/g, '&'),
                 )
-            if (!mail && ATTACHMENT_SRC.test(src)) return tag
+            if (!mail && siteAttachment(src, siteId)) return tag
             if (/^https?:\/\//i.test(src))
                 return '<a href="' + src + '">' + (alt || 'image') + '</a>'
             return alt
@@ -1669,11 +1689,12 @@ function sourceFormatOf(value) {
 }
 /* A revision's source as the cleaned HTML that is stored and shown: Markdown is rendered (CommonMark, fenced code as
    code) and then cleaned exactly as rich text is. */
-const renderSource = (format, text) =>
+const renderSource = (format, text, siteId) =>
     memberHtml(
         format === 'markdown'
             ? ec.resource.markdownHtml(String(text || ''))
             : text,
+        siteId,
     )
 function confirmedParty(partyId) {
     const confirmed = ec.resource.script(

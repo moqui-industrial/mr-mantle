@@ -388,35 +388,48 @@ feature("SEC-PFS-100: a list's archive is named in the site's own import directo
     }
 })
 
-feature("SEC-PSF-81: a member's HTML keeps an image only of the site's attachment downloads, and in mail none", {
+feature("SEC-PSF-81: a member's HTML keeps an image only of the site's attachment downloads under its forum mount, in mail none", {
     when() {
         lib.settled(SITE, "FSR_BEN")
         const html =
             '<p>FSR images<img src="/shop/Checkout/begin" alt="a cart"><img src="https://tracker.example/p.gif" alt="pixel">' +
-            '<img src="/forum/t/1/a/download?attachmentId=FSRATT1" alt="photo"></p>'
+            '<img src="/forum/t/1/a/download?attachmentId=FSRATT1" alt="photo">' +
+            '<img src="//tracker.example/forum/download?attachmentId=FSRATT2" alt="host">' +
+            '<img src="/forum/../shop/download?attachmentId=FSRATT3" alt="up">' +
+            '<img src="/forum/./download?attachmentId=FSRATT4" alt="dot">' +
+            '<img src="/shop/download?attachmentId=FSRATT5" alt="elsewhere"></p>'
         const topic = op("FSR_BEN", "publishPost", {contactListId: ids.general, title: "FSR images", body: html, operationId: operationId()})
+        const revision = Number(lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}).revision)
         const profile = op("FSR_BEN", "storeProfile", {
             handle: "fsrben",
             displayName: "Ben",
             bio: '<p>Hi<img src="/shop/Checkout/begin"></p>',
-            expectedRevision: Number(lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}).revision)
+            expectedRevision: revision
         })
-        const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+        // a bio stored before the rule is cleaned when it is read
+        lib.set("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}, {bio: '<p>Old<img src="/shop/Checkout/begin"></p>'})
         return {
             body: lib.row("mantle.party.communication.CommunicationEvent", {communicationEventId: topic.rootCommEventId}).body,
             bio: lib.row("mantle.public.PublicSiteProfile", {siteId: SITE, partyId: "FSR_BEN"}).bio,
+            readBio: op("FSR_ANN", "getProfile", {handle: "fsrben"}).profile.bio,
             profile,
-            mail: core.memberHtml(html, true)
+            mail: core().memberHtml(html, SITE, true)
         }
     },
-    then({body, bio, profile, mail}) {
+    then({body, bio, readBio, profile, mail}) {
         profile.kind == null
         !body.includes('src="/shop')
         body.includes("a cart")
         !body.includes('src="https://tracker.example')
         body.includes('href="https://tracker.example/p.gif"')
         body.includes('src="/forum/t/1/a/download?attachmentId=FSRATT1"')
-        !bio.includes("<img")
+        !body.includes("FSRATT2")
+        !body.includes("FSRATT3")
+        !body.includes("FSRATT4")
+        !body.includes("FSRATT5")
+        bio.includes("<img")
+        !readBio.includes("<img")
+        readBio.includes("Old")
         !mail.includes("<img")
         mail.includes("photo")
     }

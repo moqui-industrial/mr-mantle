@@ -566,7 +566,7 @@ function deliver(p) {
                   : event.subject,
             // Mailing-list mode carries the sanitized post; other notices link to it.
             body: allowed.everyPost
-                ? core().memberHtml(event.body || '', true)
+                ? core().memberHtml(event.body || '', v.siteId, true)
                 : null,
             reason: allowed.reason,
             siteId: v.siteId,

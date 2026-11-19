@@ -503,7 +503,7 @@
                           ' · post ' +
                           st.ordinal +
                           '</p>' +
-                          core.memberHtml(event.body || '') +
+                          core.memberHtml(event.body || '', p.siteId) +
                           '</blockquote>'
                     : author +
                           ' · post ' +
@@ -633,7 +633,7 @@
         const ruled = core.applyRules(
             p.siteId,
             event.contactListId,
-            StringUtilities.cleanHtml(p.body || ''),
+            core.memberHtml(p.body || '', p.siteId),
         )
         if (ruled.block)
             invalid('This reply contains content the community does not allow')

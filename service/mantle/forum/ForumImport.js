@@ -1111,7 +1111,7 @@
                         : all
                 },
             )
-        return StringUtilities.cleanHtml(ec.resource.markdownHtml(text))
+        return core.memberHtml(ec.resource.markdownHtml(text), siteId)
     }
     function uploadBySha1(siteId, sha1) {
         const uploadId = target(siteId, 'upload_sha1', sha1)

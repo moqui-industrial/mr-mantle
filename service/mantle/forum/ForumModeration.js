@@ -302,6 +302,7 @@
                                     title: event.subject,
                                     body: core.memberHtml(
                                         event.body || '',
+                                        p.siteId,
                                     ),
                                     revision: st.revision,
                                 }
@@ -2180,7 +2181,7 @@
         return context.map((v) => ({
             postId: v.communicationEventId,
             ordinal: Number(v.ordinal),
-            body: core.memberHtml(v.body || ''),
+            body: core.memberHtml(v.body || '', r.siteId),
         }))
     }
     methods.escalateReview = (p) => {

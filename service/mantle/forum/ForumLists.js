@@ -345,7 +345,7 @@
     }
     const MAX_BODY = 200000
     /* One message of an mbox (its lines after the "From " line) as what the import keeps of it. */
-    function readMessage(lines) {
+    function readMessage(lines, siteId) {
         const head = headerFields(lines, 0)
         const field = name => head.fields[name]?.[0] || ""
         const found = {plain: null, html: null, attachments: 0, parts: 0, unknownCharset: false}
@@ -357,9 +357,10 @@
             0
         )
         const ids = text => String(text || "").match(/<[^<>\s]+@[^<>\s]+>/g) || []
-        let html = found.plain != null ? textHtml(found.plain) : found.html != null ? StringUtilities.cleanHtml(found.html) : ""
+        let html =
+            found.plain != null ? textHtml(found.plain) : found.html != null ? core.memberHtml(found.html, siteId) : ""
         const tooLong = html.length > MAX_BODY
-        if (tooLong) html = StringUtilities.cleanHtml(html.slice(0, MAX_BODY))
+        if (tooLong) html = core.memberHtml(html.slice(0, MAX_BODY), siteId)
         const from = field("from")
         const author = authorAddress(head.fields.from || [])
         return {
@@ -552,7 +553,7 @@
     function stageMessage(run, config, lines, counts) {
         let message
         try {
-            message = readMessage(lines)
+            message = readMessage(lines, run.siteId)
         } catch (error) {
             ec.logger.error("Mbox import " + config.importId + ": a message could not be read: " + firstLine(error))
             bump(counts, "unreadable")

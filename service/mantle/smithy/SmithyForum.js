@@ -357,7 +357,7 @@ kit => {
                         ", post " +
                         Number(state.ordinal) +
                         ":</p>" +
-                        forum.memberHtml(post.body || "") +
+                        forum.memberHtml(post.body || "", p.siteId) +
                         "</blockquote>"
                 )
             }

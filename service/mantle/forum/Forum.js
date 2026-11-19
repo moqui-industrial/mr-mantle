@@ -125,10 +125,10 @@ function postProjection(state, event, a, t) {
             ? ''
             : a.record
               ? core.recordText(
-                    core.memberHtml(event.body || ''),
+                    core.memberHtml(event.body || '', a.category.siteId),
                     state.rootCommEventId,
                 )
-              : core.memberHtml(event.body || ''),
+              : core.memberHtml(event.body || '', a.category.siteId),
         postKind: state.postKind || null,
         visibility: state.visibility,
         parentCommEventId: event.parentCommEventId || null,
@@ -656,7 +656,7 @@ methods.storeProfile = (p) => {
         avatarId,
         handle: p.handle,
         displayName: String(p.displayName || p.handle).slice(0, 100),
-        bio: core.memberHtml(p.bio || ''),
+        bio: core.memberHtml(p.bio || '', p.siteId),
         discoverability: p.discoverability || 'members',
         locale: p.locale,
         timeZone: p.timeZone,
@@ -707,7 +707,7 @@ methods.getProfile = (p) => {
                 v,
                 'handle displayName avatarId bio locale timeZone revision',
             ),
-            bio: core.memberHtml(v.bio || ''),
+            bio: core.memberHtml(v.bio || '', p.siteId),
             ...(v.partyId === me()
                 ? { discoverability: v.discoverability }
                 : {}),
@@ -1371,7 +1371,7 @@ methods.previewPost = (p) => {
     requireUser()
     draftLength(p)
     return {
-        body: renderSource(sourceFormatOf(p.sourceFormat), p.body || ''),
+        body: renderSource(sourceFormatOf(p.sourceFormat), p.body || '', p.siteId),
     }
 }
 methods.publishPost = (p) => {
@@ -1458,7 +1458,7 @@ methods.publishPost = (p) => {
                 contactListId: a.category.contactListId,
                 kind: isRecord ? 'comment' : existing ? 'reply' : 'topic',
                 ...(existing ? {} : { title: p.title ?? '' }),
-                body: renderSource(format, p.body || ''),
+                body: renderSource(format, p.body || '', p.siteId),
                 source: p.body ?? '',
                 sourceFormat: format,
                 canModerate: a.canModerate,
@@ -1706,7 +1706,7 @@ methods.updatePost = (p) => {
                     : p.postId === st.rootCommEventId
                       ? 'topic'
                       : 'reply',
-            body: renderSource(format, p.body || ''),
+            body: renderSource(format, p.body || '', p.siteId),
             source: p.body ?? '',
             sourceFormat: format,
             canModerate: a.canModerate,
@@ -3174,7 +3174,7 @@ methods.getDraft = (p) => {
             body:
                 d.sourceFormat === 'markdown'
                     ? d.sourceText || ''
-                    : core.memberHtml(d.sourceText || ''),
+                    : core.memberHtml(d.sourceText || '', p.siteId),
             sourceFormat: d.sourceFormat === 'markdown' ? 'markdown' : 'html',
             attachments: rows(
                 F + 'ForumAttachment',
@@ -3792,12 +3792,12 @@ methods.getEditablePost = (p) => {
             title: root.subject,
             body: markdown
                 ? source.sourceText || ''
-                : StringUtilities.cleanHtml(event.body || ''),
+                : core.memberHtml(event.body || '', p.siteId),
             sourceFormat: markdown ? 'markdown' : 'html',
             mode: 'edit',
-            // the author and staff may hide the earlier versions from readers; staff editing another's post do by default
+            // the author and staff may hide the earlier versions from readers as they edit
             canHideHistory: a.canModerate || event.fromPartyId === me(),
-            hideHistory: a.canModerate && event.fromPartyId !== me(),
+            hideHistory: false,
             attachments: rows(
                 F + 'ForumAttachment',
                 { siteId: p.siteId, communicationEventId: p.postId },
