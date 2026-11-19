@@ -467,6 +467,26 @@ function protectListOwner(contactListId, partyId) {
     )
     if (!replacements) invalid('Assign another active category owner first')
 }
+/* A change to who holds a site's or a category's rights asks the caller's password (and second factor's code) again. */
+function reauthenticate(p, message) {
+    let auth = null
+    if (p.password)
+        try {
+            auth = ec.service
+                .sync()
+                .name('org.moqui.impl.UserServices.login#UserAccount')
+                .parameters({
+                    username: ec.user.userAccount.username,
+                    password: p.password,
+                    code: p.code,
+                })
+                .call()
+        } catch (error) {
+            auth = null
+        }
+    ec.message.clearErrors()
+    if (!auth?.loggedIn) fail('AuthenticationRequired', message)
+}
 methods.setMembership = (p) => {
     site(p.siteId, true)
     const m = member(p.siteId, p.targetPartyId)
@@ -477,6 +497,9 @@ methods.setMembership = (p) => {
         invalid('Invalid member state')
     if (m.role === 'owner' && p.state !== 'active')
         protectOwner(p.siteId, m.partyId)
+    // an owner's membership takes away or gives back an owner's rights, as a role change does
+    if (m.role === 'owner')
+        reauthenticate(p, "Reauthenticate before changing an owner's membership")
     audit(
         p.siteId,
         null,
@@ -497,21 +520,7 @@ methods.setMembership = (p) => {
 }
 methods.setSiteRole = (p) => {
     site(p.siteId, true)
-    const auth = ec.service
-        .sync()
-        .throwOnError(true)
-        .name('org.moqui.impl.UserServices.login#UserAccount')
-        .parameters({
-            username: ec.user.userAccount.username,
-            password: p.password,
-            code: p.code,
-        })
-        .call()
-    if (!auth.loggedIn)
-        fail(
-            'AuthenticationRequired',
-            'Reauthenticate before changing site roles',
-        )
+    reauthenticate(p, 'Reauthenticate before changing site roles')
     if (!['member', 'moderator', 'owner'].includes(p.role))
         invalid('Invalid role')
     const m = member(p.siteId, p.targetPartyId)
@@ -3236,21 +3245,7 @@ methods.setCategoryMember = (p) => {
                 'Unauthorized',
                 'Site owner approval is required to delegate category roles',
             )
-        const auth = ec.service
-            .sync()
-            .throwOnError(true)
-            .name('org.moqui.impl.UserServices.login#UserAccount')
-            .parameters({
-                username: ec.user.userAccount.username,
-                password: p.password,
-                code: p.code,
-            })
-            .call()
-        if (!auth.loggedIn)
-            fail(
-                'AuthenticationRequired',
-                'Reauthenticate before changing category roles',
-            )
+        reauthenticate(p, 'Reauthenticate before changing category roles')
     }
     ec.service
         .sync()

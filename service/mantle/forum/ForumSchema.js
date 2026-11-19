@@ -40,6 +40,8 @@
             'targetPartyId',
             'state',
             'expectedRevision',
+            'password',
+            'code',
             'reason',
         ],
     },

@@ -129,3 +129,35 @@ feature("SEC-PFS-97: a join request is asked once, and a member suspended from t
         suspendedRows == 0
     }
 })
+
+feature("SEC-PFS-96: an owner's membership is changed only after the caller signs in again", {
+    when() {
+        const change = (state, more = {}) =>
+            op("FSR_OWNER", "setMembership", {
+                targetPartyId: "FSR_OWNER2",
+                state,
+                expectedRevision: membershipRevision("FSR_OWNER2"),
+                reason: "Owner review",
+                ...more
+            })
+        const bare = change("suspended")
+        const signed = change("suspended", {password: "moqui"})
+        const after = lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: "FSR_OWNER2"}).state
+        const restored = change("active", {password: "moqui"})
+        // a member who is no owner is changed as before
+        const member = op("FSR_OWNER", "setMembership", {
+            targetPartyId: "FSR_ANN",
+            state: "active",
+            expectedRevision: membershipRevision("FSR_ANN"),
+            reason: "No change"
+        })
+        return {bare, signed, after, restored, member}
+    },
+    then({bare, signed, after, restored, member}) {
+        bare.kind == "AuthenticationRequired"
+        signed.kind == null
+        after == "suspended"
+        restored.kind == null
+        member.kind == null
+    }
+})
