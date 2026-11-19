@@ -961,7 +961,9 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="update" noun="PartyUserAccount">
-        <description>Update only the UserAccount and EmailPrimary.</description>
+        <description>Update only the UserAccount and EmailPrimary. The account is partyId's own (a userId given must be
+            that party's account), and it is the caller's own or the caller holds ADMIN_IDENTITY_MANAGE, as update#Account
+            asks; work with authorization disabled answers for itself (SEC-ADM-89).</description>
         <in-parameters>
             <!-- NOTE: these are the same excludes as org.moqui.impl.UserServices.update#UserAccount -->
             <auto-parameters entity-name="moqui.security.UserAccount" include="nonpk">
@@ -983,6 +985,18 @@ along with this software (see the LICENSE.md file). If not, see
                     <order-by field-name="userId"/>
                 </entity-find>
                 <set field="userId" from="userAccountList?.[0]?.userId"/>
+            </if>
+            <!-- only partyId's own account (SEC-ADM-89): a userId of another party is refused, whoever calls -->
+            <if condition="userId">
+                <entity-find-one entity-name="moqui.security.UserAccount" value-field="partyUserAccount" auto-field-map="false">
+                    <field-map field-name="userId"/></entity-find-one>
+                <if condition="partyUserAccount == null || partyUserAccount.partyId != partyId">
+                    <return error="true" message="That account is not the party's"/></if>
+            </if>
+            <!-- the caller's own account and party, or an account administrator, as update#Account -->
+            <if condition="!ec.artifactExecution.authzDisabled() &amp;&amp; !ec.user.hasPermission('ADMIN_IDENTITY_MANAGE')">
+                <if condition="!ec.user.userId || partyId != ec.user.userAccount?.partyId || (userId &amp;&amp; userId != ec.user.userId)">
+                    <return error="true" message="That account is not yours"/></if>
             </if>
 
             <if condition="userId"><service-call name="org.moqui.impl.UserServices.update#UserAccount" in-map="context"/></if>
