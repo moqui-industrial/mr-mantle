@@ -315,16 +315,18 @@ feature("the bank file of a run that pays payroll is a reader of payroll's alone
         login(users.treasury)
         const read = refused("get#RunFile", {paymentRunId: runId})
         const generated = refused("generate#RunFile", {paymentRunId: runId})
+        const written = refused("write#RunFile", {paymentRunId: runId})
         login("john.doe")
         const reader = runs("get#RunFile", {paymentRunId: runId})
         helper().call("update#mantle.account.invoice.Invoice", {invoiceId: billA, payrollOrigin: "N"})
         login(users.treasury)
         const afterwards = runs("get#RunFile", {paymentRunId: runId})
-        return {read, generated, reader, afterwards}
+        return {read, generated, written, reader, afterwards}
     },
-    then({read, generated, reader, afterwards}) {
+    then({read, generated, written, reader, afterwards}) {
         read.includes("PAYROLL_VIEW_REQUIRED")
         generated.includes("PAYROLL_VIEW_REQUIRED")
+        written.includes("PAYROLL_VIEW_REQUIRED")
         reader.fileText.length > 0
         afterwards.fileText == reader.fileText
     }
