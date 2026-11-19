@@ -830,6 +830,53 @@ feature("only the cart's holder is given the payment form; the reference and key
         bounded[1].error.includes("RATE_LIMITED")
     }
 })
+// SEC-PSS-84: a signed-in buyer's own account checkout, named by its reference and key, is the account's: its form is given;
+// and a resume by the reference and key, which may ask the provider, counts with the payment calls
+feature("a signed-in buyer's own checkout gets its payment form by reference and key; a resume counts with the payment calls", {
+    when() {
+        const asBuyer = (name, input) => {
+            login("john.doe")
+            ec.message.pushErrors()
+            try {
+                return {
+                    result: ec.service
+                        .sync()
+                        .name(name)
+                        .parameters({input: Object.assign({siteId: ids.site}, input)})
+                        .call().result
+                }
+            } catch (error) {
+                return {error: String(error.message)}
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        const own = asBuyer(CART + "add#CartItem", {productId: ids.book, quantity: "1"}).result.token
+        asBuyer(CHECKOUT + "begin#Checkout", {token: own})
+        asBuyer(CHECKOUT + "set#CheckoutContact", {token: own, name: "John Doe"})
+        asBuyer(CHECKOUT + "select#Payment", {token: own, paymentOptionId: "PiCreditCard"})
+        system(() =>
+            call("update#mantle.order.StoreCheckout", {checkoutId: checkoutRow(own).checkoutId, paymentGatewayConfigId: ids.form})
+        )
+        const ready = asBuyer(CHECKOUT + "get#Checkout", {token: own}).result
+        const submitted = asBuyer(CHECKOUT + "submit#Checkout", {token: own, expectedRevision: ready.checkout.revision})
+        const reference = submitted.result?.checkout.reference
+        const key = submitted.result?.returnKey
+        const account = asBuyer(CHECKOUT + "get#CheckoutPaymentForm", {reference, key})
+        const visitor = checkout("get#CheckoutPaymentForm", {reference, key})
+        // with this requester's payment calls used up, a resume asks the provider no more
+        const resumed = withConf("mantle@shop-payment-calls", "1", () => checkout("resume#Checkout", {reference, key}))
+        login("john.doe")
+        return {submitted, account, visitor, resumed}
+    },
+    then({submitted, account, visitor, resumed}) {
+        submitted.result.checkout.state == "paymentPending"
+        account.result.formUrl == "https://test.authorize.net/payment/payment"
+        visitor.error.includes("NOT_AVAILABLE")
+        resumed.error.includes("RATE_LIMITED")
+    }
+})
 feature("a guest's once-per-customer code is counted by the checkout's email: used again with that email it is refused", {
     when() {
         // SEC-PSS-85: a code each customer may use once, 1.00 off a book; a guest's checkout makes a new guest party each

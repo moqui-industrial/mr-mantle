@@ -686,8 +686,10 @@ function getCheckout(p) {
 }
 // resume#Checkout: a submitted checkout whose attempt resolved without a payment (declined, cancelled, failed) is open to
 // change again. A pending or unknown attempt is answered as it is. Only the cart's own session goes on with it (Shop P6,
-// F85): the reference and key read its state and hand over no cart capability.
+// F85): the reference and key read its state and hand over no cart capability. It may ask the provider, so it is counted
+// with the payment's result and form calls (SEC-PSS-84).
 function resumeCheckout(p) {
+    paymentCalls()
     const reached = reach(p)
     const result = refreshAttempt(reached.shop, reached.checkout.checkoutId, "page")
     const checkout = checkoutRow(reached.checkout.checkoutId)
@@ -1442,19 +1444,14 @@ function holdPayment(orderId, paymentId, comment) {
     })
 }
 
-// A limit of Mantle's conf (MoquiConf.xml), else its default.
-function confLimit(selector, fallback) {
-    const value = Number(ec.factory.getConfValue(selector))
-    return Number.isFinite(value) && value > 0 ? value : fallback
-}
-// The payment's result and form calls, which ask the provider, counted against the requester (SEC-PSS-84):
+// A count limit of Mantle's conf (MoquiConf.xml, other/Limits.js): Infinity for 0, no limit.
+const confLimit = name => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js").limit(name)
+// The payment's result, form and resume calls, which ask the provider, counted against the requester (SEC-PSS-84):
 // mantle@shop-payment-calls in ten minutes.
 function paymentCalls() {
-    externalAccess().throttle(
-        "shop-payment",
-        confLimit("mantle@shop-payment-calls", 120),
-        "Wait a few minutes before checking your payment again"
-    )
+    const most = confLimit("shop-payment-calls")
+    if (most === Infinity) return
+    externalAccess().throttle("shop-payment", most, "Wait a few minutes before checking your payment again")
 }
 
 // ===== the attempt's refresh =====
@@ -1546,19 +1543,16 @@ function getCheckoutPaymentForm(p) {
     const key = text(p.key)
     if (!key) notAvailable()
     // each form first searches the provider's transaction lists: mantle@shop-payment-forms for one attempt in ten minutes
-    const allowed = ec.service
-        .sync()
-        .throwOnError(true)
-        .name("org.moqui.public.AccountServices.record#Attempt")
-        .parameters({
-            input: {
-                key: "shop-payment-form:" + payment.paymentId,
-                limit: confLimit("mantle@shop-payment-forms", 10),
-                windowMillis: 600000
-            }
-        })
-        .requireNewTransaction(true)
-        .call().result.allowed
+    const forms = confLimit("shop-payment-forms")
+    const allowed =
+        forms === Infinity ||
+        ec.service
+            .sync()
+            .throwOnError(true)
+            .name("org.moqui.public.AccountServices.record#Attempt")
+            .parameters({input: {key: "shop-payment-form:" + payment.paymentId, limit: forms, windowMillis: 600000}})
+            .requireNewTransaction(true)
+            .call().result.allowed
     if (!allowed) refuse("Tarpit", "RATE_LIMITED", "Wait a few minutes before opening the payment page again")
     let out
     try {
