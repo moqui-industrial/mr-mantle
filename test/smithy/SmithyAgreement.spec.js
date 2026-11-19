@@ -551,8 +551,11 @@ feature(
             const mirror = {}
             try {
                 lib.commit(from, "Start", {"SIGNERS.md": authors()})
+                // a file:// mirror is a local address, fetched only where private networks are allowed (SEC-BOS-90)
                 const fetch = () =>
-                    lib.service(lib.OPERATOR, "org.moqui.git.GitServices.fetch#GitRepository", {repositoryId: mirrorId})
+                    withConf("git-server@webhook-private-network", "true", () =>
+                        lib.service(lib.OPERATOR, "org.moqui.git.GitServices.fetch#GitRepository", {repositoryId: mirrorId})
+                    )
                 mirror.first = fetch()
                 lib.service(lib.OPERATOR, "mantle.smithy.SmithyServices.bind#Repository", {
                     siteId: SITE,
