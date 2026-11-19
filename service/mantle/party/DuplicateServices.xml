@@ -97,8 +97,12 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="organizationName" from="partyDetail.organizationName"/>
 
             <!-- find matching identifications -->
+            <!-- never a tax identification (SSN, FEIN, FUID: payroll's and tax setup's), and a match's value masked to its last
+                four characters, as Accounting's CustomerFinance.js reads them (SEC-BAP-140) -->
+            <set field="taxIdTypes" from="Array.from(ec.resource.script('component://mr-mantle/service/mantle/account/CustomerFinance.js').taxIdTypes)"/>
             <entity-find entity-name="mantle.party.PartyIdentification" list="partyIdentificationList">
-                <econdition field-name="partyId"/><select-field field-name="idValue,partyIdTypeEnumId"/></entity-find>
+                <econdition field-name="partyId"/><econdition field-name="partyIdTypeEnumId" operator="not-in" from="taxIdTypes"/>
+                <select-field field-name="idValue,partyIdTypeEnumId"/></entity-find>
             <!-- TODO: perhaps filter characters in query somehow? (all non-alphanumeric; dash, dot, comma, space, etc) -->
             <entity-find entity-name="mantle.party.PartyIdentification" list="allDupIdList">
                 <econdition field-name="partyId" operator="not-equals"/>
@@ -106,7 +110,8 @@ along with this software (see the LICENSE.md file). If not, see
             <iterate list="allDupIdList" entry="dupId">
                 <!-- make sure matches party ID type, don't match for same ID of different type -->
                 <set field="partyIdent" from="partyIdentificationList.find((it) =&gt; it.idValue == dupId.idValue &amp;&amp; it.partyIdTypeEnumId == dupId.partyIdTypeEnumId)"/>
-                <script>if (partyIdent != null) (matchingInfoByPartyId[dupId.partyId] ??= []).push(Object.assign({}, dupId.getMap(), {matchType: 'identification'}))</script>
+                <script>if (partyIdent != null) (matchingInfoByPartyId[dupId.partyId] ??= []).push(Object.assign({}, dupId.getMap(),
+                    {matchType: 'identification', idValue: dupId.idValue ? '•••• ' + String(dupId.idValue).slice(-4) : ''}))</script>
             </iterate>
 
             <!-- find matching emails -->
