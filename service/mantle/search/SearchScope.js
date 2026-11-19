@@ -76,4 +76,49 @@ function privateClause() {
         : notPrivate
 }
 
-;({scopes, scopeOf, organizationLimit, scopeClauses, privateClause})
+// Whether a hit's record is kept from the user inside their organizations, by the record's own rule as get#RecordLinkInfo
+// has it: a confidential HR case and a message filed on one (PeopleCases.js), a person who is only an applicant the user does
+// not recruit (Recruiting.js hiddenApplicants), a protected People task (Checklists.js hiddenTaskIds), the task of a
+// confidential Smithy issue (check#TaskHidden), and a maintenance work order or request outside the user's Maintenance reach
+// (MaintenanceAccess.js). current is the hit's primary entity row. search#Universal and Marble's search#MantleFiltered ask
+// it of every hit (SEC-DAT-98).
+function hitHidden(documentId, current, userPartyId) {
+    if (!current) return true
+    const script = location => ec.resource.script("component://mr-mantle/service/mantle/" + location)
+    if (documentId === "MantleRequest" && current.requestTypeEnumId === "RqtHrCase") return true
+    if (
+        documentId === "MantleCommunicationEvent" &&
+        script("request/PeopleCases.js").caseEvents([current.communicationEventId])[current.communicationEventId]
+    )
+        return true
+    if (
+        documentId === "MantleParty" &&
+        current.partyTypeEnumId === "PtyPerson" &&
+        script("humanres/Recruiting.js").hiddenApplicants([current.partyId]).length
+    )
+        return true
+    if (documentId === "MantleTask") {
+        if (
+            script("request/PeopleCases.js").protectedTaskIds([current.workEffortId]).length > 0 &&
+            script("humanres/Checklists.js").hiddenTaskIds([current.workEffortId], userPartyId).length > 0
+        )
+            return true
+        const smithy = ec.service
+            .sync()
+            .name("mantle.smithy.SmithyIssueServices.check#TaskHidden")
+            .parameter("workEffortId", current.workEffortId)
+            .disableAuthz()
+            .call()
+        if (smithy?.hidden !== false) return true
+        if (script("work/MaintenanceAccess.js").workHidden(current.workEffortId, userPartyId)) return true
+    }
+    if (
+        documentId === "MantleRequest" &&
+        current.requestTypeEnumId === "RqtMaintenance" &&
+        script("work/MaintenanceAccess.js").requestHidden(current, userPartyId)
+    )
+        return true
+    return false
+}
+
+;({scopes, scopeOf, organizationLimit, scopeClauses, privateClause, hitHidden})

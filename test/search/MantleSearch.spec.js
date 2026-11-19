@@ -332,3 +332,40 @@ feature("the general search takes only its index's types, each under the user's 
         ordersOwned
     },
 })
+
+// the general search keeps each hit by its record's own rule inside the user's organizations, as the universal search does
+// (SearchScope.js hitHidden; SEC-DAT-98): a reported maintenance problem of the user's organization is no hit for a user
+// who is not its reporter, on it or in Maintenance; an administrator finds it
+feature("the general search leaves out a maintenance request the user's Maintenance reach does not admit (SEC-DAT-98)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.request.Request requestId="SF_MAINT_REQ" requestTypeEnumId="RqtMaintenance" statusId="ReqSubmitted"
+            requestName="SFMAINTLEAK pump leak" requestDate="${day(2)}"/>
+    <mantle.request.RequestParty requestId="SF_MAINT_REQ" partyId="ORG_ZIZI_RETAIL" roleTypeId="OrgInternal" fromDate="${day(2)}"/>
+</entity-facade-xml>`).load()
+        const found = () => (call("mantle.GeneralServices.search#MantleFiltered",
+            { indexName: "mantle", documentType: "MantleRequest", queryString: "SFMAINTLEAK", pageSize: 20 }).documentList || [])
+            .map((document) => document._id)
+        const started = Date.now()
+        let admin = []
+        while (Date.now() - started < 10000 && !admin.length) {
+            call("org.moqui.EntityServices.process#DataFeedPending", {})
+            admin = found()
+        }
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            return { admin, limited: found() }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ admin, limited }) {
+        admin.includes("SF_MAINT_REQ")
+        !limited.includes("SF_MAINT_REQ")
+    },
+})
