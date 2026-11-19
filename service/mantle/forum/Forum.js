@@ -106,8 +106,14 @@ const heldPrivate = (state, a) =>
     state.visibility === 'pending' &&
     a.category?.visibility === 'private' &&
     !!a.canRead
-function postProjection(state, event, a, t) {
+function postProjection(state, event, a, t, shownHeld = null) {
     if (!postVisible(state, event, a)) return null
+    // a held message's text is collapsed for the conversation's other participants until one asks to see it (getPosts
+    // showHeld): it may be what the gateway took it for
+    const collapsed =
+        heldPrivate(state, a) &&
+        event.fromPartyId !== me() &&
+        shownHeld !== event.communicationEventId
     const profile = one(S + 'PublicSiteProfile', {
         siteId: a.category.siteId,
         partyId: event.fromPartyId,
@@ -121,7 +127,8 @@ function postProjection(state, event, a, t) {
         author: pick(profile, 'handle displayName avatarId'),
         entryDate: event.entryDate,
         // A record's post links what it names (#12, @handle) for this reader; a state change is a line with no text.
-        body: deleted
+        body:
+            deleted || collapsed
             ? ''
             : a.record
               ? core.recordText(
@@ -131,6 +138,7 @@ function postProjection(state, event, a, t) {
               : core.memberHtml(event.body || '', a.category.siteId),
         postKind: state.postKind || null,
         visibility: state.visibility,
+        collapsed,
         parentCommEventId: event.parentCommEventId || null,
         wiki: state.wiki === 'Y',
         accepted: !!t && t.acceptedAnswerId === event.communicationEventId,
@@ -161,7 +169,7 @@ function postProjection(state, event, a, t) {
                 state.visibility === 'approved' &&
                 event.fromPartyId !== me(),
             // a message of a conversation held as spam is released by its sender or another participant
-            canRelease: heldPrivate(state, a),
+            canRelease: heldPrivate(state, a) && !!a.canReply,
             canDelete:
                 !deleted &&
                 state.rootCommEventId !== event.communicationEventId &&
@@ -1247,7 +1255,7 @@ methods.getPosts = (p) => {
             communicationEventId: st.communicationEventId,
         })
         if (event) {
-            const out = postProjection(st, event, a, t)
+            const out = postProjection(st, event, a, t, p.showHeld || null)
             if (out) list.push(out)
         }
     }
@@ -4594,7 +4602,7 @@ methods.setPostHistory = (p) => {
         )
     return { history: p.history }
 }
-/* A participant of a private conversation (its sender or a recipient) releases a message of it the mail gateway held as
+/* A participant of a private conversation (its sender or a recipient) who may reply in it releases a message of it the mail gateway held as
    spam: it is delivered to the conversation as a sent message is. No review item and no staff: a private message is
    staff's only on a participant's report (SEC-PFS-83). The release adds nothing to the sender's approved contributions,
    so another's release of a held message does not raise the sender's trust. */
@@ -4614,6 +4622,8 @@ methods.releaseHeldMessage = (p) => {
     if (!a.canRead) missing()
     revision(st, p.expectedRevision)
     if (!heldPrivate(st, a)) fail('Conflict', 'The message is not held')
+    // as writing in it: a participant who may not reply (silenced, or private messages turned off) releases nothing
+    if (!a.canReply) fail('Unauthorized', 'Releasing is not permitted')
     const event = one(E + 'CommunicationEvent', {
         communicationEventId: p.postId,
     })

@@ -182,6 +182,7 @@
             'before',
             'after',
             'around',
+            'showHeld',
         ],
     },
     searchForum: {

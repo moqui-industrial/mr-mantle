@@ -132,14 +132,27 @@ feature("an approve rule holds a category's post, never a private reply; a reply
                 ec.entity.find("mantle.forum.ForumOutbox").condition({communicationEventId: spam.postId}).disableAuthz().list()
             ).length
         // what each sees of the held reply: shown held with its release to the sender and the recipient
-        const seen = username => {
-            const post = (lib.op(username, SITE, "getPosts", {rootCommEventId: ids.privatePost}).postList || []).find(
+        const seen = (username, more = {}) => {
+            const post = (lib.op(username, SITE, "getPosts", {rootCommEventId: ids.privatePost, ...more}).postList || []).find(
                 row => row.postId === spam.postId
             )
-            return post ? [post.visibility, post.capabilities.canRelease] : null
+            return post ? [post.visibility, post.capabilities.canRelease, post.collapsed, post.body.includes("Buy now")] : null
         }
         const spamState = state(spam.postId)
-        const before = {sender: seen("PMR_BEN"), recipient: seen("PMR_ANN"), outbox: outbox(), contributions: contributions()}
+        // the recipient sees it collapsed until they ask to see its text; its sender sees their own text
+        const before = {
+            sender: seen("PMR_BEN"),
+            recipient: seen("PMR_ANN"),
+            shown: seen("PMR_ANN", {showHeld: spam.postId}),
+            outbox: outbox(),
+            contributions: contributions()
+        }
+        // a participant who may not reply (silenced) does not release it
+        lib.sanction(SITE, "PMR_ANN", "silence")
+        const silenced = lib.op("PMR_ANN", SITE, "releaseHeldMessage", {postId: spam.postId, expectedRevision: 1})
+        lib.set("mantle.forum.ForumSanction", {sanctionId: SITE + "_PMR_ANN_silence"}, {
+            thruDate: ec.user.timestampMillis(ec.user.nowTimestamp) - 1
+        })
         // the site's owner is no participant: staff do not release, nor read, a private message without a report
         const staff = lib.op("PMR_OWNER", SITE, "releaseHeldMessage", {postId: spam.postId, expectedRevision: 1})
         const released = lib.op("PMR_ANN", SITE, "releaseHeldMessage", {postId: spam.postId, expectedRevision: 1})
@@ -153,6 +166,7 @@ feature("an approve rule holds a category's post, never a private reply; a reply
             spamState,
             spamReviews: reviewsOf(spam.postId),
             before,
+            silenced,
             staff,
             released,
             again,
@@ -161,7 +175,7 @@ feature("an approve rule holds a category's post, never a private reply; a reply
             contributions: contributions()
         }
     },
-    then({held, heldReviews, reply, replyReviews, spam, spamState, spamReviews, before, staff, released, again, after, outbox, contributions}) {
+    then({held, heldReviews, reply, replyReviews, spam, spamState, spamReviews, before, silenced, staff, released, again, after, outbox, contributions}) {
         held.kind == null
         heldReviews.map(review => review.reasonFamily).includes("rule")
         reply.kind == null
@@ -169,8 +183,10 @@ feature("an approve rule holds a category's post, never a private reply; a reply
         spam.postId != null
         spamState.visibility == "pending"
         spamReviews.length == 0
-        before.sender == ["pending", true]
-        before.recipient == ["pending", true]
+        before.sender == ["pending", true, false, true]
+        before.recipient == ["pending", true, true, false]
+        before.shown == ["pending", true, false, true]
+        silenced.kind == "Unauthorized"
         before.outbox == 0
         staff.kind == "NotFound"
         released.visibility == "approved"
