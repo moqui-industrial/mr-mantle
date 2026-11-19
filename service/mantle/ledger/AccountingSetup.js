@@ -7,6 +7,7 @@ const {one, rows, find, map, call, pick, ms, hash} = lib
 const C = "mantle.ledger.config.",
     PREF = C + "PartyAcctgPreference"
 const preferenceFields = [
+    "writeOffToleranceAmount",
     "baseCurrencyUomId",
     "localCurrencyUomId",
     "fiscalYearStartMonth",

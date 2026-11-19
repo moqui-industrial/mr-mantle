@@ -17,8 +17,14 @@ function previewRequest() {
         allocations: [{sourceKey, targetKey, amount: "1"}]
     })
 }
-// the receivables user who also approves invoices, who writes off (SEC-BOS-127)
-let arApprover
+// the receivables user who also approves invoices, who writes off (SEC-BOS-127): made by the first feature that asks, so
+// each feature runs alone
+function arApprover() {
+    const id = f.org.slice(0, 25) + "_ARAPPROVE"
+    if (!ec.entity.find("moqui.security.UserAccount").condition("userId", id).disableAuthz().one())
+        helper().user(f, "ARAPPROVE", ["RECEIVABLE_EDIT", "RECEIVABLE_VIEW", "INVOICE_APPROVE"])
+    return id
+}
 function refusal(action) {
     try {
         action()
@@ -151,8 +157,7 @@ feature("a write-off and a discount are credit memos on the chosen account that 
         login(f.users.ar)
         const clerk = refusal(() => h.review(f, [], adjustments))
         login("john.doe")
-        arApprover = h.user(f, "ARAPPROVE", ["RECEIVABLE_EDIT", "RECEIVABLE_VIEW", "INVOICE_APPROVE"])
-        login(arApprover)
+        login(arApprover())
         const accounts = h.native("find#SettlementAdjustmentAccounts", {
             organizationPartyId: f.org,
             effectiveDate: f.timestamp,
@@ -192,7 +197,7 @@ feature("an adjustment without an account or with another item type is refused b
         const h = helper(),
             a = h.invoice(f, "10"),
             before = h.count(A)
-        login(arApprover)
+        login(arApprover())
         const messages = [
             {itemTypeEnumId: "ItemWriteOff", amount: "5", reason: "No account"},
             {itemTypeEnumId: "ItemTimeEntry", amount: "5", glAccountId: "550000000", reason: "Wrong type"}
@@ -511,5 +516,25 @@ feature("a settlement draft is kept for its owner behind an ID and read as none 
         notPreview.includes("SETTLEMENT_PREVIEW_UNAVAILABLE")
         other.draftJson == null
         reader.includes("PERMISSION_DENIED")
+    }
+})
+// SEC-BOS-127: within the organization's write-off tolerance a receivables clerk writes off a residual alone; above it not
+feature("a receivables clerk writes off a residual up to the organization's write-off tolerance, and no more", {
+    when() {
+        const h = helper()
+        const a = h.invoice(f, "10")
+        h.call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: "4"})
+        login(f.users.ar)
+        const writeOff = amount =>
+            refusal(() => h.review(f, [], [{invoiceId: a, itemTypeEnumId: "ItemWriteOff", amount, glAccountId: "550000000", reason: "Residual"}]))
+        const within = writeOff("3")
+        const above = writeOff("5")
+        login("john.doe")
+        h.call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: null})
+        return {within, above}
+    },
+    then({within, above}) {
+        !within.includes("ADJUSTMENT_APPROVAL_REQUIRED")
+        above.includes("ADJUSTMENT_APPROVAL_REQUIRED")
     }
 })

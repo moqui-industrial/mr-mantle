@@ -335,6 +335,16 @@ function escapeHtml(value) {
     const entities = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
     return String(value ?? "").replace(/[&<>"']/g, character => entities[character])
 }
+// SEC-BOS-127: whether a write-off or a linked customer credit of the amount is within the organization's write-off tolerance
+// (PartyAcctgPreference.writeOffToleranceAmount, in its base currency; none or 0 tolerates nothing), so a user without
+// INVOICE_APPROVE makes it with no approver.
+function writeOffTolerated(organizationPartyId, amount, currencyUomId) {
+    const preference = policy.preference(organizationPartyId)
+    const tolerance = preference?.writeOffToleranceAmount
+    if (tolerance == null || toDecimal(tolerance).compare(0) <= 0) return false
+    if (!currencyUomId || currencyUomId !== preference.baseCurrencyUomId) return false
+    return toDecimal(amount ?? 0).compare(toDecimal(tolerance)) <= 0
+}
 ;({
     entityLib,
     amount: entityLib.amount,
@@ -381,5 +391,6 @@ function escapeHtml(value) {
     openHolds,
     requireNotHeld,
     placeHold,
-    escapeHtml
+    escapeHtml,
+    writeOffTolerated
 })

@@ -217,7 +217,7 @@ feature("legacy invoice date edits recompute the chosen book day and ignore call
         detail.invoice.approvedByUserId == null
     }
 })
-feature("an AR-only user creates finalizes and applies a linked credit with original revenue accounts", {
+feature("an AR-only user creates a linked credit with original revenue accounts, refused its finalization; an approver issues it, under a tolerance the AR user does", {
     when() {
         const originalTransactions = helper()
             .lib.rows("mantle.ledger.transaction.AcctgTrans", {
@@ -255,12 +255,27 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
                 operationKey: "native-ar-credit"
             })
             creditId = credit.invoiceId
+            const stampOf = id => helper().lib.one(helper().lib.invoiceEntity, {invoiceId: id}).lastUpdatedStamp
+            // SEC-BOS-127: a linked customer credit clears the invoice's balance, so an approver issues it
+            const clerkFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: creditId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(creditId)})
+            login(f.users.approve)
             const status = native("change#InvoiceState", {
                 invoiceId: creditId,
                 organizationPartyId: f.org,
-                action: "finalize",
-                lastUpdatedStamp: helper().lib.one(helper().lib.invoiceEntity, {invoiceId: creditId}).lastUpdatedStamp
+                action: "approve",
+                lastUpdatedStamp: stampOf(creditId)
             })
+            // within the organization's write-off tolerance the AR user issues a small one alone
+            login("john.doe")
+            helper().call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: "2"})
+            login(f.users.ar)
+            const small = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "1.50", linkToOriginal: true, allocateToLines: true, operationKey: "native-ar-small-credit"})
+            const smallStatus = native("change#InvoiceState", {
+                invoiceId: small.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(small.invoiceId)}).statusId
+            login("john.doe")
+            helper().call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: null})
+            login(f.users.ar)
             const applied = native("apply#InvoiceCredit", {
                 invoiceId: creditId,
                 toInvoiceId: invoiceId,
@@ -292,6 +307,8 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
             for (const row of creditEntries)
                 actual[row.glAccountId] = (actual[row.glAccountId] || toDecimal(0)).add(row.amount || 0)
             return {
+                clerkFinalize,
+                smallStatus,
                 status,
                 applied,
                 replay,
@@ -307,7 +324,9 @@ feature("an AR-only user creates finalizes and applies a linked credit with orig
             else helper().call("delete#mantle.ledger.config.ItemTypeGlAccount", mappingKey)
         }
     },
-    then({status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
+    then({clerkFinalize, smallStatus, status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
+        clerkFinalize.includes("INVOICE_APPROVE")
+        smallStatus == "InvoiceFinalized"
         status.statusId == "InvoiceFinalized"
         applied.amountApplied.eq(25)
         replay.paymentApplicationId == applied.paymentApplicationId
@@ -633,11 +652,14 @@ feature("fully applied invoices with a retained sent status stay outside unpaid 
             operationKey: "native-paid-credit"
         })
         const creditRecord = helper().lib.one(helper().lib.invoiceEntity, {invoiceId: credit.invoiceId})
+        // an approver issues the linked credit (SEC-BOS-127)
+        login(f.users.approve)
         native("change#InvoiceState", {
             invoiceId: creditRecord.invoiceId,
-            action: "finalize",
+            action: "approve",
             lastUpdatedStamp: creditRecord.lastUpdatedStamp
         })
+        login(f.users.ar)
         native("apply#InvoiceCredit", {
             invoiceId: creditRecord.invoiceId,
             toInvoiceId: invoice.invoiceId,
@@ -884,11 +906,14 @@ feature("an open-period credit settles a closed-period original without rewritin
                 operationKey: "native-closed-source-credit"
             })
             const creditRow = helper().lib.one(helper().lib.invoiceEntity, {invoiceId: credit.invoiceId})
+            // an approver issues the linked credit (SEC-BOS-127)
+            login(fixture.users.approve)
             native("change#InvoiceState", {
                 invoiceId: creditRow.invoiceId,
-                action: "finalize",
+                action: "approve",
                 lastUpdatedStamp: creditRow.lastUpdatedStamp
             })
+            login(fixture.users.ar)
             helper().call("create#mantle.ledger.config.AccountingLock", {
                 accountingLockId: "NATIVE_SETTLE_LOCK",
                 organizationPartyId: fixture.org,

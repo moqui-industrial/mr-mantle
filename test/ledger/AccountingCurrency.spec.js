@@ -537,12 +537,15 @@ feature("a bill paid at a higher rate books a loss, again after it is unapplied 
             allocateToLines: true,
             operationKey: "fx-credit"
         }).invoiceId
+        // an approver who did not draft it issues the linked credit (SEC-BOS-127)
+        login(f.users.approve)
         call("mantle.account.InvoiceServices.change#InvoiceState", {
             invoiceId: creditId,
             organizationPartyId: f.org,
-            action: "finalize",
+            action: "approve",
             lastUpdatedStamp: one("mantle.account.invoice.Invoice", {invoiceId: creditId}).lastUpdatedStamp
         })
+        login(f.users.financeadmin)
         const applied = call("mantle.account.InvoiceServices.apply#InvoiceCredit", {
             invoiceId: creditId,
             toInvoiceId: invoiceId,
