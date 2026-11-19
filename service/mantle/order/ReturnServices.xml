@@ -1270,10 +1270,41 @@ along with this software (see the LICENSE.md file). If not, see
                 <exclude field-name="statusId"/>
                 <exclude field-name="responseDate"/><exclude field-name="responseAmount"/>
                 <exclude field-name="replacementOrderId"/><exclude field-name="finAccountTransId"/>
-                <exclude field-name="refundPaymentId"/><exclude field-name="invoiceId"/></auto-parameters>
+                <exclude field-name="refundPaymentId"/><exclude field-name="invoiceId"/>
+                <!-- an item keeps its order line and product: another line is added through add#OrderItemToReturn (SEC-BAP-93) -->
+                <exclude field-name="orderId"/><exclude field-name="orderItemSeqId"/><exclude field-name="productId"/>
+                <exclude field-name="itemTypeEnumId"/></auto-parameters>
         </in-parameters>
         <actions>
             <entity-find-one entity-name="mantle.order.return.ReturnItem" value-field="returnItem"/>
+            <if condition="returnItem == null"><return error="true" message="Return item ${returnId}:${returnItemSeqId} not found"/></if>
+            <!-- a raised quantity of an order line's item meets add#OrderItemToReturn's checks again (SEC-BAP-93): the return still
+                open, or a return authorizer's, and what was billed and, for a sale's shipped product, shipped -->
+            <if condition="returnQuantity != null &amp;&amp; returnItem.orderId &amp;&amp;
+                    toDecimal(returnQuantity).compare(toDecimal(returnItem.returnQuantity ?? 0)) &gt; 0">
+                <entity-find-one entity-name="mantle.order.return.ReturnHeader" value-field="returnHeader"/>
+                <if condition="!['ReturnCreated', 'ReturnRequested'].includes(returnHeader.statusId) &amp;&amp; ec.user.userId
+                        &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                    <return error="true" message="RETURN_NOT_OPEN: Return ${returnId} is ${returnHeader.status?.description}; only a return authorizer raises an item's quantity"/></if>
+                <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" out-map="returnable"
+                        in-map="{orderId:returnItem.orderId, orderItemSeqId:returnItem.orderItemSeqId}"/>
+                <set field="otherReturned" from="toDecimal(returnable.returnedQuantity ?? 0).subtract(toDecimal(returnItem.returnQuantity ?? 0))"/>
+                <if condition="returnable.isProductItemType &amp;&amp; otherReturned.add(toDecimal(returnQuantity)).compare(toDecimal(returnable.invoiceQuantity ?? 0)) &gt; 0">
+                    <return error="true" message="Tried to return more than is returnable; quantity billed ${returnable.invoiceQuantity}, already returned ${otherReturned}, tried to return ${returnQuantity}"/></if>
+                <script><![CDATA[
+                    const product = returnItem.productId ? ec.entity.find('mantle.product.Product').condition('productId', returnItem.productId).disableAuthz().one() : null
+                    const sale = !!ec.entity.find('mantle.party.PartyRole').condition({partyId: returnHeader.vendorPartyId, roleTypeId: 'OrgInternal'}).disableAuthz().one()
+                    shippedCeiling = null
+                    if (sale && product && ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId)) {
+                        shippedCeiling = toDecimal(0)
+                        for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance').condition({orderId: returnItem.orderId,
+                                orderItemSeqId: returnItem.orderItemSeqId}).disableAuthz().list())
+                            shippedCeiling = shippedCeiling.add(toDecimal(issuance.quantity ?? 0)).subtract(toDecimal(issuance.quantityCancelled ?? 0))
+                    }
+                ]]></script>
+                <if condition="shippedCeiling != null &amp;&amp; otherReturned.add(toDecimal(returnQuantity)).compare(shippedCeiling) &gt; 0">
+                    <return error="true" message="QUANTITY_EXCEEDS_SHIPPED: Tried to return more than was shipped; quantity shipped ${shippedCeiling}, already returned ${otherReturned}, tried to return ${returnQuantity}"/></if>
+            </if>
             <!-- TODO further restrict fields updatable based on statusId (itemChangeable), responseAmount, etc; like restrictions on EditReturnItems screen
             <set field="itemChangeable" from="['ReturnCreated', 'ReturnRequested', 'ReturnApproved'].includes(returnItem.statusId)"/>
             -->

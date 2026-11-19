@@ -258,6 +258,9 @@ feature("an approved RMA's label request prepares its package once, and the retu
         const billedReturn = call(R + "create#ReturnFromOrder", {orderId: billedSale.orderId, orderPartSeqId: "01"}).returnId
         const unshipped = invoke(R + "add#OrderItemToReturn", Object.assign(line(billedSale.orderId), {returnId: billedReturn}))
         const billedLines = rows("mantle.order.OrderItemBilling", {orderId: billedSale.orderId}).length
+        // the first return's line, raised past what was shipped after the add: refused too (update#ReturnItem, review)
+        const firstItem = rows("mantle.order.return.ReturnItem", {returnId}).find(row => row.orderItemSeqId === orderItemSeqId)
+        const raised = invoke(R + "update#ReturnItem", {returnId, returnItemSeqId: firstItem.returnItemSeqId, returnQuantity: 4})
         // a status given for the new item is a return authorizer's to give (SEC-BAP-93 review)
         const givenStatus = run("wrt_receiver", R + "add#OrderItemToReturn", Object.assign(line(ids.saleId), {statusId: "ReturnApproved"}))
         const early = run("wrt_shipper", T + "request#ReturnLabel", {operationKey: key(), returnId})
@@ -276,9 +279,10 @@ feature("an approved RMA's label request prepares its package once, and the retu
             recordId: returnId,
             checkRecord: false
         })
-        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines}
+        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines, raised}
     },
-    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines}) {
+    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines, raised}) {
+        raised.error.includes("QUANTITY_EXCEEDS_SHIPPED") || raised.error.includes("more than is returnable")
         billedLines > 0
         unshipped.error.includes("QUANTITY_EXCEEDS_SHIPPED")
         givenStatus.error.includes("Only a return authorizer gives")

@@ -267,15 +267,25 @@ function billingsOf(orderId, orderItemSeqId, scope) {
     )
     const side = scope.supplierReturn ? "toPartyId" : "fromPartyId",
         otherSide = scope.supplierReturn ? "fromPartyId" : "toPartyId"
-    // only the return's own counterparty's billings: a line billed to another customer (or by another supplier) earns this
-    // return no credit and no refund (SEC-BAP-93)
+    // only billings to the return's own counterparty, or to the order part's bill-to (CustomerBillTo, a drop-ship or
+    // marketplace store's) or from its bill-from (VendorBillFrom): a line billed to another party earns this return no
+    // credit and no refund (SEC-BAP-93)
+    const counterparties = new Set([scope.counterpartyId])
+    const orderPartSeqId = one("mantle.order.OrderItem", {orderId, orderItemSeqId})?.orderPartSeqId
+    if (orderPartSeqId)
+        for (const row of rows("mantle.order.OrderPartParty", {
+            orderId,
+            orderPartSeqId,
+            roleTypeId: scope.supplierReturn ? "VendorBillFrom" : "CustomerBillTo"
+        }))
+            counterparties.add(row.partyId)
     return billings.filter(row => {
         const invoice = invoices[row.invoiceId]
         return (
             invoice &&
             invoice.statusId !== "InvoiceCancelled" &&
             invoice[side] === scope.organizationPartyId &&
-            invoice[otherSide] === scope.counterpartyId &&
+            counterparties.has(invoice[otherSide]) &&
             !invoice.creditForInvoiceId &&
             !["InvoiceReturn", "InvoiceCreditMemo"].includes(invoice.invoiceTypeEnumId)
         )
