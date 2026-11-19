@@ -1461,7 +1461,7 @@ function priorClaimsOf(requestId, assetId) {
 // period, and, when given, only those of the queues named or assigned to the party named (an app's own case scope).
 function findClaims(p) {
     requireRead()
-    const userScope = facilityScope.scope()
+    const userScope = facilityScope.requestScope()
     let query = find(REQUEST, {requestTypeEnumId: claimType})
     if (p.fromDate) query = query.condition("requestDate", "greater-equals", p.fromDate)
     if (p.thruDate) query = query.condition("requestDate", "less", p.thruDate)
@@ -1575,7 +1575,7 @@ function findClaims(p) {
 function deliveredItems(p) {
     requireRead()
     if (blank(p.customerPartyId)) denied("CUSTOMER_REQUIRED", "Name the customer")
-    const userScope = facilityScope.scope()
+    const userScope = facilityScope.requestScope()
     let partQuery = find(PART, {customerPartyId: p.customerPartyId})
     if (userScope.organizationPartyIds) partQuery = partQuery.condition("vendorPartyId", "in", userScope.organizationPartyIds)
     const parts = Array.from(partQuery.selectField("orderId,vendorPartyId").limit(1000).list()).filter(row =>
