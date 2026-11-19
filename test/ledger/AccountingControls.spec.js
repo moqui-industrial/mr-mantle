@@ -1787,8 +1787,8 @@ feature("draft documents, journal previews, corrections and deletes go through t
         templateLinesLeft == 0
     },
 })
-// SEC-BOS-122: a posting lock holds with the organization's posting guard off: post#AcctgTrans of a locked date is refused, and
-// the same transaction posts once the lock is through an earlier date
+// SEC-BOS-122: a posting lock holds with the organization's posting guard off: post#AcctgTrans of a locked date is refused, the
+// same transaction posts once the lock is gone, and unpost#AcctgTrans of it is refused once a lock covers its date again
 feature("a posting lock holds while the posting guard is off", {
     when() {
         const off = "FIN_CONTROL_OFF_ORG"
@@ -1820,13 +1820,26 @@ feature("a posting lock holds while the posting guard is off", {
             changeReason: "Year end",
         })
         const refused = rejected("LedgerServices.post#AcctgTrans", {acctgTransId: tx})
-        const after = lib().one("mantle.ledger.transaction.AcctgTrans", {acctgTransId: tx}).isPosted
-        return {guard, lock: lock.accountingLockId, refused, after}
+        const posted = () => lib().one("mantle.ledger.transaction.AcctgTrans", {acctgTransId: tx}).isPosted
+        const after = posted()
+        lib().call("delete#mantle.ledger.config.AccountingLock", {accountingLockId: lock.accountingLockId})
+        const postedUnlocked = rejected("LedgerServices.post#AcctgTrans", {acctgTransId: tx})
+        const afterUnlock = posted()
+        native("CloseServices.store#Lock", {
+            organizationPartyId: off,
+            lockScope: "all",
+            lockThroughDate: ec.l10n.format(ec.user.nowTimestamp, "yyyy-MM-dd"),
+            changeReason: "Year end again",
+        })
+        const unpost = rejected("LedgerServices.unpost#AcctgTrans", {acctgTransId: tx})
+        return {guard, lock: lock.accountingLockId, refused, after, postedUnlocked, afterUnlock, unpost, afterUnpost: posted()}
     },
-    then({guard, lock, refused, after}) {
+    then({guard, lock, refused, after, postedUnlocked, afterUnlock, unpost, afterUnpost}) {
         guard != "Y"
         !!lock
         refused.includes("SOFT_LOCK")
         after != "Y"
+        postedUnlocked == "" && afterUnlock == "Y"
+        unpost.includes("SOFT_LOCK") && afterUnpost == "Y"
     },
 })

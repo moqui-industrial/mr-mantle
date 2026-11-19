@@ -750,7 +750,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="unpost" noun="AcctgTrans">
-        <description>Un-posts a posted Accounting Transaction (AcctgTrans)</description>
+        <description>Un-posts a posted Accounting Transaction (AcctgTrans): refused in a closed period, and, but for a period's
+            closing entries, on a date a posting lock of its organization covers (PostingGuard.js refuseLocked, SEC-BOS-122).</description>
         <in-parameters>
             <parameter name="acctgTransId" required="true"/>
         </in-parameters>
@@ -761,6 +762,11 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- make sure the AcctgTrans has not already been posted -->
             <if condition="acctgTrans.isPosted != 'Y'">
                 <return message="Transaction ${acctgTransId} not posted, not un-posting"/>
+            </if>
+            <!-- a posting lock covering its date holds for an unposting too, but for a period's closing entries, which its reopen
+                unposts (SEC-BOS-122) -->
+            <if condition="!(['AttPeriodClosing', 'AttNetIncomeClosing'].includes(acctgTrans.acctgTransTypeEnumId))">
+                <script>ec.resource.script('component://mr-mantle/service/mantle/ledger/PostingGuard.js').refuseLocked({acctgTransId:acctgTransId})</script>
             </if>
             <service-call name="mantle.ledger.LedgerServices.find#PartyAcctgPreference" out-map="context" in-map="{organizationPartyId:acctgTrans.organizationPartyId}"/>
             <set field="doRealTimeGlSummary" from="partyAcctgPreference?.realTimeGlSummary == 'Y'"/>

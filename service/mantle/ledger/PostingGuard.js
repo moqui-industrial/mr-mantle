@@ -463,10 +463,7 @@ function check(p) {
     if (!p.verifyOnly && !adopted) {
         captureSourceDay(initial)
         // the guard off checks nothing else, but a posting lock still holds (SEC-BOS-122)
-        const tx = one(T, {acctgTransId: p.acctgTransId})
-        const locked = postingLocks(tx, scopes(tx, rows(E, {acctgTransId: tx.acctgTransId})), true, calendarDay(tx, {}, true))
-        if (locked.findings.length)
-            throw new Error(locked.findings[0].code + ": " + locked.findings.map(r => r.message).join("; "))
+        refuseLocked(p)
         return {handled: false, valid: true, findings: []}
     }
     if (!p.verifyOnly) find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
@@ -503,6 +500,15 @@ function check(p) {
         creditTotal: out.creditTotal
     }
 }
+// SEC-BOS-122: a posting or an unposting of a transaction into a date a posting lock of its organization covers is refused
+// (HARD_LOCK, or SOFT_LOCK unless an exception allows it), whatever the guard's state; unpost#AcctgTrans asks it for all but
+// a period's closing entries, which a reopen of the period (FISCAL_REOPEN) unposts.
+function refuseLocked(p) {
+    const tx = one(T, {acctgTransId: p.acctgTransId})
+    if (!tx) return
+    const locked = postingLocks(tx, scopes(tx, rows(E, {acctgTransId: tx.acctgTransId})), true, calendarDay(tx, {}, true))
+    if (locked.findings.length) throw new Error(locked.findings[0].code + ": " + locked.findings.map(r => r.message).join("; "))
+}
 function completed(acctgTransId) {
     const tx = one(T, {acctgTransId})
     if (!tx || preference(tx.organizationPartyId).postingGuardEnabled !== "Y" || tx.isPosted !== "Y") return
@@ -527,6 +533,7 @@ function completed(acctgTransId) {
 }
 ;({
     validate,
+    refuseLocked,
     check,
     completed,
     fiscal,
