@@ -192,3 +192,13 @@ feature("a reply all reaches the thread's participant outside the replier's reac
     }
 })
 
+feature("a department's employee reaches its parent's and a sibling department's staff, not another top-level organization's", {
+    when() {
+        return filteredAs("prch.deptsender." + run, () => ({
+            visible: result(P + "filter#VisibleParties", {partyIdList: [made.Sibling, made.TopStaff, made.AnotherStaff]}).visiblePartyIdList || []
+        }))
+    },
+    then({visible}) {
+        visible == [made.Sibling, made.TopStaff]
+    }
+})
