@@ -21,6 +21,15 @@ along with this software (see the LICENSE.md file). If not, see
     adds the occurrences (MaintenanceOccurrence), the generation of a planner and of the generate_MaintenanceWorkOrders job, the
     reconciliation of missed and counted obligations, and the job's state for Settings. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="check" noun="PlanRecordVisible" allow-remote="false">
+        <description>Whether the user sees a maintenance plan (MaintenanceSchedule) as a record, its card and panels (the
+            RecordLinkType visibility service, SEC-BOS-87): a reader of plans (MAINTENANCE_VIEW) of its organization alone.</description>
+        <implements service="mantle.party.CommunicationServices.check#RecordTypeVisible"/>
+        <actions>
+            <set field="recordVisible" from="ec.resource.script('component://mr-mantle/service/mantle/work/MaintenancePlans.js')
+                    .planRecordVisible(context).recordVisible"/>
+        </actions>
+    </service>
     <service verb="find" noun="MaintenanceSchedules" allow-remote="false">
         <description>The plans of the user's maintenance scope (MAINTENANCE_VIEW; PERMISSION_DENIED without), found in the query
             before paging: text (id or name), organization (ORGANIZATION_DENIED outside the scope), equipment, facility (with those

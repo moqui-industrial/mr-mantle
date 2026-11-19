@@ -2984,10 +2984,18 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!authzOn) return true
                 // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization
                 const registration = registrations[entityName]
+                // in a transaction of its own, so an app check that refuses inside it cannot mark the caller's rollback-only
                 if (registration?.visibleService) return ec.service.sync().name(registration.visibleService)
-                        .parameters({recordEntityName: entityName, recordId: id}).disableAuthz().call()?.recordVisible === true
+                        .parameters({recordEntityName: entityName, recordId: id}).requireNewTransaction(true).disableAuthz().call()?.recordVisible === true
                 if (registration?.parentEntityName && registration?.parentField) {
                     const parentId = value[registration.parentField]
+                    // with no parent, the record's own organization when the registration names its field (a tracking link of
+                    // no campaign), else a system administrator's
+                    if (!parentId && registration.organizationField) {
+                        const orgIds = userOrganizationIds()
+                        const organizationPartyId = value[registration.organizationField]
+                        return orgIds == null || (!!organizationPartyId && orgIds.includes(organizationPartyId))
+                    }
                     if (!parentId) return userOrganizationIds() == null
                     const parentKeys = Object.keys(ec.entity.makeValue(registration.parentEntityName).getPrimaryKeys())
                     return parentKeys.length === 1 && registeredTypes.has(registration.parentEntityName) && depth < 5
@@ -2998,6 +3006,9 @@ along with this software (see the LICENSE.md file). If not, see
                     const organizationPartyId = value[registration.organizationField]
                     return orgIds == null || (!!organizationPartyId && orgIds.includes(organizationPartyId))
                 }
+                // a registration with no rule of its own that does not say why (Mantle's codeRule, public content's publicRead)
+                // is a system administrator's: the entity filters alone would open it to every user (SEC-BOS-87)
+                if (registration && registration.codeRule !== 'Y' && registration.publicRead !== 'Y') return userOrganizationIds() == null
                 if (entityName === COMM_EVENT) return commEventVisible(value, depth)
                 if (entityName === WIKI_PAGE) return wikiPageVisible(value)
                 // a merge request or a repository: whoever may view the repository (org.moqui.git.GitServices)

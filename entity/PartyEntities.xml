@@ -1571,96 +1571,103 @@ along with this software (see the LICENSE.md file). If not, see
         <description>A record type the record link services take (CommunicationServices get#RecordLinkInfo; SEC-BOS-87): the record
             panels, cards, notes, messages, activities, record rooms and record folders of a record of any other entity are refused.
             Registered by the component that hosts the record, as data: Mantle the types its joins and rules cover; an app the
-            records its screens show (mr-boss data/BossRecordTypesData.xml). Beside get#RecordLinkInfo's own rules for its types and
+            records its screens show (mr-boss data/BossSetupRecordTypesData.xml). Beside get#RecordLinkInfo's own rules for its types and
             the user's entity filters, a registration names how a record of it is seen, the first that is set: visibleService, a
             service implementing mantle.party.CommunicationServices.check#RecordTypeVisible (recordEntityName, recordId; answers
             recordVisible), called with authorization disabled, which applies the host app's own rule; parentEntityName with
-            parentField, the record seen as the record its field names is (another registered type); organizationField, the
+            parentField, the record seen as the record its field names is (another registered type; with that field empty, by
+            organizationField when it is set too, else a system administrator's); organizationField, the
             field holding the record's organization, which must be one of the user's (every one for a system administrator; a
             record with none is a system administrator's). These apply with authorization on, as get#RecordLinkInfo's rules for
-            a user do. disabled Y leaves it out.</description>
+            a user do. A registration with none of these is seen by a system administrator alone (and logged as an error when
+            loaded), unless it says why it needs none: codeRule Y, a type get#RecordLinkInfo rules itself (Mantle's own rows), or
+            publicRead Y, public content seen under the entity filters alone (a site). disabled Y leaves it out.</description>
         <field name="recordEntityName" type="text-medium" is-pk="true"><description>The full entity name</description></field>
         <field name="ownerText" type="text-medium"><description>Whose record type it is, for a reader</description></field>
         <field name="visibleService" type="text-medium"/>
         <field name="parentEntityName" type="text-medium"/>
         <field name="parentField" type="text-short"/>
         <field name="organizationField" type="text-short"/>
+        <field name="codeRule" type="text-indicator"><description>Y: get#RecordLinkInfo's own rules and the entity filters decide
+            (Mantle's registrations)</description></field>
+        <field name="publicRead" type="text-indicator"><description>Y: public content, seen by any user under the entity filters
+            alone</description></field>
         <field name="disabled" type="text-indicator"/>
         <seed-data>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.Request" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.effort.WorkEffort" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.wiki.WikiPage" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunity" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.Party" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.facility.Facility" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTrans" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBom" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.agreement.Agreement" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.maintenance.AssetMaintenance" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.communication.CommunicationEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.Invoice" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.Payment" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethod" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.Product" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategory" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.shipment.Shipment" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.Asset" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspection" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.Employment" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplication" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualification" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReview" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.Payslip" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.MarketingCampaign" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSend" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistration" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitMergeRequest" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitRepository" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.time.Timesheet" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserAccount" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="moqui.entity.EntityAuditLog" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTransContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.InvoiceContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.PaymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethodContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspectionContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunityContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSendContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistrationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.RequestContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplicationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualificationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReviewContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.PayslipContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeature" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeatureGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductIdentifierPolicy" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductOtherIdentification" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductCatalogOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategoryContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ContentEditConflict" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.receipt.AssetReceipt" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.issuance.AssetIssuance" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetDetail" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetBookEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetRevaluationPreview" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.PostingOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCost" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCostComponent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductCostCalculation" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomItem" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.method.MethodReleaseDecision" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenter" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
-            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenterRate" ownerText="Mantle: get#RecordLinkInfo's joins or rules"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.Request" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.effort.WorkEffort" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.wiki.WikiPage" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunity" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.Party" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.facility.Facility" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTrans" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBom" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.agreement.Agreement" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.maintenance.AssetMaintenance" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.party.communication.CommunicationEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.Invoice" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.Payment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethod" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.Product" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategory" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.shipment.Shipment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.Asset" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspection" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnHeader" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.Employment" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplication" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualification" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReview" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.Payslip" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.MarketingCampaign" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSend" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistration" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitMergeRequest" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.resource.GitRepository" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.time.Timesheet" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserAccount" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.security.UserGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="moqui.entity.EntityAuditLog" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.AcctgTransContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.invoice.InvoiceContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.payment.PaymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.account.method.PaymentMethodContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.return.ReturnContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.quality.QualityInspectionContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.sales.opportunity.SalesOpportunityContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.marketing.campaign.CampaignSendContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.registration.EventRegistrationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.order.OrderContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.request.RequestContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.employment.EmploymentApplicationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PartyQualificationContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.ability.PerformanceReviewContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.humanres.payroll.PayslipContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeature" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.feature.ProductFeatureGroup" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductIdentifierPolicy" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductOtherIdentification" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductCatalogOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ProductContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.category.ProductCategoryContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.ContentEditConflict" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.receipt.AssetReceipt" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.issuance.AssetIssuance" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetDetail" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetBookEvent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.asset.AssetRevaluationPreview" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.ledger.transaction.PostingOperation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCost" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductStandardCostComponent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.cost.ProductCostCalculation" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomItem" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.product.bom.ProductBomContent" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.method.MethodReleaseDecision" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenter" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
+            <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.WorkCenterRate" ownerText="Mantle: get#RecordLinkInfo's joins or rules" codeRule="Y"/>
             <mantle.party.communication.RecordLinkType recordEntityName="mantle.work.production.ProductionDowntime" ownerText="Mantle: a production stop, a maintenance request's link (ProductionDowntime.js)" organizationField="organizationPartyId"/>
         </seed-data>
     </entity>

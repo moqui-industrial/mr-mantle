@@ -1890,6 +1890,19 @@ function run(op, p) {
 }
 ;({
     execute: run,
+    // a job opening as a record (its card and panels; the RecordLinkType visibility service, SEC-BOS-87): a recruiting reader
+    // (RECRUIT_VIEW) of its organization in People's scope; never an error
+    openingRecordVisible: p => {
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        try {
+            const opening = blank(p.recordId) ? null : one(OPENING, {jobOpeningId: text(p.recordId)})
+            return {recordVisible: !!opening && recruits(people.scopeOf(), opening.organizationPartyId)}
+        } catch (error) {
+            return {recordVisible: false}
+        } finally {
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    },
     // P17 review: the applicant's address an issued offer's letter is emailed to (Offers.js)
     applicantEmails,
     // People acceptance: the applicants universal search leaves out (UniversalSearchServices search#Universal)

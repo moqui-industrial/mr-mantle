@@ -2332,6 +2332,29 @@ const operations = {
     requireCompletionReading,
     readingNeeded,
     homeCounts,
+    // a plan as a record (its card and panels; the RecordLinkType visibility service, SEC-BOS-87): a reader of plans (MAINTENANCE_VIEW)
+    // of its organization; never an error
+    planRecordVisible: p => {
+        const wasDisabled = ec.artifactExecution.disableAuthz()
+        ec.message.pushErrors()
+        try {
+            const userScope = maintenanceAccess.scope()
+            const schedule = blank(p.recordId) ? null : one(SCHEDULE, {maintenanceScheduleId: text(p.recordId)})
+            return {
+                recordVisible:
+                    !!ec.user.userId &&
+                    !!userScope.capabilities.view &&
+                    !!schedule &&
+                    maintenanceAccess.covers(userScope, schedule.organizationPartyId)
+            }
+        } catch (error) {
+            return {recordVisible: false}
+        } finally {
+            ec.message.clearErrors()
+            ec.message.popErrors()
+            if (!wasDisabled) ec.artifactExecution.enableAuthz()
+        }
+    },
     // a plan a reader of the scope may open (MAINTENANCE_VIEW in its organization; RECORD_UNAVAILABLE): Maintenance's record check
     requireSchedule: (userScope, maintenanceScheduleId) => {
         if (!userScope.capabilities.view) denied("PERMISSION_DENIED", "Maintenance view is required")

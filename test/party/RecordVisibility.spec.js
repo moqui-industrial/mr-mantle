@@ -302,17 +302,24 @@ feature("a registered type's own rule: a production stop is its organization's, 
         if (!ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStoreFeed").one())
             call("create#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStoreFeed", ownerText: "Spec: a feed",
                 parentEntityName: "mantle.product.store.ProductStore", parentField: "productStoreId" })
-        if (!ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStore").one())
-            call("create#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore", ownerText: "Spec: a store",
-                organizationField: "organizationPartyId" })
-        call("create#mantle.work.production.ProductionDowntime", { productionDowntimeId: "RV-STOP", organizationPartyId: "RV_ORG" })
-        call("create#mantle.product.store.ProductStoreFeed", { productStoreFeedId: "RV-FEED", productStoreId: "RV_STORE" })
-        const seen = (username, entityName, recordId) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
-                .parameters({ recordEntityName: entityName, recordId, checkOnly: true }).call()?.recordVisible)
-        return { moStop: seen("rv.mo", "mantle.work.production.ProductionDowntime", "RV-STOP"),
-            ozStop: seen("rv.oz", "mantle.work.production.ProductionDowntime", "RV-STOP"),
-            moFeed: seen("rv.mo", "mantle.product.store.ProductStoreFeed", "RV-FEED"),
-            ozFeed: seen("rv.oz", "mantle.product.store.ProductStoreFeed", "RV-FEED") }
+        // the store by its organization, for this feature (an app's registration, BOSS's by Commerce's own check, is put back after)
+        const storeType = ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStore").one()
+        const before = storeType ? storeType.getMap() : null
+        call("store#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore", ownerText: "Spec: a store",
+            organizationField: "organizationPartyId", visibleService: null, parentEntityName: null, parentField: null })
+        try {
+            call("create#mantle.work.production.ProductionDowntime", { productionDowntimeId: "RV-STOP", organizationPartyId: "RV_ORG" })
+            call("create#mantle.product.store.ProductStoreFeed", { productStoreFeedId: "RV-FEED", productStoreId: "RV_STORE" })
+            const seen = (username, entityName, recordId) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                    .parameters({ recordEntityName: entityName, recordId, checkOnly: true }).call()?.recordVisible)
+            return { moStop: seen("rv.mo", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+                ozStop: seen("rv.oz", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+                moFeed: seen("rv.mo", "mantle.product.store.ProductStoreFeed", "RV-FEED"),
+                ozFeed: seen("rv.oz", "mantle.product.store.ProductStoreFeed", "RV-FEED") }
+        } finally {
+            if (before) call("store#mantle.party.communication.RecordLinkType", before)
+            else call("delete#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore" })
+        }
     },
     then({ moStop, ozStop, moFeed, ozFeed }) {
         moStop == true
@@ -323,6 +330,28 @@ feature("a registered type's own rule: a production stop is its organization's, 
 })
 
 // five entries at one minute (a note, a file, two messages, a status change) between the created status and a later message
+feature("a registration with no rule is a system administrator's, unless it says it is public content (SEC-BOS-87)", {
+    when() {
+        const TYPE = "mantle.facility.FacilityGroup"
+        call("create#mantle.facility.FacilityGroup", { facilityGroupId: "RV-GROUP", description: "Rule-less spec group" })
+        const seen = (username) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: TYPE, recordId: "RV-GROUP", checkOnly: true }).call()?.recordVisible)
+        try {
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, ownerText: "Spec: no rule" })
+            const ruleless = { mo: seen("rv.mo"), admin: seen("john.doe") }
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, publicRead: "Y" })
+            return { ruleless, open: seen("rv.mo") }
+        } finally {
+            call("delete#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE })
+        }
+    },
+    then({ ruleless, open }) {
+        ruleless.mo == false
+        ruleless.admin == true
+        open == true
+    },
+})
+
 feature("the timeline cursor pages through entries of one date with no entry skipped or repeated; beforeDate alone skips them", {
     when() {
         at(20)

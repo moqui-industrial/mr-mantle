@@ -164,6 +164,19 @@ function formOf(formId, options = {}) {
         denied("PERMISSION_DENIED", "Changing this " + noun + " is not permitted")
     return form
 }
+// Whether the user sees a form as a record (its card and panels; the RecordLinkType visibility service of DbForm, SEC-BOS-87): a
+// form of a registered purpose the user reads, of one of their organizations for it (formOf with view); never an error.
+function formRecordVisible(p) {
+    ec.message.pushErrors()
+    try {
+        return {recordVisible: !!formOf(p.recordId, {view: true}) && !ec.message.hasError()}
+    } catch (error) {
+        return {recordVisible: false}
+    } finally {
+        ec.message.clearErrors()
+        ec.message.popErrors()
+    }
+}
 // A purpose built only through its app's own services (mantle.party.FormPurpose ownServices: Customer Service's case templates
 // and feedback, whose rules the generic services would skip) is made and changed there, never here.
 function requireGenericBuilder(registration) {
@@ -1051,7 +1064,7 @@ function recordAnswer(formId, values) {
     }).formResponseId
 }
 
-const operations = {createForm, saveField, saveCondition, endPart, publishForm, renameForm, getForm, findForms}
+const operations = {createForm, saveField, saveCondition, endPart, publishForm, renameForm, getForm, findForms, formRecordVisible}
 ;({
     // for the apps' own modules: CaseTemplates.js (case templates), CaseFeedback.js (case feedback) and People's
     TYPES,
