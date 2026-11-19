@@ -292,9 +292,32 @@ feature(
                 itemChanges: [{orderItemSeqId: "01", quantity: 8}],
                 partChanges: {currencyUomId: "EUR"}
             })
-            return {cut, codes, refused, lower, currency}
+            // SEC-BAP-92: a ship-to address is the buying organization's (or its facilities'); another's is refused, by its id
+            const address = (contactMechId, partyId) => {
+                call("create#mantle.party.contact.ContactMech", {contactMechId, contactMechTypeEnumId: "CmtPostalAddress"})
+                call("create#mantle.party.contact.PostalAddress", {contactMechId, address1: contactMechId + " Lane", city: "Elsewhere"})
+                if (partyId)
+                    call("create#mantle.party.contact.PartyContactMech", {
+                        partyId,
+                        contactMechId,
+                        contactMechPurposeId: "PostalShippingDest",
+                        fromDate: ec.user.nowTimestamp
+                    })
+            }
+            address(prefix + "_ADDR_OWN", org)
+            address(prefix + "_ADDR_OTHER", null)
+            const shipTo = contactMechId =>
+                run(state.buyer, O + "preview#PurchaseRevision", {
+                    orderId: state.orderId,
+                    partChanges: {postalContactMechId: contactMechId}
+                }).changeRows.find(row => row.field == "postalContactMechId")
+            const ownAddress = shipTo(prefix + "_ADDR_OWN"),
+                otherAddress = shipTo(prefix + "_ADDR_OTHER")
+            return {cut, codes, refused, lower, currency, ownAddress, otherAddress}
         },
-        then({cut, codes, refused, lower, currency}) {
+        then({cut, codes, refused, lower, currency, ownAddress, otherAddress}) {
+            ownAddress.refusalCode == null && ownAddress.toText.includes("Lane")
+            otherAddress.refusalCode == "ADDRESS_INVALID" && otherAddress.toText == prefix + "_ADDR_OTHER"
             currency.changeRows.find(row => row.field == "currencyUomId").refusalCode == "CURRENCY_CHANGE_WITH_AMOUNTS"
             currency.canApply == false
             cut.error == ""

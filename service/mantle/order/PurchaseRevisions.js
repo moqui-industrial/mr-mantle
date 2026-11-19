@@ -239,6 +239,21 @@ function sameValue(field, oldValue, newValue) {
     if (dateFields.includes(field)) return lib.dateText(oldValue) === lib.dateText(newValue)
     return String(oldValue) === String(newValue)
 }
+// Whether an address is the buying organization's to ship to (SEC-BAP-92): a current address of the organization or of one of its
+// facilities. Any other (another organization's, an employee's, a private contact's) is refused and never read out.
+function organizationAddress(organizationPartyId, contactMechId) {
+    if (blank(contactMechId) || blank(organizationPartyId)) return false
+    const now = ec.user.nowTimestamp
+    if (
+        find("mantle.party.contact.PartyContactMech", {partyId: organizationPartyId, contactMechId})
+            .conditionDate("fromDate", "thruDate", now)
+            .count()
+    )
+        return true
+    return Array.from(
+        find("mantle.facility.FacilityContactMech", {contactMechId}).conditionDate("fromDate", "thruDate", now).list()
+    ).some(row => one("mantle.facility.Facility", {facilityId: row.facilityId})?.ownerPartyId === organizationPartyId)
+}
 // A value as text for the change rows (names for parties, terms and products; amounts as given, the screen withholds them).
 function valueText(field, value, currencyUomId) {
     if (blank(value)) return ""
@@ -280,7 +295,8 @@ function proposed(po, facts, p) {
             oldValue: oldValue == null ? null : String(oldValue),
             newValue: newValue == null ? null : String(newValue),
             fromText: valueText(field, oldValue, currency),
-            toText: valueText(field, newValue, currency),
+            // a refused address is named by its id only (SEC-BAP-92)
+            toText: field === "postalContactMechId" && refusal ? String(newValue) : valueText(field, newValue, currency),
             refusalCode: refusal ? refusal[0] : null,
             refusalText: refusal ? refusal[1] : ""
         })
@@ -415,8 +431,14 @@ function proposed(po, facts, p) {
             if (one("moqui.basic.Enumeration", {enumId: newValue})?.parentEnumId !== "TtInco")
                 refusal = ["TERM_INVALID", "Choose an incoterm"]
         } else if (field === "postalContactMechId" && newValue) {
-            if (!one("mantle.party.contact.PostalAddress", {contactMechId: newValue}))
-                refusal = ["ADDRESS_INVALID", "Choose a postal address"]
+            if (
+                !one("mantle.party.contact.PostalAddress", {contactMechId: newValue}) ||
+                !organizationAddress(po.organizationPartyId, newValue)
+            )
+                refusal = [
+                    "ADDRESS_INVALID",
+                    "Choose a postal address of " + partyName(po.organizationPartyId) + " or of its facilities"
+                ]
         }
         row(field === "currencyUomId" ? ORDER : PART, null, field, oldValue, newValue, refusal)
     }
