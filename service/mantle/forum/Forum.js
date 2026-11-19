@@ -4887,6 +4887,16 @@ methods.storeRoute = (p) =>
     receipt(p, 'storeRoute', () => {
         site(p.siteId, true)
         const address = routeAddress(p.address)
+        // a route takes no mail while the operator names no forum inbound account (SEC-PFS-85): said once a process
+        if (!forumInboundAccounts().length) {
+            const warned = ec.cache.getCache('mantle.forum.InboundAccountsWarned')
+            if (!warned.get('routes')) {
+                warned.put('routes', 'Y')
+                ec.logger.warn(
+                    'Forum route ' + address + ' is saved, but mantle@forum-inbound-accounts names no account: no route takes mail until one is named',
+                )
+            }
+        }
         if (p.contactListId) {
             const c = one(F + 'ForumCategory', {
                 contactListId: p.contactListId,
