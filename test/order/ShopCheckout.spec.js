@@ -830,3 +830,49 @@ feature("only the cart's holder is given the payment form; the reference and key
         bounded[1].error.includes("RATE_LIMITED")
     }
 })
+feature("a guest's cart takes no once-per-customer code or promotion; its new guest party is no customer to count", {
+    when() {
+        // SEC-PSS-85: a code one customer may use once, and a promotion each customer takes once, both 1.00 off a book
+        const promotion = (storePromotionId, fields) => {
+            make(S + "ProductStorePromotion", {
+                storePromotionId,
+                productStoreId: ids.store,
+                itemDescription: "Once a customer",
+                serviceRegisterId: "FlatDiscount",
+                fromDate: new Date(Date.now() - 60000),
+                ...fields
+            })
+            make(S + "ProductStorePromoParameter", {storePromotionId, parameterName: "discountAmount", parameterValue: "1"})
+            make(S + "ProductStorePromoProduct", {storePromotionId, productId: ids.book, excludeProduct: "N"})
+        }
+        system(() => {
+            promotion(prefix + "_PERCODE", {requireCode: "Y"})
+            make(S + "ProductStorePromoCode", {
+                promoCodeId: prefix + "_FIRST",
+                storePromotionId: prefix + "_PERCODE",
+                promoCode: prefix + "_FIRST",
+                userEntered: "Y",
+                requireParty: "N",
+                useLimitPerCustomer: 1
+            })
+        })
+        const added = op(CART + "add#CartItem", {productId: ids.book, quantity: "1"})
+        const code = op(CART + "apply#PromoCode", {
+            token: added.result.token,
+            promoCode: prefix + "_FIRST",
+            expectedRevision: added.result.cart.revision
+        })
+        system(() => promotion(prefix + "_PERCUST", {requireCode: "N", useLimitPerCustomer: 1}))
+        try {
+            const {view} = readyCart(ids.book, 1)
+            return {code, view}
+        } finally {
+            system(() => call("update#" + S + "ProductStorePromotion", {storePromotionId: prefix + "_PERCUST", thruDate: new Date()}))
+        }
+    },
+    then({code, view}) {
+        code.error.includes("PROMO_CODE_INVALID")
+        view.checkout.state == "ready"
+        view.checkout.totals.total.amount == "12.00"
+    }
+})

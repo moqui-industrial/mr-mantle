@@ -987,6 +987,10 @@ function checkOrderPromotionLimits(p) {
     const asked = items.filter(item => placingIds.has(item.orderPartSeqId) && num(item.promoTimesUsed) > 0)
     if (!asked.length) return none
     const customerPartyId = (parts.find(part => part.customerPartyId) || {}).customerPartyId || null
+    // a Shop guest's cart (access rows, none with a verified customer) has no customer to count: its guest party is new on
+    // each checkout, so a per-customer limit admits no use of it (SEC-PSS-85; apply#OrderPromotions applies none)
+    const accessRows = rows("mantle.order.StoreCartAccess", {orderId: order.orderId})
+    const shopGuest = accessRows.length > 0 && !accessRows.some(row => row.customerPartyId)
 
     // the rows read first, unlocked: only those with a limit the order uses are locked and counted
     const promotionIds = unique(asked.map(item => item.storePromotionId)).sort()
@@ -1038,7 +1042,8 @@ function checkOrderPromotionLimits(p) {
             const requested = sum(mine)
             if (!requested) continue
             let used
-            if (limit.per === "customer")
+            if (limit.per === "customer" && shopGuest) used = allowed
+            else if (limit.per === "customer")
                 used = customerPartyId ? placedUses({[field]: id, customerPartyId}, order.orderId) + ownPlaced : ownPlaced
             else used = placedUses({[field]: id}, order.orderId) + ownPlaced
             if (used + requested > allowed)
