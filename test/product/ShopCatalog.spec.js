@@ -459,3 +459,52 @@ feature(
         }
     }
 )
+
+feature("a product's name and description are read only from its own content folder; another location is not published (SEC-PSS-82)", {
+    when() {
+        const owned = "dbresource://mantle/content/product/" + ids.free + "/content_" + prefix + "_DESC_OWN/description.html"
+        const created = system(() => {
+            ec.resource.getLocationReference(owned).putText("<p>The product's own description</p>")
+            // rows of the store (ranked first) naming files of the server, and one of any store in the product's folder
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_NAME_CONF",
+                productId: ids.free,
+                productStoreId: ids.store,
+                productContentTypeEnumId: "PcntProductName",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_DESC_CONF",
+                productId: ids.free,
+                productStoreId: ids.store,
+                productContentTypeEnumId: "PcntDescriptionLong",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+            make("mantle.product.ProductContent", {
+                productContentId: prefix + "_DESC_OWN",
+                productId: ids.free,
+                productContentTypeEnumId: "PcntDescriptionLong",
+                contentLocation: owned
+            })
+            // the product service makes no name or description row of another location
+            try {
+                call("mantle.product.ProductServices.create#ProductContent", {
+                    productId: ids.free,
+                    productContentTypeEnumId: "PcntDescription",
+                    contentLocation: "component://mr-mantle/MoquiConf.xml"
+                })
+                return "created"
+            } catch (error) {
+                ec.message.clearErrors()
+                return String(error.message || error)
+            }
+        })
+        return {created, free: read("get#Product", {productId: ids.free})}
+    },
+    then({created, free}) {
+        created.includes("a location is not taken")
+        free.result.product.name == "Catalog " + ids.free
+        free.result.product.description.$richText.includes("The product's own description")
+        !JSON.stringify(free.result).includes("mantle")
+    }
+})

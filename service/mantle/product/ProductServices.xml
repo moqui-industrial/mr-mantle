@@ -941,11 +941,12 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="productContentId"/></out-parameters>
         <actions>
-            <!-- a download's file is served only from its product's content folder (ShopFulfillment.js servedDownload) -->
-            <if condition="contentLocation &amp;&amp; productContentTypeEnumId == 'PcntDownload'">
-                <set field="contentLib" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js')"/>
+            <!-- a download's file is served only from its product's content folder (ShopFulfillment.js servedDownload), and a
+                name's or description's is read only there (ShopCatalog.js contentTexts, SEC-PSS-82) -->
+            <set field="contentLib" from="ec.resource.script('component://mr-mantle/service/mantle/product/Content.js')"/>
+            <if condition="contentLocation &amp;&amp; (productContentTypeEnumId == 'PcntDownload' || contentLib.shopTextTypes.includes(productContentTypeEnumId))">
                 <if condition="!contentLib.owned({productId:productId}, contentLib.config({}), contentLocation)">
-                    <return error="true" message="${contentLib.downloadLocationRefused}"/></if>
+                    <return error="true" message="${productContentTypeEnumId == 'PcntDownload' ? contentLib.downloadLocationRefused : contentLib.textLocationRefused}"/></if>
             </if>
             <service-call name="create#mantle.product.ProductContent" in-map="context" out-map="context"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0"><then>
