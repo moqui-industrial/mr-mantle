@@ -253,17 +253,16 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="openStatusIdList" from="['OrderPlaced', 'OrderProcessing', 'OrderApproved', 'OrderSent', 'OrderCompleted', 'OrderHold']"/>
 
             <!-- make sure code is valid -->
-            <if condition="promoCodeId">
+            <if condition="promoCodeId"><then>
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
                     <field-map field-name="promoCodeId"/></entity-find-one>
                 <if condition="storePromoCode != null &amp;&amp; String(storePromoCode.promoCode || '').toUpperCase() != String(promoCode).toUpperCase()">
                     <set field="storePromoCode" from="null"/></if>
-                <else>
-                    <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
-                        <econdition field-name="promoCode" ignore-case="true"/></entity-find>
-                    <set field="storePromoCode" from="storePromoCodeList[0]"/>
-                </else>
-            </if>
+            </then><else>
+                <entity-find entity-name="mantle.product.store.ProductStorePromoCode" list="storePromoCodeList">
+                    <econdition field-name="promoCode" ignore-case="true"/></entity-find>
+                <set field="storePromoCode" from="storePromoCodeList[0]"/>
+            </else></if>
             <if condition="storePromoCode == null &amp;&amp; !promoCodeId">
                 <entity-find-one entity-name="mantle.product.store.ProductStorePromoCode" value-field="storePromoCode">
                     <field-map field-name="promoCodeId" from="promoCode"/></entity-find-one>

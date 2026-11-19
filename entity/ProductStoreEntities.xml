@@ -370,7 +370,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="thruDate" type="date-time" enable-audit-log="true"/>
         <field name="useLimitPerCode" type="number-integer" enable-audit-log="true"/>
         <field name="useLimitPerCustomer" type="number-integer" enable-audit-log="true"/>
-        <field name="userEntered" type="text-indicator"/>
+        <!-- Y: customers enter it (Shop applies only these, SEC-PSS-81); N, the default: staff apply it themselves -->
+        <field name="userEntered" type="text-indicator" default="'N'"/>
         <field name="requireParty" type="text-indicator"/>
         <relationship type="one" related="mantle.product.store.ProductStorePromotion" short-alias="storePromotion"/>
         <relationship type="many" related="mantle.product.store.ProductStorePromoCodeParty" short-alias="parties">
