@@ -2533,7 +2533,10 @@ along with this software (see the LICENSE.md file). If not, see
                 if (!calendarIds.length) return false
                 const access = ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess')
                         .parameters({calendarIdList: calendarIds}).disableAuthz().call()
-                return calendarIds.some((id) => ['CalpView', 'CalpEdit', 'CalpManage'].includes(access?.permissionMap?.[id]))
+                // an event only the people on it see: through a calendar only for its editors (check#EventAccess, SEC-BOS-107)
+                const levels = ['WevRestricted', 'WevConfidential'].includes(workEffort.visibilityEnumId) ? ['CalpEdit', 'CalpManage']
+                        : ['CalpView', 'CalpEdit', 'CalpManage']
+                return calendarIds.some((id) => levels.includes(access?.permissionMap?.[id]))
             }
             const requestVisible = (request, s) => {
                 if (s.userPartyId && request.filedByPartyId === s.userPartyId) return true

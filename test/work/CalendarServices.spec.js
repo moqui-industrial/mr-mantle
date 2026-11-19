@@ -1062,3 +1062,35 @@ feature("a REPLY to an organizer the replier may not reach keeps the organizer's
         parsed.events[0].organizer.email == "yuri.private@example.com"
     },
 })
+
+// SEC-BOS-107: an event set to "Only the people on it" (WevRestricted) is Busy to a viewer of its calendar who is not on it: no
+// title, place or organizer in the grid or its calendar file, and check#EventAccess gives no view; its organizer sees it whole
+feature("an event only the people on it see is Busy to a viewer of its calendar who is not on it (SEC-BOS-107)", {
+    when() {
+        setTime(18)
+        const appraisal = as("Ada", () => {
+            cal.reviews = call(`${CAL}.create#Calendar`, { calendarName: "Ada Reviews" }).calendarId
+            call(`${CAL}.share#Calendar`, { calendarId: cal.reviews, userId: user.Ben, permissionEnumId: "CalpView" })
+            return event("Private appraisal", { estimatedStartDate: at(2 * 24 + 16), estimatedCompletionDate: at(2 * 24 + 17),
+                assignToPartyId: party.Ada, calendarId: cal.reviews, visibilityEnumId: "WevRestricted", location: "Room 9" })
+        })
+        const ben = as("Ben", () => ({
+            access: call(`${EV}.check#EventAccess`, { workEffortId: appraisal, permission: "none" }),
+            shown: week({ calendarIdList: [cal.reviews] }).find((item) => item.workEffortId === appraisal),
+            ics: call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [appraisal] }).eventMapList[0],
+        }))
+        const ada = as("Ada", () => week({ calendarIdList: [cal.reviews] }).find((item) => item.workEffortId === appraisal))
+        return { ben, ada }
+    },
+    then({ ben, ada }) {
+        ben.access.canView == false
+        ben.shown.title == "Busy"
+        ben.shown.freeBusyOnly == true
+        ben.shown.location == null
+        ben.ics.summary == "Busy"
+        ben.ics.location == null
+        ben.ics.organizer == null
+        ada.title.includes("Private appraisal")
+        ada.freeBusyOnly == false
+    },
+})

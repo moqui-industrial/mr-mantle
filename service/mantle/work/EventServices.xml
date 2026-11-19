@@ -60,6 +60,8 @@ along with this software (see the LICENSE.md file). If not, see
             A booking of an asked managed resource (a ResourceBookingPolicy in force) that the user may not open (check#EventAccess)
             is answered as free/busy: title Busy, freeBusyOnly, no url, location or organizer (§2 of impl-maintenance: a busy
             interval the caller may not open carries no title or attendee). An unmanaged resource's bookings are as before.
+            An event only the people on it see (WevRestricted, WevConfidential) that the user may not open (check#EventAccess: a
+            viewer of its calendar who is not on it) is answered the same way, as it is on a publish link (SEC-BOS-107).
         </description>
         <in-parameters>
             <parameter name="facilityId"/>
@@ -341,6 +343,10 @@ along with this software (see the LICENSE.md file). If not, see
                 ownerNames.set(detail.partyId, detail.organizationName || [detail.firstName, detail.lastName].filter((part) => part).join(' ') || detail.partyId)
             // a booking of a managed resource the user may not open (check#EventAccess) is Busy, with no title, link, place or
             // organizer (impl-maintenance P15, §2: a busy interval the caller may not open carries no title or attendee)
+            // an event only the people on it see (WevRestricted, WevConfidential) is Busy to one who may not open it, and on a
+            // publish link, which no one on it follows (SEC-BOS-107)
+            const restrictedHidden = (workEffort, id) => ['WevRestricted', 'WevConfidential'].includes(workEffort.visibilityEnumId)
+                    && (!!publishToken || !canOpen(id))
             const seen = new Map()
             const canOpen = (id) => {
                 if (!seen.has(id)) {
@@ -359,6 +365,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const freeBusyOnly = (member.calendarIds.length > 0 && member.calendarIds.every((id) => calendarLevel.get(id) === 1)
                         && !member.partyRows.length && !member.owner && !member.allUsers && !member.resource && !member.project)
                         || (member.managed && !canOpen(instance.seriesWorkEffortId || instance.workEffortId))
+                        || restrictedHidden(workEffort, instance.seriesWorkEffortId || instance.workEffortId)
                 const partyRow = member.partyRows.find((row) => row.partyId === userPartyId) || member.partyRows[0] || null
                 let url = ''
                 if (urlGString && !freeBusyOnly) {
@@ -645,7 +652,9 @@ along with this software (see the LICENSE.md file). If not, see
             subscription calendar, whose events come from the feed, and not a calendar it was only put in to be seen,
             CalendarWorkEffort.viewOnly: an attendee who adds an invitation to a calendar of their own sees it there and changes
             nothing, nor do that calendar's editors); view as well as an attendee (a current WorkEffortParty), with view
-            permission on a calendar it is in, or when it is visible to all users (WevAllUsers). An event an application keeps
+            permission on a calendar it is in, or when it is visible to all users (WevAllUsers). An event only the people on it see
+            (WevRestricted or WevConfidential) is viewed through a calendar only with edit or manage permission on it: a viewer of
+            the calendar who is not on it sees it as Busy (get#FullCalendarData, get#EventIcsMaps; SEC-BOS-107). An event an application keeps
             (get#ManagedEvents: People's training session, People's interview, or another EventManager) is viewed as any other
             but changed by no user here (managedBy names where it is changed; impl-people P19 review, Commons calendar editors of
             Nov 12, 2026); that application's services check their own rules and write it, or call these services as the
@@ -695,13 +704,17 @@ along with this software (see the LICENSE.md file). If not, see
                 const editLinks = new Set(links.filter((link) => link.viewOnly !== 'Y').map((link) => link.calendarId))
                 let viewByCalendar = false
                 let editByCalendar = false
+                // an event only the people on it see (WevRestricted, "Only the people on it", or WevConfidential): a calendar's
+                // viewer who is not on it does not open it (get#FullCalendarData shows it Busy), its editors do (SEC-BOS-107)
+                const restricted = ['WevRestricted', 'WevConfidential'].includes(row.visibilityEnumId)
+                const viewLevels = restricted ? ['CalpEdit', 'CalpManage'] : ['CalpView', 'CalpEdit', 'CalpManage']
                 if (calendarIds.length) {
                     const access = ec.service.sync().name('mantle.work.CalendarServices.check#CalendarAccess').parameters({calendarIdList: calendarIds}).call()
                     const kinds = new Map(Array.from(ec.entity.find('mantle.work.calendar.Calendar').condition(cf.makeCondition('calendarId', 'in', calendarIds))
                             .selectField('calendarId,calendarKindEnumId').list()).map((calendar) => [calendar.calendarId, calendar.calendarKindEnumId]))
                     for (const id of calendarIds) {
                         const permissionId = access.permissionMap?.[id]
-                        if (['CalpView', 'CalpEdit', 'CalpManage'].includes(permissionId)) viewByCalendar = true
+                        if (viewLevels.includes(permissionId)) viewByCalendar = true
                         if (['CalpEdit', 'CalpManage'].includes(permissionId) && kinds.get(id) !== 'CalkSubscription' && editLinks.has(id)) editByCalendar = true
                     }
                 }
@@ -776,7 +789,9 @@ along with this software (see the LICENSE.md file). If not, see
             current user's reminders as alarms. An attendee's role is OPT-PARTICIPANT when the party's expectation is
             WepeInvRequested (optional), NON-PARTICIPANT for WepeFyi, else REQ-PARTICIPANT. The organizer's and an attendee's
             email address is given only for a party the user may reach (SEC-BOS-88: mantle/party/PartyReach.js visibleParties,
-            under the caller's filters; every party with authorization disabled): another's is the name alone.</description>
+            under the caller's filters; every party with authorization disabled): another's is the name alone. An event only the
+            people on it see (WevRestricted, WevConfidential) that the user may not open (check#EventAccess) is its time alone,
+            titled Busy (SEC-BOS-107).</description>
         <in-parameters>
             <parameter name="workEffortIdList" type="List" required="true"/>
         </in-parameters>
@@ -832,6 +847,21 @@ along with this software (see the LICENSE.md file). If not, see
             const roleOf = {WepeInvRequested: 'OPT-PARTICIPANT', WepeFyi: 'NON-PARTICIPANT'}
             const userPartyId = ec.user.userAccount?.partyId || null
             const uidOf = (row) => row.universalId || `mantle-${row.workEffortId}`
+            // an event only the people on it see, which the user may not open (check#EventAccess), is Busy: its time alone, no
+            // title, place, description, link, organizer, attendees or alarms (SEC-BOS-107); a recurring instance as its series
+            const opened = new Map()
+            const hidden = (row, series) => {
+                const event = series || row
+                if (!['WevRestricted', 'WevConfidential'].includes(event.visibilityEnumId)) return false
+                if (!opened.has(event.workEffortId)) {
+                    ec.message.pushErrors()
+                    try {
+                        opened.set(event.workEffortId, !!ec.service.sync().name('mantle.work.EventServices.check#EventAccess')
+                                .parameters({workEffortId: event.workEffortId, permission: 'none'}).disableAuthz().call()?.canView)
+                    } catch (err) { opened.set(event.workEffortId, false) } finally { ec.message.clearErrors(); ec.message.popErrors() }
+                }
+                return !opened.get(event.workEffortId)
+            }
             for (const row of rows) {
                 const instance = recurrenceIdOf.get(row.workEffortId)
                 const series = instance ? byId.get(instance.seriesId) : null
@@ -844,17 +874,19 @@ along with this software (see the LICENSE.md file). If not, see
                 const alarms = userPartyId ? Array.from(ec.entity.find('mantle.work.effort.WorkEffortReminder').condition('workEffortId', row.workEffortId)
                         .condition('partyId', userPartyId).list()).map((reminder) => ({offsetMinutes: Number(String(reminder.offsetMinutes ?? 0)),
                             action: reminder.methodEnumId === 'WermEmail' ? 'EMAIL' : 'DISPLAY'})) : []
+                const busyOnly = hidden(row, series)
                 eventMapList.push({uid: series ? uidOf(series) : uidOf(row), sequence: row.revisionNumber == null ? 0 : Number(String(row.revisionNumber)),
-                    summary: row.workEffortName ?? null, description: row.description ?? null, location: row.location ?? null, url: row.infoUrl ?? null,
+                    summary: busyOnly ? 'Busy' : (row.workEffortName ?? null), description: busyOnly ? null : (row.description ?? null),
+                    location: busyOnly ? null : (row.location ?? null), url: busyOnly ? null : (row.infoUrl ?? null),
                     status: row.statusId === 'WeCancelled' ? 'CANCELLED' : 'CONFIRMED',
                     start: allDay ? null : startMs, end: allDay ? null : toMillis(row.actualCompletionDate || row.estimatedCompletionDate),
                     allDay: allDay, startDate: startDay, endDate: allDay ? addDays(dayTextOf(row.allDayEnd) || startDay, 1) : null,
                     timeZone: recurrence?.timeZone || ec.user.timeZone || null, rrule: recurrence?.rrule ?? null,
                     exdates: splitValues(recurrence?.exdates), rdates: splitValues(recurrence?.rdates), recurrenceId: instance ? instance.at : null,
-                    organizer: personOf(row.ownerPartyId),
-                    attendees: parties.map((party) => Object.assign({}, personOf(party.partyId), {partstat: partstat[party.statusId] || 'NEEDS-ACTION',
+                    organizer: busyOnly ? null : personOf(row.ownerPartyId),
+                    attendees: busyOnly ? [] : parties.map((party) => Object.assign({}, personOf(party.partyId), {partstat: partstat[party.statusId] || 'NEEDS-ACTION',
                         role: roleOf[party.expectationEnumId] || 'REQ-PARTICIPANT', rsvp: party.mustRsvp === 'Y'})),
-                    alarms: alarms, lastModified: toMillis(row.lastUpdatedStamp)})
+                    alarms: busyOnly ? [] : alarms, lastModified: toMillis(row.lastUpdatedStamp)})
             }
         ]]></script></actions>
     </service>
