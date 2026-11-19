@@ -774,7 +774,9 @@ along with this software (see the LICENSE.md file). If not, see
             mantle.work.CalendarServices), for the ICalendar tool's write: the series with their rules, plus the instances of
             those series changed on their own (with recurrenceId), the organizer and the attendees with their answers, and the
             current user's reminders as alarms. An attendee's role is OPT-PARTICIPANT when the party's expectation is
-            WepeInvRequested (optional), NON-PARTICIPANT for WepeFyi, else REQ-PARTICIPANT.</description>
+            WepeInvRequested (optional), NON-PARTICIPANT for WepeFyi, else REQ-PARTICIPANT. The organizer's and an attendee's
+            email address is given only for a party the user may reach (SEC-BOS-88: mantle/party/PartyReach.js visibleParties,
+            under the caller's filters; every party with authorization disabled): another's is the name alone.</description>
         <in-parameters>
             <parameter name="workEffortIdList" type="List" required="true"/>
         </in-parameters>
@@ -809,11 +811,18 @@ along with this software (see the LICENSE.md file). If not, see
             const recurrences = new Map(Array.from(ec.entity.find('mantle.work.effort.WorkEffortRecurrence')
                     .condition(cf.makeCondition('workEffortId', 'in', allIds)).list()).map((row) => [row.workEffortId, row]))
             const people = new Map()
+            // the parties whose address the user may read (SEC-BOS-88): the organizers and attendees of these events, asked once
+            const eventPartyIds = rows.map((row) => row.ownerPartyId).concat(Array.from(ec.entity.find('mantle.work.effort.WorkEffortParty')
+                    .condition('workEffortId', 'in', allIds).conditionDate('fromDate', 'thruDate', null).selectField('partyId').list())
+                    .map((row) => row.partyId)).filter((id) => id)
+            const reachable = new Set(ec.resource.script('component://mr-mantle/service/mantle/party/PartyReach.js')
+                    .visibleParties(eventPartyIds, true))
             const personOf = (partyId) => {
                 if (!partyId) return null
                 if (!people.has(partyId)) {
                     const detail = ec.entity.find('mantle.party.PartyDetail').condition('partyId', partyId).one()
-                    const email = ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress').parameters({partyId: partyId}).call()?.emailAddress || null
+                    const email = !reachable.has(partyId) ? null : ec.service.sync().name('mantle.party.ContactServices.get#PrimaryEmailAddress')
+                            .parameters({partyId: partyId}).call()?.emailAddress || null
                     people.set(partyId, {name: detail ? (detail.organizationName || [detail.firstName, detail.lastName].filter((part) => part).join(' ')) : partyId, email: email})
                 }
                 return people.get(partyId)
