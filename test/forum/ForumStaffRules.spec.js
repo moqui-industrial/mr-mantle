@@ -456,6 +456,45 @@ feature("SEC-PFS-100: a list's archive is named in the site's own import directo
     }
 })
 
+feature("SEC-PFS-91: a topic links and shows an article only of the site's publishing space, to staff too", {
+    when() {
+        const wiki = (verb, input) => lib.run("org.moqui.resource.WikiServices." + verb, input)
+        wiki("create#WikiSpace", {wikiSpaceId: "FSRSPACE", description: "Another space"})
+        const wikiPageId = wiki("update#WikiPage", {wikiSpaceId: "FSRSPACE", pageName: "FSR note", pageText: "Internal\n"}).wikiPageId
+        const versionName = wiki("get#WikiPageHistory", {wikiPageId}).versionList[0].versionName
+        wiki("set#PublishedVersion", {wikiPageId, publishedVersionName: versionName})
+        lib.settled(SITE, "FSR_ANN")
+        const rootCommEventId = op("FSR_ANN", "publishPost", {
+            contactListId: ids.general,
+            title: "FSR article talk",
+            body: "<p>About the note</p>",
+            operationId: operationId()
+        }).rootCommEventId
+        const link = () =>
+            op("FSR_OWNER", "linkDiscussion", {rootCommEventId, sourceType: "article", sourceId: wikiPageId, operationId: operationId()})
+        const refused = link()
+        // a link made while the space was the site's shows nothing once it is not
+        lib.set("mantle.public.PublicSite", {siteId: SITE}, {publishingWikiSpaceId: "FSRSPACE"})
+        const linked = link()
+        const whileSite = (op("FSR_MOD", "getTopicLinks", {rootCommEventId}).linkList || []).length
+        lib.set("mantle.public.PublicSite", {siteId: SITE}, {publishingWikiSpaceId: null})
+        return {
+            refused,
+            linked,
+            whileSite,
+            staff: (op("FSR_MOD", "getTopicLinks", {rootCommEventId}).linkList || []).length,
+            reader: (op("FSR_BEN", "getTopicLinks", {rootCommEventId}).linkList || []).length
+        }
+    },
+    then({refused, linked, whileSite, staff, reader}) {
+        refused.kind == "NotFound"
+        linked.linkId != null
+        whileSite == 1
+        staff == 0
+        reader == 0
+    }
+})
+
 feature("SEC-PSF-81: a member's HTML keeps an image only of the site's attachment downloads under its forum mount, in mail none", {
     when() {
         lib.settled(SITE, "FSR_BEN")
