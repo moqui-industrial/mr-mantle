@@ -579,66 +579,9 @@ along with this software (see the LICENSE.md file). If not, see
         </in-parameters>
         <out-parameters><parameter name="visiblePartyIdList" type="List"/></out-parameters>
         <actions><script><![CDATA[
-            const cf = ec.entity.conditionFactory
-            const ids = Array.from(new Set(Array.from(partyIdList || []).map((id) => String(id || '')).filter((id) => id)))
-            visiblePartyIdList = []
-            if (!ids.length) return
-            if (ec.artifactExecution.authzDisabled()) {
-                const exists = new Set(Array.from(ec.entity.find('mantle.party.Party').condition('partyId', 'in', ids).selectField('partyId').list()).map((row) => row.partyId))
-                visiblePartyIdList = ids.filter((id) => exists.has(id))
-                return
-            }
-            if (!ec.user.userId) return
-            const visible = cf.makeCondition([cf.makeCondition('privateOwnerUserId', 'equals', null), cf.makeCondition('privateOwnerUserId', 'equals', ec.user.userId)], 'or')
-            // with authorization on: the calling app's filters
-            let find = ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', ids).condition(visible).selectField('partyId')
-            if (!includeDisabled) find = find.condition(cf.makeCondition('disabled', 'not-equals', 'Y', true))
-            const seen = new Set(Array.from(find.list()).map((row) => row.partyId))
-            if (!seen.size) return
-            // the organizations each works for, read as the system (a relationship is no record the user reads here), each
-            // with its top-level organization (its PrtOrgRollup root): a party is staff when one of them, or its root, is internal
-            const orgsOf = {}
-            const rootOf = {}
-            let userRoots = new Set()
-            const wasDisabled = ec.artifactExecution.disableAuthz()
-            try {
-                const me = ec.user.userAccount?.partyId || null
-                const employersOf = (partyIds) => Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', 'in', partyIds)
-                        .condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember']).conditionDate('fromDate', 'thruDate', null)
-                        .selectField('fromPartyId').selectField('toPartyId').list())
-                const relationships = employersOf(Array.from(seen))
-                const mine = me ? employersOf([me]).map((row) => row.toPartyId) : []
-                // the root of an organization: up its current PrtOrgRollup parents (child to parent), at most ten levels
-                const root = (orgId) => {
-                    if (orgId in rootOf) return rootOf[orgId]
-                    let at = orgId
-                    for (let depth = 0; depth < 10; depth++) {
-                        const parent = Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', at)
-                                .condition('relationshipTypeEnumId', 'PrtOrgRollup').conditionDate('fromDate', 'thruDate', null)
-                                .selectField('toPartyId').list())[0]?.toPartyId
-                        if (!parent || parent === at) break
-                        at = parent
-                    }
-                    rootOf[orgId] = at
-                    return at
-                }
-                const targets = Array.from(new Set(relationships.map((row) => row.toPartyId)))
-                const candidates = Array.from(new Set(targets.concat(targets.map(root))))
-                const internal = new Set(candidates.length ? Array.from(ec.entity.find('mantle.party.PartyRole').condition('partyId', 'in', candidates)
-                        .condition('roleTypeId', 'OrgInternal').selectField('partyId').list()).map((row) => row.partyId) : [])
-                for (const row of relationships) if (internal.has(row.toPartyId) || internal.has(root(row.toPartyId)))
-                    (orgsOf[row.fromPartyId] || (orgsOf[row.fromPartyId] = [])).push(row.toPartyId)
-                // the user's own top-level organizations: of what they work for, departments too, and their filter's organizations.
-                // Reaching staff only (the owner's decision, 2026-11-19): departments, their parent and siblings reach each other;
-                // what the user reads is still their filters' alone.
-                userRoots = new Set(mine.concat(Array.from(ec.user.context.filterOrgIds || [])).map(root))
-            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
-            const organizations = Array.from(new Set(Object.values(orgsOf).flat()))
-            // the organizations the user may see, under the same filters, or of one of the user's top-level organizations
-            const seenOrganizations = new Set(organizations.length ? Array.from(ec.entity.find('mantle.party.PartyDetail').condition('partyId', 'in', organizations)
-                    .selectField('partyId').list()).map((row) => row.partyId) : [])
-            const reached = (org) => seenOrganizations.has(org) || userRoots.has(rootOf[org] ?? org)
-            visiblePartyIdList = ids.filter((id) => seen.has(id) && (!orgsOf[id] || orgsOf[id].some(reached)))
+            // the rule is PartyReach.js's, so a caller in a frame of its own (a shell provider) runs it without a service call
+            visiblePartyIdList = ec.resource.script('component://mr-mantle/service/mantle/party/PartyReach.js')
+                    .visibleParties(partyIdList, includeDisabled)
         ]]></script></actions>
     </service>
 
