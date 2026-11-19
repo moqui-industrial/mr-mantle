@@ -11,10 +11,13 @@
         mail-provider-authserv-ids the authserv-ids (comma separated) of the mail providers a synced (IMAP or POP) mailbox's
         mail comes from, whose topmost Authentication-Results field proves its sender's domain for a service queue's mail
         (mx.google.com for Gmail, for one); mail the listener takes is proved under the listener's own id
-        (smtp-server@authserv-id, else its hostname when it verifies mail itself), never this list (SEC-BAP-84). -->
+        (smtp-server@authserv-id, else its hostname when it verifies mail itself), never this list (SEC-BAP-84).
+        forum-inbound-accounts the mail accounts (emailAccountId, comma separated) that are the forum's own inbound accounts: a
+        forum route's mail is read only from one of these (hosted or shared, fed by the mail listener), never from a person's
+        or an organization's mailbox that holds the same address (SEC-PFS-85). Empty: the forum reads no route's mail. -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
             content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
-            mail-provider-authserv-ids=""/>
+            mail-provider-authserv-ids="" forum-inbound-accounts=""/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->

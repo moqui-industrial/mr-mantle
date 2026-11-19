@@ -170,9 +170,9 @@ function routeAddress(address) {
     return value
 }
 /* Whether an address is someone's own (SEC-PFS-85): a user account's address, or the address or an identity of a mail account
-   a user or an organization owns (a person's hosted mailbox, an organization's shared one). A route takes the mail of its
-   address into the site's forum, so a site owner may name only an address of the forum's own inbound account, which has
-   no owner (Forum.js forumAccount). */
+   a user or an organization owns (a person's hosted mailbox, an organization's shared one), unless the account is one of the
+   forum's own inbound accounts (mantle@forum-inbound-accounts, Forum.js forumAccount). A route takes the mail of its address
+   into the site's forum, so a site owner may name only an address of such an account. */
 function ownedMailAddress(address) {
     const same = (field) =>
         ec.entity.conditionFactory
@@ -180,14 +180,20 @@ function ownedMailAddress(address) {
             .ignoreCase()
     if (find('moqui.security.UserAccount').condition(same('emailAddress')).count() > 0)
         return true
+    // the forum's own inbound accounts (mantle@forum-inbound-accounts) hold route addresses whoever made them
+    const forumAccounts = String(ec.factory.getConfValue('mantle@forum-inbound-accounts') || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
     const owned = (emailAccountId) => {
+        if (forumAccounts.includes(String(emailAccountId))) return false
         const account = one('moqui.basic.email.EmailAccount', { emailAccountId })
         return !!account && !!(account.ownerUserId || account.ownerPartyId)
     }
     for (const account of Array.from(
         find('moqui.basic.email.EmailAccount').condition(same('emailAddress')).limit(20).list(),
     ))
-        if (account.ownerUserId || account.ownerPartyId) return true
+        if (owned(account.emailAccountId)) return true
     for (const identity of Array.from(
         find('moqui.basic.email.EmailIdentity').condition(same('emailAddress')).limit(20).list(),
     ))

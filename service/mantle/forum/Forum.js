@@ -5111,17 +5111,21 @@ const textHtml = (text) =>
         .join('')
 /* Whether a mail account is one of the forum's own inbound accounts for a route: hosted or shared, fed by the mail
    listener (its server has no store host, so the gateway wrote its trace and authentication fields, not a mailbox's
-   owner), owned by no user or organization, and holding the route's address as its own or as an identity. A user's
-   synced mailbox, whose header fields its owner controls, never is, nor a person's or an organization's own mailbox
-   (SEC-PFS-85). */
+   owner), named by the operator in mantle@forum-inbound-accounts, and holding the route's address as its own or as an
+   identity. A user's synced mailbox, whose header fields its owner controls, never is, nor any other account that holds a
+   route's address (SEC-PFS-85). */
+const forumInboundAccounts = () =>
+    String(ec.factory.getConfValue('mantle@forum-inbound-accounts') || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
 function forumAccount(emailAccountId, route) {
-    const account = emailAccountId
-        ? one('moqui.basic.email.EmailAccount', { emailAccountId })
-        : null
+    // only an account the operator named as the forum's own (mantle@forum-inbound-accounts, SEC-PFS-85): a person's or an
+    // organization's mailbox holding the route's address is never read, whoever owns it
+    if (!emailAccountId || !forumInboundAccounts().includes(String(emailAccountId))) return false
+    const account = one('moqui.basic.email.EmailAccount', { emailAccountId })
     if (!account || !['EakHosted', 'EakShared'].includes(account.accountKindEnumId))
         return false
-    // a person's or an organization's own mailbox is never the forum's (SEC-PFS-85): its owner's mail is not the site's
-    if (account.ownerUserId || account.ownerPartyId) return false
     const server = account.emailServerId
         ? one('moqui.basic.email.EmailServer', {
               emailServerId: account.emailServerId,
@@ -5182,8 +5186,14 @@ function processInbound(ctx) {
     if (
         (ctx.emailAccountId || ctx.emailMessageId || ctx.stored) &&
         !forumAccount(accountId, route)
-    )
+    ) {
+        // a route's address on an account that is not the forum's (SEC-PFS-85): said, so an operator who meant it to be lists it
+        ec.logger.warn(
+            'Forum route ' + route.address + ': mail on account ' + (accountId || '(none)') +
+                ' is not read; it is not one of mantle@forum-inbound-accounts (or not hosted or shared, or synced)',
+        )
         return { handled: false }
+    }
     // the sender is the From mailbox's address, never text of its display name (fromMailbox)
     const mailbox = fromMailbox(stored, fields.from)
     const siteId = route.siteId,

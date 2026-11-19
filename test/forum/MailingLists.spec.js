@@ -81,6 +81,8 @@ spec({
         login(lib.OPERATOR)
         setConf("pass@import-dir", "runtime://tmp/mantle-mbox-import")
         setConf("smtp-server@authserv-id", "gw.example.test")
+        // the forum's own inbound account, named by the operator (SEC-PFS-85)
+        setConf("mantle@forum-inbound-accounts", "MLS_FORUM_ACCOUNT")
         lib.site(SITE)
         lib.make("mantle.public.PublicSiteHost", {siteId: SITE, hostname: "mls.example.test", canonical: "Y"})
         ids.list = category("Dev", "list", "dev@" + LISTS)
@@ -989,5 +991,44 @@ feature("a route address is never a person's or an organization's own mail addre
     then({mailbox, identity, user, forumOwn}) {
         mailbox.includes("not a route") && identity.includes("not a route") && user.includes("not a route")
         forumOwn == "taken dev@" + LISTS
+    }
+})
+
+feature("a route's mail is read only from an account the operator names as the forum's, whoever owns it (SEC-PFS-85)", {
+    when() {
+        sys(() => {
+            // as Mail settings makes one: its maker the owner
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_OWNED_FORUM",
+                accountKindEnumId: "EakShared",
+                ownerUserId: "MLS_MEMBER",
+                emailAddress: "dev@" + LISTS
+            })
+            lib.make("moqui.basic.email.EmailAccount", {
+                emailAccountId: "MLS_UNLISTED",
+                accountKindEnumId: "EakHosted",
+                emailAddress: "dev@" + LISTS
+            })
+        })
+        const inbound = (emailAccountId, n) =>
+            lib.run("mantle.forum.DeliveryServices.process#Inbound", {
+                emailAccountId,
+                emailMessageId: null,
+                headers: {
+                    "delivered-to": "dev@" + LISTS,
+                    "message-id": "<mls-bound-" + n + "@mls.test>",
+                    "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test"
+                },
+                fields: {from: "mls_member@smithy.test", subject: "Bound " + n, toList: ["dev@" + LISTS]},
+                bodyPartList: [{contentType: "text/plain", contentText: "MLS-BOUND " + n}]
+            }).result
+        return withConf("mantle@forum-inbound-accounts", "MLS_FORUM_ACCOUNT,MLS_OWNED_FORUM", () => ({
+            owned: inbound("MLS_OWNED_FORUM", 1),
+            unlisted: inbound("MLS_UNLISTED", 2)
+        }))
+    },
+    then({owned, unlisted}) {
+        owned.handled == true
+        unlisted.handled == false
     }
 })
