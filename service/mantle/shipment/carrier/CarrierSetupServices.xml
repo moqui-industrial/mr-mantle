@@ -111,6 +111,10 @@ along with this software (see the LICENSE.md file). If not, see
                     disable-authz="true"/>
             <if condition="gateway == null">
                 <return error="true" message="GATEWAY_INVALID: there is no shipping gateway ${shippingGatewayConfigId}"/></if>
+            <!-- a gateway has no organization: its carrier accounts are changed only by a user whose organizations hold its every
+                use (the stores binding it, the parties naming it their default), or a system administrator (SEC-BAP-101) -->
+            <if condition="!ec.resource.script('component://mr-mantle/service/mantle/shipment/Shipping.js').gatewayManaged(shippingGatewayConfigId)">
+                <return error="true" message="GATEWAY_INVALID: Shipping gateway ${shippingGatewayConfigId} is used by an organization not yours; an administrator changes its carriers"/></if>
             <entity-find-count entity-name="mantle.party.PartyRole" count-field="carrierRoles" disable-authz="true">
                 <econdition field-name="partyId" from="carrierPartyId"/>
                 <econdition field-name="roleTypeId" value="Carrier"/>

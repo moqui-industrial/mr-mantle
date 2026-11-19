@@ -198,8 +198,8 @@ along with this software (see the LICENSE.md file). If not, see
                 <set field="shippingGatewayConfigId" from="ptySettingOut?.settingValue"/>
             </if>
             <!-- if still no shippingGatewayConfigId try the global or user preference -->
-            <if condition="!shippingGatewayConfigId">
-                <set field="shippingGatewayConfigId" from="ec.user.getPreference('DefaultShipmentGatewayConfigId')"/></if>
+            <!-- never the user's own preference, which any user sets (/apps/setPreference): a shipment's gateway is its
+                store's, its segment's or its organization's DefaultShipmentGatewayConfigId setting (SEC-BAP-101) -->
 
             <if condition="shippingGatewayConfigId"><entity-find-one entity-name="mantle.shipment.carrier.ShippingGatewayConfig" value-field="shippingGatewayConfig"/></if>
 
@@ -433,8 +433,8 @@ along with this software (see the LICENSE.md file). If not, see
                             in-map="{partyId:shipment.fromPartyId, partySettingTypeId:'DefaultShipmentGatewayConfigId'}"/>
                     <set field="shippingGatewayConfigId" from="ptySettingOut?.settingValue"/>
                 </if>
-                <if condition="!shippingGatewayConfigId">
-                    <set field="shippingGatewayConfigId" from="ec.user.getPreference('DefaultShipmentGatewayConfigId')"/></if>
+                <!-- never the user's own preference, which any user sets (/apps/setPreference): a shipment's gateway is its
+                    store's, its segment's or its organization's DefaultShipmentGatewayConfigId setting (SEC-BAP-101) -->
 
                 <if condition="shippingGatewayConfigId">
                     <!-- include all CarrierShipmentMethod records -->

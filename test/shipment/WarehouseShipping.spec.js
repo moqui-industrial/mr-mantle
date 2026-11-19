@@ -298,6 +298,9 @@ feature("a two-package shipment is rated by the local rules and by the test carr
 feature("a gateway the shipment's lookup does not offer rates and buys nothing for it, though it serves the carrier (SEC-BAP-101)", {
     when() {
         const sh = packedShipment("WSH_DEST", [1], {shippingGatewayConfigId: gateway})
+        // the shipper's own preference names the gateway: no user's preference offers one (SEC-BAP-101 review)
+        call("store#moqui.security.UserPreference", {userId: "WSH_SHIPPER", preferenceKey: "DefaultShipmentGatewayConfigId",
+            preferenceValue: "WSH_NOFIND"})
         return {
             rates: run("wsh_shipper", T + "get#ShipmentRates", {shipmentId: sh.shipmentId, shippingGatewayConfigId: "WSH_NOFIND"}),
             label: run("wsh_shipper", T + "request#PackageLabels", labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})),
@@ -368,9 +371,14 @@ feature("both packages' labels are bought once through the test carrier; a retry
 
 feature("a label timeout asks the carrier before retrying and buys no second label", {
     when() {
-        // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and its gateway,
-        // which is the gateway recorded, called and asked after the timeout (P13 review A1)
-        const sh = packedShipment("WSH_TIMEOUT", [1, 1], {shippingGatewayConfigId: gateway})
+        // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and the gateway its
+        // store binds to it (the only kind of gateway a request names, SEC-BAP-101), which is the gateway recorded, called and
+        // asked after the timeout (P13 review A1)
+        call("create#mantle.product.store.ProductStore", {productStoreId: "WSH_STORE", storeName: "WSH store", organizationPartyId: org})
+        call("create#mantle.product.store.ProductStoreShippingGateway", {productStoreId: "WSH_STORE", carrierPartyId: carrier,
+            shippingGatewayConfigId: gateway})
+        const sh = packedShipment("WSH_TIMEOUT", [1, 1])
+        call("update#mantle.shipment.Shipment", {shipmentId: sh.shipmentId, productStoreId: "WSH_STORE"})
         state.timeout = sh
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
