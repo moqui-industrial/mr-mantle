@@ -974,6 +974,8 @@
         )
         if (!sanction) missing()
         staff(p.siteId, sanction.contactListId)
+        // ending a sanction asks what setting one asks: never one's own, and only above the member's rank
+        requireHigherRank(p.siteId, sanction.contactListId, sanction.partyId)
         revision(
             { revision: Number(sanction.revision || 1) },
             p.expectedRevision,
