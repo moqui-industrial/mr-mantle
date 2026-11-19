@@ -412,6 +412,15 @@ feature("an exception: the reason the policy does not allow, approved through th
             recordId: submitted.returnId,
             message: {sourceRevision: submitted.sourceRevision}
         })
+        // a team of one manager: where the organization's ServicePolicy allows it (returnExceptionSelfApproval), they approve
+        svc("create#mantle.request.support.ServicePolicy", {servicePolicyId: prefix + "_SP", organizationPartyId: org,
+            fromDate: 0, returnExceptionSelfApproval: "Y"})
+        const selfAllowed = run(users.agent, P + "approve#ReturnException", {
+            recordEntityName: "mantle.order.return.ReturnHeader",
+            recordId: submitted.returnId,
+            message: {sourceRevision: submitted.sourceRevision}
+        })
+        ec.entity.find("mantle.request.support.ServicePolicy").condition({servicePolicyId: prefix + "_SP"}).disableAuthz().deleteAll()
         ec.entity.find("moqui.security.UserGroupPermission")
             .condition({userGroupId: users.agent, userPermissionId: "RETURN_EXCEPTION_APPROVE"})
             .disableAuthz()
@@ -422,10 +431,11 @@ feature("an exception: the reason the policy does not allow, approved through th
             message: {sourceRevision: submitted.sourceRevision}
         })
         const authorized = run(users.authorizer, P + "authorize#Return", {operationKey: key(), returnId: submitted.returnId})
-        return {submitted, blocked, noRevision, staleMessage, refuseNoReason, selfApproved, approved, authorized}
+        return {submitted, blocked, noRevision, staleMessage, refuseNoReason, selfApproved, selfAllowed, approved, authorized}
     },
-    then({submitted, blocked, noRevision, staleMessage, refuseNoReason, selfApproved, approved, authorized}) {
+    then({submitted, blocked, noRevision, staleMessage, refuseNoReason, selfApproved, selfAllowed, approved, authorized}) {
         code(selfApproved) == "SELF_APPROVAL"
+        code(selfAllowed) == ""
         submitted.outcome == "ExceptionRequired"
         submitted.exceptions.includes("REASON_NOT_ALLOWED")
         submitted.exceptionNotified == 1

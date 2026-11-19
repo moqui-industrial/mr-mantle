@@ -1082,8 +1082,13 @@ function decide(p, fromTopic = false) {
     const decision = String(p.decision || "")
     if (!["approve", "refuse"].includes(decision)) denied("DECISION_INVALID", "Approve or refuse")
     if (decision === "refuse" && blank(p.reason)) denied("REASON_REQUIRED", "Give the reason for refusing")
-    // four eyes: who asked for the exception at this revision, or entered the return, does not approve it (SEC-BAP-112)
-    if (decision === "approve" && exceptionAuthor(header.returnId, current, ec.user.userId))
+    // four eyes: who asked for the exception at this revision, or entered the return, does not approve it unless the
+    // organization's ServicePolicy allows it (returnExceptionSelfApproval, off by default; SEC-BAP-112)
+    const servicePolicy = ec.resource
+        .script("component://mr-mantle/service/mantle/request/SupportCases.js")
+        .policyOf(header.vendorPartyId)
+    const selfAllowed = servicePolicy?.returnExceptionSelfApproval === "Y"
+    if (decision === "approve" && !selfAllowed && exceptionAuthor(header.returnId, current, ec.user.userId))
         denied("SELF_APPROVAL", "You asked for this exception or entered return " + header.returnId + "; another approver decides it")
     const core = evaluateCore({returnId: header.returnId})
     if (!core.exceptions.length) denied("NO_EXCEPTION", "Return " + header.returnId + " needs no exception")
