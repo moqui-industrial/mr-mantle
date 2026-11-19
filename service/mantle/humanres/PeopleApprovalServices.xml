@@ -140,7 +140,8 @@ along with this software (see the LICENSE.md file). If not, see
             with the request locked and read again. The last step's approval approves the request,
             a refusal refuses it, and either reads the notices; an approval of an earlier step sends the next step's. A decision
             the caller already made of the request answers the first (repeated). Refuses a caller without
-            PEOPLE_REQUEST_APPROVE, which every step needs, HR-routed ones too (PERMISSION_DENIED), no request (RECORD_UNAVAILABLE), another decision than
+            PEOPLE_REQUEST_APPROVE, which every step needs, HR-routed ones too (PERMISSION_DENIED), no request, or with a sourceId a
+            request of another source (RECORD_UNAVAILABLE: a domain service's record is decided only by its own request), another decision than
             the caller's first (ALREADY_DECIDED), a request no longer waiting (NOT_PENDING), a notice of an earlier revision
             (REVISION_CHANGED), a source changed since the request (SOURCE_CHANGED), a refusal without a reason
             (REASON_REQUIRED), the requester or the person it is about (SELF_APPROVAL) and anyone else not an approver of the

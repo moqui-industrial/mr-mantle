@@ -601,6 +601,29 @@ feature("a mid-period hire's fixed allowance is prorated by its term's setting, 
     }
 })
 
+feature("an approval decides only its own run: another run's request never approves a run (SEC-BOS-91)", {
+    when() {
+        // the second run waits for approval; the first is back in review with no request waiting
+        const submitted = run(state.payroll, S + "submit#Run", {payrollRunId: state.run2, justification: "March allowances"})
+        const crossed = run(state.approver, S + "approve#Run", {
+            payrollRunId: state.runId,
+            peopleApprovalId: submitted.peopleApprovalId
+        })
+        return {
+            submitted,
+            crossed,
+            first: one("mantle.humanres.payroll.PayrollRun", {payrollRunId: state.runId}),
+            request: one("mantle.humanres.approval.PeopleApproval", {peopleApprovalId: submitted.peopleApprovalId})
+        }
+    },
+    then({submitted, crossed, first, request}) {
+        submitted.error == ""
+        code(crossed) == "RECORD_UNAVAILABLE"
+        first.statusId == "PrnReview"
+        request.statusId == "PapPending"
+    }
+})
+
 feature(
     "an employment ended after its calculation makes it stale, and a run not approved is cancelled with its reason, releasing its inputs",
     {

@@ -1562,6 +1562,8 @@ function decideRun(p, decision) {
         operationKey: text(p.operationKey) || null
     })
     if (!decided.repeated) {
+        // only a run waiting in review is decided (SEC-BOS-91); a repeat answers the first decision
+        if (run.statusId !== "PrnReview") denied("NOT_IN_REVIEW", "Only a run in review is approved or returned")
         if (decided.complete) {
             call("update#" + RUN, {
                 payrollRunId: run.payrollRunId,
