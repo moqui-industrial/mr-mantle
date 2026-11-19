@@ -267,6 +267,34 @@ feature("checkOnly answers recordVisible with no error, for a record not seen, a
     },
 })
 
+feature("an entity that is no registered record type is no record, a mail message and a job offer among them, for every caller (SEC-BOS-87)", {
+    when() {
+        const raw = (params) => {
+            const out = ec.service.sync().name(`${COMM}.get#RecordLinkInfo`).parameters(Object.assign({ checkOnly: true }, params)).call()
+            const errors = ec.message.hasError() ? ec.message.getErrorsString() : null
+            ec.message.clearErrors()
+            return { visible: out?.recordVisible ?? null, reason: out?.notVisibleReason ?? null, errors }
+        }
+        const mail = ec.entity.find("moqui.basic.email.EmailMessage").selectField("emailMessageId").limit(1).list()[0]?.emailMessageId || "RV-NO-MAIL"
+        const asUser = as("rv.oz", () => raw({ recordEntityName: "moqui.basic.email.EmailMessage", recordId: mail }))
+        // authorization disabled (an internal caller) too, and with checkRecord false
+        const internal = raw({ recordEntityName: "mantle.humanres.recruitment.EmploymentOffer", recordId: "RV-OFFER" })
+        const unchecked = errorOf(`${COMM}.get#RecordLinkInfo`, { recordEntityName: "moqui.basic.email.EmailMessage", recordId: mail, checkRecord: false })
+        const request = raw({ recordEntityName: REQUEST, recordId: "RV-R1" })
+        return { asUser, internal, unchecked, request }
+    },
+    then({ asUser, internal, unchecked, request }) {
+        asUser.visible == false
+        asUser.errors == null
+        asUser.reason.includes("is not a record type")
+        internal.visible == false
+        internal.reason.includes("is not a record type")
+        unchecked != null
+        unchecked.includes("is not a record type")
+        request.visible == true
+    },
+})
+
 // five entries at one minute (a note, a file, two messages, a status change) between the created status and a later message
 feature("the timeline cursor pages through entries of one date with no entry skipped or repeated; beforeDate alone skips them", {
     when() {

@@ -2107,6 +2107,12 @@ along with this software (see the LICENSE.md file). If not, see
             not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
             transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
 
+            Only a registered record type is a record (SEC-BOS-87): one with a communication event, work effort, request,
+            note or content join below, or one this service rules on (each type named in the rules below, and a return,
+            ReturnHeader, under its entity filters). Any other entity, every moqui.* entity but a wiki page, a merge request,
+            a git repository, an account, a security group and an audit row among them, is refused as not a record type, with
+            checkRecord false too; an audit row of an unregistered type is not seen.
+
             A record the user may see is found under the user's entity filters, and is never someone else's personal
             contact (Party.privateOwnerUserId). A work effort, a request, a communication event and an order (whose filter
             is on OrderPart, not OrderHeader) have no entity filter of their own, so under an organization filter they
@@ -2363,6 +2369,30 @@ along with this software (see the LICENSE.md file). If not, see
             catch (err) { refuse(`The record type ${recordEntityName} is not an entity`); return }
             recordEntityName = recordValue.getEntityName()
             recordTypeName = recordValue.getEntityNamePretty()
+            // SEC-BOS-87: only a registered record type (see the description): the joins' types and those ruled on below
+            const ruledTypes = [PARTY, WORK_EFFORT, REQUEST, COMM_EVENT, ORDER, WIKI_PAGE, GIT_MERGE_REQUEST, GIT_REPOSITORY, TIMESHEET,
+                'moqui.security.UserAccount', 'moqui.security.UserGroup', 'moqui.entity.EntityAuditLog',
+                'mantle.ledger.transaction.AcctgTransContent', 'mantle.account.invoice.InvoiceContent',
+                'mantle.account.payment.PaymentContent', 'mantle.account.method.PaymentMethodContent',
+                'mantle.product.asset.AssetContent', 'mantle.order.return.ReturnHeader', 'mantle.order.return.ReturnContent',
+                'mantle.product.quality.QualityInspectionContent', 'mantle.sales.opportunity.SalesOpportunityContent',
+                'mantle.marketing.campaign.CampaignSendContent', 'mantle.work.registration.EventRegistrationContent',
+                'mantle.order.OrderContent', 'mantle.request.RequestContent', 'mantle.humanres.employment.EmploymentContent',
+                'mantle.humanres.employment.EmploymentApplicationContent', 'mantle.humanres.ability.PartyQualificationContent',
+                'mantle.humanres.ability.PerformanceReviewContent', 'mantle.humanres.payroll.PayslipContent',
+                'mantle.product.feature.ProductFeature', 'mantle.product.feature.ProductFeatureGroup',
+                'mantle.product.ProductIdentifierPolicy', 'mantle.product.ProductOtherIdentification',
+                'mantle.product.ProductCatalogOperation', 'mantle.product.ProductContent',
+                'mantle.product.category.ProductCategoryContent', 'mantle.product.ContentEditConflict',
+                'mantle.product.receipt.AssetReceipt', 'mantle.product.issuance.AssetIssuance', 'mantle.product.asset.AssetDetail',
+                'mantle.product.asset.AssetBookEvent', 'mantle.product.asset.AssetRevaluationPreview',
+                'mantle.ledger.transaction.PostingOperation', 'mantle.product.cost.ProductStandardCost',
+                'mantle.product.cost.ProductStandardCostComponent', 'mantle.product.cost.ProductCostCalculation',
+                'mantle.product.bom.ProductBomItem', 'mantle.product.bom.ProductBomContent', 'mantle.work.method.MethodReleaseDecision',
+                'mantle.work.production.WorkCenter', 'mantle.work.production.WorkCenterRate']
+            const registeredTypes = new Set([commEventJoins, workEffortJoins, requestJoins, noteEntities, contentEntities]
+                    .flatMap((map) => Object.keys(map)).concat(ruledTypes))
+            if (!registeredTypes.has(recordEntityName)) { refuse(`The record type ${recordEntityName} is not a record type`); return }
             const keyNames = Object.keys(recordValue.getPrimaryKeys())
             if (keyNames.length !== 1) {
                 refuse(`The record type ${recordEntityName} has ${keyNames.length} primary key fields, a record link needs one`)
@@ -2931,6 +2961,7 @@ along with this software (see the LICENSE.md file). If not, see
                 // A raw audit row carries its source's visibility, including the independent financial grant.
                 if (entityName === 'moqui.entity.EntityAuditLog') {
                     if (depth > 5 || !value.changedEntityName || !value.pkPrimaryValue) return false
+                    if (!registeredTypes.has(value.changedEntityName)) return false
                     const sourceKeys = Object.keys(ec.entity.makeValue(value.changedEntityName).getPrimaryKeys())
                     if (sourceKeys.length !== 1 || !visible(value.changedEntityName,sourceKeys[0],value.pkPrimaryValue,depth+1)) return false
                     // an asset's cost and book fields: its book's reader for an asset Accounting keeps a book of, else its
