@@ -1497,7 +1497,9 @@ methods.publishPost = (p) => {
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
         gateCommit(gated, { pending })
-        if (pending)
+        // a private message held (the mail gateway's spam verdict, the only hold a private post has) stays with its author
+        // and files no review item: staff read a private message only from a participant's report (SEC-PFS-83)
+        if (pending && !isPrivate)
             review(
                 p.siteId,
                 a.category.contactListId,

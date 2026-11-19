@@ -43,6 +43,13 @@ spec({
             action: "flag",
             operationId: operationId()
         }).ruleId
+        // and one that holds a word for approval
+        ids.approveRule = lib.op("PMR_OWNER", SITE, "storeRule", {
+            ruleType: "word",
+            pattern: "pmrhold",
+            action: "approve",
+            operationId: operationId()
+        }).ruleId
     }
 })
 
@@ -83,6 +90,57 @@ feature("a rule flags a category's post for review, never a private message or i
         conversation.kind == null
         edited.kind == null
         privateReviews.length == 0
+    }
+})
+
+feature("an approve rule holds a category's post, never a private reply, and a reply held as spam files no review", {
+    when() {
+        lib.settled(SITE, "PMR_BEN")
+        const held = lib.op("PMR_BEN", SITE, "publishPost", {
+            contactListId: ids.category,
+            title: "Held hello",
+            body: "<p>pmrhold in public</p>",
+            operationId: operationId()
+        })
+        lib.settled(SITE, "PMR_BEN")
+        const reply = lib.op("PMR_BEN", SITE, "publishPost", {
+            rootCommEventId: ids.privatePost,
+            body: "<p>pmrhold between us</p>",
+            operationId: operationId()
+        })
+        lib.settled(SITE, "PMR_BEN")
+        // a mailed reply the gateway marked as spam
+        const spam = lib.privileged(() =>
+            lib.run("mantle.forum.DeliveryServices.post#Inbound", {
+                input: {
+                    siteId: SITE,
+                    username: "PMR_BEN",
+                    rootCommEventId: ids.privatePost,
+                    body: "<p>Buy now</p>",
+                    mailVerdict: {spam: true, reason: "X-Spam-Flag: YES"},
+                    operationId: operationId()
+                }
+            }).result
+        )
+        const state = postId => lib.row("mantle.forum.ForumPostState", {communicationEventId: postId})
+        return {
+            held,
+            heldReviews: reviewsOf(held.rootCommEventId),
+            reply,
+            replyReviews: reviewsOf(reply.postId),
+            spam,
+            spamState: spam?.postId ? state(spam.postId) : null,
+            spamReviews: spam?.postId ? reviewsOf(spam.postId) : []
+        }
+    },
+    then({held, heldReviews, reply, replyReviews, spam, spamState, spamReviews}) {
+        held.kind == null
+        heldReviews.map(review => review.reasonFamily).includes("rule")
+        reply.kind == null
+        replyReviews.length == 0
+        spam.postId != null
+        spamState.visibility == "pending"
+        spamReviews.length == 0
     }
 })
 

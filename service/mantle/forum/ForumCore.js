@@ -1696,6 +1696,7 @@ function gate(g) {
             Number(memberState.approvedContributions || 0) <
                 pol.firstContributionCount,
         ruleHold = !g.isPrivate && approve && !mod,
+        // a private post is held for spam too, with no review item (publishPost, SEC-PFS-83)
         spam = !!g.mailVerdict?.spam && !mod
     if (firstPost || ruleHold || spam)
         return {
