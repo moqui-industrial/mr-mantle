@@ -499,10 +499,40 @@ feature("a product's name and description are read only from its own content fol
                 return String(error.message || error)
             }
         })
-        return {created, free: read("get#Product", {productId: ids.free})}
+        const refusal = work =>
+            system(() => {
+                try {
+                    work()
+                    return "done"
+                } catch (error) {
+                    ec.message.clearErrors()
+                    return String(error.message || error)
+                }
+            })
+        // nor moves a row there by an update, nor takes an encoded step out of the product's folder
+        const updated = refusal(() =>
+            call("mantle.product.ProductServices.update#ProductContent", {
+                productContentId: prefix + "_DESC_OWN",
+                contentLocation: "component://mr-mantle/MoquiConf.xml"
+            })
+        )
+        const encoded = refusal(() =>
+            call("mantle.product.ProductServices.create#ProductContent", {
+                productId: ids.free,
+                productContentTypeEnumId: "PcntDescription",
+                contentLocation: "dbresource://mantle/content/product/" + ids.free + "/%2e%2e/" + ids.plain + "/x.html"
+            })
+        )
+        const location = system(() =>
+            ec.entity.find("mantle.product.ProductContent").condition("productContentId", prefix + "_DESC_OWN").one().contentLocation
+        )
+        return {created, updated, encoded, location, owned, free: read("get#Product", {productId: ids.free})}
     },
-    then({created, free}) {
+    then({created, updated, encoded, location, owned, free}) {
         created.includes("a location is not taken")
+        updated.includes("a location is not taken")
+        encoded.includes("a location is not taken")
+        location == owned
         free.result.product.name == "Catalog " + ids.free
         free.result.product.description.$richText.includes("The product's own description")
         !JSON.stringify(free.result).includes("mantle")

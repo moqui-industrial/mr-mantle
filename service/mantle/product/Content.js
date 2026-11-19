@@ -78,8 +78,9 @@ function owned(row, c, location = row.contentLocation) {
             ec.factory.getConfValue("mantle@content-root"),
             ec.factory.getConfValue("mantle@content-large-root")
         ].filter(Boolean)
+    // no step out of the folder: a .. segment, a backslash or an encoded dot, slash or backslash (as ShopCatalog's image rule)
     return (
-        !value.split("/").includes("..") &&
+        !/(?:^|[\/\\])\.\.(?:[\/\\]|$)|\\|%2e|%2f|%5c/i.test(value) &&
         roots.some(root => value.startsWith(String(root).replace(/\/+$/, "") + "/" + c.folder + "/" + row[c.owner] + "/"))
     )
 }
