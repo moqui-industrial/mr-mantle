@@ -994,7 +994,8 @@ along with this software (see the LICENSE.md file). If not, see
             the EmailRuleAction enumeration ErActCreateRequest): a received message becomes a request, or joins one.
             - A message already on a request is left (running the rules again makes nothing twice).
             - A reply in a request's thread (its In-Reply-To or References name a message on the request, or its thread's
-              first message is on it) joins that request's conversation and makes nothing new.
+              first message is on it) joins that request's conversation and makes nothing new, when the trusted mail gateway
+              authenticated its sender (find#EmailRequest, SEC-BAP-84).
             - A value that names a service queue (Customer Service P6, F10, F11; Channels.js mailIntake) files into the queue
               by its route: references, then a verified case token; an automatic message ignored or attached only, never
               acknowledged; a customer's message a case timed by its received date and acknowledged once; staff, another
@@ -1007,7 +1008,8 @@ along with this software (see the LICENSE.md file). If not, see
               A project is taken only when its intake account (WstIntakeAccount) is the message's account, or the rule's owner
               (ruleOwnerUserId) is one of its parties; otherwise the request has no project. The type is the project's
               default, the subject its name, the text its description; the sender is the Reporter and Customer (a party
-              found by the address, else a person made from the sender's name), the project's triage assignee its Assignee.
+              found by the address, else a person made from the sender's name) when the trusted mail gateway authenticated
+              it, else no party is named and a note says why (SEC-BAP-84), the project's triage assignee its Assignee.
             Each new or joined message is the request's: RequestEmailMessage, its CommunicationEvent (type Email) by
             RequestCommEvent, so Chatter shows it, and its files as RequestContent. The confirmation goes from the account
             when the form settings send one (not for a reply). Returns requestId and whether it was made.
@@ -1060,6 +1062,7 @@ along with this software (see the LICENSE.md file). If not, see
                 const settings = ec.service.sync().name('mantle.request.RequestServices.get#IntakeSettings').parameters({workEffortId: project?.workEffortId || null,
                     organizationPartyId: project ? null : (ec.service.sync().name('mantle.request.RequestServices.get#EmailAccountOrganization')
                         .parameters({emailAccountId: emailAccountId || message.emailAccountId}).call()?.organizationPartyId || null)}).call()?.settings || {}
+                // a sender the gateway did not authenticate names no party (SEC-BAP-84): the request has no customer, with why
                 const sender = ec.service.sync().name('mantle.request.RequestServices.findOrCreate#EmailSender').parameters({emailMessageId: emailMessageId}).call() || {}
                 const text = String(message.bodyText || String(message.body || '').replace(/<(style|script)[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>/gi, '\n')
                         .replace(/<\/p>/gi, '\n\n').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')).trim()
@@ -1071,6 +1074,9 @@ along with this software (see the LICENSE.md file). If not, see
                 if (ec.message.hasError()) return
                 requestId = out.requestId
                 created = true
+                if (!sender.authenticated) ec.service.sync().name('create#mantle.request.RequestNote').parameters({requestId: requestId,
+                    noteDate: ec.user.nowTimestamp, noteText: ec.l10n.localize('Sender not verified') + ': ' + (sender.problem || '') + ' (From '
+                        + (message.fromAddress || '') + ')'}).call()
                 ec.service.sync().name('mantle.request.RequestServices.file#RequestEmail').parameters({requestId: requestId, emailMessageId: emailMessageId}).call()
                 if (ec.message.hasError()) return
                 if (settings.publicForm?.confirm === 'Y' && settings.accountId && settings.accountId === (emailAccountId || message.emailAccountId))
@@ -1082,7 +1088,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="WorkItemFromEmail" authenticate="anonymous-all" allow-remote="false">
         <description>
             The createWorkItem action of the mail client's rules (EmailRuleAction ErActCreateWorkItem): a message from an
-            internal sender (a user account with that address whose party is on the project) becomes a work item of the project
+            internal sender (a user account with that address whose party is on the project, its From authenticated by the
+            trusted mail gateway: Channels.js senderTrust, SEC-BAP-84) becomes a work item of the project
             (the action's value, or the plus tag's, as create#RequestFromEmail finds it): Task type, the subject its title, the
             text its description, the sender its owner and Reporter; its files and the message on the item
             (WorkEffortCommEvent). From anyone else, or with no project, it is a request (create#RequestFromEmail). A message
@@ -1117,7 +1124,9 @@ along with this software (see the LICENSE.md file). If not, see
                 const project = ec.service.sync().name('mantle.request.RequestServices.find#EmailIntakeProject').parameters({emailMessageId: emailMessageId,
                     emailAccountId: emailAccountId || message.emailAccountId, ruleOwnerUserId: ruleOwnerUserId || null, value: value || null}).call()?.project || null
                 if (project == null) return asRequest()
-                // an internal sender: a user with the address whose party holds a current role on the project
+                // an internal sender: a user with the address whose party holds a current role on the project, and whose address
+                // the trusted mail gateway authenticated (SEC-BAP-84); any other From is a request's
+                if (!ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').senderTrust(message).authenticated) return asRequest()
                 const address = String(message.fromAddress || '').trim().toLowerCase()
                 const account = address ? Array.from(ec.entity.find('moqui.security.UserAccount').condition('emailAddress', address).list())
                         .concat(Array.from(ec.entity.find('moqui.security.UserAccount').condition('username', address).list()))
@@ -1221,13 +1230,15 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="EmailRequest" authenticate="anonymous-view" allow-remote="false">
         <description>Internal: the request a received message answers: one of the messages its In-Reply-To and References
             name (by Message-ID), its parent, or its thread's first message is on a request (RequestEmailMessage). Else
-            none.</description>
+            none, and none for a message whose sender the trusted mail gateway did not authenticate (Channels.js senderTrust,
+            SEC-BAP-84): a Message-ID in forged headers joins nothing.</description>
         <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
         <out-parameters><parameter name="requestId"/></out-parameters>
         <actions><script><![CDATA[
             requestId = null
             const message = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).disableAuthz().one()
             if (message == null) return
+            if (!ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').senderTrust(message).authenticated) return
             const ids = new Set([message.parentEmailMessageId, message.rootEmailMessageId].filter((id) => id && id !== emailMessageId))
             const referenced = String(message.inReplyTo || '').split(/\s+/).concat(String(message.referencesHeader || '').split(/\s+/))
                     .map((id) => id.trim()).filter((id) => /^<[^<>\s]+>$/.test(id))
@@ -1242,9 +1253,12 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Internal: the party of a received message's sender: a person or organization, not disabled and not
             anyone's personal contact, with that email address in effect (a user account's party first); else a person made
             from the sender's name (Customer role; a name of one word, or none, has the address's domain as its last name)
-            with the address. partyId and the address's contactMechId.</description>
+            with the address. partyId and the address's contactMechId. A sender the trusted mail gateway did not authenticate
+            (Channels.js senderTrust, SEC-BAP-84) is no one: no party is found or made (authenticated false, the reason in
+            problem).</description>
         <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
-        <out-parameters><parameter name="partyId"/><parameter name="contactMechId"/></out-parameters>
+        <out-parameters><parameter name="partyId"/><parameter name="contactMechId"/>
+            <parameter name="authenticated" type="Boolean"/><parameter name="problem"/></out-parameters>
         <actions><script><![CDATA[
             partyId = null
             contactMechId = null
@@ -1252,7 +1266,13 @@ along with this software (see the LICENSE.md file). If not, see
             try {
                 const message = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).one()
                 const address = String(message?.fromAddress || '').trim().toLowerCase()
+                authenticated = false
+                problem = null
                 if (!address.includes('@')) return
+                const trust = ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').senderTrust(message)
+                authenticated = !!trust.authenticated
+                problem = trust.problem || null
+                if (!authenticated) return
                 const user = Array.from(ec.entity.find('moqui.security.UserAccount').condition('emailAddress', address).list()).find((row) => row.partyId)
                 const infos = Array.from(ec.entity.find('mantle.party.contact.PartyContactMechInfo').condition('infoString', address)
                         .conditionDate('fromDate', 'thruDate', null).list())

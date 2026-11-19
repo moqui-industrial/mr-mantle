@@ -1089,6 +1089,9 @@ const operations = {saveRoute, previewRoute, mailIntake, createToken, removeToke
     routeText,
     heldRequests,
     automaticReason,
+    // whether a stored message's From is its sender (the trusted gateway authenticated it), for every mail intake
+    // (RequestServices create#WorkItemFromEmail, find#EmailRequest, findOrCreate#EmailSender; SEC-BAP-84)
+    senderTrust: message => runInternal(() => senderTrust(message)),
     // the text blocks a route may acknowledge with (Customer Service's options name the same)
     serviceGroupOf,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off
