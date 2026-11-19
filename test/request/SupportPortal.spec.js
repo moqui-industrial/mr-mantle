@@ -601,6 +601,43 @@ feature("a queue's form token files a request that reads no case; a forged token
     }
 })
 
+feature("a signed-in account filing a queue's form with its own verified address has its case at once; another address waits (SEC-PSS-87)", {
+    when() {
+        const intake = token("SignedIntake")
+        capability("RequestCategory", state.queue, "CaseIntake", intake, null)
+        const card = () => Number(String(page(state.self, S + "get#AccountCard", {}).lines?.[0] || "").split(" ")[0])
+        const before = card()
+        const file = (emailAddress, requestName) =>
+            page(state.self, S + "create#CustomerCase", {
+                token: intake,
+                firstName: "Dee",
+                lastName: "Spec",
+                emailAddress,
+                requestName,
+                description: "Filed through the form signed in",
+                operationId: opId()
+            })
+        const own = file(" Dee@Consumer.example.test ", "Signed-in form case")
+        const ownCase = one("mantle.request.Request", {requestCategoryId: state.queue, requestName: "Signed-in form case"})
+        const afterOwn = card()
+        const other = file("someone@elsewhere.example.test", "Another address's form case")
+        const otherCase = one("mantle.request.Request", {requestCategoryId: state.queue, requestName: "Another address's form case"})
+        // the case profiles, made after each filing's commit
+        for (const row of [ownCase, otherCase]) svc("mantle.request.SupportCaseServices.ensure#CaseProfile", {requestId: row.requestId})
+        const listed = (page(state.self, S + "find#CustomerCases", {}).caseList || []).map(row => row.requestId)
+        return {before, own, ownCase, afterOwn, other, otherCase, listed, afterOther: card()}
+    },
+    then({before, own, ownCase, afterOwn, other, otherCase, listed, afterOther}) {
+        own.receipt.message.includes("follow it in your cases")
+        ownCase.senderVerified === "Y"
+        listed.includes(ownCase.requestId)
+        afterOwn === before + 1
+        other.receipt.message.includes("once you reply from that address")
+        otherCase.senderVerified === "N"
+        !listed.includes(otherCase.requestId)
+        afterOther === afterOwn
+    }
+})
 feature("a return of a shipped order's eligible lines is requested, read through its RMA link and withdrawn before receipt", {
     when() {
         const offer = page(state.contact, R + "get#ReturnableOrder", {orderId: state.shipped})

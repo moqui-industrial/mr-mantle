@@ -851,6 +851,14 @@ function createCustomerCase(p) {
         throw error
     }
 }
+// Whether an address is one the signed-in account verified (it answered the mail sent there).
+function accountVerified(address) {
+    const typed = String(address || "").trim().toLowerCase()
+    if (!ec.user.userId || !typed) return false
+    return Array.from(
+        ec.entity.find("moqui.security.public.VerifiedAddress").condition("userId", ec.user.userId).disableAuthz().list()
+    ).some(row => !!row.verifiedAt && String(row.emailAddress || "").trim().toLowerCase() === typed)
+}
 function intakeCase(p, organizationPartyId, key, stage) {
     // the site's organization goes to the token check itself (SEC-PSS-66), and to create#IntakeRequest's
     const target = ec.resource.script("component://mr-mantle/service/mantle/request/Channels.js").formTarget(p.token, organizationPartyId)
@@ -882,14 +890,23 @@ function intakeCase(p, organizationPartyId, key, stage) {
         ec.message.clearErrors()
         fail("Unprocessable", message || "Your request could not be sent")
     }
-    // a public form's file is the typist's, not known to be the matched customer's: kept internal, for staff (SEC-PSS-87)
-    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null, "RqCntInternal")
+    // a signed-in account filing with one of its own verified addresses is the address's owner: the case is confirmed as it
+    // is filed (SEC-PSS-87; confirmSender takes it only when that account is the case's filer, the address's matched party)
+    const confirmed =
+        !!out?.requestId &&
+        accountVerified(p.emailAddress) &&
+        cases.confirmSender(out.requestId, {partyId: ec.user.userAccount?.partyId})
+    // a public form's file is the typist's, not known to be the matched customer's: kept internal, for staff (SEC-PSS-87);
+    // a confirmed filer's is the customer's own
+    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null, confirmed ? SHARED : "RqCntInternal")
     else media().unstage(staged)
-    // the sender is not verified: the answer reads no case
-    const result = {
-        receipt: {received: true, message: L("Thank you. We have your request and will answer you by email.")},
-        alreadyApplied: false
-    }
+    // an unconfirmed sender's answer reads no case; a signed-in one is told when it shows in their cases
+    const message = confirmed
+        ? "Thank you. We have your request; you can follow it in your cases."
+        : ec.user.userId
+          ? "Thank you. We have your request and will answer you by email. It shows in your cases once you reply from that address."
+          : "Thank you. We have your request and will answer you by email."
+    const result = {receipt: {received: true, message: L(message)}, alreadyApplied: false}
     lib.complete(operation, REQUEST, out?.requestId || "_NA_", result)
     return result
 }
@@ -1192,10 +1209,26 @@ function accountCard(p) {
     const organizationPartyId = served(p.siteId)
     if (!ec.user.userId) signInRequired()
     const customers = actingFor(organizationPartyId).map(row => row.partyId)
-    const openCases = customers.length
+    // the customers' cases, by their Customer party as find#CustomerCases reads them, less a public form's case its sender has
+    // not confirmed, which is no case of the account's yet (SEC-PSS-87)
+    const cf = ec.entity.conditionFactory
+    const linked = customers.length
+        ? Array.from(
+              find("mantle.request.RequestParty").condition("partyId", "in", customers).condition("roleTypeId", "Customer").list()
+          )
+              .filter(link => lib.active(link))
+              .map(link => link.requestId)
+        : []
+    const openCases = linked.length
         ? find("mantle.request.Request")
-              .condition("customerPartyId", "in", customers)
+              .condition("requestId", "in", linked)
               .condition("statusId", "in", openStatuses)
+              .condition(
+                  cf.makeCondition(
+                      [cf.makeCondition("senderVerified", "equals", null), cf.makeCondition("senderVerified", "not-equals", "N")],
+                      "or"
+                  )
+              )
               .count()
         : 0
     const returns = customers.length
