@@ -24,9 +24,9 @@
         shop-payment-forms the hosted payment forms one payment attempt is given in ten minutes; each asks the provider
         (SEC-PSS-84); a customer's renewal resumptions and card changes count with the payment calls, and
         shop-renewal-resumes is how many times a day the customer has one renewal charged again (SEC-PSS-86).
-        Marketing's event registrations: marketing-reservations-per-offer how many reservations an event's offer takes in a
-        day from one requester and for one buyer address (each up to its tickets' places), marketing-tickets-per-address how
-        many reservations a day name one attendee address, which is mailed each ticket (SEC-PSS-88). -->
+        Marketing's event registrations: marketing-reservations-per-offer how many places an event's offer takes in a day
+        from one requester (a verified signed-in account counted as itself) and for one buyer address,
+        marketing-tickets-per-address how many tickets (one a place) are mailed a day to one attendee address (SEC-PSS-88). -->
     <!-- allow-test-gateways: true lets the local test payment gateways (PgtTest, which approve without a charge) take payments
         and be permitted for an organization on a production instance (instance@purpose), as a public demo server's conf does
         (runtime/conf/MoquiDemoConf.xml); off, they are refused there (account/TestGateways.js, SEC-BOS-129). They always work

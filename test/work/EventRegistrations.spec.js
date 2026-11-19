@@ -72,7 +72,20 @@ function reserve(siteId, registrationPolicyId, ticketTypeId, quantity, email) {
     })
     return out.kind ? out : {reference: out.registration.reference, token: out.token, view: out.registration}
 }
-const complete = (siteId, token, attendees) =>
+// the receipt's link of a free registration held for its buyer's address (its RegistrationConfirm capability, made as the
+// receipt makes it, its token only in the mail), opened: it confirms the places (SEC-PSS-88)
+function receiptLink(siteId, reference) {
+    const made = system(() =>
+        ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").create({
+            recordType: "EventRegistration",
+            recordId: reference,
+            scopes: ["RegistrationView", "RegistrationCancel", "RegistrationConfirm"],
+            validDays: 1
+        })
+    )
+    return visitor("get#Registration", {siteId, token: made.token})
+}
+const completeOnly = (siteId, token, attendees) =>
     visitor("complete#Registration", {
         siteId,
         token,
@@ -81,6 +94,13 @@ const complete = (siteId, token, attendees) =>
         termsRevision: 0,
         operationId: key()
     })
+// a completion's answer; a free one held for its buyer's address then confirmed through the receipt's link, as its buyer does
+function throughReceipt(siteId, out) {
+    const view = out.registration
+    if (!view || view.state !== "held" || view.stateText !== "Held: confirm it with the link we emailed you") return out
+    return receiptLink(siteId, view.reference)
+}
+const complete = (siteId, token, attendees) => throughReceipt(siteId, completeOnly(siteId, token, attendees))
 // Pay as the page does: with the key of the amount the payment step showed (getRegistration's priceKey)
 const pay = (siteId, token) =>
     visitor("start#RegistrationPayment", {
@@ -1431,9 +1451,9 @@ feature("a typed address attaches no reservation or attendee to the directory pa
             make("moqui.security.public.VerifiedAddress", {userId: own, emailAddress: "own@mkrg.example.test", verifiedAt: new Date()})
         })
         const typed = reserve(siteA, ids.match.registrationPolicyId, ids.match.ticketTypeId, 2, "Known@mkrg.example.test")
-        const completed = visitor("complete#Registration", {siteId: siteA, token: typed.token, acceptTerms: "Y", termsRevision: 0,
-            operationId: key(), attendees: JSON.stringify([{name: "Spec buyer", email: "known@mkrg.example.test"},
-                {name: "Typed guest", email: "guest.known@mkrg.example.test"}])})
+        const completed = throughReceipt(siteA, visitor("complete#Registration", {siteId: siteA, token: typed.token, acceptTerms: "Y",
+            termsRevision: 0, operationId: key(), attendees: JSON.stringify([{name: "Spec buyer", email: "known@mkrg.example.test"},
+                {name: "Typed guest", email: "guest.known@mkrg.example.test"}])}))
         const typedPlaces = places(typed.reference)
         // signed in: the account's own verified address
         login(own)
@@ -1493,8 +1513,9 @@ feature("a verified account claims a live reservation typed with its address, an
     when() {
         const buyerAddress = "claim@mkrg.example.test", guestAddress = "claim.guest@mkrg.example.test"
         const reserved = reserve(siteA, ids.claim.registrationPolicyId, ids.claim.ticketTypeId, 2, buyerAddress)
-        const completed = visitor("complete#Registration", {siteId: siteA, token: reserved.token, acceptTerms: "Y", termsRevision: 0,
-            operationId: key(), attendees: JSON.stringify([{name: "Spec buyer"}, {name: "Claim guest", email: guestAddress}])})
+        const completed = throughReceipt(siteA, visitor("complete#Registration", {siteId: siteA, token: reserved.token,
+            acceptTerms: "Y", termsRevision: 0, operationId: key(),
+            attendees: JSON.stringify([{name: "Spec buyer"}, {name: "Claim guest", email: guestAddress}])}))
         const before = reservationOf(reserved.reference)
         const [first, second] = places(reserved.reference)
         // the buyer's mailed ticket: its link's token, as sent
@@ -1557,39 +1578,108 @@ function entityRevision(registrationId) {
         .ms(row(R, {registrationId}).lastUpdatedStamp)
 }
 
-feature("SEC-PSS-88: an offer takes a bounded number of a requester's and an address's reservations a day, an address a bounded number of tickets", {
+feature("SEC-PSS-88: an offer's places are counted for a requester and a buyer address, tickets a place for an attendee address", {
     when() {
         freshLimits()
-        const offer = system(() => offerFor(orgA, siteA, "BOUNDED", 20, [{priceSourceEnumId: "EtpFree"}]))
-        return withConf("mantle@marketing-reservations-per-offer", "2", () =>
-            withConf("mantle@marketing-tickets-per-address", "1", () => {
-                const first = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.one@mkrg.example.test")
-                const second = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.two@mkrg.example.test")
-                // a third from the same requester, past the offer's day
-                const third = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.three@mkrg.example.test")
-                // both name one attendee address: its first ticket is mailed, the second refused
-                const attend = token =>
-                    visitor("complete#Registration", {
-                        siteId: siteA,
-                        token,
-                        attendees: JSON.stringify([{name: "Tess Target", email: "target@mkrg.example.test"}]),
-                        acceptTerms: "Y",
-                        termsRevision: 0,
-                        operationId: key()
-                    })
-                const firstTicket = attend(first.token)
-                const secondTicket = attend(second.token)
-                return {first, second, third, firstTicket, secondTicket, secondState: states(second.reference)}
+        const offer = system(() => offerFor(orgA, siteA, "BOUNDED", 40, [{priceSourceEnumId: "EtpFree"}]))
+        const office = accountWith(prefix + "_OFFICE", "office@mkrg.example.test", true)
+        const reserveAs = (username, quantity, email) => {
+            const out = asAccount(username, "reserve#Registration", {
+                siteId: siteA,
+                registrationPolicyId: offer.registrationPolicyId,
+                lines: JSON.stringify([{ticketTypeId: offer.ticketTypeId, quantity}]),
+                buyerName: "Spec buyer",
+                buyerEmail: email,
+                operationId: key()
+            })
+            return out.kind ? out : {reference: out.registration.reference, token: out.token}
+        }
+        const attend = (token, people, acceptTerms = "Y") =>
+            visitor("complete#Registration", {
+                siteId: siteA,
+                token,
+                attendees: JSON.stringify(people),
+                acceptTerms,
+                termsRevision: 0,
+                operationId: key()
+            })
+        return withConf("mantle@marketing-reservations-per-offer", "3", () =>
+            withConf("mantle@marketing-tickets-per-address", "2", () => {
+                // the places, not the reservations, are counted: two, then two more past the requester's three
+                const first = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 2, "bounded.a@mkrg.example.test")
+                const second = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 2, "bounded.b@mkrg.example.test")
+                // a verified account behind the same network address is counted as itself; the buyer address's places
+                // still are: two more for bounded.a pass its three
+                const sameAddress = reserveAs(office, 2, "bounded.a@mkrg.example.test")
+                const own = reserveAs(office, 1, "office@mkrg.example.test")
+                // a completion that fails spends no ticket of its addresses; each place is one ticket of its address
+                const failed = attend(first.token, [
+                    {name: "Tess Target", email: "target@mkrg.example.test"},
+                    {name: "", email: "target@mkrg.example.test"}
+                ])
+                const tickets = attend(first.token, [
+                    {name: "Tess Target", email: "target@mkrg.example.test"},
+                    {name: "Tom Target", email: "target@mkrg.example.test"}
+                ])
+                const third = attend(own.token, [{name: "Tess Target", email: "target@mkrg.example.test"}])
+                return {first, second, sameAddress, own, failed, tickets, third, ownState: states(own.reference)}
             })
         )
     },
     then(r) {
         !!r.first.token == true
-        !!r.second.token == true
+        r.second.kind == "Tarpit"
+        r.sameAddress.kind == "Tarpit"
+        !!r.own.token == true
+        !!r.failed.kind == true
+        r.tickets.registration.state != null
         r.third.kind == "Tarpit"
-        r.firstTicket.registration.state != null
-        r.secondTicket.kind == "Tarpit"
-        r.secondState == "EvrHeld"
+        r.ownState == "EvrHeld"
+    }
+})
+
+feature("SEC-PSS-88: a free place is confirmed only for a verified buyer or by the receipt's link mailed to the buyer's address", {
+    when() {
+        freshLimits()
+        const offer = system(() => offerFor(orgA, siteA, "ADDRESS", 10, [{priceSourceEnumId: "EtpFree"}]))
+        // a visitor's: held, the page's own token confirms nothing, the receipt's link mailed to the buyer does
+        const reserved = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "confirm.me@mkrg.example.test")
+        const completed = completeOnly(siteA, reserved.token, ["Confirm Me"])
+        const byPage = visitor("get#Registration", {siteId: siteA, token: reserved.token})
+        const delivery = rows("mantle.party.MessageDelivery", {eventKey: "evreg-receipt:" + reserved.reference + ":held"})[0]
+        const mailed = system(() =>
+            ec.service.sync().name(E + "build#RegistrationDelivery").parameters({deliveryId: delivery.deliveryId}).disableAuthz().call()
+        )
+        const mailedToken = (/Registration\?token=([A-Za-z0-9_-]+)/.exec(String(mailed.bodyText)) || [])[1]
+        const byMail = visitor("get#Registration", {siteId: siteA, token: mailedToken})
+        // a verified signed-in account buying for its own address: confirmed at once
+        const buyer = accountWith(prefix + "_FREE_BUYER", "free.buyer@mkrg.example.test", true)
+        const mine = asAccount(buyer, "reserve#Registration", {
+            siteId: siteA,
+            registrationPolicyId: offer.registrationPolicyId,
+            lines: JSON.stringify([{ticketTypeId: offer.ticketTypeId, quantity: 1}]),
+            buyerName: "Free buyer",
+            buyerEmail: "free.buyer@mkrg.example.test",
+            operationId: key()
+        })
+        const mineCompleted = asAccount(buyer, "complete#Registration", {
+            siteId: siteA,
+            token: mine.token,
+            attendees: JSON.stringify([{name: "Free buyer"}]),
+            acceptTerms: "Y",
+            termsRevision: 0,
+            operationId: key()
+        })
+        return {completed, byPage, mailedToken, byMail, held: states(reserved.reference), mineCompleted}
+    },
+    then(r) {
+        r.completed.registration.state == "held"
+        r.completed.registration.stateText == "Held: confirm it with the link we emailed you"
+        r.byPage.registration.state == "held"
+        !!r.mailedToken == true
+        r.byMail.registration.state == "confirmed"
+        r.held == "EvrConfirmed"
+        r.mineCompleted.registration.state == "confirmed"
     }
 })
 
