@@ -726,11 +726,11 @@ function notOwnLeave(employment) {
 // ===== assign#Policy =====
 // Whether an employment may be put under the policy from a date: the employer's (EMPLOYMENT_OUTSIDE), employed then
 // (DATE_OUTSIDE), under no other policy of the type then (ASSIGNMENT_OVERLAP), and with no entries of the type in another unit
-// (UNIT_MISMATCH); with an opening balance, not the caller's own (SELF_APPROVAL).
-function checkAssignable(policy, employment, fromMs, thruMs, partyRelationshipId, opening) {
+// (UNIT_MISMATCH), and not the caller's own (SELF_APPROVAL: a policy assigned is leave its accrual grants, from whatever date).
+function checkAssignable(policy, employment, fromMs, thruMs, partyRelationshipId) {
     if (!employment || employment.toPartyId !== policy.organizationPartyId)
         denied("EMPLOYMENT_OUTSIDE", "Employment " + partyRelationshipId + " is not one of the policy's employer")
-    if (opening != null && opening !== 0) notOwnLeave(employment)
+    notOwnLeave(employment)
     if (!openAt(employment, fromMs)) denied("DATE_OUTSIDE", "The person is not employed on that date")
     const clash = rows(ASSIGNMENT, {partyRelationshipId, leaveTypeEnumId: policy.leaveTypeEnumId}).find(
         row => !voided(row) && (ms(row.fromDate) ?? -Infinity) < (thruMs ?? Infinity) && (ms(row.thruDate) ?? Infinity) > fromMs
@@ -783,7 +783,7 @@ function assignPolicy(p) {
         try {
             if (operationKey && rows(ASSIGNMENT, {operationKey, partyRelationshipId, leavePolicyId: policy.leavePolicyId}).length)
                 row.outcome = "repeated"
-            else checkAssignable(policy, employment, fromMs, thruMs, partyRelationshipId, opening)
+            else checkAssignable(policy, employment, fromMs, thruMs, partyRelationshipId)
         } catch (error) {
             refusedRow(row, error)
         }
@@ -798,8 +798,7 @@ function assignPolicy(p) {
                     policyEmployment(policy, row.partyRelationshipId),
                     fromMs,
                     thruMs,
-                    row.partyRelationshipId,
-                    opening
+                    row.partyRelationshipId
                 )
                 const created = call("create#" + ASSIGNMENT, {
                     leavePolicyId: policy.leavePolicyId,
@@ -1588,7 +1587,7 @@ function accrueAll(assignments, asOf) {
     return {posted, assignmentCount: assignments.length, failed: failedList.length, failedList}
 }
 // run#Accrual: an HR editor's run of the accrual by a date (now, never later) for a policy of theirs, or every policy of their
-// employers.
+// employers; never the editor's own employments, which the daily job accrues (SEC-BOS-117).
 function runAccrual(p) {
     const userScope = editorScope("Running the leave accrual")
     const asOf = Math.min(nowMs(), p.asOfDate ? people.asOfMillis(p.asOfDate) : nowMs())
@@ -1602,7 +1601,11 @@ function runAccrual(p) {
                     .list()
             ).map(row => row.leavePolicyId)
           : []
-    return accrueAll(accrualAssignments(policyIds, asOf, null), asOf)
+    const mine = ec.user.userAccount?.partyId || null
+    return accrueAll(
+        accrualAssignments(policyIds, asOf, null).filter(row => !mine || row.partyId !== mine),
+        asOf
+    )
 }
 // run#AccrualJob: the daily job, every assignment of every policy (or the employments given), by now.
 function runAccrualJob(p) {

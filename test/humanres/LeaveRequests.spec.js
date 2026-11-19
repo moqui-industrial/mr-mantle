@@ -165,7 +165,13 @@ spec({
             policy.error,
             run(state.hr, L + "assign#Policy", {
                 leavePolicyId: state.policy,
-                partyRelationshipIds: [state.anaEmp, state.hrEmp],
+                partyRelationshipIds: [state.anaEmp],
+                fromDate: "2026-01-01",
+                reason: "Spec"
+            }).error,
+            run(state.hr2, L + "assign#Policy", {
+                leavePolicyId: state.policy,
+                partyRelationshipIds: [state.hrEmp],
                 fromDate: "2026-01-01",
                 reason: "Spec"
             }).error,

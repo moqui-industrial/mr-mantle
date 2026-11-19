@@ -290,9 +290,9 @@ feature(
     }
 )
 
-// SEC-BOS-117: an HR editor grants no leave to their own employment, by an allocation or an opening balance; the same terms
-// reach another employee, and an assignment with no opening balance is not refused
-feature("an HR editor's own employment is refused a grant and an opening balance, another employee's is not", {
+// SEC-BOS-117: an HR editor grants no leave to their own employment, by an allocation or an assignment of a policy, and their own
+// run of the accrual leaves their employment out; the same terms reach another employee
+feature("an HR editor's own employment is refused a grant and a policy, and is left out of their accrual run; another employee's is not", {
     when() {
         const calHr = user("CALHR", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT"], [], state.cal)
         const outcomes = out => (out.error ? code(out) : out.rows.map(row => row.personName + ":" + (row.reasonCode || row.outcome)).join(","))
@@ -324,12 +324,25 @@ feature("an HR editor's own employment is refused a grant and an opening balance
                     preview: true
                 })
             )
-        return {grant: outcomes(grant), opening: assign("5"), noOpening: assign(null)}
+        const opening = assign("5"),
+            noOpening = assign(null)
+        // round 2: a policy put on the editor by another HR editor accrues, but not in the editor's own run of the accrual
+        run(state.hr, L + "store#AccrualRule", {leavePolicyId: sick, expectedRevision: revisionOf(sick), fromDate: "2025-01-01",
+            serviceMonthsFrom: 0, amount: "1"})
+        run(state.hr, L + "assign#Policy", {leavePolicyId: sick, partyRelationshipIds: [state.calEmp, state.benEmp],
+            fromDate: "2025-01-01", reason: "Spec"})
+        const sickEntries = partyRelationshipId => entries({partyRelationshipId, leavePolicyId: sick}).length
+        run(calHr, L + "run#Accrual", {leavePolicyId: sick})
+        const ownRun = {cal: sickEntries(state.calEmp), ben: sickEntries(state.benEmp)}
+        run(state.hr, L + "run#Accrual", {leavePolicyId: sick})
+        const otherRun = sickEntries(state.calEmp)
+        return {grant: outcomes(grant), opening, noOpening, ownRun, otherRun}
     },
-    then({grant, opening, noOpening}) {
+    then({grant, opening, noOpening, ownRun, otherRun}) {
         grant === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || grant === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
         opening === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || opening === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
-        noOpening === "Leave BEN:ready,Leave CAL:ready" || noOpening === "Leave CAL:ready,Leave BEN:ready"
+        noOpening === "Leave BEN:ready,Leave CAL:SELF_APPROVAL" || noOpening === "Leave CAL:SELF_APPROVAL,Leave BEN:ready"
+        ownRun.cal === 0 && ownRun.ben > 0 && otherRun > 0
     }
 })
 

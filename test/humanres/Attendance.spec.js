@@ -358,3 +358,22 @@ feature("an import needs PEOPLE_IMPORT and the employer: HR without it and anoth
         otherRuns.length == 0
     }
 })
+
+// SEC-BOS-117: a preview another importer made is imported without the importer's own time, which is refused at import
+feature("an importer who imports another's preview is refused the rows of their own time", {
+    when() {
+        const party = person("HR2")
+        employ(party, orgA)
+        const other = user("HR2", ["PEOPLE_HR_VIEW", "PEOPLE_HR_EDIT", "PEOPLE_IMPORT"], party)
+        const preview = importOf(file([state.hrParty + ",2026-03-10 08:00,in,Q1,door", state.ana + ",2026-03-10 08:00,in,Q2,door"]), other)
+        const imported = run(state.hr, A + "import#Records", {attendanceImportId: preview.attendanceImportId})
+        const failedRows = run(state.hr, A + "get#Import", {attendanceImportId: preview.attendanceImportId, outcome: "problems"}).rows
+        return {preview, imported, failedRows}
+    },
+    then({preview, imported, failedRows}) {
+        preview.readyCount == 2
+        imported.importedCount == 1 && imported.errorCount == 1
+        failedRows.map(row => row.reasonCode).join(",") == "SELF_APPROVAL"
+        punchCount({partyId: state.hrParty}) == 0
+    }
+})
