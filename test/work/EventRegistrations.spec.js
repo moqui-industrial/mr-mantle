@@ -73,7 +73,7 @@ function reserve(siteId, registrationPolicyId, ticketTypeId, quantity, email) {
     return out.kind ? out : {reference: out.registration.reference, token: out.token, view: out.registration}
 }
 // the receipt's link of a free registration held for its buyer's address (its RegistrationConfirm capability, made as the
-// receipt makes it, its token only in the mail), opened: it confirms the places (SEC-PSS-88)
+// receipt makes it, its token only in the mail), opened and its "Confirm my places" posted: it confirms the places (SEC-PSS-88)
 function receiptLink(siteId, reference) {
     const made = system(() =>
         ec.resource.script("component://mr-mantle/service/mantle/party/ExternalAccess.js").create({
@@ -83,7 +83,7 @@ function receiptLink(siteId, reference) {
             validDays: 1
         })
     )
-    return visitor("get#Registration", {siteId, token: made.token})
+    return visitor("get#Registration", {siteId, token: made.token, confirm: "Y"})
 }
 const completeOnly = (siteId, token, attendees) =>
     visitor("complete#Registration", {
@@ -1651,7 +1651,10 @@ feature("SEC-PSS-88: a free place is confirmed only for a verified buyer or by t
             ec.service.sync().name(E + "build#RegistrationDelivery").parameters({deliveryId: delivery.deliveryId}).disableAuthz().call()
         )
         const mailedToken = (/Registration\?token=([A-Za-z0-9_-]+)/.exec(String(mailed.bodyText)) || [])[1]
-        const byMail = visitor("get#Registration", {siteId: siteA, token: mailedToken})
+        // opening the mailed link (a mail scanner's fetch too) confirms nothing; its page's posted confirm does
+        const opened = visitor("get#Registration", {siteId: siteA, token: mailedToken})
+        const openedState = states(reserved.reference)
+        const byMail = visitor("get#Registration", {siteId: siteA, token: mailedToken, confirm: "Y"})
         // a verified signed-in account buying for its own address: confirmed at once
         const buyer = accountWith(prefix + "_FREE_BUYER", "free.buyer@mkrg.example.test", true)
         const mine = asAccount(buyer, "reserve#Registration", {
@@ -1670,13 +1673,16 @@ feature("SEC-PSS-88: a free place is confirmed only for a verified buyer or by t
             termsRevision: 0,
             operationId: key()
         })
-        return {completed, byPage, mailedToken, byMail, held: states(reserved.reference), mineCompleted}
+        return {completed, byPage, mailedToken, opened, openedState, byMail, held: states(reserved.reference), mineCompleted}
     },
     then(r) {
         r.completed.registration.state == "held"
         r.completed.registration.stateText == "Held: confirm it with the link we emailed you"
         r.byPage.registration.state == "held"
         !!r.mailedToken == true
+        r.opened.registration.state == "held" && r.opened.registration.canConfirm == true
+        r.openedState == "EvrHeld"
+        r.byPage.registration.canConfirm == false
         r.byMail.registration.state == "confirmed"
         r.held == "EvrConfirmed"
         r.mineCompleted.registration.state == "confirmed"

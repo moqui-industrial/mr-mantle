@@ -1258,17 +1258,19 @@ function getRegistration(p) {
         const looked = Number(one("mantle.account.payment.PortalPaymentAttempt", {paymentId: reservation.paymentId})?.checkCount || 0)
         payments().refresh(reservation.reservationId, yes(p.returned) && looked === 0 ? "return" : "page")
     }
-    // the receipt's link of a free registration held for its buyer's address (RegistrationConfirm, mailed only there) confirms it
+    // the receipt's link of a free registration held for its buyer's address (RegistrationConfirm, mailed only there) lets its
+    // reader confirm it, by an explicit confirm the page posts ("Confirm my places"), never by opening it: a mail scanner that
+    // follows links confirms nothing (SEC-PSS-88)
+    let mayConfirm = false
     if (via === "token" && reservation.completedDate && !reservation.paymentId) {
-        let confirming = false
         try {
             access().check({token: p.token, scope: "RegistrationConfirm", recordType: "EventRegistration", organizationPartyId})
-            confirming = true
+            mayConfirm = true
         } catch (error) {
             if (error?.moquiErrorKind !== "NotFound") throw error
             ec.message.clearErrors()
         }
-        if (confirming) asPage(() => placesOf().confirmFree(reservation.reservationId))
+        if (mayConfirm && yes(p.confirm)) asPage(() => placesOf().confirmFree(reservation.reservationId))
     }
     const fresh = one(RESERVATION, {reservationId: reservation.reservationId})
     let ticket = null
@@ -1292,7 +1294,8 @@ function getRegistration(p) {
                 qrSvg: ec.resource.barcodeSvg("QR", issued.code, {moduleWidth: 1.2}) || ""
             }
     }
-    return {registration: registrationView(fresh, policy, via, ticket ? {ticket} : {})}
+    const canConfirm = mayConfirm && !!placesOf().stateOfReservation(fresh, policy).addressToConfirm
+    return {registration: registrationView(fresh, policy, via, Object.assign({canConfirm}, ticket ? {ticket} : {}))}
 }
 // cancelRegistration: the buyer's cancellation of the reservation's live places (or the ones named) before the occurrence starts,
 // confirmed and with PASS's request key, as the cancellation rule of the accepted terms allows (follow-up 1): a confirmed place until

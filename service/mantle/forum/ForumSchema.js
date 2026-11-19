@@ -1864,6 +1864,7 @@
             'key',
             'returned',
             'showTicket',
+            'confirm',
             'operationId',
         ],
     },
