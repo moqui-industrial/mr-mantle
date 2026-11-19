@@ -162,11 +162,21 @@ along with this software (see the LICENSE.md file). If not, see
                     if (missing.length) { ec.message.addError(`Party ${missing.join(', ')} not found`); return }
                     // an internal message reaches only parties the sender may (filter#VisibleParties: the app's filters, and
                     // another organization's staff only with that organization; SEC-BOS-98); internal work with authorization
-                    // off is not asked. Any other is not found, as one that does not exist.
+                    // off is not asked. Any other is not found, as one that does not exist. A reply keeps its thread's people:
+                    // when the sender is one of them, the thread's existing participants are not asked again, so a reply all
+                    // still reaches each of them (get#ThreadParticipants); only the recipients the sender adds are.
                     if (communicationEventTypeId === 'Message') {
-                        const reachable = new Set(Array.from(ec.service.sync().name('mantle.party.PartyServices.filter#VisibleParties')
-                                .parameters({partyIdList: named, includeDisabled: true}).call()?.visiblePartyIdList || []))
-                        const unreached = named.filter((id) => !reachable.has(id))
+                        let kept = new Set()
+                        const threadEventId = parentCommEventId || rootCommEventId
+                        if (threadEventId) {
+                            const participants = Array.from(ec.service.sync().name('mantle.party.CommunicationServices.get#ThreadParticipants')
+                                    .parameter('communicationEventId', threadEventId).call()?.partyIdList || [])
+                            if (participants.includes(fromPartyId)) kept = new Set(participants)
+                        }
+                        const asked = named.filter((id) => !kept.has(id))
+                        const reachable = new Set(asked.length ? Array.from(ec.service.sync().name('mantle.party.PartyServices.filter#VisibleParties')
+                                .parameters({partyIdList: asked, includeDisabled: true}).call()?.visiblePartyIdList || []) : [])
+                        const unreached = asked.filter((id) => !reachable.has(id))
                         if (unreached.length) { ec.message.addError(`Party ${unreached.join(', ')} not found`); return }
                     }
                 }
@@ -296,6 +306,37 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <service verb="get" noun="ThreadParticipants" allow-remote="false">
+        <description>Internal (SEC-BOS-98): the parties of a thread, that of communicationEventId (its root, or itself when it is
+            one): the from and to party of each of its events and each CommunicationEventParty row's party. create#Message
+            keeps them as a reply's recipients when the sender is one of them. Read as the system.</description>
+        <in-parameters><parameter name="communicationEventId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="rootCommEventId"/>
+            <parameter name="partyIdList" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            partyIdList = []
+            rootCommEventId = null
+            const wasDisabled = ec.artifactExecution.disableAuthz()
+            try {
+                const cf = ec.entity.conditionFactory
+                const event = ec.entity.find('mantle.party.communication.CommunicationEvent').condition('communicationEventId', communicationEventId).one()
+                if (event == null) return
+                rootCommEventId = event.rootCommEventId || event.communicationEventId
+                const events = Array.from(ec.entity.find('mantle.party.communication.CommunicationEvent').condition(cf.makeCondition([
+                        cf.makeCondition('communicationEventId', 'equals', rootCommEventId), cf.makeCondition('rootCommEventId', 'equals', rootCommEventId)], 'or'))
+                        .selectField('communicationEventId').selectField('fromPartyId').selectField('toPartyId').list())
+                const ids = new Set()
+                for (const row of events) { if (row.fromPartyId) ids.add(row.fromPartyId); if (row.toPartyId) ids.add(row.toPartyId) }
+                const eventIds = events.map((row) => row.communicationEventId)
+                if (eventIds.length) for (const row of ec.entity.find('mantle.party.communication.CommunicationEventParty')
+                        .condition('communicationEventId', 'in', eventIds).selectField('partyId').list()) if (row.partyId) ids.add(row.partyId)
+                partyIdList = Array.from(ids)
+            } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+
     <service verb="reply" noun="CommunicationEvent">
         <description>
             A reply to a communication event (parentCommEventId) in its thread (rootCommEventId), through create#Message.

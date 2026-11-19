@@ -4,7 +4,10 @@
 // MANTLE_USER_ORG filter, a party shared by every organization (_NA_) is reached unless it is staff of an internal
 // organization the user may not see; a colleague of the user's own organization is reached, a staff member of another
 // organization is not, by the filter or by an internal message, which answers it as a party that does not exist. Internal
-// work with authorization off is not asked. New spec, no Groovy original.
+// work with authorization off is not asked. A reply keeps its thread's people: a reply all reaches a participant the replier
+// could not message anew, and still not a party the replier adds. A department reaches its parent's and its sibling
+// departments' staff (they share a top-level organization), never another top-level organization's. New spec, no Groovy
+// original.
 // Run: ./moq test mr-mantle --spec PartyReach
 const dayMillis = 86400000
 const effectiveTime = Date.now()
@@ -67,24 +70,28 @@ feature("two internal organizations owning themselves, a sender and a colleague 
         }
         made.own = org("Reach Own")
         made.other = org("Reach Other")
-        call("create#moqui.security.UserGroup", {userGroupId: "PRCH_FILTERED", description: "Party reach spec"})
-        call("create#moqui.security.ArtifactGroup", {artifactGroupId: "PRCH_FILTERED", description: "Party reach spec"})
-        for (const artifactName of [P + "filter#VisibleParties", C + "create#Message"])
-            call("create#moqui.security.ArtifactGroupMember", {
+        // the authz rows once: a run after another finds them
+        const once = (entityName, fields) => {
+            if (ec.entity.find(entityName).condition(fields).count() == 0) call("create#" + entityName, fields)
+        }
+        once("moqui.security.UserGroup", {userGroupId: "PRCH_FILTERED", description: "Party reach spec"})
+        once("moqui.security.ArtifactGroup", {artifactGroupId: "PRCH_FILTERED", description: "Party reach spec"})
+        for (const artifactName of [P + "filter#VisibleParties", C + "create#Message", C + "reply#CommunicationEvent"])
+            once("moqui.security.ArtifactGroupMember", {
                 artifactGroupId: "PRCH_FILTERED",
                 artifactTypeEnumId: "AT_SERVICE",
                 artifactName,
                 nameIsPattern: "N",
                 inheritAuthz: "Y"
             })
-        call("create#moqui.security.ArtifactAuthz", {
+        once("moqui.security.ArtifactAuthz", {
             artifactAuthzId: "PRCH_FILTERED",
             userGroupId: "PRCH_FILTERED",
             artifactGroupId: "PRCH_FILTERED",
             authzTypeEnumId: "AUTHZT_ALLOW",
             authzActionEnumId: "AUTHZA_ALL"
         })
-        call("create#moqui.security.ArtifactAuthzFilter", {artifactAuthzId: "PRCH_FILTERED", entityFilterSetId: "MANTLE_USER_ORG"})
+        once("moqui.security.ArtifactAuthzFilter", {artifactAuthzId: "PRCH_FILTERED", entityFilterSetId: "MANTLE_USER_ORG"})
         // every person's party is shared (_NA_, the default): only employment tells the staff apart
         const person = (key, employer) => {
             made[key] = call(P + "create#Person", {firstName: key, lastName: "Reach"}).partyId
@@ -100,15 +107,41 @@ feature("two internal organizations owning themselves, a sender and a colleague 
         person("Sender", made.own)
         person("Colleague", made.own)
         person("Staff", made.other)
+        person("Staff2", made.other)
         person("Outsider", null)
-        made.senderUserId = call(P + "create#PartyUserAccount", {
-            partyId: made.Sender,
-            emailAddress: "prch.sender." + run + "@example.com",
-            username: "prch.sender." + run,
-            newPassword: "moqui1!!",
-            newPasswordVerify: "moqui1!!"
-        }).userId
-        call("create#moqui.security.UserGroupMember", {userGroupId: "PRCH_FILTERED", userId: made.senderUserId, fromDate: effectiveTime - dayMillis})
+        // a top-level organization with two departments (PrtOrgRollup, child to parent), and another top-level one
+        made.top = org("Reach Top")
+        made.another = org("Reach Another")
+        const department = (name) => {
+            const partyId = call(P + "create#Organization", {organizationName: name + " " + run, roleTypeId: "OrgDepartment"}).partyId
+            call("update#mantle.party.Party", {partyId, ownerPartyId: made.top})
+            call("create#mantle.party.PartyRelationship", {
+                relationshipTypeEnumId: "PrtOrgRollup",
+                fromPartyId: partyId,
+                toPartyId: made.top,
+                fromDate: effectiveTime - dayMillis
+            })
+            return partyId
+        }
+        made.deptOne = department("Reach Dept One")
+        made.deptTwo = department("Reach Dept Two")
+        person("DeptSender", made.deptOne)
+        person("Sibling", made.deptTwo)
+        person("TopStaff", made.top)
+        person("AnotherStaff", made.another)
+        const account = (key) => {
+            const userId = call(P + "create#PartyUserAccount", {
+                partyId: made[key],
+                emailAddress: "prch." + key.toLowerCase() + "." + run + "@example.com",
+                username: "prch." + key.toLowerCase() + "." + run,
+                newPassword: "moqui1!!",
+                newPasswordVerify: "moqui1!!"
+            }).userId
+            call("create#moqui.security.UserGroupMember", {userGroupId: "PRCH_FILTERED", userId, fromDate: effectiveTime - dayMillis})
+            return userId
+        }
+        made.senderUserId = account("Sender")
+        account("DeptSender")
         return {owner: ec.entity.find("mantle.party.Party").condition("partyId", made.Staff).one().ownerPartyId}
     },
     then({owner}) {
@@ -137,3 +170,25 @@ feature("the sender reaches the colleague and the outsider, not the other organi
         internal == [made.Colleague, made.Staff, made.Outsider]
     }
 })
+
+feature("a reply all reaches the thread's participant outside the replier's reach; a party the replier adds is still asked", {
+    when() {
+        // the other organization's staff member wrote to the sender and the colleague (internal work, authorization off)
+        const parent = call(C + "create#Message", {fromPartyId: made.Staff, toPartyIdList: [made.Sender, made.Colleague], subject: "Thread " + run,
+            body: "<p>x</p>"}).communicationEventId
+        return filteredAs("prch.sender." + run, () => {
+            const replyAll = result(C + "reply#CommunicationEvent", {parentCommEventId: parent, subject: "Re: Thread " + run, body: "<p>y</p>"})
+            const added = result(C + "reply#CommunicationEvent", {parentCommEventId: parent, subject: "Re: Thread " + run, body: "<p>z</p>",
+                toPartyIdList: [made.Staff2]})
+            const rows = replyAll.communicationEventId ? Array.from(ec.entity.find("mantle.party.communication.CommunicationEventParty")
+                .condition("communicationEventId", replyAll.communicationEventId).disableAuthz().list()).map(row => row.partyId) : []
+            return {replyAll, added, rows}
+        })
+    },
+    then({replyAll, added, rows}) {
+        replyAll.error == "" && replyAll.communicationEventId != null
+        rows.includes(made.Staff) && rows.includes(made.Colleague)
+        added.error.includes("not found")
+    }
+})
+
