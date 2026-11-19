@@ -760,12 +760,11 @@ Protect.js client key) and `PUT /v3/invoice/by-transaction-id/{id}` (Enhanced Da
   browser endpoint checks (`browserPayment`: payer or treasury, gateway, method of the same gateway, open status), the
   page state, the operation id check, and `submitBrowserToken` (lock and recheck, `begin#PaymentGatewayOperation` before any
   profile, the payer's consent, a declined new card's profile deleted) and `dispatch`. P1's 15 features pass unchanged.
-- *Authentication.* The token is cached in the process cache `mantle.ext.account.gateway.PayTrace.accessToken` by remote, endpoint
-  and user until a minute before `expires_in` (900 when absent, the documentation's smallest), sealed: XORed with a
-  keystream of `ec.user.singleUseCodeHash` (the conf's hash type, SHA-256 by default) of the remote's password, a random
-  nonce and a block counter, so the Tools cache screen (which lists values) shows hex no one can use without the
-  password. A token that does not unseal (another password or hash type since) is asked for again. It is never recorded
-  or logged. A 401 on a request takes a new token and sends that request once more (a 401 is refused before processing,
+- *Authentication.* The token is kept in `PaymentGatewayAccessToken`'s encrypted field (the framework's field encryption,
+  under the instance's key) by a hash of the remote, endpoint and user, until a minute before `expires_in` (900 when
+  absent, the documentation's smallest); the process cache `mantle.ext.account.gateway.PayTrace.accessToken` holds only a
+  refusal's back-off, never the token (SEC-BAP-136, which replaced a keystream of the remote's password). It is never
+  logged. A 401 on a request takes a new token and sends that request once more (a 401 is refused before processing,
   so it cannot charge twice); a second 401 is resultError. Credentials the token endpoint refuses, and a second 401 with
   a fresh token, are not sent again for 60 seconds. The integrator id is an option (at most 12 characters, checked), not
   a secret; the API user's password is the remote's encrypted `password`. The cipher is this module's construction from
