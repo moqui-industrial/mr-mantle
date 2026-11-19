@@ -619,6 +619,10 @@
             'hideHistory',
         ],
     },
+    releaseHeldMessage: {
+        service: 'mantle.forum.ForumServices.release#HeldMessage',
+        fields: ['siteId', 'postId', 'expectedRevision'],
+    },
     deletePost: {
         service: 'mantle.forum.ForumServices.delete#Post',
         fields: ['siteId', 'postId', 'expectedRevision', 'reason'],

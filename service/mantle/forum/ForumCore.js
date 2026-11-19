@@ -462,7 +462,11 @@ function postVisible(state, event, a) {
     return (
         state.visibility === 'approved' ||
         event.fromPartyId === me() ||
-        a.canModerate
+        a.canModerate ||
+        // a private conversation's message held as spam is its participants' to see and release (Forum.js)
+        (state.visibility === 'pending' &&
+            a.category?.visibility === 'private' &&
+            !!a.canRead)
     )
 }
 const trustLevel = (siteId, partyId = me()) =>

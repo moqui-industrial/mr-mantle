@@ -100,6 +100,12 @@ function canEditPost(state, event, a) {
         trustLevel(a.category.siteId) !== 'new'
     )
 }
+/* A message of a private conversation held as spam (the only hold a private message has) that the caller, a participant,
+   may release. */
+const heldPrivate = (state, a) =>
+    state.visibility === 'pending' &&
+    a.category?.visibility === 'private' &&
+    !!a.canRead
 function postProjection(state, event, a, t) {
     if (!postVisible(state, event, a)) return null
     const profile = one(S + 'PublicSiteProfile', {
@@ -154,6 +160,8 @@ function postProjection(state, event, a, t) {
                 !deleted &&
                 state.visibility === 'approved' &&
                 event.fromPartyId !== me(),
+            // a message of a conversation held as spam is released by its sender or another participant
+            canRelease: heldPrivate(state, a),
             canDelete:
                 !deleted &&
                 state.rootCommEventId !== event.communicationEventId &&
@@ -258,7 +266,6 @@ const lists = ec.resource.script(
     'component://mr-mantle/service/mantle/forum/ForumLists.js',
 )(core, methods, operations)
 moderation.onHeld(lists.decideHeld)
-moderation.onPrivateApproved(allocatePrivate)
 /* The scope of a read (scopeContactListId, mr-pass plan/design-smithy.md §12.5): a category and every category below it,
    as a set of ids; null with no scope. A scope the caller may not read is Not Found, as a category is, and every access
    rule of what is inside it is unchanged. */
@@ -1172,6 +1179,10 @@ methods.getPosts = (p) => {
                         'equals',
                         me() || '_ANONYMOUS_',
                     ),
+                    // a conversation's participants see a message held in it, to release it
+                    ...(t.kind === 'private'
+                        ? [cf.makeCondition('visibility', 'equals', 'pending')]
+                        : []),
                 ],
                 'or',
             ),
@@ -1538,19 +1549,21 @@ methods.publishPost = (p) => {
         const poll = p.poll || json(savedDraft?.pollJson, null)
         if (poll) createPoll(p.siteId, root, postId, poll)
         gateCommit(gated, { pending })
-        // A held post waits in the review queue for its staff to release or reject it. A private message is held only
-        // for the mail gateway's spam verdict; its item is the site staff's, as a participant's report on it would be,
-        // and shows that message alone (SEC-PFS-83: no rule holds or flags a private message for review).
-        if (pending)
-            review(
-                p.siteId,
-                isPrivate ? null : a.category.contactListId,
-                'post',
-                postId,
-                1,
-                gated.reasonFamily,
-            )
-        else {
+        // A held post waits in its review queue. A private message held (the mail gateway's spam verdict, the only hold a
+        // private post has) files no review item, as staff read a private message only from a participant's report
+        // (SEC-PFS-83): its sender and the conversation's other participants see it held and release it
+        // (releaseHeldMessage), and until then it is delivered to no one.
+        if (pending) {
+            if (!isPrivate)
+                review(
+                    p.siteId,
+                    a.category.contactListId,
+                    'post',
+                    postId,
+                    1,
+                    gated.reasonFamily,
+                )
+        } else {
             if (gated.flag)
                 review(
                     p.siteId,
@@ -4572,6 +4585,46 @@ methods.restorePostRevision = (p) => {
         reason: p.reason || 'Restored revision ' + r.revision,
         hideHistory: p.hideHistory ?? false,
     })
+}
+/* A participant of a private conversation (its sender or a recipient) releases a message of it the mail gateway held as
+   spam: it is delivered to the conversation as a sent message is. No review item and no staff: a private message is
+   staff's only on a participant's report (SEC-PFS-83). The release adds nothing to the sender's approved contributions,
+   so another's release of a held message does not raise the sender's trust. */
+methods.releaseHeldMessage = (p) => {
+    requireUser()
+    site(p.siteId)
+    one(S + 'PublicSite', { siteId: p.siteId }, true)
+    const st = one(
+        F + 'ForumPostState',
+        { communicationEventId: p.postId },
+        true,
+    )
+    if (!st) missing()
+    const t = one(F + 'ForumTopic', { rootCommEventId: st.rootCommEventId }, true)
+    if (!t || t.siteId !== p.siteId || t.kind !== 'private') missing()
+    const a = conversationAccess(t)
+    if (!a.canRead) missing()
+    revision(st, p.expectedRevision)
+    if (!heldPrivate(st, a)) fail('Conflict', 'The message is not held')
+    const event = one(E + 'CommunicationEvent', {
+        communicationEventId: p.postId,
+    })
+    update(st, { visibility: 'approved', approvedRevision: st.revision })
+    update(t, {
+        visiblePostCount: Number(t.visiblePostCount || 0) + 1,
+        lastActivity: now(),
+        revision: Number(t.revision) + 1,
+    })
+    allocatePrivate(p.postId, t.rootCommEventId, event.fromPartyId)
+    create(F + 'ForumOutbox', {
+        outboxId: id(),
+        siteId: p.siteId,
+        communicationEventId: p.postId,
+        eventType: 'post',
+        state: 'pending',
+        createdAt: now(),
+    })
+    return { visibility: 'approved', revision: Number(st.revision) }
 }
 methods.deletePost = (p) => {
     requireUser()
