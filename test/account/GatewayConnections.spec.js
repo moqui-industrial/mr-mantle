@@ -428,11 +428,14 @@ feature("a test payment gateway is bound to no organization and takes no payment
             const out = invoke("mantle.account.PaymentServices.authorize#SinglePayment", {paymentId})
             return {error: out.error, statusId: one("mantle.account.payment.Payment", {paymentId}).statusId}
         }
-        const production = withConf("instance@purpose", "production", () => ({
-            bound: admin(() => bind("TEST_APPROVE", {reason: "Spec"})).error,
-            authorize: authorize(),
-            allowed: withConf("mantle@allow-test-gateways", "true", () => authorize())
-        }))
+        // the setting named false here, as Mantle's default: a component's test conf may allow test gateways for its walks
+        const production = withConf("mantle@allow-test-gateways", "false", () =>
+            withConf("instance@purpose", "production", () => ({
+                bound: admin(() => bind("TEST_APPROVE", {reason: "Spec"})).error,
+                authorize: authorize(),
+                allowed: withConf("mantle@allow-test-gateways", "true", () => authorize())
+            }))
+        )
         const test = admin(() => bind("TEST_APPROVE", {reason: "Spec"}))
         return {production, test}
     },
