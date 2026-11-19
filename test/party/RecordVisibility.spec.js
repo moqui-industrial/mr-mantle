@@ -330,6 +330,35 @@ feature("a registered type's own rule: a production stop is its organization's, 
 })
 
 // five entries at one minute (a note, a file, two messages, a status change) between the created status and a later message
+// Ace's grant names MANTLE_ACTIVE_ORG and Ace has no active organization, so the entity filters apply nothing: the record
+// rules hold Ace to RV_ORG's shipments, facilities, returns, maintenance and owned parties (SEC-BAP-89)
+feature("with no active organization, another organization's shipment, facility, return, maintenance and party are not seen (SEC-BAP-89)", {
+    when() {
+        const make = (entity, fields) => call(`create#${entity}`, fields)
+        make("mantle.party.Party", { partyId: "RV_OWNED_OWN", partyTypeEnumId: "PtyPerson", ownerPartyId: "RV_ORG" })
+        make("mantle.party.Party", { partyId: "RV_OWNED_OTHER", partyTypeEnumId: "PtyPerson", ownerPartyId: "RV_ORG2" })
+        make("mantle.shipment.Shipment", { shipmentId: "RV-SH-OWN", shipmentTypeEnumId: "ShpTpSales", statusId: "ShipInput", fromPartyId: "RV_ORG" })
+        make("mantle.shipment.Shipment", { shipmentId: "RV-SH-OTHER", shipmentTypeEnumId: "ShpTpSales", statusId: "ShipInput", fromPartyId: "RV_ORG2" })
+        make("mantle.facility.Facility", { facilityId: "RV-FAC-OWN", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "RV_ORG" })
+        make("mantle.facility.Facility", { facilityId: "RV-FAC-OTHER", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "RV_ORG2" })
+        make("mantle.order.return.ReturnHeader", { returnId: "RV-RET-OTHER", statusId: "ReturnCreated", vendorPartyId: "RV_ORG2", customerPartyId: "RV_OWNED_OTHER" })
+        make("mantle.product.asset.Asset", { assetId: "RV-ASSET-OTHER", assetTypeEnumId: "AstTpEquipment", ownerPartyId: "RV_ORG2" })
+        make("mantle.product.maintenance.AssetMaintenance", { assetMaintenanceId: "RV-AM-OTHER", assetId: "RV-ASSET-OTHER" })
+        const seen = (entity, id) => as("rv.ace", () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: entity, recordId: id, checkOnly: true }).call()?.recordVisible)
+        return {
+            own: [seen("mantle.shipment.Shipment", "RV-SH-OWN"), seen("mantle.facility.Facility", "RV-FAC-OWN"), seen("mantle.party.Party", "RV_OWNED_OWN")],
+            other: [seen("mantle.shipment.Shipment", "RV-SH-OTHER"), seen("mantle.facility.Facility", "RV-FAC-OTHER"),
+                seen("mantle.order.return.ReturnHeader", "RV-RET-OTHER"), seen("mantle.product.maintenance.AssetMaintenance", "RV-AM-OTHER"),
+                seen("mantle.party.Party", "RV_OWNED_OTHER")]
+        }
+    },
+    then({ own, other }) {
+        own.every((visible) => visible === true)
+        other.every((visible) => visible === false)
+    },
+})
+
 feature("a registration with no rule is a system administrator's, unless it says it is public content (SEC-BOS-87)", {
     when() {
         const TYPE = "mantle.facility.FacilityGroup"

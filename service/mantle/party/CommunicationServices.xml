@@ -2125,7 +2125,11 @@ along with this software (see the LICENSE.md file). If not, see
             checkRecord false too; an audit row of an unregistered type is not seen.
 
             A record the user may see is found under the user's entity filters, and is never someone else's personal
-            contact (Party.privateOwnerUserId). A work effort, a request, a communication event and an order (whose filter
+            contact (Party.privateOwnerUserId). Because an ALWAYS MANTLE_ACTIVE_ORG grant applies no filter while no
+            organization is active, a shipment (its from or to party), a facility (its owner), a return (its vendor or
+            customer), an asset maintenance (its asset's owner) and a party some organization owns (shared, the user's own,
+            an internal organization itself, else its owner) are also held to the user's organizations, every one for a
+            system administrator (SEC-BAP-89). A work effort, a request, a communication event and an order (whose filter
             is on OrderPart, not OrderHeader) have no entity filter of their own, so under an organization filter they
             follow per-user rules, those of search#Universal (IronStone R4, R5). The
             organization filter is the MANTLE_USER_ORG or MANTLE_ACTIVE_ORG filter set of the authorization: its
@@ -2717,7 +2721,16 @@ along with this software (see the LICENSE.md file). If not, see
                     return ec.resource.script('component://mr-mantle/service/mantle/humanres/Checklists.js')
                             .hiddenTaskIds([id], ec.user.userId ? ec.user.userAccount?.partyId || null : null).length === 0
                 if (isClientUser()) return clientVisible(entityName, id)
-                if (entityName === PARTY) return !value.privateOwnerUserId || value.privateOwnerUserId === ec.user.userId
+                if (entityName === PARTY) {
+                    if (value.privateOwnerUserId && value.privateOwnerUserId !== ec.user.userId) return false
+                    // a party some organization owns is that organization's users' (as the MANTLE_USER_ORG Party filter, which an
+                    // ALWAYS MANTLE_ACTIVE_ORG grant does not apply with no organization active; SEC-BAP-89): shared (_NA_ or no
+                    // owner), one of the user's organizations', the user's own party, or an internal organization itself
+                    if (!authzOn || !value.ownerPartyId || value.ownerPartyId === '_NA_' || value.privateOwnerUserId) return true
+                    if (value.partyId === ec.user.userAccount?.partyId) return true
+                    const orgIds = userOrganizationIds()
+                    return orgIds == null || orgIds.includes(value.ownerPartyId) || orgIds.includes(value.partyId)
+                }
                 // An account's or a security group's notes (Admin's "Log as note", impl-admin F75): neither record has an
                 // organization of its own. An account is found through mantle.party.UserAccountOrganization (the account with
                 // each internal organization its party works for) under the user's organization filters, Mantle's identity
@@ -2982,6 +2995,20 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === WORK_EFFORT && ['WepRouting','WepRoutingTask'].includes(value.purposeEnumId)) return !!ec.service.sync()
                         .name('mantle.work.RoutingServices.get#RoutingAccess').parameters({workEffortId:id}).disableAuthz().call()?.recordVisible
                 if (!authzOn) return true
+                // an organization's shipments, facilities, returns and maintenance records are its users' (SEC-BAP-89): their
+                // entity filters, under an ALWAYS MANTLE_ACTIVE_ORG grant, apply nothing with no organization active, so an app
+                // administrator would read every organization's through a record panel. A system administrator reads all.
+                const orgRecord = {
+                    'mantle.shipment.Shipment': (row) => [row.fromPartyId, row.toPartyId],
+                    'mantle.facility.Facility': (row) => [row.ownerPartyId],
+                    'mantle.order.return.ReturnHeader': (row) => [row.vendorPartyId, row.customerPartyId],
+                    'mantle.product.maintenance.AssetMaintenance': (row) => [row.assetId
+                        ? ec.entity.find('mantle.product.asset.Asset').condition('assetId', row.assetId).disableAuthz().one()?.ownerPartyId : null]
+                }
+                if (Object.hasOwn(orgRecord, entityName)) {
+                    const orgIds = userOrganizationIds()
+                    if (orgIds != null && !orgRecord[entityName](value).some((partyId) => !!partyId && orgIds.includes(partyId))) return false
+                }
                 // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization
                 const registration = registrations[entityName]
                 // in a transaction of its own, so an app check that refuses inside it cannot mark the caller's rollback-only
