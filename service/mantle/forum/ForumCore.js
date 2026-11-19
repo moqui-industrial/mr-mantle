@@ -377,6 +377,12 @@ function category(id, siteId) {
 function articleReadable(siteId, wikiPageId, partyId) {
     const page = one('moqui.resource.wiki.WikiPage', { wikiPageId })
     if (!page?.publishedVersionName) return false
+    // an article of the site's own publishing space; a page of any other space is no reader's here
+    if (
+        page.wikiSpaceId !==
+        one(S + 'PublicSite', { siteId })?.publishingWikiSpaceId
+    )
+        return false
     if (
         !one(S + 'PublicSubscriptionBinding', {
             siteId,

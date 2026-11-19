@@ -691,16 +691,33 @@
             if (t.kind !== 'category') invalid('Link a category topic')
             if (!['product', 'article'].includes(p.sourceType))
                 invalid('Link a product or an article')
+            // only what is the site's own: a product its Shop sells, an article of its publishing space (or of a space
+            // the caller administers); anything else answers as a missing one, so another organization's ids are not
+            // probed
             if (
                 p.sourceType === 'product' &&
-                !one('mantle.product.Product', { productId: p.sourceId })
+                !productPublic(p.siteId, p.sourceId)
             )
                 missing()
-            if (
-                p.sourceType === 'article' &&
-                !one('moqui.resource.wiki.WikiPage', { wikiPageId: p.sourceId })
-            )
-                missing()
+            if (p.sourceType === 'article') {
+                const page = one('moqui.resource.wiki.WikiPage', {
+                    wikiPageId: p.sourceId,
+                })
+                const space = one(S + 'PublicSite', {
+                    siteId: p.siteId,
+                })?.publishingWikiSpaceId
+                if (
+                    !page ||
+                    (page.wikiSpaceId !== space &&
+                        !ec.service
+                            .sync()
+                            .throwOnError(true)
+                            .name('org.moqui.resource.WikiServices.get#WikiPageAccess')
+                            .parameters({ wikiSpaceId: page.wikiSpaceId })
+                            .call()?.canAdmin)
+                )
+                    missing()
+            }
             // An article's comments follow the article unless the owner links it without a gate.
             const bound =
                 p.sourceType === 'article' &&
