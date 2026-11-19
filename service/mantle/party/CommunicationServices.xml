@@ -2095,6 +2095,17 @@ along with this software (see the LICENSE.md file). If not, see
         ]]></script></actions>
     </service>
 
+    <service verb="check" noun="RecordTypeVisible" type="interface">
+        <description>The visibility service a record type's registration names (RecordLinkType visibleService, SEC-BOS-87): whether the
+            current user may see the record, by the host app's own rule; called by get#RecordLinkInfo with authorization disabled.
+            Never an error: a record the user may not see, or a failure, answers false.</description>
+        <in-parameters>
+            <parameter name="recordEntityName" required="true"/>
+            <parameter name="recordId" required="true"/>
+        </in-parameters>
+        <out-parameters><parameter name="recordVisible" type="Boolean"/></out-parameters>
+    </service>
+
     <service verb="get" noun="RecordLinkInfo">
         <description>
             What the record link and timeline services know about a record type: the full entity name and its single
@@ -2107,10 +2118,10 @@ along with this software (see the LICENSE.md file). If not, see
             not found). With checkOnly the answer is recordVisible, true or false, and no error, so the caller's
             transaction is not marked rollback-only by a record the user may not see; notVisibleReason says why, for a log.
 
-            Only a registered record type is a record (SEC-BOS-87): one with a communication event, work effort, request,
-            note or content join below, or one this service rules on (each type named in the rules below, and a return,
-            ReturnHeader and a production stop, ProductionDowntime, under their entity filters). Any other entity, every moqui.* entity but a wiki page, a merge request,
-            a git repository, an account, a security group and an audit row among them, is refused as not a record type, with
+            Only a registered record type is a record (SEC-BOS-87): a mantle.party.communication.RecordLinkType row, which
+            Mantle seeds for the types of its joins and rules below and an app for the records its screens host, each with its
+            visibility rule (an app's service, a parent record, or the record's organization; the entity's description). Any
+            other entity, every moqui.* entity but those registered among them, is refused as not a record type, with
             checkRecord false too; an audit row of an unregistered type is not seen.
 
             A record the user may see is found under the user's entity filters, and is never someone else's personal
@@ -2369,31 +2380,11 @@ along with this software (see the LICENSE.md file). If not, see
             catch (err) { refuse(`The record type ${recordEntityName} is not an entity`); return }
             recordEntityName = recordValue.getEntityName()
             recordTypeName = recordValue.getEntityNamePretty()
-            // SEC-BOS-87: only a registered record type (see the description): the joins' types and those ruled on below
-            const ruledTypes = [PARTY, WORK_EFFORT, REQUEST, COMM_EVENT, ORDER, WIKI_PAGE, GIT_MERGE_REQUEST, GIT_REPOSITORY, TIMESHEET,
-                'moqui.security.UserAccount', 'moqui.security.UserGroup', 'moqui.entity.EntityAuditLog',
-                'mantle.ledger.transaction.AcctgTransContent', 'mantle.account.invoice.InvoiceContent',
-                'mantle.account.payment.PaymentContent', 'mantle.account.method.PaymentMethodContent',
-                'mantle.product.asset.AssetContent', 'mantle.order.return.ReturnHeader', 'mantle.order.return.ReturnContent',
-                'mantle.product.quality.QualityInspectionContent', 'mantle.sales.opportunity.SalesOpportunityContent',
-                'mantle.marketing.campaign.CampaignSendContent', 'mantle.work.registration.EventRegistrationContent',
-                'mantle.order.OrderContent', 'mantle.request.RequestContent', 'mantle.humanres.employment.EmploymentContent',
-                'mantle.humanres.employment.EmploymentApplicationContent', 'mantle.humanres.ability.PartyQualificationContent',
-                'mantle.humanres.ability.PerformanceReviewContent', 'mantle.humanres.payroll.PayslipContent',
-                'mantle.product.feature.ProductFeature', 'mantle.product.feature.ProductFeatureGroup',
-                'mantle.product.ProductIdentifierPolicy', 'mantle.product.ProductOtherIdentification',
-                'mantle.product.ProductCatalogOperation', 'mantle.product.ProductContent',
-                'mantle.product.category.ProductCategoryContent', 'mantle.product.ContentEditConflict',
-                'mantle.product.receipt.AssetReceipt', 'mantle.product.issuance.AssetIssuance', 'mantle.product.asset.AssetDetail',
-                'mantle.product.asset.AssetBookEvent', 'mantle.product.asset.AssetRevaluationPreview',
-                'mantle.ledger.transaction.PostingOperation', 'mantle.product.cost.ProductStandardCost',
-                'mantle.product.cost.ProductStandardCostComponent', 'mantle.product.cost.ProductCostCalculation',
-                'mantle.product.bom.ProductBomItem', 'mantle.product.bom.ProductBomContent', 'mantle.work.method.MethodReleaseDecision',
-                'mantle.work.production.WorkCenter', 'mantle.work.production.WorkCenterRate',
-                // a production stop, which a maintenance request is filed on (ProductionDowntime.js), under its entity filters
-                'mantle.work.production.ProductionDowntime']
-            const registeredTypes = new Set([commEventJoins, workEffortJoins, requestJoins, noteEntities, contentEntities]
-                    .flatMap((map) => Object.keys(map)).concat(ruledTypes))
+            // SEC-BOS-87: only a registered record type (mantle.party.communication.RecordLinkType, the components' registrations)
+            const registrations = {}
+            for (const row of ec.entity.find('mantle.party.communication.RecordLinkType').useCache(true).disableAuthz().list())
+                if (row.disabled !== 'Y') registrations[row.recordEntityName] = row
+            const registeredTypes = new Set(Object.keys(registrations))
             if (!registeredTypes.has(recordEntityName)) { refuse(`The record type ${recordEntityName} is not a record type`); return }
             const keyNames = Object.keys(recordValue.getPrimaryKeys())
             if (keyNames.length !== 1) {
@@ -2991,6 +2982,22 @@ along with this software (see the LICENSE.md file). If not, see
                 if (entityName === WORK_EFFORT && ['WepRouting','WepRoutingTask'].includes(value.purposeEnumId)) return !!ec.service.sync()
                         .name('mantle.work.RoutingServices.get#RoutingAccess').parameters({workEffortId:id}).disableAuthz().call()?.recordVisible
                 if (!authzOn) return true
+                // a registration's own rule (RecordLinkType, SEC-BOS-87): the host app's service, the parent record, or the organization
+                const registration = registrations[entityName]
+                if (registration?.visibleService) return ec.service.sync().name(registration.visibleService)
+                        .parameters({recordEntityName: entityName, recordId: id}).disableAuthz().call()?.recordVisible === true
+                if (registration?.parentEntityName && registration?.parentField) {
+                    const parentId = value[registration.parentField]
+                    if (!parentId) return userOrganizationIds() == null
+                    const parentKeys = Object.keys(ec.entity.makeValue(registration.parentEntityName).getPrimaryKeys())
+                    return parentKeys.length === 1 && registeredTypes.has(registration.parentEntityName) && depth < 5
+                            && visible(registration.parentEntityName, parentKeys[0], parentId, depth + 1)
+                }
+                if (registration?.organizationField) {
+                    const orgIds = userOrganizationIds()
+                    const organizationPartyId = value[registration.organizationField]
+                    return orgIds == null || (!!organizationPartyId && orgIds.includes(organizationPartyId))
+                }
                 if (entityName === COMM_EVENT) return commEventVisible(value, depth)
                 if (entityName === WIKI_PAGE) return wikiPageVisible(value)
                 // a merge request or a repository: whoever may view the repository (org.moqui.git.GitServices)

@@ -23,6 +23,14 @@ along with this software (see the LICENSE.md file). If not, see
     recalculated, its change paid on a new slip linked to the original, which stays); an approved run's calculated employments
     become payslips (PayrollResults.js: preview slips in preview mode), withdrawn when its approval is taken back. -->
 <services xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://moqui.org/xsd/service-definition-3.xsd">
+    <service verb="check" noun="RunRecordVisible" allow-remote="false">
+        <description>Whether the user sees a pay run as a record (its card and panels; the RecordLinkType visibility service,
+            SEC-BOS-87): a payroll reader (PAYROLL_VIEW) of its employer in People's scope alone.</description>
+        <implements service="mantle.party.CommunicationServices.check#RecordTypeVisible"/>
+        <actions>
+            <set field="recordVisible" from="ec.resource.script('component://mr-mantle/service/mantle/humanres/PayrollRuns.js').execute('runRecordAccess', context).recordVisible"/>
+        </actions>
+    </service>
     <service verb="find" noun="Runs" allow-remote="false">
         <description>The pay runs of the employers in the caller's payroll scope (PAYROLL_VIEW), newest period first, filtered by
             employer, group and state (cancelled ones left out unless asked): each its group, period, pay date, kind, worker count,

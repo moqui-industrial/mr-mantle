@@ -295,6 +295,33 @@ feature("an entity that is no registered record type is no record, a mail messag
     },
 })
 
+feature("a registered type's own rule: a production stop is its organization's, a store's record follows the store (SEC-BOS-87)", {
+    when() {
+        // the registrations a component declares (RecordLinkType): Mantle's production stop by its organization; one of this spec's, a
+        // store's feed, by its parent store
+        if (!ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStoreFeed").one())
+            call("create#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStoreFeed", ownerText: "Spec: a feed",
+                parentEntityName: "mantle.product.store.ProductStore", parentField: "productStoreId" })
+        if (!ec.entity.find("mantle.party.communication.RecordLinkType").condition("recordEntityName", "mantle.product.store.ProductStore").one())
+            call("create#mantle.party.communication.RecordLinkType", { recordEntityName: "mantle.product.store.ProductStore", ownerText: "Spec: a store",
+                organizationField: "organizationPartyId" })
+        call("create#mantle.work.production.ProductionDowntime", { productionDowntimeId: "RV-STOP", organizationPartyId: "RV_ORG" })
+        call("create#mantle.product.store.ProductStoreFeed", { productStoreFeedId: "RV-FEED", productStoreId: "RV_STORE" })
+        const seen = (username, entityName, recordId) => as(username, () => ec.service.sync().name(`${COMM}.get#RecordLinkInfo`)
+                .parameters({ recordEntityName: entityName, recordId, checkOnly: true }).call()?.recordVisible)
+        return { moStop: seen("rv.mo", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+            ozStop: seen("rv.oz", "mantle.work.production.ProductionDowntime", "RV-STOP"),
+            moFeed: seen("rv.mo", "mantle.product.store.ProductStoreFeed", "RV-FEED"),
+            ozFeed: seen("rv.oz", "mantle.product.store.ProductStoreFeed", "RV-FEED") }
+    },
+    then({ moStop, ozStop, moFeed, ozFeed }) {
+        moStop == true
+        ozStop == false
+        moFeed == true
+        ozFeed == false
+    },
+})
+
 // five entries at one minute (a note, a file, two messages, a status change) between the created status and a later message
 feature("the timeline cursor pages through entries of one date with no entry skipped or repeated; beforeDate alone skips them", {
     when() {

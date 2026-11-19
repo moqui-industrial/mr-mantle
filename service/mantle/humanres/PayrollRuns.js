@@ -1985,7 +1985,17 @@ function findRuns(p) {
     return Object.assign({canCreate: edits(userScope)}, lib.pageList(list, p, "runs", {noLimitCap: listCap}))
 }
 
+// A pay run as a record (its card and panels, RecordLinkType, SEC-BOS-87): a payroll reader of its employer alone.
+function runRecordAccess(p) {
+    try {
+        runIn(readerScope(), p.recordId)
+        return {recordVisible: true}
+    } catch (error) {
+        return {recordVisible: false}
+    }
+}
 const operations = {
+    runRecordAccess,
     findRuns,
     createRun,
     selectEmployments,
