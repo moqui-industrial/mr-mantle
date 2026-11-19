@@ -287,9 +287,10 @@ function caseFor(p, organizationPartyId) {
     const request = one(REQUEST, {requestId: checked.recordId})
     const profile = request ? one(PROFILE, {requestId: checked.recordId}) : null
     if (!profile) unavailable()
-    // its filer signed in confirms a public form's typed address (SEC-PSS-28); a link's holder does not
-    if (!p.token && request.senderVerified === "N")
-        cases.confirmSender(request.requestId, {partyId: ec.user.userAccount?.partyId}, true)
+    // a public form's case (its typed address not confirmed, SEC-PSS-28) is the matched address's owner's only once a reply
+    // from the address confirms it: whoever typed the form is not known to be them, and opening it signed in is not filing it
+    // (SEC-PSS-87). Its link, sent to the address, reads it.
+    if (!p.token && request.senderVerified === "N") unavailable()
     return {checked, request, profile, requestId: request.requestId, customerPartyId: checked.partyId, organizationPartyId}
 }
 const statusLabel = (profile, statusId) =>
@@ -656,6 +657,8 @@ function findCustomerCases(p) {
             if (!profile) continue
             const parties = cases.partiesOf(request.requestId)
             if (cases.roleParty(parties, "OrgInternal") !== organizationPartyId) continue
+            // a public form's case waits for its address to confirm it (SEC-PSS-87, caseFor)
+            if (request.senderVerified === "N") continue
             const customer = customerOf.get(request.requestId)
             // a contact sees a colleague's case only as a customer administrator (the self account is the customer)
             const own =
@@ -808,12 +811,12 @@ function getCaseIntake(p) {
         capabilities: {canSubmit: queues.length > 0, takesFiles: true, needsSender: false}
     }
 }
-// A staged file kept as a case's file of the customer-shared type.
-function keepCaseFile(requestId, staged, description) {
+// A staged file kept as a case's file of the customer-shared type (or another, contentTypeEnumId).
+function keepCaseFile(requestId, staged, description, contentTypeEnumId = SHARED) {
     if (!staged) return null
     const content = call("create#" + CONTENT, {
         requestId,
-        contentTypeEnumId: SHARED,
+        contentTypeEnumId,
         description: description || staged.filename,
         contentDate: now()
     })
@@ -879,7 +882,8 @@ function intakeCase(p, organizationPartyId, key, stage) {
         ec.message.clearErrors()
         fail("Unprocessable", message || "Your request could not be sent")
     }
-    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null)
+    // a public form's file is the typist's, not known to be the matched customer's: kept internal, for staff (SEC-PSS-87)
+    if (out?.requestId && staged) keepCaseFile(out.requestId, staged, null, "RqCntInternal")
     else media().unstage(staged)
     // the sender is not verified: the answer reads no case
     const result = {

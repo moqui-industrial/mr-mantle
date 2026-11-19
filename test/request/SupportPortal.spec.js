@@ -466,18 +466,25 @@ feature("MyCases pages by an opaque cursor scoped to the list and the account; a
     }
 })
 
-feature("a form-filed case's typed address is confirmed by its filer opening it signed in, not by another reader (SEC-PSS-28)", {
+feature("a form-filed case is no signed-in reader's until a reply from its typed address confirms it (SEC-PSS-28, SEC-PSS-87)", {
     when() {
-        // as a queue's public form leaves a case: its sender not verified
+        // as a queue's public form leaves a case: its filer the typed address's owner, its sender not verified
         svc("update#mantle.request.Request", {requestId: state.filed, filedByPartyId: state.contact, senderVerified: "N"})
-        const byAdministrator = page(state.boss, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
-        const afterAdministrator = one("mantle.request.Request", {requestId: state.filed}).senderVerified
-        const byFiler = page(state.contact, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
-        return {byAdministrator, afterAdministrator, byFiler, after: one("mantle.request.Request", {requestId: state.filed}).senderVerified}
+        const byAdministrator = page(state.boss, S + "get#CustomerCase", {requestId: state.filed})
+        const byFiler = page(state.contact, S + "get#CustomerCase", {requestId: state.filed})
+        const listed = (page(state.contact, S + "find#CustomerCases", {}).caseList || []).map(row => row.requestId)
+        const after = one("mantle.request.Request", {requestId: state.filed}).senderVerified
+        // confirmed (a reply from the address), it is theirs again
+        svc("update#mantle.request.Request", {requestId: state.filed, senderVerified: "Y"})
+        const confirmed = page(state.contact, S + "get#CustomerCase", {requestId: state.filed}).case?.requestId
+        return {byAdministrator, byFiler, listed, after, confirmed}
     },
-    then({byAdministrator, afterAdministrator, byFiler, after}) {
-        byAdministrator === state.filed && afterAdministrator === "N"
-        byFiler === state.filed && after === "Y"
+    then({byAdministrator, byFiler, listed, after, confirmed}) {
+        byAdministrator.kind === "NotFound"
+        byFiler.kind === "NotFound"
+        !listed.includes(state.filed)
+        after === "N"
+        confirmed === state.filed
     }
 })
 

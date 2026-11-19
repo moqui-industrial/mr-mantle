@@ -355,8 +355,9 @@ function revisionOf(requestId, request = one(REQUEST, {requestId})) {
     return revision
 }
 // SEC-PSS-28: a request a public form filed with a typed address (senderVerified N) has its sender confirmed by a reply
-// from that address (by.address, the request's emailContactMechId) or by its filer signed in (by.partyId, filedByPartyId):
-// senderVerified Y. Anything else leaves the mark. In the caller's transaction, or its own (newTransaction, for a read);
+// from that address (by.address, the request's emailContactMechId) or by its filer signed in (by.partyId, filedByPartyId)
+// when it files: senderVerified Y. The Support pages never confirm one by a sign-in after the filing: the filer of a form's
+// case is the owner of the typed address, not who typed it (SEC-PSS-87). Anything else leaves the mark. In the caller's transaction, or its own (newTransaction, for a read);
 // a failure is logged and never fails the caller. Whether it confirmed.
 function confirmSender(requestId, by, newTransaction = false) {
     try {
