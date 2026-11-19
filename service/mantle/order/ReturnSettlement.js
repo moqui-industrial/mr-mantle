@@ -255,7 +255,8 @@ function returnScope(p, lock) {
     const counterpartyId = supplierReturn ? header.vendorPartyId : header.customerPartyId
     return {header, supplierReturn, organizationPartyId, counterpartyId, settlementRequired: !!mode.settlementRequired}
 }
-// The order line's billing on the side's invoices (sales invoices from the organization, bills to it), not cancelled.
+// The order line's billing on the side's invoices (sales invoices from the organization to the return's customer, bills to it
+// from the return's supplier), not cancelled.
 function billingsOf(orderId, orderItemSeqId, scope) {
     if (!orderId) return []
     const billings = rows(OIB, {orderId, orderItemSeqId})
@@ -264,13 +265,17 @@ function billingsOf(orderId, orderItemSeqId, scope) {
     const invoices = Object.fromEntries(
         Array.from(find(INV).condition("invoiceId", "in", invoiceIds).list()).map(row => [row.invoiceId, row])
     )
-    const side = scope.supplierReturn ? "toPartyId" : "fromPartyId"
+    const side = scope.supplierReturn ? "toPartyId" : "fromPartyId",
+        otherSide = scope.supplierReturn ? "fromPartyId" : "toPartyId"
+    // only the return's own counterparty's billings: a line billed to another customer (or by another supplier) earns this
+    // return no credit and no refund (SEC-BAP-93)
     return billings.filter(row => {
         const invoice = invoices[row.invoiceId]
         return (
             invoice &&
             invoice.statusId !== "InvoiceCancelled" &&
             invoice[side] === scope.organizationPartyId &&
+            invoice[otherSide] === scope.counterpartyId &&
             !invoice.creditForInvoiceId &&
             !["InvoiceReturn", "InvoiceCreditMemo"].includes(invoice.invoiceTypeEnumId)
         )

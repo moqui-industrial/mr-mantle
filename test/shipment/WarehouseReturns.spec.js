@@ -238,6 +238,26 @@ feature("an approved RMA's label request prepares its package once, and the retu
             returnResponseEnumId: "RrspCredit"
         })
         const otherCustomer = invoke(R + "add#OrderItemToReturn", line(otherSale.orderId))
+        // a sale invoiced and not shipped: nothing of its line is returned, whatever was billed (SEC-BAP-93)
+        const billedSale = call("mantle.order.OrderServices.create#Order", {
+            vendorPartyId: org,
+            customerPartyId: customer,
+            currencyUomId: "USD",
+            facilityId: facility
+        })
+        call("mantle.order.OrderServices.add#OrderProductQuantity", {
+            orderId: billedSale.orderId,
+            orderPartSeqId: billedSale.orderPartSeqId,
+            productId: "WRT_KETTLE",
+            quantity: 1,
+            unitAmount: 20
+        })
+        call("mantle.order.OrderServices.place#Order", {orderId: billedSale.orderId})
+        call("mantle.order.OrderServices.approve#Order", {orderId: billedSale.orderId})
+        call("mantle.account.InvoiceServices.create#EntireOrderPartInvoice", {orderId: billedSale.orderId, orderPartSeqId: billedSale.orderPartSeqId})
+        const billedReturn = call(R + "create#ReturnFromOrder", {orderId: billedSale.orderId, orderPartSeqId: "01"}).returnId
+        const unshipped = invoke(R + "add#OrderItemToReturn", Object.assign(line(billedSale.orderId), {returnId: billedReturn}))
+        const billedLines = rows("mantle.order.OrderItemBilling", {orderId: billedSale.orderId}).length
         // a status given for the new item is a return authorizer's to give (SEC-BAP-93 review)
         const givenStatus = run("wrt_receiver", R + "add#OrderItemToReturn", Object.assign(line(ids.saleId), {statusId: "ReturnApproved"}))
         const early = run("wrt_shipper", T + "request#ReturnLabel", {operationKey: key(), returnId})
@@ -256,9 +276,11 @@ feature("an approved RMA's label request prepares its package once, and the retu
             recordId: returnId,
             checkRecord: false
         })
-        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus}
+        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines}
     },
-    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus}) {
+    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus, unshipped, billedLines}) {
+        billedLines > 0
+        unshipped.error.includes("QUANTITY_EXCEEDS_SHIPPED")
         givenStatus.error.includes("Only a return authorizer gives")
         otherCustomer.error.includes("ORDER_MISMATCH")
         receiverAdds.error.includes("RETURN_NOT_OPEN")

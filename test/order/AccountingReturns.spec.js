@@ -254,6 +254,17 @@ feature("a partial receipt credits only what arrived, and a second box is credit
         const seqA = returnSeq(ids.returnA, productA)
         login(users.reader)
         const read = preview(ids.returnA, [{returnItemSeqId: seqA}])
+        // SEC-BAP-93: a line billed to another party earns the return nothing, though it is on the return
+        const itemA = one("mantle.order.return.ReturnItem", {returnId: ids.returnA, returnItemSeqId: seqA})
+        const invoiceIds = [...new Set(rows("mantle.order.OrderItemBilling", {orderId: itemA.orderId, orderItemSeqId: itemA.orderItemSeqId})
+            .map(row => row.invoiceId))]
+        login("john.doe")
+        for (const invoiceId of invoiceIds) svc("update#mantle.account.invoice.Invoice", {invoiceId, toPartyId: supplier})
+        login(users.ar)
+        const otherBilled = preview(ids.returnA, [{returnItemSeqId: seqA}])
+        login("john.doe")
+        for (const invoiceId of invoiceIds) svc("update#mantle.account.invoice.Invoice", {invoiceId, toPartyId: customer})
+        login(users.reader)
         const readerSettle = refused(R + "settle#Return", settleRequest(ids.returnA, [{returnItemSeqId: seqA, quantity: 1}]))
         login(users.ar)
         const over = refused(R + "preview#ReturnSettlement", {
@@ -278,6 +289,7 @@ feature("a partial receipt credits only what arrived, and a second box is credit
         return {
             first,
             read,
+            otherBilled,
             readerSettle,
             over,
             changed,
@@ -291,7 +303,8 @@ feature("a partial receipt credits only what arrived, and a second box is credit
             discountLines
         }
     },
-    then({first, read, readerSettle, over, changed, settled, retry, rest, afterFirstBox, second, item, discount, discountLines}) {
+    then({first, read, otherBilled, readerSettle, over, changed, settled, retry, rest, afterFirstBox, second, item, discount, discountLines}) {
+        otherBilled.itemRows[0].eligibleQuantity == 0
         first.receivedItems[0].receivedQuantity == 2
         first.receivedItems[0].statusId == "ReturnApproved"
         read.itemRows[0].eligibleQuantity == 2

@@ -349,7 +349,8 @@ along with this software (see the LICENSE.md file). If not, see
         </actions>
     </service>
     <service verb="add" noun="OrderItemToReturn">
-        <description>Add an order line to a return, up to what was billed of it less what is already returned. The line's order
+        <description>Add an order line to a return, up to what was billed of it, and for a sale of a shipped product what was
+            shipped of it (QUANTITY_EXCEEDS_SHIPPED), less what is already returned. The line's order
             part is the return's customer's and organization's (ORDER_MISMATCH, the same as for a missing line: SEC-BAP-93); a
             cancelled, completed or manual-response return takes none, and one past Requested, whose new item is born approved,
             takes one only from a return authorizer (RETURN_AUTHORIZE; RETURN_NOT_OPEN). The new item takes the return's status;
@@ -405,6 +406,21 @@ along with this software (see the LICENSE.md file). If not, see
                 <!-- make sure returnQuantity + returnedQuantity is not greater than invoiceQuantity -->
                 <if condition="toDecimal(returnedQuantity).add(returnQuantity).compare(invoiceQuantity) &gt; 0">
                     <return error="true" message="Tried to return more than is returnable; quantity billed ${invoiceQuantity}, already returned ${returnedQuantity}, tried to return ${returnQuantity}"/></if>
+                <!-- and, for a sale of a shipped product, not greater than what was shipped (issued) either: an invoiced line
+                    never shipped returns nothing (SEC-BAP-93; the ceiling Customer Service's ReturnPolicies.js lineFacts uses) -->
+                <script><![CDATA[
+                    const product = orderItem.productId ? ec.entity.find('mantle.product.Product').condition('productId', orderItem.productId).disableAuthz().one() : null
+                    const sale = !!ec.entity.find('mantle.party.PartyRole').condition({partyId: returnHeader.vendorPartyId, roleTypeId: 'OrgInternal'}).disableAuthz().one()
+                    shippedCeiling = null
+                    if (sale && product && ['PtAsset', 'PtDigitalAsset', 'PtAssetUse', 'PtPickAssembly'].includes(product.productTypeEnumId)) {
+                        shippedCeiling = toDecimal(0)
+                        for (const issuance of ec.entity.find('mantle.product.issuance.AssetIssuance').condition({orderId: orderItem.orderId,
+                                orderItemSeqId: orderItem.orderItemSeqId}).disableAuthz().list())
+                            shippedCeiling = shippedCeiling.add(toDecimal(issuance.quantity ?? 0)).subtract(toDecimal(issuance.quantityCancelled ?? 0))
+                    }
+                ]]></script>
+                <if condition="shippedCeiling != null &amp;&amp; toDecimal(returnedQuantity).add(returnQuantity).compare(shippedCeiling) &gt; 0">
+                    <return error="true" message="QUANTITY_EXCEEDS_SHIPPED: Tried to return more than was shipped; quantity shipped ${shippedCeiling}, already returned ${returnedQuantity}, tried to return ${returnQuantity}"/></if>
             </then><else>
                 <!-- make sure returnTotal + returnedTotal is not greater than invoiceTotal -->
                 <if condition="toDecimal(returnedTotal).add(returnTotal).compare(invoiceTotal) &gt; 0">
