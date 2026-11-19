@@ -152,35 +152,45 @@ feature("SEC-PFS-97: a join request is asked once, and a member suspended from t
     }
 })
 
-feature("SEC-PFS-96: an owner's membership is changed only after the caller signs in again", {
+feature("SEC-PFS-96: an owner's membership is changed only after a recent sign-in, with no password asked", {
     when() {
-        const change = (state, more = {}) =>
-            op("FSR_OWNER", "setMembership", {
+        const change = (call, state) =>
+            call("FSR_OWNER", "setMembership", {
                 targetPartyId: "FSR_OWNER2",
                 state,
                 expectedRevision: membershipRevision("FSR_OWNER2"),
-                reason: "Owner review",
-                ...more
+                reason: "Owner review"
             })
-        const bare = change("suspended")
-        const signed = change("suspended", {password: "moqui"})
+        const stale = change(internalOp, "suspended")
+        // lib.op signs in with the password: a sign-in a moment ago
+        const recent = change(op, "suspended")
         const after = lib.row("mantle.public.PublicSiteParty", {siteId: SITE, partyId: "FSR_OWNER2"}).state
-        const restored = change("active", {password: "moqui"})
-        // a member who is no owner is changed as before
-        const member = op("FSR_OWNER", "setMembership", {
+        const restored = change(op, "active")
+        // a member who is no owner is changed with no sign-in asked
+        const member = internalOp("FSR_OWNER", "setMembership", {
             targetPartyId: "FSR_ANN",
             state: "active",
             expectedRevision: membershipRevision("FSR_ANN"),
             reason: "No change"
         })
-        return {bare, signed, after, restored, member}
+        // a password is no field of the operation any more
+        const password = op("FSR_OWNER", "setMembership", {
+            targetPartyId: "FSR_ANN",
+            state: "active",
+            expectedRevision: membershipRevision("FSR_ANN"),
+            reason: "No change",
+            password: "moqui"
+        })
+        return {stale, recent, after, restored, member, password}
     },
-    then({bare, signed, after, restored, member}) {
-        bare.kind == "AuthenticationRequired"
-        signed.kind == null
+    then({stale, recent, after, restored, member, password}) {
+        stale.kind == "AuthenticationRequired"
+        stale.reason == "reauthRequired"
+        recent.kind == null
         after == "suspended"
         restored.kind == null
         member.kind == null
+        password.kind == "Unprocessable"
     }
 })
 

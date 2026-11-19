@@ -475,25 +475,29 @@ function protectListOwner(contactListId, partyId) {
     )
     if (!replacements) invalid('Assign another active category owner first')
 }
-/* A change to who holds a site's or a category's rights asks the caller's password (and second factor's code) again. */
-function reauthenticate(p, message) {
-    let auth = null
-    if (p.password)
-        try {
-            auth = ec.service
-                .sync()
-                .name('org.moqui.impl.UserServices.login#UserAccount')
-                .parameters({
-                    username: ec.user.userAccount.username,
-                    password: p.password,
-                    code: p.code,
-                })
-                .call()
-        } catch (error) {
-            auth = null
-        }
-    ec.message.clearErrors()
-    if (!auth?.loggedIn) fail('AuthenticationRequired', message)
+/* A change to who holds a site's or a category's rights asks a recent sign-in (SEC-PFS-96), as the framework's
+   require#RecentAuth does: a password, a second factor's code or a provider sign-in with its auth_time in the last five
+   minutes, so an account that signs in through a provider acts too and no password is asked or counted as a failed login.
+   It asks check#RecentAuth, as Smithy's git access does: the PASS authority runs an operation with authorization disabled
+   (PassAuthority.js), which require#RecentAuth lets through. Through a remote frontend it is the visitor's own sign-in that
+   its delegation carries (passSignedInAt). Refused with the reason reauthRequired and require#RecentAuth's header. */
+const RECENT_SIGN_IN = 5 * 60000
+function reauthenticate() {
+    const signedInAt = ec.user.context.passSignedInAt
+    const recent =
+        signedInAt != null
+            ? millis(now()) - Number(signedInAt) <= RECENT_SIGN_IN
+            : ec.service
+                  .sync()
+                  .name('org.moqui.sso.RecentAuthServices.check#RecentAuth')
+                  .parameters({ maxAgeSeconds: RECENT_SIGN_IN / 1000 })
+                  .call()?.recent === true
+    if (recent) return
+    ec.web?.response?.setHeader('X-Moqui-Reauth', 'required')
+    fail(
+        'AuthenticationRequired',
+        'reauthRequired: Confirm it is you: sign in again to do this',
+    )
 }
 methods.setMembership = (p) => {
     site(p.siteId, true)
@@ -507,7 +511,7 @@ methods.setMembership = (p) => {
         protectOwner(p.siteId, m.partyId)
     // an owner's membership takes away or gives back an owner's rights, as a role change does
     if (m.role === 'owner')
-        reauthenticate(p, "Reauthenticate before changing an owner's membership")
+        reauthenticate()
     audit(
         p.siteId,
         null,
@@ -528,7 +532,7 @@ methods.setMembership = (p) => {
 }
 methods.setSiteRole = (p) => {
     site(p.siteId, true)
-    reauthenticate(p, 'Reauthenticate before changing site roles')
+    reauthenticate()
     if (!['member', 'moderator', 'owner'].includes(p.role))
         invalid('Invalid role')
     const m = member(p.siteId, p.targetPartyId)
@@ -3307,7 +3311,7 @@ methods.setCategoryMember = (p) => {
                 'Unauthorized',
                 'Site owner approval is required to delegate category roles',
             )
-        reauthenticate(p, 'Reauthenticate before changing category roles')
+        reauthenticate()
     }
     ec.service
         .sync()

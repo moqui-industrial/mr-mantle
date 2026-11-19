@@ -234,6 +234,8 @@ const REASONS = [
     'paymentDeclined',
     'rateLimited',
     'providerUnavailable',
+    // a change of a site's or a category's rights asks a recent sign-in (Forum.js reauthenticate)
+    'reauthRequired',
     // Shop P1: the operator's mount refusals
     'mountTaken',
     'rootNotAllowed',
