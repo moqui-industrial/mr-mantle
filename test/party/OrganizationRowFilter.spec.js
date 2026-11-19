@@ -284,6 +284,20 @@ feature("a finance administrator of one organization changes only its own chart 
         login("john.doe")
         ec.artifactExecution.disableAuthz()
         out.sharedName = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", "ORF_ACCT_SHARED").one().accountName
+        // a finance administrator of both organizations changes the account they share
+        const bothParty = call("mantle.party.PartyServices.create#Person", {firstName: "orf.chartboth", lastName: "RowFilter"}).partyId
+        const bothUserId = call("mantle.party.PartyServices.create#PartyUserAccount", {partyId: bothParty, emailAddress: "orf.chartboth@example.com",
+            username: "orf.chartboth", newPassword: "moqui1!!", newPasswordVerify: "moqui1!!"}).userId
+        for (const toPartyId of ["ORF_A", "ORF_B"])
+            call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtEmployee", fromPartyId: bothParty,
+                fromRoleTypeId: "Employee", toPartyId, toRoleTypeId: "OrgInternal", fromDate: past})
+        call("create#moqui.security.UserGroupMember", {userGroupId: "ORF_CHART", userId: bothUserId, fromDate: past})
+        login("orf.chartboth", "moqui1!!")
+        ec.artifactExecution.disableAuthz()
+        out.both = attempt("mantle.ledger.AccountServices.store#Account", rename("ORF_ACCT_SHARED", "ORF_A"))
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        out.bothName = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", "ORF_ACCT_SHARED").one().accountName
         out.assigned = ec.entity.find("mantle.ledger.account.GlAccountOrganization").condition({glAccountId: "ORF_ACCT_B", organizationPartyId: "ORF_A"}).count()
         return out
     },
@@ -296,5 +310,7 @@ feature("a finance administrator of one organization changes only its own chart 
         out.assigned == 0
         out.classify.includes("ACCOUNT_SHARED")
         out.currency.includes("PERMISSION_DENIED")
+        out.both == ""
+        out.bothName == "ORF_ACCT_SHARED renamed"
     }
 })
