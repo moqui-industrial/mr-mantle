@@ -84,6 +84,7 @@ feature("a site owner's export and moderation report leave out a private group's
         sys(() => lib.run(O + "dispatch#Jobs", {}))
         const dir = STORAGE + "/exports/" + exportId + "/topics/"
         const exists = rootCommEventId => sys(() => ec.resource.getLocationReference(dir + rootCommEventId + ".json").exists)
+        const categories = sys(() => ec.resource.getLocationText(STORAGE + "/exports/" + exportId + "/categories.json", false))
         const reported = lib.op("SXS_OWNER", SITE, "exportReport", {report: "moderation"})
         const reportRow = lib.row("mantle.forum.ForumExport", {exportId: reported.exportId})
         const report = reportRow ? sys(() => ec.resource.getLocationText(reportRow.location, false)) : JSON.stringify(reported)
@@ -92,14 +93,17 @@ feature("a site owner's export and moderation report leave out a private group's
             finished: lib.row("mantle.forum.ForumJobRun", {runId: started.runId}),
             publicExported: exists(ids.publicTopic),
             privateExported: exists(ids.privateTopic),
+            categories: String(categories || ""),
             report: String(report || "")
         }
     },
-    then({started, finished, publicExported, privateExported, report}) {
+    then({started, finished, publicExported, privateExported, categories, report}) {
         started.runId != null
         finished.state == "complete"
         publicExported == true
         privateExported == false
+        categories.includes("SXS public")
+        !categories.includes("SXS private")
         report.includes("SXS public topic pinned")
         !report.includes("SXS group secret")
     }

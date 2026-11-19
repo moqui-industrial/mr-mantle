@@ -527,11 +527,7 @@
         if (!t || t.siteId !== siteId || t.kind !== 'category') return
         // a topic of a category its starter does not moderate (one bound to a private group or repository they may not
         // view, SEC-PFS-84) is left out of the export
-        if (
-            !config.operator &&
-            !categoryAccess(t.contactListId, run.partyId)?.canModerate
-        )
-            return
+        if (!startedModerates(run, config, t.contactListId)) return
         const root = one(E + 'CommunicationEvent', {
             communicationEventId: rootCommEventId,
         })
@@ -595,7 +591,12 @@
         )
     }
     /* Settings without credentials, tokens or secrets; private conversations are not part of a site export. */
-    function exportSettings(siteId, dir) {
+    // whether the run's starter moderates a category, which the site export holds only then (SEC-PFS-84)
+    const startedModerates = (run, config, contactListId) =>
+        !!config.operator ||
+        !!categoryAccess(contactListId, run.partyId)?.canModerate
+    function exportSettings(run, config, dir) {
+        const siteId = run.siteId
         const s = one(S + 'PublicSite', { siteId })
         writeJson(dir + '/site.json', {
             ...pick(
@@ -611,16 +612,18 @@
         })
         writeJson(
             dir + '/categories.json',
-            rows(F + 'ForumCategory', { siteId }, 1000).map((c) => ({
-                ...pick(
-                    c,
-                    'contactListId parentContactListId sequenceNum slug publicationState visibility mode rules qualifyingSources',
-                ),
-                name:
-                    one('mantle.marketing.contact.ContactList', {
-                        contactListId: c.contactListId,
-                    })?.contactListName || '',
-            })),
+            rows(F + 'ForumCategory', { siteId }, 1000)
+                .filter((c) => startedModerates(run, config, c.contactListId))
+                .map((c) => ({
+                    ...pick(
+                        c,
+                        'contactListId parentContactListId sequenceNum slug publicationState visibility mode rules qualifyingSources',
+                    ),
+                    name:
+                        one('mantle.marketing.contact.ContactList', {
+                            contactListId: c.contactListId,
+                        })?.contactListName || '',
+                })),
         )
         writeJson(
             dir + '/tags.json',
@@ -633,9 +636,13 @@
         )
         writeJson(
             dir + '/mail-routes.json',
-            rows(F + 'ForumMailRoute', { siteId }, 1000).map((r) =>
-                pick(r, 'routeId address contactListId enabled'),
-            ),
+            rows(F + 'ForumMailRoute', { siteId }, 1000)
+                .filter(
+                    (r) =>
+                        !r.contactListId ||
+                        startedModerates(run, config, r.contactListId),
+                )
+                .map((r) => pick(r, 'routeId address contactListId enabled')),
         )
         // The effective policy, without credentials: policy sections hold limits and rules only.
         writeJson(dir + '/policy.json', core.policy(siteId))
@@ -1018,7 +1025,7 @@
         if (handlers[run.jobType]?.finish)
             handlers[run.jobType].finish(run, config, failed)
         if (!failed && run.jobType === 'op-export-site')
-            exportSettings(run.siteId, exportDir(config.exportId))
+            exportSettings(run, config, exportDir(config.exportId))
         if (!failed && run.jobType === 'op-export-site')
             finishArchive(
                 run,
