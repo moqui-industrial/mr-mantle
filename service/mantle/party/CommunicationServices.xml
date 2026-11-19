@@ -3729,7 +3729,8 @@ along with this software (see the LICENSE.md file). If not, see
             as notes (PartyNote, WorkEffortNote, RequestNote, OrderNote, FacilityNote); its done activities (work efforts
             with the purpose WepPhoneCall, WepEmail, WepToDo or WepMeeting through RequestWorkEffort, WikiPageWorkEffort
             or WorkEffortRecord); its changes from the entity audit log, never of a field its entity marks ai-opt-out or
-            encrypted or names as a password, secret or token (SEC-BAP-94); its files (the *Content rows); and the messages of
+            encrypted or names as a password, secret or token (SEC-BAP-94), nor of an ownership field such as ownerPartyId or
+            privateOwnerUserId (SEC-BAP-141); its files (the *Content rows); and the messages of
             the chat room bound to it (org.moqui.chat.ChatServices.get#Timeline by the record: none when there is no room,
             the user may not read it or the room is end-to-end encrypted, as the server has no text for it). The open activities come apart in plannedActivities, soonest due first, with the
             assignee.
@@ -3985,12 +3986,15 @@ along with this software (see the LICENSE.md file). If not, see
                     finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
                 // a field its entity keeps from readers is never shown (SEC-BAP-94): an ai-opt-out field (a job offer's pay, a
-                // wage), an encrypted one, one named as a secret, and one the entity no longer has
+                // wage), an encrypted one, one named as a secret, and one the entity no longer has; nor an ownership field
+                // (ownerPartyId, privateOwnerUserId and any other named for an owner), whose old value says whose private
+                // contact a party was or which organization held a record, which the record's own screens show no reader
+                // (SEC-BAP-141)
                 const definition = ec.entity.getEntityDefinition(recordEntityName)
                 const marked = (flag) => flag === true || flag === 'true' || flag === 'Y'
                 const fieldShown = (name) => {
                     const field = definition?.getFieldInfo(name || '')
-                    return !!field && !marked(field.aiOptOut) && !marked(field.encrypt) && !/password|secret|token/i.test(name)
+                    return !!field && !marked(field.aiOptOut) && !marked(field.encrypt) && !/password|secret|token|owner/i.test(name)
                 }
                 for (const value of find.list()) {
                     const change = value.getMap()

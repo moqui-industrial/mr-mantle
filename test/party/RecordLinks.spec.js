@@ -565,11 +565,16 @@ feature("a record's changes leave out a field its entity keeps from readers: ai-
         // a party's payment gateway customer id is ai-opt-out too (SEC-BAP-94 review)
         call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.party.Party", changedFieldName: "gatewayCimId", pkPrimaryValue: partyId,
             oldValueText: "before", newValueText: "RL-CIM-ID", changedDate: ec.user.nowTimestamp, changedByUserId: "EX_JOHN_DOE" })
+        // nor a party's former private owner or owning organization (SEC-BAP-141)
+        for (const [changedFieldName, oldValueText] of [["privateOwnerUserId", "RL-FORMER-OWNER"], ["ownerPartyId", "RL-FORMER-ORG"]])
+            call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.party.Party", changedFieldName, pkPrimaryValue: partyId,
+                oldValueText, newValueText: null, changedDate: ec.user.nowTimestamp, changedByUserId: "EX_JOHN_DOE" })
         const party = timeline("mantle.party.Party", partyId, { kinds: "changes" })
-        return { values: Array.from(out.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue)
-            .concat(Array.from(party.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue)) }
+        const changes = Array.from(out.entryList || []).concat(Array.from(party.entryList || [])).filter(entry => entry.kind === "change")
+        return { values: changes.map(entry => entry.newValue), oldValues: changes.map(entry => entry.oldValue) }
     },
-    then({ values }) {
+    then({ values, oldValues }) {
+        !oldValues.includes("RL-FORMER-OWNER") && !oldValues.includes("RL-FORMER-ORG")
         !values.includes("RL-CIM-ID")
         values.includes("RL-SHOWN")
         !values.includes("RL-SECRET-NUMBER") && !values.includes("RL-GONE")
