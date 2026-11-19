@@ -97,6 +97,14 @@ along with this software (see the LICENSE.md file). If not, see
             ]]></script>
         </actions>
     </service>
+    <service verb="clean" noun="AppHtml" allow-remote="false">
+        <description>Internal (SEC-CLI-82): HTML as an allow-html="app" parameter keeps it (the safe set, and an image only from
+            this server), for create#Message's internal Message body.</description>
+        <in-parameters><parameter name="html" allow-html="app"/></in-parameters>
+        <out-parameters><parameter name="html"/></out-parameters>
+        <actions><script>html = html || ''</script></actions>
+    </service>
+
     <service verb="create" noun="Message">
         <description>
             A communication event, by default an internal Message from the current user's party. Each recipient gets a
@@ -119,7 +127,9 @@ along with this software (see the LICENSE.md file). If not, see
         </description>
         <in-parameters>
             <auto-parameters entity-name="mantle.party.communication.CommunicationEvent" include="nonpk"/>
-            <parameter name="body" allow-html="safe"/>
+            <parameter name="body" allow-html="any"><description>Cleaned here by the event's kind (SEC-CLI-82): an internal Message
+                as allow-html="app" (only this server's images: it is read only by signed-in users), anything else (a Comment, a
+                post to a mailbox bound to a forum) as allow-html="safe"</description></parameter>
             <parameter name="fromPartyId" default="ec.user.userAccount.partyId"/>
             <parameter name="communicationEventTypeId" default-value="Message"/>
             <parameter name="statusId" default-value="CeReceived"/>
@@ -144,6 +154,15 @@ along with this software (see the LICENSE.md file). If not, see
         </out-parameters>
         <actions>
             <script><![CDATA[
+                // the body cleaned by the event's kind (SEC-CLI-82): an internal Message is read only by signed-in users, so it keeps
+                // only this server's images (clean#AppHtml, allow-html="app"); a Comment or a post through a forum stays safe
+                if (body != null && body !== '') {
+                    const forumBound = communicationEventTypeId === 'Message' && contactListId
+                            && ec.entity.find('mantle.forum.ForumCategory').condition('contactListId', contactListId).disableAuthz().count() > 0
+                    body = communicationEventTypeId === 'Message' && !forumBound
+                            ? ec.service.sync().name('mantle.party.CommunicationServices.clean#AppHtml').parameter('html', String(body)).call()?.html ?? ''
+                            : StringUtilities.cleanHtml(String(body))
+                }
                 const asList = (value) => (value == null ? [] : (typeof value === 'string' ? value.split(',') : Array.from(value)))
                         .map((id) => String(id).trim()).filter((id) => id)
                 recipientList = []
@@ -352,7 +371,8 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="parentCommEventId" required="true" default="communicationEventId"/>
             <parameter name="communicationEventId"/>
             <parameter name="subject"/>
-            <parameter name="body" allow-html="safe"/>
+            <parameter name="body" allow-html="any"><description>Cleaned by create#Message by the reply's kind: a Message as
+                allow-html="app", a Comment as allow-html="safe" (SEC-CLI-82)</description></parameter>
             <parameter name="contentType" default-value="text/plain"/>
             <parameter name="fromPartyId" default="ec.user.userAccount.partyId"/>
             <parameter name="statusId" default-value="CeReceived"/>
