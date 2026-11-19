@@ -1556,3 +1556,38 @@ function entityRevision(registrationId) {
         .script("component://mr-mantle/service/mantle/ledger/EntityLib.js")
         .ms(row(R, {registrationId}).lastUpdatedStamp)
 }
+
+feature("SEC-PSS-88: an offer takes a bounded number of a requester's and an address's reservations a day, an address a bounded number of tickets", {
+    when() {
+        const offer = system(() => offerFor(orgA, siteA, "BOUNDED", 20, [{priceSourceEnumId: "EtpFree"}]))
+        return withConf("mantle@marketing-reservations-per-offer", "2", () =>
+            withConf("mantle@marketing-tickets-per-address", "1", () => {
+                const first = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.one@mkrg.example.test")
+                const second = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.two@mkrg.example.test")
+                // a third from the same requester, past the offer's day
+                const third = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "bounded.three@mkrg.example.test")
+                // both name one attendee address: its first ticket is mailed, the second refused
+                const attend = token =>
+                    visitor("complete#Registration", {
+                        siteId: siteA,
+                        token,
+                        attendees: JSON.stringify([{name: "Tess Target", email: "target@mkrg.example.test"}]),
+                        acceptTerms: "Y",
+                        termsRevision: 0,
+                        operationId: key()
+                    })
+                const firstTicket = attend(first.token)
+                const secondTicket = attend(second.token)
+                return {first, second, third, firstTicket, secondTicket, secondState: states(second.reference)}
+            })
+        )
+    },
+    then(r) {
+        !!r.first.token == true
+        !!r.second.token == true
+        r.third.kind == "Tarpit"
+        r.firstTicket.registration.state != null
+        r.secondTicket.kind == "Tarpit"
+        r.secondState == "EvrHeld"
+    }
+})

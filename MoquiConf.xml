@@ -18,10 +18,14 @@
     <!-- Shop's payment limits: shop-payment-calls a requester's payment result and payment form calls in ten minutes,
         shop-payment-forms the hosted payment forms one payment attempt is given in ten minutes; each asks the provider
         (SEC-PSS-84); a customer's renewal resumptions and card changes count with the payment calls, and
-        shop-renewal-resumes is how many times a day the customer has one renewal charged again (SEC-PSS-86). -->
+        shop-renewal-resumes is how many times a day the customer has one renewal charged again (SEC-PSS-86).
+        Marketing's event registrations: marketing-reservations-per-offer how many reservations an event's offer takes in a
+        day from one requester and for one buyer address (each up to its tickets' places), marketing-tickets-per-address how
+        many reservations a day name one attendee address, which is mailed each ticket (SEC-PSS-88). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
             content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
             shop-payment-calls="120" shop-payment-forms="10" shop-renewal-resumes="2"
+            marketing-reservations-per-offer="20" marketing-tickets-per-address="10"
             mail-provider-authserv-ids="" forum-inbound-accounts=""/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>

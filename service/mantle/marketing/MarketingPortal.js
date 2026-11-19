@@ -890,6 +890,12 @@ const access = () => ec.resource.script("component://mr-mantle/service/mantle/pa
 const RESERVATION = "mantle.work.registration.EventReservation"
 const REG_POLICY = "mantle.work.registration.EventRegistrationPolicy"
 const regLimits = {client: 10, site: 500, address: 5, payloadChars: 65536}
+// SEC-PSS-88: an offer's reservations a day for one requester and for one buyer address (each up to the ticket's places), and the
+// tickets a day for one attendee address, from Mantle's conf (mantle@marketing-reservations-per-offer, -tickets-per-address)
+function confLimit(selector, fallback) {
+    const value = Number(ec.factory.getConfValue(selector))
+    return Number.isFinite(value) && value > 0 ? value : fallback
+}
 // A refusal of the registration services answered as the page's kind: what the visitor can fix (a value, the hold, the places
 // left, changed terms) with its own words; anything about another record the one NotFound.
 function asPage(work) {
@@ -1112,6 +1118,12 @@ function reserveRegistration(p) {
             !allowed("mkt-reg-address:" + addressKey(buyer.address), regLimits.address, HOUR)
         )
             fail("Tarpit", "RATE_LIMITED: Too many registrations from here. Wait a few minutes and try again.")
+        const perOffer = confLimit("mantle@marketing-reservations-per-offer", 20)
+        if (
+            !allowed("mkt-reg-offer:" + policyId + ":" + requester(), perOffer, DAY) ||
+            !allowed("mkt-reg-offer-address:" + policyId + ":" + addressKey(buyer.address), perOffer, DAY)
+        )
+            fail("Tarpit", "RATE_LIMITED: You have made as many registrations for this event as one person may today.")
     }
     const lines = jsonOf(p.lines)
     if (!Array.isArray(lines)) fail("Unprocessable", "VALUE_INVALID[lines]: Choose at least one place")
@@ -1153,6 +1165,19 @@ function completeRegistration(p) {
     const answers = jsonOf(p.answers)
     if ((p.attendees != null && !Array.isArray(attendees)) || (p.answers != null && !Array.isArray(answers)))
         fail("Unprocessable", "Reload the page and try again")
+    // each typed attendee address is mailed a ticket: a bounded number a day for one address (SEC-PSS-88), counted once, when
+    // the reservation is completed
+    if (!reservation.completedDate) {
+        const perAddress = confLimit("mantle@marketing-tickets-per-address", 10)
+        const addresses = new Set(
+            (attendees || [])
+                .map(attendee => String(attendee?.email || "").trim().toLowerCase())
+                .filter(Boolean)
+        )
+        for (const address of addresses)
+            if (!allowed("mkt-reg-ticket:" + addressKey(address), perAddress, DAY))
+                fail("Tarpit", "RATE_LIMITED: An attendee's address has been sent as many tickets as it may today.")
+    }
     asPage(() =>
         placesOf().complete(reservation, {
             attendees: attendees || [],
