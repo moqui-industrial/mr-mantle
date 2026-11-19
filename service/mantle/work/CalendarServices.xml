@@ -931,7 +931,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="fetch" noun="CalendarSubscription" authenticate="anonymous-all">
         <description>One subscription of the fetch job: GET its URL (webcal as https; any other scheme refused) and read
-            what it answered with store#CalendarFeedText. The GET refuses a host that is or resolves to an internal
+            what it answered with store#CalendarFeedText, a feed over mantle@calendar-feed-max-bytes refused unparsed
+            (SEC-FIL-82). The GET refuses a host that is or resolves to an internal
             address, redirects included (denyInternal). A failed GET's error is a fixed text, not the answer's status or
             the connection's error, which are logged. Errors are the caller's to record. With authorization on, only for a calendar the user
             owns or manages (check#CalendarAccess CalpManage).</description>
@@ -966,6 +967,13 @@ along with this software (see the LICENSE.md file). If not, see
             if (status < 200 || status >= 300) {
                 ec.logger.warn(`Calendar subscription ${calendarId} answered ${status} ${response.getReasonPhrase() || ''}`)
                 ec.message.addError('The feed could not be read'); return
+            }
+            // a feed over mantle@calendar-feed-max-bytes is not parsed (SEC-FIL-82): the parse of a large file is the costly part
+            const maxBytes = ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit('calendar-feed-max-bytes')
+            const feedSize = response.bytes().length
+            if (feedSize > maxBytes) {
+                ec.logger.warn(`Calendar subscription ${calendarId} answered ${feedSize} bytes, over the ${maxBytes} it is read from`)
+                ec.message.addError(`The feed is larger than the ${maxBytes} bytes a subscription is read from`); return
             }
             const feedText = response.text()
             if (!feedText || !String(feedText).trim()) { ec.message.addError('The feed answered with no calendar'); return }

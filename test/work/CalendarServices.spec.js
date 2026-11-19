@@ -804,6 +804,38 @@ feature("a subscription refuses an http URL, and its fetch refuses an internal a
     },
 })
 
+// a feed larger than mantle@calendar-feed-max-bytes is not parsed, and the subscription records why (SEC-FIL-82)
+feature("a feed over the conf's size is refused unparsed, with a fixed error", {
+    when() {
+        setTime(14.5)
+        const http = ec.factory.getTool("HttpFixtures")
+        const url = "https://calendar.example.com/large.ics"
+        http.enable()
+        http.add({method: "GET", url, status: 200, contentType: "text/calendar", body: feedIcs})
+        try {
+            return withConf("mantle@calendar-feed-max-bytes", "64", () =>
+                as("Ada", () => {
+                    const large = call(`${CAL}.subscribe#Calendar`, { url, fetchNow: false }).calendarId
+                    const fetched = call(`${CAL}.fetch#CalendarSubscriptions`, { calendarId: large, force: true })
+                    const row = ec.entity.find("mantle.work.calendar.CalendarSubscription").condition("calendarId", large).one()
+                    const events = ec.entity.find("mantle.work.calendar.CalendarWorkEffort").condition("calendarId", large).count()
+                    call(`${CAL}.delete#Calendar`, { calendarId: large })
+                    return { fetched, row, events, asked: http.count() }
+                })
+            )
+        } finally {
+            http.reset()
+        }
+    },
+    then({ fetched, row, events, asked }) {
+        asked == 1
+        fetched.failedCount == 1
+        row.lastFetchStatus == "error"
+        row.lastFetchError.includes("larger than the 64 bytes")
+        events == 0
+    },
+})
+
 feature("export#Calendar writes an iCalendar file that reads back through the ICalendar tool; import#Calendar reads a series, its moved instance and an all-day event", {
     when() {
         setTime(14.5)
