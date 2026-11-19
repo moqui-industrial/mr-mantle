@@ -237,25 +237,10 @@ along with this software (see the LICENSE.md file). If not, see
                 if (searchScope.hitHidden(hit.documentId, current, userPartyId)) continue
                 // an invoice and a payment by their own reads, of their side (a receivable reader does not find a bill), as
                 // get#RecordLinkInfo has them; the organization limit above does not know the side (IronStone Accounting P21,
-                // F431, F438). A dropped hit makes the total the page's and the finance counts the page's (F439).
-                if (hit.documentId === 'MantleInvoice' || hit.documentId === 'MantlePayment') {
-                    const account = 'component://mr-mantle/service/mantle/account/'
-                    let readable = true
-                    if (hit.documentId === 'MantleInvoice')
-                        readable = ec.resource.script(account + 'InvoiceWorkflowLib.js').readable(current.invoiceId, invoiceMemo)
-                    else {
-                        ec.message.pushErrors()
-                        try { ec.resource.script(account + 'PaymentWorkflow.js').paymentScope({paymentId: current.paymentId}) }
-                        catch (error) { readable = false }
-                        finally { ec.message.clearErrors(); ec.message.popErrors() }
-                    }
-                    if (!readable) { financeDropped = true; continue }
-                }
-                // a ledger transaction of a payroll-origin invoice or payment only for a reader of payroll (People P27, AC-23: its
-                // payrollOrigin mark, PayrollOrigin.js)
-                if (hit.documentId === 'MantleAcctgTrans' && current.payrollOrigin === 'Y' &&
-                        !ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js').canRead()) {
-                    financeDropped = true; continue }
+                // F431, F438), and a payroll-origin ledger transaction only for a payroll reader (People P27, AC-23); a dropped hit
+                // makes the total the page's and the finance counts the page's (F439) (SearchScope.js financeHidden, shared with
+                // Marble's search)
+                if (searchScope.financeHidden(hit.documentId, current, invoiceMemo)) { financeDropped = true; continue }
                 if (hit.documentId === 'MantleCommunicationEvent' && boundMailboxes.has(current.contactListId)) {
                     const was = ec.artifactExecution.disableAuthz()
                     try {

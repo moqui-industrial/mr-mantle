@@ -212,6 +212,23 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{indexName:indexName, documentType:documentType, queryString:queryString, flattenDocument:false,
                              orderByFields:orderByFields, highlightFields:highlightFields, nestedQueryMap:nestedQueryMap, filter:filter,
                              pageIndex:pageIndex, pageSize:pageSize, pageNoLimit:pageNoLimit}"/>
+                <!-- a person who is only an applicant is a hit only for a recruiter of their application's employer or its panel,
+                    as search#Universal has it (Recruiting.js hiddenApplicants through SearchScope.js hitHidden; SEC-DAT-98) -->
+                <script><![CDATA[
+                    const partyHits = Array.from(documentList || [])
+                    const hidden = new Set(ec.resource.script('component://mr-mantle/service/mantle/humanres/Recruiting.js')
+                            .hiddenApplicants(partyHits.map(doc => doc.partyId || String(doc._id || '').split('::')[0]).filter(Boolean)))
+                    const page = ec.resource.script('component://mr-mantle/service/mantle/search/SearchScope.js').keepPage(
+                            {documentList, documentListCount, documentListPageIndex, documentListPageSize},
+                            doc => !hidden.has(doc.partyId || String(doc._id || '').split('::')[0]))
+                    if (hidden.size) {
+                        documentList = page.documentList
+                        documentListCount = page.documentListCount
+                        documentListPageMaxIndex = page.documentListPageMaxIndex
+                        documentListPageRangeLow = page.documentListPageRangeLow
+                        documentListPageRangeHigh = page.documentListPageRangeHigh
+                    }
+                ]]></script>
             </if>
         </actions>
     </service>

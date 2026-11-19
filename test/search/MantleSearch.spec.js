@@ -369,3 +369,73 @@ feature("the general search leaves out a maintenance request the user's Maintena
         !limited.includes("SF_MAINT_REQ")
     },
 })
+
+// party search leaves out a person who is only an applicant the user does not recruit, as the universal search does
+// (Recruiting.js hiddenApplicants; SEC-DAT-98 review): Marble's FindParty, FindCustomer and FindSupplier search through it
+feature("party search leaves out a person who is only an applicant the user does not recruit (SEC-DAT-98)", {
+    when() {
+        ec.entity.makeDataLoader().xmlText(`<entity-facade-xml>
+    <mantle.party.Party partyId="SF_APPLICANT" partyTypeEnumId="PtyPerson" ownerPartyId="ORG_ZIZI_RETAIL">
+        <mantle.party.Person firstName="Zed" lastName="Sfapplicant"/>
+    </mantle.party.Party>
+    <mantle.humanres.employment.EmploymentApplication employmentApplicationId="SF_APPLICATION" applyingPartyId="SF_APPLICANT"
+            organizationPartyId="ORG_ZIZI_RETAIL" applicationDate="${day(1)}"/>
+</entity-facade-xml>`).load()
+        const indexed = () => num(call("org.moqui.search.SearchServices.search#DataDocuments",
+            { indexName: "mantle_party", documentType: "MantleParty", queryString: "Sfapplicant", pageSize: 20 }).documentListCount)
+        const started = Date.now()
+        let count = 0
+        while (Date.now() - started < 10000 && !count) {
+            call("org.moqui.EntityServices.process#DataFeedPending", {})
+            count = indexed()
+        }
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            // the service as a screen calls it (artifact authorization off: the rule is the service's own)
+            ec.artifactExecution.disableAuthz()
+            const found = call("mantle.party.PartyServices.search#Party", { anyField: "Sfapplicant" })
+            return { count, found: (found.documentList || []).map((document) => document.partyId), total: num(found.documentListCount) }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ count, found, total }) {
+        count > 0
+        !found.includes("SF_APPLICANT")
+        total == 0
+    },
+})
+
+// the general search reads an invoice by its own side's read, as the universal search does (SearchScope.js financeHidden;
+// SEC-DAT-98 review), and its count is the page's, never a total that counts a hidden hit
+feature("the general search leaves out invoices the user does not read, and counts only what it shows (SEC-DAT-98)", {
+    when() {
+        const typed = () => call("mantle.GeneralServices.search#MantleFiltered",
+            { indexName: "mantle", documentType: "MantleInvoice", queryString: "*:*", pageSize: 100 })
+        const admin = typed()
+        ec.user.internalLoginUser("sf.org.user")
+        ec.artifactExecution.enableAuthz()
+        try {
+            call("mantle.party.PartyServices.setup#UserOrganizationInfo", {})
+            const limited = typed()
+            return { admin: num(admin.documentListCount), limitedIds: (limited.documentList || []).map((document) => document._id),
+                limitedCount: num(limited.documentListCount), maxIndex: num(limited.documentListPageMaxIndex) }
+        } finally {
+            ec.message.clearAll()
+            ec.artifactExecution.disableAuthz()
+            for (const name of ["userOrgIds", "filterOrgIds", "activeOrgId"]) delete ec.user.context[name]
+            login("john.doe")
+        }
+    },
+    then({ admin, limitedIds, limitedCount, maxIndex }) {
+        admin > 0
+        limitedIds.length == 0
+        limitedCount == 0
+        maxIndex == 0
+    },
+})
