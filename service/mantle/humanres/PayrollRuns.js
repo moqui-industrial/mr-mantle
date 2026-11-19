@@ -1551,6 +1551,10 @@ function decideRun(p, decision) {
     const message = p.message || {}
     if (p.recordEntityName && p.recordEntityName !== RUN) denied("SOURCE_INVALID", "Not a pay run approval")
     const run = runIn(userScope, text(p.payrollRunId) || text(p.recordId))
+    // only a run waiting in review is decided (SEC-BOS-91), before any decision is recorded; an approved run only for a
+    // repeat of the decision that approved it, which record#Decision answers
+    if (run.statusId !== "PrnReview" && run.statusId !== "PrnApproved")
+        denied("NOT_IN_REVIEW", "Only a run in review is approved or returned")
     const decided = call("mantle.humanres.PeopleApprovalServices.record#Decision", {
         approvalKindEnumId: KIND,
         sourceEntityName: RUN,
@@ -1562,7 +1566,6 @@ function decideRun(p, decision) {
         operationKey: text(p.operationKey) || null
     })
     if (!decided.repeated) {
-        // only a run waiting in review is decided (SEC-BOS-91); a repeat answers the first decision
         if (run.statusId !== "PrnReview") denied("NOT_IN_REVIEW", "Only a run in review is approved or returned")
         if (decided.complete) {
             call("update#" + RUN, {
