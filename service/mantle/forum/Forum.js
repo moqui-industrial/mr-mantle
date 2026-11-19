@@ -1244,6 +1244,22 @@ methods.getPosts = (p) => {
         generation: Number(a.site.generation),
     }
 }
+/* A draft is a member's (or an internal account's, which posts through Comms, or the operator's), within the post's length and title
+   limits; a member keeps at most mantle@forum-drafts-per-member of a site's drafts, and one untouched for
+   mantle@forum-draft-days is removed (cleanup#Drafts). */
+function draftLimits(p) {
+    const m = member(p.siteId)
+    if (!(active(m) && m.state === 'active') && !internalParty(me()) && !isOperator())
+        fail('Unauthorized', 'Join the site to keep drafts')
+    draftLength(p)
+    if (p.title != null && String(p.title).length > 250)
+        invalid('A title is at most 250 characters')
+}
+function draftLength(p) {
+    const most = policy(p.siteId).maxPostLength
+    if (String(p.body || '').length > most)
+        invalid('Body must contain at most ' + most + ' characters')
+}
 methods.storeDraft = (p) => {
     site(p.siteId)
     const partyId = requireUser(),
@@ -1255,6 +1271,19 @@ methods.storeDraft = (p) => {
         fail('Conflict', 'Draft changed; reload and compare')
     if (p.poll && JSON.stringify(p.poll).length > 20000)
         invalid('The poll draft is too large')
+    draftLimits(p)
+    if (!old) {
+        const most = Number(
+            ec.factory.getConfValue('mantle@forum-drafts-per-member') || 50,
+        )
+        if (
+            find(F + 'ForumDraft', { siteId: p.siteId, partyId }).count() >=
+            most
+        )
+            invalid(
+                'You have ' + most + ' drafts here; publish or discard one first',
+            )
+    }
     if (old) revision(old, p.expectedRevision)
     if (p.contactListId) category(p.contactListId, p.siteId)
     // A record's conversation keeps a reply's or an edit's draft, never a new topic's.
@@ -1323,6 +1352,7 @@ methods.discardDraft = (p) => {
 methods.previewPost = (p) => {
     site(p.siteId)
     requireUser()
+    draftLength(p)
     return {
         body: renderSource(sourceFormatOf(p.sourceFormat), p.body || ''),
     }

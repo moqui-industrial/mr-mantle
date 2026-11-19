@@ -202,3 +202,40 @@ feature("SEC-PFS-86: the author's or staff's edit takes the earlier versions out
         replyReader == [2]
     }
 })
+
+feature("SEC-PFS-92: a draft is a member's, within the post's length and the member's count, and an untouched one expires", {
+    when() {
+        setConf("mantle@forum-drafts-per-member", "2")
+        const draft = (username, body, title = "FSR draft") =>
+            kind(op(username, "storeDraft", {contactListId: ids.general, title, body, expectedRevision: 0}))
+        const tooLong = "x".repeat(100001)
+        const out = {
+            outsider: draft("FSR_OUT", "Not a member"),
+            long: draft("FSR_BEN", tooLong),
+            longTitle: draft("FSR_BEN", "Text", "t".repeat(251)),
+            preview: kind(op("FSR_BEN", "previewPost", {body: tooLong})),
+            made: [1, 2, 3].map(n => draft("FSR_BEN", "Draft " + n))
+        }
+        // one draft untouched for two days, past forum-draft-days
+        setConf("mantle@forum-draft-days", "1")
+        const old = Array.from(
+            ec.entity.find("mantle.forum.ForumDraft").condition({siteId: SITE, partyId: "FSR_BEN"}).disableAuthz().list()
+        )[0]
+        lib.set("mantle.forum.ForumDraft", {draftId: old.draftId}, {
+            updatedAt: new Date(ec.user.timestampMillis(ec.user.nowTimestamp) - 2 * 86400000)
+        })
+        lib.run("mantle.forum.OperationServices.cleanup#Drafts", {})
+        out.left = count("mantle.forum.ForumDraft", {siteId: SITE, partyId: "FSR_BEN"})
+        setConf("mantle@forum-drafts-per-member", "")
+        setConf("mantle@forum-draft-days", "")
+        return out
+    },
+    then({outsider, long, longTitle, preview, made, left}) {
+        outsider == "Unauthorized"
+        long == "Unprocessable"
+        longTitle == "Unprocessable"
+        preview == "Unprocessable"
+        made == [null, null, "Unprocessable"]
+        left == 1
+    }
+})
