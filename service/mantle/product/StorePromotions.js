@@ -584,12 +584,18 @@ function codeTextOf(value, exceptPromoCodeId, organizationPartyId) {
         denied("CODE_TAKEN", "The code " + code + " is taken")
     return code
 }
-// The promotions of the organization's stores: a code's text is unique among their codes only, so whether a text is taken,
+// A code's uniqueness scope (SEC-BAP-108): its store's organization, or for a store of no organization the store itself.
+// Answered as the key codeTaken and the counts take (a string), from a promotion or a store row.
+const scopeOfStore = store =>
+    store?.organizationPartyId ? store.organizationPartyId : "store:" + (store?.productStoreId || "_NONE_")
+// The promotions of a uniqueness scope's stores: a code's text is unique among their codes only, so whether a text is taken,
 // and how many codes a prefix has, say nothing of another organization's stores (SEC-BAP-108).
 function organizationPromotionIds(organizationPartyId) {
-    const storeIds = organizationPartyId
-        ? rows(STORE, {organizationPartyId}).map(row => row.productStoreId)
-        : []
+    const storeIds = !organizationPartyId
+        ? []
+        : String(organizationPartyId).startsWith("store:")
+          ? [String(organizationPartyId).slice(6)]
+          : rows(STORE, {organizationPartyId}).map(row => row.productStoreId)
     if (!storeIds.length) return ["_NONE_"]
     const ids = Array.from(
         find(PROMOTION).condition("productStoreId", "in", storeIds).selectField("storePromotionId").list()
@@ -598,7 +604,14 @@ function organizationPromotionIds(organizationPartyId) {
 }
 const organizationCodes = organizationPartyId =>
     find(CODE).condition("storePromotionId", "in", organizationPromotionIds(organizationPartyId))
-const organizationOf = promotion => (promotion ? one(STORE, {productStoreId: promotion.productStoreId})?.organizationPartyId : null)
+const organizationOf = promotion => (promotion ? scopeOfStore(one(STORE, {productStoreId: promotion.productStoreId})) : null)
+// Two saves of codes in one scope at once wait for each other, so a text is checked and made as one (SEC-BAP-108 review): the
+// organization's Party row, or the store's, locked in the caller's transaction.
+function lockScope(organizationPartyId) {
+    if (String(organizationPartyId).startsWith("store:"))
+        find(STORE, {productStoreId: String(organizationPartyId).slice(6)}).forNoKeyUpdate(true).one()
+    else find("mantle.party.Party", {partyId: organizationPartyId}).forNoKeyUpdate(true).one()
+}
 function codeTaken(code, exceptPromoCodeId, organizationPartyId) {
     const factory = ec.entity.conditionFactory
     let query = organizationCodes(organizationPartyId).condition(
@@ -704,6 +717,7 @@ function storePromoCode(p) {
             denied("CODE_REDEEMED", "The code has been used; it keeps its text (expire it and make a new one)")
         else {
             const organizationPartyId = organizationOf(promotion)
+            lockScope(organizationPartyId)
             values.promoCode = wanted
                 ? codeTextOf(wanted, code?.promoCodeId, organizationPartyId)
                 : drawCodes("", 1, 8, new Set(), undefined, organizationPartyId)[0]
@@ -796,7 +810,7 @@ function generatePromoCodes(p) {
     if (numbered && (!Number.isInteger(startNumber) || startNumber < 0)) denied("VALUE_INVALID", "Numbers start at 0 or more")
     const values = codeValues(p, null)
     const factory = ec.entity.conditionFactory
-    const organizationPartyId = store.organizationPartyId
+    const organizationPartyId = scopeOfStore(store)
     const existingWithPrefix = prefix
         ? organizationCodes(organizationPartyId)
               .condition(factory.makeCondition("promoCode", "like", likeText(prefix).slice(1)).ignoreCase())
@@ -847,15 +861,19 @@ function generatePromoCodes(p) {
     const results = []
     for (const promoCode of planned) {
         try {
-            if (codeTaken(promoCode, null, organizationPartyId))
-                denied("CODE_TAKEN", "The code " + promoCode + " is taken")
-            const out = lib.probe(
-                "create#" + CODE,
-                Object.assign({userEntered: "Y", requireParty: "N"}, values, {
-                    storePromotionId: promotion.storePromotionId,
-                    promoCode
-                })
-            )
+            // checked and made in one transaction under the scope's lock, so two batches at once make no text twice
+            const out = ec.transaction.runRequireNew(null, "Promotion code " + promoCode + " not made", () => {
+                lockScope(organizationPartyId)
+                if (codeTaken(promoCode, null, organizationPartyId))
+                    denied("CODE_TAKEN", "The code " + promoCode + " is taken")
+                return call(
+                    "create#" + CODE,
+                    Object.assign({userEntered: "Y", requireParty: "N"}, values, {
+                        storePromotionId: promotion.storePromotionId,
+                        promoCode
+                    })
+                )
+            })
             results.push({promoCode, promoCodeId: out.promoCodeId, ok: true, code: null, message: "Made"})
         } catch (error) {
             const reason = lib.reasonCode(error) || "ERROR"

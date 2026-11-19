@@ -677,3 +677,38 @@ feature("two concurrent placements past a code's use limit: the second waits for
         code(results[refused]) == "PROMOTION_LIMIT_REACHED"
     }
 })
+
+feature("an order of no store does not guess between stores' codes of one text (SEC-BAP-108 review)", {
+    when() {
+        // two stores of no organization (a store Commerce cannot reach, as loaded data), each with a code of the same text
+        system(() => {
+            for (const id of ["_LONE1", "_LONE2"]) {
+                make(S + "ProductStore", {productStoreId: prefix + id, storeName: "Lone store" + id, defaultCurrencyUomId: "USD"})
+                make(S + "ProductStorePromotion", {storePromotionId: prefix + id + "_P", productStoreId: prefix + id,
+                    itemDescription: "Lone" + id, serviceRegisterId: "FlatDiscount", requireCode: "Y"})
+                make(S + "ProductStorePromoCode", {promoCodeId: prefix + id + "_C", storePromotionId: prefix + id + "_P",
+                    promoCode: prefix + "LONEX", userEntered: "Y"})
+            }
+        })
+        const orderId = system(() => call("mantle.order.OrderServices.create#Order", {vendorPartyId: vendorId,
+            customerPartyId: customer("Lone"), currencyUomId: "USD"}).orderId)
+        const ambiguous = system(() => {
+            ec.message.pushErrors()
+            try {
+                ec.service.sync().name("mantle.product.PromotionServices.add#OrderPromoCode").parameters({orderId, promoCode: prefix + "LONEX"})
+                    .requireNewTransaction(true).call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        })
+        return {ambiguous, applied: list("mantle.order.OrderPromoCode", {orderId}).length}
+    },
+    then({ambiguous, applied}) {
+        ambiguous.includes("PROMO_CODE_AMBIGUOUS")
+        applied == 0
+    }
+})
