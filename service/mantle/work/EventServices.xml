@@ -1949,7 +1949,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="FreeBusy">
         <description>
             Busy times of parties, meeting rooms (facilities) and equipment (assets) from fromDate to thruDate (at most 92
-            days), for "Find a time" and booking, with no event details:
+            days), for "Find a time" and booking, with no event details. A party is answered only when the user may reach it
+            (mantle/party/PartyReach.js visibleParties: under the caller's filters, never another user's personal contact or the
+            staff of an organization the user does not reach; every party with authorization disabled), is the user, or is on
+            excludeWorkEffortId, the event being scheduled, which the user may change; any other is left out (SEC-BOS-108):
             - a party: the events (and WetTimeOff, status away) where it is a current WorkEffortParty and has not declined
               (an invitation not answered yet or answered tentative is tentative; a row with availability WeptaAvailable is
               not busy), and the events it owns;
@@ -2055,7 +2058,27 @@ along with this software (see the LICENSE.md file). If not, see
                     failed.push(label)
                 } finally { ec.message.clearErrors(); ec.message.popErrors() }
             }
-            for (const partyId of unique(partyIdList)) attempt(`party ${partyId}`, () => {
+            // SEC-BOS-108: the busy times of a party the user may reach (mantle/party/PartyReach.js visibleParties: under the
+            // caller's filters, staff of an organization the user reaches; every party with authorization disabled), the user's
+            // own, and those already on the event being scheduled when the user may change it; any other is left out and logged
+            const askedParties = unique(partyIdList)
+            const me = ec.user.userAccount?.partyId || null
+            const reachable = new Set(ec.resource.script('component://mr-mantle/service/mantle/party/PartyReach.js').visibleParties(askedParties, true))
+            if (me) reachable.add(me)
+            if (excludeWorkEffortId && askedParties.some((id) => !reachable.has(id))) {
+                ec.message.pushErrors()
+                try {
+                    const access = ec.service.sync().name('mantle.work.EventServices.check#EventAccess').parameters({workEffortId: excludeWorkEffortId,
+                        permission: 'none'}).call()
+                    if (access?.canEdit) for (const row of ec.entity.find('mantle.work.effort.WorkEffortParty').condition('workEffortId', excludeWorkEffortId)
+                            .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).selectField('partyId').disableAuthz().list()) reachable.add(row.partyId)
+                    if (access?.canEdit && access.workEffort?.ownerPartyId) reachable.add(access.workEffort.ownerPartyId)
+                } finally { ec.message.clearErrors(); ec.message.popErrors() }
+            }
+            const parties = askedParties.filter((id) => reachable.has(id))
+            if (parties.length < askedParties.length)
+                ec.logger.info(`Free/busy not answered for parties ${ec.user.username || ec.user.userId} may not reach: ${askedParties.filter((id) => !reachable.has(id)).join(', ')}`)
+            for (const partyId of parties) attempt(`party ${partyId}`, () => {
                 const busy = intervalsOf({partyId: partyId, workEffortTypeEnumIds: ['WetEvent', 'WetTimeOff']}, partyStatus)
                 const entry = {resourceType: 'party', partyId: partyId, busyList: asDates(busy), workingHourList: null}
                 const hasAvailable = ec.entity.find('mantle.work.effort.WorkEffortAndParty').condition('workEffortTypeEnumId', 'WetAvailable')

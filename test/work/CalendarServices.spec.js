@@ -1094,3 +1094,41 @@ feature("an event only the people on it see is Busy to a viewer of its calendar 
         ada.freeBusyOnly == false
     },
 })
+
+// SEC-BOS-108: Find a time answers the busy times of a party the caller may reach and no other: Ben, with the event services
+// granted and authorization on, gets Ada's but not those of Ada's personal contact, who has an appointment that day
+feature("get#FreeBusy answers only a party the caller may reach: not another user's personal contact (SEC-BOS-108)", {
+    when() {
+        setTime(18.5)
+        const zed = call("create#mantle.party.Party", { partyTypeEnumId: "PtyPerson", privateOwnerUserId: user.Ada }).partyId
+        call("create#mantle.party.Person", { partyId: zed, firstName: "Zed", lastName: "Private" })
+        event("Zed's appointment", { ownerPartyId: zed, estimatedStartDate: at(32 * 24 + 10), estimatedCompletionDate: at(32 * 24 + 11) })
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_FREEBUSY_CALLER", description: "Spec free/busy callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_FREEBUSY_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_FREEBUSY_SERVICES", description: "Spec free/busy services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_FREEBUSY_SERVICES", artifactName: "mantle\\.work\\.EventServices\\..*",
+            artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_FREEBUSY_AUTHZ", userGroupId: "CS_FREEBUSY_CALLER", artifactGroupId: "CS_FREEBUSY_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        try {
+            return as("Ben", () => {
+                const wasDisabled = ec.artifactExecution.authzDisabled()
+                ec.artifactExecution.enableAuthz()
+                try {
+                    const out = call(`${EV}.get#FreeBusy`, { partyIdList: [zed, party.Ada], fromDate: at(32 * 24), thruDate: at(33 * 24) })
+                    return { zed, parties: out.freeBusyList.map((entry) => entry.partyId) }
+                } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+            })
+        } finally {
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_FREEBUSY_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_FREEBUSY_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_FREEBUSY_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_FREEBUSY_CALLER").deleteAll()
+            ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_FREEBUSY_CALLER").deleteAll()
+        }
+    },
+    then({ zed, parties }) {
+        parties.includes(party.Ada)
+        !parties.includes(zed)
+    },
+})
