@@ -1234,22 +1234,33 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Internal: the request a received message answers: one of the messages its In-Reply-To and References
             name (by Message-ID), its parent, or its thread's first message is on a request (RequestEmailMessage). Else
             none, and none for a message whose sender the trusted mail gateway did not authenticate (Channels.js senderTrust,
-            SEC-BAP-84): a Message-ID in forged headers joins nothing.</description>
+            SEC-BAP-84): a Message-ID in forged headers joins nothing. A support case is joined only by a sender verified for
+            it: an address its referenced message was from or to, its customer, reporter or customer's contact, or staff of
+            its organization (Channels.js mayJoinByReference, SEC-BAP-97).</description>
         <in-parameters><parameter name="emailMessageId" required="true"/></in-parameters>
         <out-parameters><parameter name="requestId"/></out-parameters>
         <actions><script><![CDATA[
             requestId = null
             const message = ec.entity.find('moqui.basic.email.EmailMessage').condition('emailMessageId', emailMessageId).disableAuthz().one()
             if (message == null) return
-            if (!ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js').senderTrust(message).authenticated) return
+            const channels = ec.resource.script('component://mr-mantle/service/mantle/request/Channels.js')
+            if (!channels.senderTrust(message).authenticated) return
             const ids = new Set([message.parentEmailMessageId, message.rootEmailMessageId].filter((id) => id && id !== emailMessageId))
             const referenced = String(message.inReplyTo || '').split(/\s+/).concat(String(message.referencesHeader || '').split(/\s+/))
                     .map((id) => id.trim()).filter((id) => /^<[^<>\s]+>$/.test(id))
             if (referenced.length) for (const row of ec.entity.find('moqui.basic.email.EmailMessage').condition('messageId', 'in', Array.from(new Set(referenced)).slice(0, 50))
                     .selectField('emailMessageId').disableAuthz().list()) if (row.emailMessageId !== emailMessageId) ids.add(row.emailMessageId)
             if (!ids.size) return
-            const link = Array.from(ec.entity.find('mantle.request.RequestEmailMessage').condition('emailMessageId', 'in', Array.from(ids)).disableAuthz().list())[0]
-            if (link && ec.entity.find('mantle.request.Request').condition('requestId', link.requestId).disableAuthz().one() != null) requestId = link.requestId
+            // a support case is joined only by a sender verified for it (Channels.js mayJoinByReference, SEC-BAP-97)
+            const byRequest = new Map()
+            for (const link of ec.entity.find('mantle.request.RequestEmailMessage').condition('emailMessageId', 'in', Array.from(ids)).disableAuthz().list())
+                byRequest.set(link.requestId, (byRequest.get(link.requestId) || []).concat([link.emailMessageId]))
+            for (const [linkedId, referencedIds] of byRequest) {
+                if (ec.entity.find('mantle.request.Request').condition('requestId', linkedId).disableAuthz().one() == null) continue
+                if (!channels.mayJoinByReference(message, linkedId, referencedIds)) continue
+                requestId = linkedId
+                break
+            }
         ]]></script></actions>
     </service>
     <service verb="findOrCreate" noun="EmailSender" authenticate="anonymous-all" allow-remote="false">

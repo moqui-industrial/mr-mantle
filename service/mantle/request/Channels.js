@@ -405,7 +405,8 @@ function senderOf(address, organizationPartyId) {
 // thread's first message is on a request (as find#EmailRequest), and the sender is verified for it: an address the
 // referenced message was from or to (To, Cc), the request's customer, reporter or a contact of its customer, or staff of the
 // queue's organization. A Message-ID is no secret (every recipient has it), so a stranger naming one in forged headers
-// joins nothing: the message goes on as a new one of its own sender.
+// joins nothing: the message goes on as a new one of its own sender. Only a request of the queue's organization is joined
+// (its OrgInternal party, or its queue's owner): another organization's case is never one, whoever writes (SEC-BAP-97).
 const addressesOf = (...values) =>
     new Set(
         values
@@ -425,6 +426,13 @@ function senderOnRequest(requestId, referencedIds, message, sender, organization
     if (parties.some(row => ["Customer", "Reporter"].includes(row.roleTypeId) && row.partyId === sender.partyId)) return true
     const customerPartyId = parties.find(row => row.roleTypeId === "Customer")?.partyId
     return !!customerPartyId && cases.customerSidesOf(sender.partyId).includes(customerPartyId)
+}
+const ofOrganization = (requestId, organizationPartyId) => {
+    if (!organizationPartyId) return false
+    if (cases.currentRows(PARTY, {requestId, roleTypeId: "OrgInternal"}).some(row => row.partyId === organizationPartyId))
+        return true
+    const categoryId = one(REQUEST, {requestId})?.requestCategoryId
+    return !!categoryId && one(CATEGORY, {requestCategoryId: categoryId})?.ownerPartyId === organizationPartyId
 }
 function referencedRequest(message, sender, organizationPartyId) {
     const ids = new Set(
@@ -446,9 +454,23 @@ function referencedRequest(message, sender, organizationPartyId) {
     for (const link of find(REQUEST_MAIL).condition("emailMessageId", "in", Array.from(ids)).list())
         byRequest.set(link.requestId, (byRequest.get(link.requestId) || []).concat([link.emailMessageId]))
     for (const [requestId, referencedIds] of byRequest)
-        if (one(REQUEST, {requestId}) && senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId))
+        if (
+            one(REQUEST, {requestId}) &&
+            ofOrganization(requestId, organizationPartyId) &&
+            senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId)
+        )
             return requestId
     return null
+}
+// find#EmailRequest (a rule that names no queue): whether the message may join this request by its references. A support
+// case (CaseProfile) is joined only by a sender verified for it as above, the case's organization's staff among them; any
+// other request by its references alone (SEC-BAP-97).
+function mayJoinByReference(message, requestId, referencedIds) {
+    if (!one(PROFILE, {requestId})) return true
+    const organizationPartyId =
+        cases.currentRows(PARTY, {requestId, roleTypeId: "OrgInternal"}).map(row => row.partyId)[0] || null
+    const sender = senderOf(message.fromAddress, organizationPartyId)
+    return senderOnRequest(requestId, referencedIds, message, sender, organizationPartyId)
 }
 // The case a subject's token names ([Request 123], [Case 123]), only for a sender who is that case's customer, reporter or a
 // contact of its customer, and only a case of the organization: a guessed id authorizes no one.
@@ -1092,6 +1114,9 @@ const operations = {saveRoute, previewRoute, mailIntake, createToken, removeToke
     // whether a stored message's From is its sender (the trusted gateway authenticated it), for every mail intake
     // (RequestServices create#WorkItemFromEmail, find#EmailRequest, findOrCreate#EmailSender; SEC-BAP-84)
     senderTrust: message => runInternal(() => senderTrust(message)),
+    // whether find#EmailRequest may join a message to a request by its references (SEC-BAP-97)
+    mayJoinByReference: (message, requestId, referencedIds) =>
+        runInternal(() => mayJoinByReference(message, requestId, referencedIds)),
     // the text blocks a route may acknowledge with (Customer Service's options name the same)
     serviceGroupOf,
     // each operation checks its own permission and organization, and reads and writes with artifact authorization off

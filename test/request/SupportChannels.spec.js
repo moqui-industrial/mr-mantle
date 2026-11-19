@@ -497,6 +497,45 @@ feature("a reply joins its case by its references; the case's token joins for it
     }
 })
 
+feature("a reference joins only a case of the queue's organization, and a rule with no queue joins a case only for a sender verified for it (SEC-BAP-97)", {
+    when() {
+        const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})
+        // staff of the other organization, mailing its own queue with the references of this organization's case
+        party(prefix + "_OTHER_STAFF", "Olga", null, otherOrg, "PtyPerson", "olga.sch@example.com")
+        call("create#mantle.party.PartyRelationship", {
+            relationshipTypeEnumId: "PrtEmployee",
+            fromPartyId: prefix + "_OTHER_STAFF",
+            toPartyId: otherOrg,
+            toRoleTypeId: "OrgInternal",
+            fromDate: since
+        })
+        const references = {subject: "Re: SCH Thermostat is dark", inReplyTo: first.messageId, referencesHeader: first.messageId}
+        const staff = receive(Object.assign({fromAddress: "olga.sch@example.com", bodyText: "Ours now."}, references))
+        const staffOut = run("john.doe", R + "create#RequestFromEmail", {
+            emailMessageId: staff,
+            emailAccountId: account,
+            ruleOwnerUserId: state.otherAdmin,
+            value: state.otherQueue
+        })
+        // an authenticated stranger through a rule that names no queue: the case's references join nothing
+        const stranger = receive(Object.assign({fromAddress: "sam.sch@example.com", bodyText: "Me too."}, references))
+        const strangerOut = mail(stranger, null)
+        // the case's contact through the same rule joins it
+        const own = receive(Object.assign({fromAddress: "dana.sch@example.com", bodyText: "Still dark."}, references))
+        const ownOut = mail(own, null)
+        return {staffOut, staffRequest: requestOf(staff), strangerOut, strangerRequest: requestOf(stranger), ownOut}
+    },
+    then({staffOut, staffRequest, strangerOut, strangerRequest, ownOut}) {
+        staffOut.error == ""
+        staffOut.joined == false
+        staffRequest != state.mailCase
+        strangerOut.joined == false
+        strangerRequest != state.mailCase
+        ownOut.joined == true
+        ownOut.requestId == state.mailCase
+    }
+})
+
 feature("mail the gateway did not authenticate, or whose From is not one plain mailbox, joins no case and is held for review (SEC-BAP-84)", {
     when() {
         const first = one("moqui.basic.email.EmailMessage", {emailMessageId: state.firstMessage})
