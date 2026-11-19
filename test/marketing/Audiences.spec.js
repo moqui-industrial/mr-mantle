@@ -36,12 +36,15 @@ spec({
             users.reader = user(prefix, "reader", [orgA], ["MARKETING_VIEW"])
             // P6: Pia the editor's own personal contact, Pat the reader's (privateOwnerUserId), each with an address
             const personal = {Pia: users.editor, Pat: users.reader}
-            for (const name of ["Ana", "Ben", "Cyd", "Dee", "Eve", "Pia", "Pat"]) {
+            // Oli is organization B's contact (its owner), which A's lists never name (SEC-BAP-88)
+            const owner = {Oli: orgB}
+            for (const name of ["Ana", "Ben", "Cyd", "Dee", "Eve", "Pia", "Pat", "Oli"]) {
                 party[name] = prefix + "_" + name.toUpperCase()
                 make("mantle.party.Party", {
                     partyId: party[name],
                     partyTypeEnumId: "PtyPerson",
-                    ...(personal[name] ? {privateOwnerUserId: personal[name]} : {})
+                    ...(personal[name] ? {privateOwnerUserId: personal[name]} : {}),
+                    ...(owner[name] ? {ownerPartyId: owner[name]} : {})
                 })
                 make("mantle.party.Person", {partyId: party[name], firstName: name, lastName: "Audiencespec"})
                 if (name === "Eve") continue
@@ -132,10 +135,21 @@ feature("a request is pending without confirmation; one without an address is re
                 evidenceDate: ago(2),
                 evidenceText: "Met at the fair"
             }),
+            // another organization's contact and an internal organization are missing, named by id only (SEC-BAP-88)
+            foreign: as(users.editor, L + "request#Subscriptions", {
+                contactListId: listId,
+                partyIdList: [party.Oli, orgB],
+                sourceEnumId: "PcsForm",
+                evidenceDate: ago(2),
+                evidenceText: "Met at the fair"
+            }),
             members: as(users.editor, L + "find#Members", {contactListId: listId, memberStatus: "pending"})
         }
     },
-    then({out, again, noEvidence, personal, members}) {
+    then({out, again, noEvidence, personal, foreign, members}) {
+        outcomes(foreign) == ["refused:RECORD_UNAVAILABLE", "refused:RECORD_UNAVAILABLE"]
+        Array.from(foreign.results).map(result => result.partyName) == [party.Oli, orgB]
+        status(listId, party.Oli) == null
         out.refusal == ""
         outcomes(out) == ["pending:", "pending:", "refused:MISSING_DESTINATION"]
         status(listId, party.Ana) == "CLPT_PENDING" && status(listId, party.Ben) == "CLPT_PENDING"

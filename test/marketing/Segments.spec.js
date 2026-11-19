@@ -173,7 +173,16 @@ feature("an explicit exclusion wins over every match; an inclusion joins the rul
             excludeBen: member(party.Ben, "MspExclude"),
             includeAnn: member(party.Ann, "MspInclude"),
             includeFay: member(party.Fay, "MspInclude"),
-            otherParty: member(party.Gil + "_NONE", "MspInclude")
+            otherParty: member(party.Gil + "_NONE", "MspInclude"),
+            // organization B's contact and an internal organization are no member of A's segment (SEC-BAP-88)
+            foreign: (() => {
+                system(() => {
+                    make("mantle.party.Party", {partyId: prefix + "_FOREIGN", partyTypeEnumId: "PtyPerson", ownerPartyId: orgB})
+                    make("mantle.party.Person", {partyId: prefix + "_FOREIGN", firstName: "Foreign", lastName: "Segmentspec"})
+                })
+                return member(prefix + "_FOREIGN", "MspInclude")
+            })(),
+            organization: member(orgB, "MspInclude")
         }
         out.child = as(users.editor, Q + "evaluate#Segment", {marketSegmentId: segment.child, show: "all"})
         // an ended exclusion no longer applies; a second add of the same row names its revision
@@ -196,9 +205,10 @@ feature("an explicit exclusion wins over every match; an inclusion joins the rul
         out.after = as(users.editor, Q + "evaluate#Segment", {marketSegmentId: segment.child})
         return out
     },
-    then({excludeBen, includeAnn, includeFay, otherParty, child, endUnnamed, end, after}) {
+    then({excludeBen, includeAnn, includeFay, otherParty, foreign, organization, child, endUnnamed, end, after}) {
         excludeBen.refusal == "" && includeAnn.refusal == "" && includeFay.refusal == ""
         otherParty.refusal.includes("RECORD_UNAVAILABLE")
+        foreign.refusal.includes("RECORD_UNAVAILABLE") && organization.refusal.includes("RECORD_UNAVAILABLE")
         // Ann (a gardener outside California) is included; Ben excluded though his rules match; Fay included but no gardener
         matched(child) == [party.Ann, party.Cyd].sort()
         leftOut(child)[party.Ben] == "Excluded explicitly"

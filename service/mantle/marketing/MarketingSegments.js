@@ -1242,14 +1242,18 @@ function storeSegmentFilter(p) {
 
 // ===== store#SegmentMember =====
 // An explicit member, dated: add (include, the default, or exclude) from a date (now by default) until one (none by default), or
-// end the member's row now. A party is one that exists, is not disabled or merged and is not another user's personal contact. The
+// end the member's row now. A party is one that exists, is not disabled or merged, is not another user's personal contact, and is
+// shared or the segment's organization's and no internal organization (SEC-BAP-88). The
 // member row's revision is named when the row exists. An explicit member subscribes no one.
 function storeSegmentMember(p) {
     const userScope = audienceScope("audienceEdit")
     const segment = segmentOfScope(userScope, p.marketSegmentId, true)
     requireOpen(segment)
     const partyId = text(p.partyId)
-    if (!inScopeParties([partyId]).has(partyId)) denied("RECORD_UNAVAILABLE", "Party " + partyId + " is not available")
+    // a party of the segment's organization's audience: shared or its own, not an internal organization (SEC-BAP-88)
+    const party = inScopeParties([partyId]).get(partyId)
+    if (!party || !marketingAccess.organizationParty(party, segment.ownerPartyId))
+        denied("RECORD_UNAVAILABLE", "Party " + partyId + " is not available")
     const roleTypeId = text(p.roleTypeId) || "_NA_"
     const key = {marketSegmentId: segment.marketSegmentId, partyId, roleTypeId}
     const existing = find(MEMBER, key).forUpdate(true).one()
