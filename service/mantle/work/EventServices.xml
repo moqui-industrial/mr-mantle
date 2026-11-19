@@ -34,7 +34,7 @@ along with this software (see the LICENSE.md file). If not, see
             the user declined (the user's own rows so, and the user not its owner) is left out unless showDeclined even when
             it is in an asked calendar, though not when it books an asked resource.
             With publishToken (a publish link, mantle.work.CalendarServices.share#Calendar) only that calendar's events, at
-            the link's permission, and publishPassword must match its password.
+            the link's permission, and for a link with a password publishGrant must be the grant open#PublishedCalendar gave.
             With rootWorkEffortId (a project; IronStone Projects' calendar, design-projects.md §15 Calendar project filter) only
             the events linked to it (WorkEffortRecord of mantle.work.effort.WorkEffort) are in: all of them for a user who is a
             current party of the project (or ADMIN), else those the user owns or is a party of; the project's milestones,
@@ -79,7 +79,7 @@ along with this software (see the LICENSE.md file). If not, see
             <parameter name="excludeCancelled" type="Boolean" default="false"/>
             <parameter name="workEffortTypeEnumIds" type="List"><description>Default WetEvent</description></parameter>
             <parameter name="publishToken"/>
-            <parameter name="publishPassword"/>
+            <parameter name="publishGrant"><description>A link with a password: the grant mantle.work.CalendarServices.open#PublishedCalendar gave</description></parameter>
             <parameter name="rootWorkEffortId"><description>A project: only its linked events (WorkEffortRecord)</description></parameter>
             <parameter name="titleGString" default-value="\${(workEffort.workEffortName || (workEffort.purposeEnumId ? workEffort.purpose.description : 'Event')) + ' [' + workEffort.workEffortId + ']'}"/>
             <parameter name="urlGString"/>
@@ -156,8 +156,9 @@ along with this software (see the LICENSE.md file). If not, see
             if (publishToken) {
                 const share = ec.entity.find('mantle.work.calendar.CalendarShare').condition('publishToken', String(publishToken))
                         .condition(cf.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().one()
+                // a link with a password takes the grant its open gave (open#PublishedCalendar counts the wrong tries), never a password
                 const valid = share != null && !share.userId && !share.userGroupId && !share.partyId && (!share.passwordHash
-                        || (publishPassword && ec.user.passwordsMatch(String(publishPassword), share.passwordHash)))
+                        || (publishGrant && ec.resource.checkGrant(`${share.calendarShareId}\n${share.passwordHash}`, `calendar:${share.calendarShareId}`, String(publishGrant))))
                 if (!valid) { ec.message.addError('This calendar link is not valid'); return }
                 calendarLevel.set(share.calendarId, Math.min(levels[share.permissionEnumId] || 1, 2))
                 calendarOrder.push(share.calendarId)

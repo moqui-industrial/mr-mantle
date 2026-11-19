@@ -924,30 +924,41 @@ feature("import#Calendar splits a series at a RANGE=THISANDFUTURE override: the 
     },
 })
 
-// SEC-BOS-102: each try of the password is counted first, ten a link in ten minutes, past which even the right one is refused
-feature("a publish link reads the calendar with its password only, and stops taking tries after ten", {
+// SEC-BOS-102: the password is checked once, for a grant the events take; only a wrong try counts, ten a link in ten minutes, past
+// which even the right one is refused; right ones never lock the link
+feature("a publish link reads the calendar with the grant its right password gives, and stops taking wrong tries after ten", {
     when() {
         setTime(15)
         logout()
-        const wrong = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "wrong", start: "2027-05-09", end: "2027-05-15" })
-        const right = call(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        const range = { start: "2027-05-09", end: "2027-05-15" }
+        const open = (password) => call(`${CAL}.open#PublishedCalendar`, { publishToken, password }).grant
+        const wrong = errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "wrong" })
+        const noGrant = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken }, range))
+        const badGrant = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant: "1.forged" }, range))
+        let grant = null
+        for (let i = 0; i < 12; i++) grant = open("open sesame")
+        const right = call(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range))
         const guesses = []
-        for (let i = 0; i < 8; i++) guesses.push(errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "guess " + i, start: "2027-05-09", end: "2027-05-15" }))
-        const limited = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        for (let i = 0; i < 9; i++) guesses.push(errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "guess " + i }))
+        const limited = errorOf(`${CAL}.open#PublishedCalendar`, { publishToken, password: "open sesame" })
+        const stillOpen = call(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range)).eventList.length
         login("john.doe")
         setTime(15.1)
         const ended = as("Ada", () => call(`${CAL}.unshare#Calendar`, { calendarId: cal.projects, publish: true }).unsharedCount)
         logout()
-        const after = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        const after = errorOf(`${CAL}.get#PublishedCalendarEvents`, Object.assign({ publishToken, grant }, range))
         login("john.doe")
-        return { wrong, right, guesses, limited, ended, after }
+        return { wrong, noGrant, badGrant, right, guesses, limited, stillOpen, ended, after }
     },
-    then({ wrong, right, guesses, limited, ended, after }) {
+    then({ wrong, noGrant, badGrant, right, guesses, limited, stillOpen, ended, after }) {
         wrong.includes("The password is not right")
-        guesses.every((error) => error.includes("The password is not right"))
-        limited.includes("Too many tries")
+        noGrant.includes("needs its password")
+        badGrant.includes("needs its password")
         right.calendarName == "Ada Projects"
         right.eventList.map((item) => item.title).sort() == ["Design review", "Focus time"]
+        guesses.every((error) => error.includes("The password is not right"))
+        limited.includes("Too many tries")
+        stillOpen == 2
         ended == 1
         after.includes("not valid")
     },
