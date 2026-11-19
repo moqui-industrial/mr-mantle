@@ -156,10 +156,15 @@ function approve(scope, preference) {
     lib.requirePermission("INVOICE_APPROVE")
     const record = scope.record
     // its creator and anyone who changed its lines, amounts or header since (SEC-BOS-126)
-    const selfApproved =
-        record.draftedByUserId === ec.user.userId || changersOf(record.draftChangedByUserIds).includes(ec.user.userId)
+    const changed = changersOf(record.draftChangedByUserIds).includes(ec.user.userId)
+    const selfApproved = record.draftedByUserId === ec.user.userId || changed
     if (selfApproved && preference.allowAccountingSelfApproval !== "Y")
-        denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this invoice")
+        denied(
+            "SELF_APPROVAL_DENIED",
+            changed
+                ? "You changed this invoice; another finance approver must approve it"
+                : "Another finance approver must approve this invoice"
+        )
     call("update#" + I, {
         invoiceId: record.invoiceId,
         approvedByUserId: ec.user.userId,

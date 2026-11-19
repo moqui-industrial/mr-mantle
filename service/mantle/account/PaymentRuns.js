@@ -365,9 +365,15 @@ function approve(p) {
     const selected = selectedItems(run.paymentRunId)
     if (!selected.length) denied("RUN_EMPTY", "Select at least one bill")
     for (const item of selected) lib.requireNotHeld(item.invoiceId)
-    const selfApproved = run.createdByUserId === ec.user.userId || changersOf(run).includes(ec.user.userId)
+    const changed = changersOf(run).includes(ec.user.userId)
+    const selfApproved = run.createdByUserId === ec.user.userId || changed
     if (selfApproved && lib.policy.preference(run.organizationPartyId).allowAccountingSelfApproval !== "Y")
-        denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this payment run")
+        denied(
+            "SELF_APPROVAL_DENIED",
+            changed && run.createdByUserId !== ec.user.userId
+                ? "You changed this payment run's bills; another finance approver must approve it"
+                : "Another finance approver must approve this payment run"
+        )
     const approvedTotal = total(selected)
     call("update#" + R, {
         paymentRunId: run.paymentRunId,
