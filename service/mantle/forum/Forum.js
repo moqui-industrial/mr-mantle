@@ -1629,6 +1629,13 @@ methods.updatePost = (p) => {
         invalid('Only the author changes attachments')
     if (a.canModerate && event.fromPartyId !== me() && !p.reason)
         invalid('Staff edits require a reason')
+    // The author or staff may take the earlier versions out of the post's public history, so text an edit removes (an
+    // address, a secret, abuse) is no longer shown to readers or restored by a wiki editor; staff editing another's post
+    // do so unless they say otherwise. The author and staff still read every version.
+    const staffEdit = a.canModerate && event.fromPartyId !== me()
+    const hideHistory = p.hideHistory == null ? staffEdit : p.hideHistory === true
+    if (hideHistory && !a.canModerate && event.fromPartyId !== me())
+        fail('Unauthorized', 'Only the author or staff hide earlier versions')
     // An edit keeps the post's authoring format unless it names one.
     const format =
         p.sourceFormat == null || p.sourceFormat === ''
@@ -1671,6 +1678,14 @@ methods.updatePost = (p) => {
         reason: p.reason,
         publicHistoryAllowed: 'Y',
     })
+    if (hideHistory)
+        for (const earlier of Array.from(
+            find(F + 'ForumPostRevision', { communicationEventId: p.postId })
+                .condition('revision', 'less', r)
+                .condition('publicHistoryAllowed', 'equals', 'Y')
+                .list(),
+        ))
+            update(earlier, { publicHistoryAllowed: 'N' })
     update(event, { body, editedDate: now() })
     update(st, {
         revision: r,
@@ -3729,6 +3744,9 @@ methods.getEditablePost = (p) => {
                 : StringUtilities.cleanHtml(event.body || ''),
             sourceFormat: markdown ? 'markdown' : 'html',
             mode: 'edit',
+            // the author and staff may hide the earlier versions from readers; staff editing another's post do by default
+            canHideHistory: a.canModerate || event.fromPartyId === me(),
+            hideHistory: a.canModerate && event.fromPartyId !== me(),
             attachments: rows(
                 F + 'ForumAttachment',
                 { siteId: p.siteId, communicationEventId: p.postId },
@@ -4517,6 +4535,7 @@ methods.restorePostRevision = (p) => {
         body: r.sourceText || r.sanitizedBody,
         expectedRevision: p.expectedRevision,
         reason: p.reason || 'Restored revision ' + r.revision,
+        hideHistory: p.hideHistory ?? false,
     })
 }
 methods.deletePost = (p) => {
@@ -5838,6 +5857,7 @@ function execute(operation, p) {
         'mine',
         'sourceFrozen',
         'ownersOnly',
+        'hideHistory',
     ])
     const listFields = new Set([
         'attachmentIds',

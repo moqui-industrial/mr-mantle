@@ -161,3 +161,44 @@ feature("SEC-PFS-96: an owner's membership is changed only after the caller sign
         member.kind == null
     }
 })
+
+feature("SEC-PFS-86: the author's or staff's edit takes the earlier versions out of the post's public history", {
+    when() {
+        lib.settled(SITE, "FSR_ANN")
+        const topic = op("FSR_ANN", "publishPost", {
+            contactListId: ids.general,
+            title: "FSR history",
+            body: "<p>Call me at 555-0100</p>",
+            operationId: operationId()
+        })
+        const postId = topic.rootCommEventId
+        const edited = op("FSR_ANN", "updatePost", {postId, body: "<p>Call me</p>", expectedRevision: 1, hideHistory: true})
+        // a staff edit of another member's post hides them unless the editor says otherwise
+        lib.settled(SITE, "FSR_BEN")
+        const reply = op("FSR_BEN", "publishPost", {rootCommEventId: postId, body: "<p>FSR abuse</p>", operationId: operationId()})
+        const moderated = op("FSR_MOD", "updatePost", {
+            postId: reply.postId,
+            body: "<p>Removed by a moderator</p>",
+            expectedRevision: 1,
+            reason: "Abuse"
+        })
+        return {
+            edited,
+            moderated,
+            reader: revisions(op("FSR_BEN", "getPostHistory", {postId})),
+            compare: kind(op("FSR_BEN", "comparePostRevisions", {postId, fromRevision: 1, toRevision: 2})),
+            author: revisions(op("FSR_ANN", "getPostHistory", {postId})),
+            staff: revisions(op("FSR_MOD", "getPostHistory", {postId})),
+            replyReader: revisions(op("FSR_ANN", "getPostHistory", {postId: reply.postId}))
+        }
+    },
+    then({edited, moderated, reader, compare, author, staff, replyReader}) {
+        edited.kind == null
+        moderated.kind == null
+        reader == [2]
+        compare == "NotFound"
+        author == [2, 1]
+        staff == [2, 1]
+        replyReader == [2]
+    }
+})

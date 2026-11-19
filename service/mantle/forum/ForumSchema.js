@@ -260,6 +260,7 @@
             'draftId',
             'attachmentIds',
             'sourceFormat',
+            'hideHistory',
         ],
     },
     markRead: {
@@ -609,7 +610,14 @@
     },
     restorePostRevision: {
         service: 'mantle.forum.ForumServices.restore#PostRevision',
-        fields: ['siteId', 'postId', 'revision', 'expectedRevision', 'reason'],
+        fields: [
+            'siteId',
+            'postId',
+            'revision',
+            'expectedRevision',
+            'reason',
+            'hideHistory',
+        ],
     },
     deletePost: {
         service: 'mantle.forum.ForumServices.delete#Post',
