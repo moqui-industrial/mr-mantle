@@ -227,6 +227,8 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.modeByManager = as(users.manage, () => store("shippingGateway", ids.shippo, {testMode: "N"}))
         out.config = one(CONFIG, {paymentGatewayConfigId: ids.anet}).getMap()
         out.remote = one(REMOTE, {systemMessageRemoteId: ids.anet}).getMap()
+        out.shippoRemote = one(REMOTE, {systemMessageRemoteId: ids.shippo})?.getMap()
+        out.traceRemote = one(REMOTE, {systemMessageRemoteId: ids.trace})?.getMap()
         out.anetOptions = one("mantle.account.method.PaymentGatewayAuthorizeNet", {paymentGatewayConfigId: ids.anet})?.getMap()
         out.traceOptions = one("mantle.account.method.PaymentGatewayPayTrace", {paymentGatewayConfigId: ids.trace}).getMap()
         out.shipping = one("mantle.shipment.carrier.ShippingGatewayConfig", {shippingGatewayConfigId: ids.shippo}).getMap()
@@ -245,6 +247,10 @@ feature("a gateway is a registered provider type with that type's services, and 
         out.anet.applied === true
         out.config.authorizeServiceName === "mantle.ext.account.gateway.AuthorizeNetServices.authorize#Payment"
         out.config.systemMessageRemoteId === ids.anet
+        // each connection is for its provider's webhook type only, PayTrace's for none (SEC-RTE-86)
+        out.remote.systemMessageTypeId === "AuthorizeNetWebhook"
+        out.shippoRemote.systemMessageTypeId === "ShippoWebhook"
+        out.traceRemote.systemMessageTypeId == null
         out.anetOptions.validationMode === "none"
         out.credentials.applied === true
         out.read.secretList.find(row => row.name === "password").secretSet === true

@@ -78,6 +78,8 @@ const paymentTypes = {
         },
         hosts: {"apitest.authorize.net": "T", "api.authorize.net": "P"},
         address: "https://apitest.authorize.net/xml/v1/request.api",
+        // the one message type its remote takes at /rest/sm (SEC-RTE-86)
+        webhookType: "AuthorizeNetWebhook",
         optionsPart: "authorizeNet",
         options: {validationMode: "none", lookupGraceSeconds: 300},
         needs: "its API endpoint, API login id (the user) and transaction key (the password)",
@@ -120,6 +122,8 @@ const shippingTypes = {
         // where its label files are (an answer's label_url, a presigned storage link; SEC-BAP-06)
         labelHosts: ["shippo-delivery.s3.amazonaws.com", "shippo-delivery-east.s3.amazonaws.com", "deliver.goshippo.com"],
         address: "https://api.goshippo.com",
+        // the one message type its remote takes at /rest/sm (SEC-RTE-86)
+        webhookType: "ShippoWebhook",
         needs: "its API base and API token (the password)",
         complete: remote => !!text(remote.sendUrl) && !!text(remote.password)
     }
@@ -182,7 +186,9 @@ const newRemote = (id, values, type) => ({
     description: text(values.description),
     sendUrl: type.address,
     usageCode: "T",
-    messageAuthEnumId: "SmatLogin"
+    messageAuthEnumId: "SmatLogin",
+    // the remote is for its provider's webhook type only (SEC-RTE-86); a provider with none (PayTrace) receives nothing here
+    systemMessageTypeId: type.webhookType || null
 })
 
 // ===== payment gateways =====
