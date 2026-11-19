@@ -303,12 +303,11 @@ feature("SEC-PFS-93: one open export per member, a day's report files per staff 
     }
 })
 
-feature("SEC-PFS-99: a site's owner sends as a registered sender of the site's own domain only; the operator any", {
+feature("SEC-PFS-99: a site sends only as a sender of its own host name or one the operator names for it, checked at send time", {
     when() {
-        setConf("pass@sender-addresses", "forum@" + HOST + ",forum@other.test")
-        setConf("pass@mail-template-ids", "FSR_OWN,FSR_OTHER")
         for (const [emailTemplateId, fromAddress] of [
             ["FSR_OWN", "forum@" + HOST],
+            ["FSR_PARENT", "forum@example.test"],
             ["FSR_OTHER", "forum@other.test"]
         ])
             lib.make("moqui.basic.email.EmailTemplate", {
@@ -320,16 +319,31 @@ feature("SEC-PFS-99: a site's owner sends as a registered sender of the site's o
             })
         const store = (username, senderAddress, templateId, expectedRevision) =>
             op(username, "storeMailSettings", {senderAddress, senderName: "FSR", templateId, expectedRevision})
-        const other = store("FSR_OWNER", "forum@other.test", "FSR_OTHER", 0)
-        const own = store("FSR_OWNER", "forum@" + HOST, "FSR_OWN", 0)
-        const operator = store(lib.OPERATOR, "forum@other.test", "FSR_OTHER", 1)
-        const back = store(lib.OPERATOR, "forum@" + HOST, "FSR_OWN", 2)
-        return {other, own, operator, back}
+        const senders = "forum@" + HOST + ",forum@example.test,forum@other.test"
+        return withConf("pass@sender-addresses", senders, () =>
+            withConf("pass@mail-template-ids", "FSR_OWN,FSR_PARENT,FSR_OTHER", () => {
+                // a parent domain is a sibling site's too (another.example.test), and another domain is another site's
+                const parent = store("FSR_OWNER", "forum@example.test", "FSR_PARENT", 0)
+                const other = store(lib.OPERATOR, "forum@other.test", "FSR_OTHER", 0)
+                const own = store("FSR_OWNER", "forum@" + HOST, "FSR_OWN", 0)
+                // the operator names the site for a sender of a custom domain
+                const named = withConf("mantle@forum-sender-sites", "forum@other.test=" + SITE + ";FSR_ELSEWHERE", () =>
+                    store("FSR_OWNER", "forum@other.test", "FSR_OTHER", 1)
+                )
+                // sent with what is stored only while the operator's registration still holds it
+                const atSend = lib.privileged(() => core().mailSettings(SITE))
+                const back = store("FSR_OWNER", "forum@" + HOST, "FSR_OWN", 2)
+                return {parent, other, own, named, atSend, back}
+            })
+        )
     },
-    then({other, own, operator, back}) {
+    then({parent, other, own, named, atSend, back}) {
+        parent.kind == "Unprocessable"
+        parent.message.includes("ask the operator")
         other.kind == "Unprocessable"
         own.revision == 1
-        operator.revision == 2
+        named.revision == 2
+        atSend == null
         back.revision == 3
     }
 })

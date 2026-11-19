@@ -839,6 +839,63 @@ function memberHtml(html, siteId, mail = false) {
         }),
     )
 }
+/* Whether a registered sender serves a site (SEC-PFS-99): its domain is exactly one of the site's host names, or the
+   operator names the site for it in mantle@forum-sender-sites ("address=SITE_A;SITE_B, ..."). The registered senders
+   (pass@sender-addresses) are the deployment's, so a site's mail never goes out as another site's. */
+function senderServes(siteId, address) {
+    const sender = String(address || '').trim().toLowerCase()
+    const domain = sender.includes('@') ? sender.split('@').pop() : ''
+    if (!domain) return false
+    if (
+        rows(S + 'PublicSiteHost', { siteId }, 100).some(
+            (h) => String(h.hostname || '').toLowerCase() === domain,
+        )
+    )
+        return true
+    return String(ec.factory.getConfValue('mantle@forum-sender-sites') || '')
+        .split(',')
+        .map((entry) => entry.trim().split('='))
+        .some(
+            ([named, sites]) =>
+                String(named || '').trim().toLowerCase() === sender &&
+                String(sites || '')
+                    .split(';')
+                    .map((s) => s.trim())
+                    .includes(siteId),
+        )
+}
+/* Why the operator's registration refuses a sender and template for a site, or null: the sender of pass@sender-addresses
+   that serves the site, and a template of pass@mail-template-ids from that sender. */
+function mailSettingsRefusal(siteId, senderAddress, templateId) {
+    const listed = (selector) =>
+        String(ec.factory.getConfValue(selector) || '')
+            .split(',')
+            .map((x) => x.trim())
+    if (!listed('pass@sender-addresses').includes(senderAddress))
+        return 'Sender must be registered by the operator'
+    if (!senderServes(siteId, senderAddress))
+        return "That sender is not this site's: its domain is none of the site's host names; ask the operator to register it for this site"
+    const template = one('moqui.basic.email.EmailTemplate', {
+        emailTemplateId: templateId,
+    })
+    if (
+        !template ||
+        template.fromAddress !== senderAddress ||
+        !listed('pass@mail-template-ids').includes(templateId)
+    )
+        return 'Template and sender must be registered together'
+    return null
+}
+/* A site's mail settings to send with, checked again against the registration at send time; null (and an error in the
+   log) when the operator's registration no longer holds them. */
+function mailSettings(siteId) {
+    const settings = one(F + 'ForumMailSettings', { siteId })
+    if (!settings) return null
+    const refusal = mailSettingsRefusal(siteId, settings.senderAddress, settings.templateId)
+    if (!refusal) return settings
+    ec.logger.error('Forum mail of site ' + siteId + ' is not sent: ' + refusal)
+    return null
+}
 /* Sanitized HTML as plain text; templates escape it once. */
 function plainText(html) {
     return StringUtilities.cleanHtml(html || '')
@@ -2074,6 +2131,8 @@ function privateTopic(t) {
     heldMail,
     ATTACHMENT_TYPES,
     attachmentName,
+    mailSettings,
+    mailSettingsRefusal,
     reviewScoped,
     TARGET_TYPES,
     listMember,

@@ -2492,37 +2492,9 @@ methods.resolveDelivery = (p) => {
 }
 methods.storeMailSettings = (p) => {
     site(p.siteId, true)
-    const allowed = String(ec.factory.getConfValue('pass@sender-addresses') || '')
-        .split(',')
-        .map((x) => x.trim())
-    if (!allowed.includes(p.senderAddress))
-        invalid('Sender must be registered by the operator')
-    // The registered senders are the deployment's: a site's owner takes only one of the site's own domain, the domain of
-    // one of its hosts or one above it (forum.example.com sends as example.com), so one site's mail never goes out as
-    // another's (SEC-PFS-99); the operator stores any registered sender.
-    if (!isOperator()) {
-        const domain = String(p.senderAddress).split('@').pop().trim().toLowerCase()
-        const hosts = rows(S + 'PublicSiteHost', { siteId: p.siteId }, 100).map(
-            (h) => String(h.hostname || '').toLowerCase(),
-        )
-        if (
-            !domain ||
-            !hosts.some((h) => h === domain || h.endsWith('.' + domain))
-        )
-            invalid("The sender's domain must be one of this site's host domains")
-    }
-    const template = one('moqui.basic.email.EmailTemplate', {
-        emailTemplateId: p.templateId,
-    })
-    const templates = String(ec.factory.getConfValue('pass@mail-template-ids') || '')
-        .split(',')
-        .map((x) => x.trim())
-    if (
-        !template ||
-        template.fromAddress !== p.senderAddress ||
-        !templates.includes(p.templateId)
-    )
-        invalid('Template and sender must be registered together')
+    // a sender of the operator's registration that serves this site (ForumCore.js senderServes, SEC-PFS-99)
+    const refusal = core.mailSettingsRefusal(p.siteId, p.senderAddress, p.templateId)
+    if (refusal) invalid(refusal)
     const old = one(F + 'ForumMailSettings', { siteId: p.siteId }, true)
     if (old) revision(old, p.expectedRevision)
     const values = {
@@ -5137,7 +5109,7 @@ methods.testRoute = (p) => {
     site(p.siteId, true)
     const r = one(F + 'ForumMailRoute', { routeId: p.routeId })
     if (!r || r.siteId !== p.siteId) missing()
-    const settings = one(F + 'ForumMailSettings', { siteId: p.siteId }),
+    const settings = core.mailSettings(p.siteId),
         ua = ec.user.userAccount
     if (!settings) fail('Conflict', 'Configure outbound mail first')
     if (
@@ -5748,7 +5720,7 @@ function postInbound(p) {
 /* A safe outcome notice to a verified member: what happened, never another thread's content. */
 function feedback(siteId, ua, text) {
     if (!text) return
-    const settings = one(F + 'ForumMailSettings', { siteId })
+    const settings = core.mailSettings(siteId)
     if (!settings) return
     try {
         ec.service

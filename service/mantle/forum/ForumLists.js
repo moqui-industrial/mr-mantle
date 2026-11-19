@@ -935,7 +935,7 @@
     /* A plain notice by the site's mail settings: whether it was sent; never throws, and never fails the caller's work.
        body: cleaned HTML for the template's body, when the notice has more to say than its title. */
     function notify(siteId, toAddress, title, url, body) {
-        const settings = one(F + "ForumMailSettings", {siteId})
+        const settings = core.mailSettings(siteId)
         if (!settings) return false
         try {
             const out = ec.service
