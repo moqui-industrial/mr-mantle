@@ -206,7 +206,7 @@ feature("event creation and business-day calculations", {
 
 // SEC-BOS-110 (review): a user, with authorization on, moves a task only into a project they see (get#VisibleProjectInfo): joe
 // moves his task into a General project of his organization, not into a Work group project he is not on
-feature("a user moves a task only into a project they see (SEC-BOS-110)", {
+feature("a user moves a task only into a project they see, and a root that is no project is not checked (SEC-BOS-110)", {
     when() {
         call("create#mantle.work.effort.WorkEffort", { workEffortId: "WPS-OPEN", workEffortTypeEnumId: "WetProject", workEffortName: "WPS Open project",
                 statusId: "WeInProgress", visibilityEnumId: "WevGeneral", ownerPartyId: "ORG_ZIZI_SERVICES" })
@@ -214,6 +214,9 @@ feature("a user moves a task only into a project they see (SEC-BOS-110)", {
                 statusId: "WeInProgress", visibilityEnumId: "WevWorkGroup", ownerPartyId: "ORG_ZIZI_SERVICES" })
         call("create#mantle.work.effort.WorkEffort", { workEffortId: "WPS-JOE", workEffortTypeEnumId: "WetTask", workEffortName: "Joe's loose task",
                 statusId: "WeInPlanning", ownerPartyId: "ORG_ZIZI_JD" })
+        // a task tree rooted in a task, no project: no project rule applies to a move into it
+        for (const [workEffortId, workEffortName] of [["WPS-JOE-TOP", "Joe's tree"], ["WPS-JOE-2", "Joe's second task"]])
+            call("create#mantle.work.effort.WorkEffort", { workEffortId, workEffortTypeEnumId: "WetTask", workEffortName, statusId: "WeInPlanning", ownerPartyId: "ORG_ZIZI_JD" })
         call("create#moqui.security.UserGroup", { userGroupId: "WPS_TASK_CALLER", description: "Spec task callers" })
         call("create#moqui.security.UserGroupMember", { userGroupId: "WPS_TASK_CALLER", userId: "ORG_ZIZI_JD", fromDate: 0 })
         call("create#moqui.security.ArtifactGroup", { artifactGroupId: "WPS_TASK_SERVICES", description: "Spec task services" })
@@ -226,7 +229,8 @@ feature("a user moves a task only into a project they see (SEC-BOS-110)", {
         try {
             const hidden = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE", rootWorkEffortId: "WPS-CLOSED" })
             const open = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE", rootWorkEffortId: "WPS-OPEN" })
-            return { hidden, open }
+            const tree = errorOf("mantle.work.TaskServices.update#Task", { workEffortId: "WPS-JOE-2", rootWorkEffortId: "WPS-JOE-TOP" })
+            return { hidden, open, tree }
         } finally {
             ec.artifactExecution.disableAuthz()
             login("john.doe")
@@ -237,9 +241,10 @@ feature("a user moves a task only into a project they see (SEC-BOS-110)", {
             ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "WPS_TASK_CALLER").deleteAll()
         }
     },
-    then({ hidden, open }) {
+    then({ hidden, open, tree }) {
         hidden.includes("PROJECT_UNAVAILABLE")
         open == null
+        tree == null
         we("WPS-JOE").rootWorkEffortId == "WPS-OPEN"
     },
 })
