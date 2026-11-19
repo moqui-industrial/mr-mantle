@@ -1100,7 +1100,8 @@ kit => {
             const artifact = others ? null : one("moqui.resource.GitRunArtifact", {artifactId: asset.artifactId})
             if (artifact && artifact.keep === "Y") update(artifact, {keep: "N"})
         }
-        if (asset.contentLocation)
+        // only a file this site keeps under the content root is removed, never another stored location (SEC-PFS-82)
+        if (asset.contentLocation && String(asset.contentLocation).startsWith(assetRoot(asset.siteId) + "/"))
             try {
                 ec.resource.getLocationReference(asset.contentLocation).delete()
             } catch (error) {

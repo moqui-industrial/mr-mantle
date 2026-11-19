@@ -10,6 +10,7 @@ const ids = {}
 const op = (username, operation, input) => lib.op(username, lib.SITE7, operation, {repositoryId: ids.repositoryId, ...input})
 // a user's own content-root preference, which moves no file (SEC-PFS-82), and the content root setting
 const MOVED = "runtime://tmp/sst-content-root-moved"
+const SET_ROOT = "dbresource://spec-smithy-content-root"
 const ROOT = String(ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content").replace(/\/+$/, "")
 // over the 64 KiB a stored file keeps in its row, so its content is a blob
 const ARTIFACT_TEXT = "the release's archive, as a runner uploaded it\n".repeat(2000)
@@ -309,7 +310,10 @@ feature("a release file is kept under the content root setting, whatever the Mai
         lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", MOVED))
         let added
         try {
-            added = op("SST_MAINT", "addReleaseAsset", {tag: "v1.2.0", attachmentId: "SST_UP_FILE", name: "notes-file.txt", operationId: "sst-asset-root"})
+            // the root set apart from its default, so the setting is seen to be read
+            added = withConf("mantle@content-root", SET_ROOT, () =>
+                op("SST_MAINT", "addReleaseAsset", {tag: "v1.2.0", attachmentId: "SST_UP_FILE", name: "notes-file.txt", operationId: "sst-asset-root"})
+            )
         } finally {
             lib.as("SST_MAINT", () => ec.user.setPreference("mantle.content.root", null))
         }
@@ -318,7 +322,7 @@ feature("a release file is kept under the content root setting, whatever the Mai
     },
     then({added, asset, moved}) {
         added.assetId != null
-        asset.contentLocation == ROOT + "/smithy/" + lib.SITE7 + "/release-assets/" + asset.assetId + "/notes-file.txt"
+        asset.contentLocation == SET_ROOT + "/smithy/" + lib.SITE7 + "/release-assets/" + asset.assetId + "/notes-file.txt"
         lib.privileged(() => ec.resource.getLocationReference(asset.contentLocation).getText()) == "Uploaded\n"
         !moved
     }

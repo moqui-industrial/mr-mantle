@@ -555,3 +555,32 @@ feature("the lifecycle participant lists a user's open campaign roles to an owne
         !later.resourceList.some(found => found.resourceId == resourceId)
     }
 })
+
+// SEC-BAP-82: a campaign's file is written under Mantle's content root settings (here set apart, so the setting is seen
+// to be read), never where the author's own content-root preference points, with its name safe in a location
+feature("a campaign's file is kept under the content root setting, whatever the author's own preference says", {
+    when() {
+        const id = campaign(users.author, orgA, {campaignName: "Files"})
+        login(users.author)
+        ec.user.setPreference("mantle.content.root", "runtime://tmp/mkc-content-root-moved")
+        ec.user.setPreference("mantle.content.large.root", "runtime://tmp/mkc-content-root-moved")
+        let out
+        try {
+            out = withConf("mantle@content-root", "dbresource://spec-mkc-root", () =>
+                as(users.author, C + "create#CampaignAsset", {marketingCampaignId: id, contentFile: uploadedFile("C# brief.txt", "Brief")})
+            )
+        } finally {
+            login(users.author)
+            ec.user.setPreference("mantle.content.root", null)
+            ec.user.setPreference("mantle.content.large.root", null)
+        }
+        const asset = system(() => row("mantle.marketing.campaign.CampaignAsset", {campaignAssetId: out.campaignAssetId}))
+        return {id, out, asset, moved: system(() => ec.resource.getLocationReference("runtime://tmp/mkc-content-root-moved").getExists())}
+    },
+    then({id, out, asset, moved}) {
+        out.refusal == ""
+        asset.contentLocation == "dbresource://spec-mkc-root/marketingCampaign/" + id + "/asset_" + out.campaignAssetId + "/C_ brief.txt"
+        system(() => ec.resource.getLocationReference(asset.contentLocation).getText()) == "Brief"
+        !moved
+    }
+})

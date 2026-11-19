@@ -1802,12 +1802,17 @@ along with this software (see the LICENSE.md file). If not, see
             const content = Array.from(ec.entity.find('mantle.work.effort.WorkEffortContent').condition('workEffortId', workEffortId)
                     .condition('contentTypeEnumId', 'WectReleaseNotes').orderBy('-contentDate').list())[0] || null
             const root = String(ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content').replace(/\/+$/, '')
-            const location = content?.contentLocation || (root + '/work/' + workEffortId + '/release-notes.md')
+            // the stored file is written again only where this service puts it, under the content root; any other stored
+            // location (a row made elsewhere, a root since changed) gets a new file under the root (SEC-PFS-82)
+            const own = root + '/work/' + workEffortId + '/'
+            const stored = String(content?.contentLocation || '')
+            const location = stored.startsWith(own) && !stored.includes('#') && !stored.split('/').includes('..') ? stored
+                    : own + 'release-notes.md'
             ec.resource.getLocationReference(location).putText(String(notesText || ''))
             if (content != null) {
                 workEffortContentId = content.workEffortContentId
                 ec.service.sync().name('update#mantle.work.effort.WorkEffortContent').parameters({workEffortContentId: workEffortContentId,
-                    contentDate: ec.user.nowTimestamp, userId: ec.user.userId || null}).call()
+                    contentLocation: location, contentDate: ec.user.nowTimestamp, userId: ec.user.userId || null}).call()
             } else {
                 workEffortContentId = ec.service.sync().name('create#mantle.work.effort.WorkEffortContent').parameters({workEffortId: workEffortId,
                     contentTypeEnumId: 'WectReleaseNotes', contentLocation: location, description: ec.resource.expand('Release notes of ${version}', '',
