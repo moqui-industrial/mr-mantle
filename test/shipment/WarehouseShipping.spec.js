@@ -767,6 +767,30 @@ feature("a print failure leaves the posted result and offers a reprint; the prin
     }
 })
 
+feature("a printer serves one organization's facilities, and a reprint sends only a job printed at its facility since the binding (SEC-BAP-103)", {
+    when() {
+        const job = Array.from(
+            find("moqui.basic.print.PrintJob", {networkPrinterId: "WSH_PRINTER"}).orderBy("-createdDate").limit(1).list()
+        )[0]
+        call("create#mantle.facility.Facility", {facilityId: "WSH_FAC2", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
+        call("create#mantle.facility.Facility", {facilityId: "WSH_OTHER_FAC", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "WSH_OTHER"})
+        const binding = facilityId => ({facilityId, printerPurposeEnumId: "PtpPackageLabel", networkPrinterId: "WSH_PRINTER"})
+        return {
+            sameOrganization: run("wsh_admin", P + "store#FacilityPrinter", binding("WSH_FAC2")),
+            otherOrganization: run("wsh_outsider", P + "store#FacilityPrinter", binding("WSH_OTHER_FAC")),
+            // the first facility's job, asked again at the second facility that bound the printer after it
+            elsewhere: run("wsh_shipper", P + "dispatch#Document", {facilityId: "WSH_FAC2", printJobId: job.printJobId}),
+            here: run("wsh_shipper", P + "dispatch#Document", {facilityId: facility, printJobId: job.printJobId})
+        }
+    },
+    then({sameOrganization, otherOrganization, elsewhere, here}) {
+        sameOrganization.error == ""
+        otherOrganization.error.includes("PRINTER_UNAVAILABLE")
+        elsewhere.error.includes("RECORD_UNAVAILABLE")
+        here.error == ""
+    }
+})
+
 feature("a return label is requested on the same recorded gateway path", {
     when() {
         // a shipped sale to return

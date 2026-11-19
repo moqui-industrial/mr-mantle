@@ -122,6 +122,16 @@ function storeBinding(p) {
     }
     if (blank(p.networkPrinterId) || !one(PRINTER, {networkPrinterId: p.networkPrinterId}))
         denied("PRINTER_INVALID", "Choose a network printer")
+    // a printer serves one organization's facilities: one another organization's facility binds now or later is refused, so
+    // its jobs and their documents never print, or reprint, where another organization collects them (SEC-BAP-103)
+    const organizationPartyId = facilityScope.facilityOrganization(facility)
+    const sharedWith = rows(BINDING, {networkPrinterId: p.networkPrinterId}).some(
+        row =>
+            row.facilityId !== facility.facilityId &&
+            (row.thruDate == null || lib.ms(row.thruDate) > lib.ms(ec.user.nowTimestamp)) &&
+            facilityScope.facilityOrganization(row.facilityId) !== organizationPartyId
+    )
+    if (sharedWith) denied("PRINTER_UNAVAILABLE", "Printer " + p.networkPrinterId + " serves another organization's facility")
     const copies = blank(p.copies) ? 1 : number(p.copies)
     if (!Number.isInteger(copies) || copies < 1 || copies > 20) denied("COPIES_INVALID", "Copies are 1 to 20")
     if (p.fromDate && p.thruDate && lib.ms(p.thruDate) <= lib.ms(p.fromDate))
@@ -158,11 +168,26 @@ function dispatch(p) {
     const facility = facilityOf(userScope, p.facilityId)
     // a reprint: the same document sent again, from the job a print left
     if (!blank(p.printJobId)) {
+        // only a job printed here: on a printer the facility binds now, since that binding began, and for a label a shipment
+        // of this facility; never another facility's job on a printer once or also bound here (SEC-BAP-103)
         const job = one(JOB, {printJobId: p.printJobId})
         const bound = job
-            ? rows(BINDING, {facilityId: facility.facilityId}).some(row => row.networkPrinterId === job.networkPrinterId)
+            ? rows(BINDING, {facilityId: facility.facilityId}).some(
+                  row =>
+                      row.networkPrinterId === job.networkPrinterId &&
+                      inEffect(row) &&
+                      (row.fromDate == null || lib.ms(job.createdDate) >= lib.ms(row.fromDate))
+              )
             : false
-        if (!job || !bound) denied("RECORD_UNAVAILABLE", "Print job " + p.printJobId + " is not of this facility's printers")
+        const labelOf = job ? /^(?:Shipment|Return)Label(.+)-[^-]+-\d*$/.exec(String(job.jobName || "")) : null
+        const labelHere =
+            !labelOf ||
+            rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: labelOf[1]}).some(
+                row => row.originFacilityId === facility.facilityId || row.destinationFacilityId === facility.facilityId
+            )
+        if (!job || !bound || !labelHere)
+            denied("RECORD_UNAVAILABLE", "Print job " + p.printJobId + " is not of this facility's printers")
+        if (labelOf) requireAny(["SHIPMENT_SHIP", "SHIPMENT_PACK"])
         if (job.document == null) return failure("DOCUMENT_UNAVAILABLE", "The job kept no document to send again")
         try {
             probe("org.moqui.impl.PrintServices.send#PrintJob", {printJobId: job.printJobId})
