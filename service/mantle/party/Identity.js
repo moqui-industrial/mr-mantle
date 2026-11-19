@@ -502,6 +502,23 @@ function storeOrganizationMembership(p) {
             denied("RECORD_UNAVAILABLE", "The membership is not available")
         if (text(p.expectedRevision) !== stamp(row))
             return refused("REVISION_CHANGED", "The membership changed since you read it; reload it", {revision: stamp(row)})
+        // the job title alone (SEC-BOS-89: Commons no longer changes a staff relationship), audit-logged with the reason
+        if (p.changeTitle === true || p.changeTitle === "true" || p.changeTitle === "Y") {
+            if (reason) ec.context.putAll({relationshipName_changeReason: reason})
+            const titled = ec.entity.makeValue(RELATIONSHIP)
+            titled.setFields(
+                {partyRelationshipId: row.partyRelationshipId, relationshipName: text(p.relationshipName) || null},
+                true,
+                null,
+                null
+            )
+            titled.update()
+            return {
+                applied: true,
+                partyRelationshipId: row.partyRelationshipId,
+                revision: stamp(one(RELATIONSHIP, {partyRelationshipId: row.partyRelationshipId}))
+            }
+        }
         if ((ms(row.thruDate) ?? Infinity) <= now) return refused("MEMBERSHIP_ENDED", "The membership has already ended")
         const thruDate = p.thruDate != null && p.thruDate !== "" ? ms(p.thruDate) : now
         if (!Number.isFinite(thruDate) || thruDate < now - 60000) throw new Error("A membership ends now or later")
@@ -562,6 +579,7 @@ function storeOrganizationMembership(p) {
             fromPartyId: partyId,
             toPartyId: organizationPartyId,
             toRoleTypeId: "OrgInternal",
+            relationshipName: text(p.relationshipName) || null,
             fromDate: iso(fromDate),
             thruDate: iso(thruDate)
         },

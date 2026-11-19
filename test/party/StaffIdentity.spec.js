@@ -308,16 +308,27 @@ feature(
                         partyRelationshipId: added.partyRelationshipId,
                         expectedRevision: "1"
                     })
-                    const ended = result(S + "store#OrganizationMembership", {
+                    // the job title alone (SEC-BOS-89: Commons no longer retitles staff), then the end
+                    const titled = result(S + "store#OrganizationMembership", {
                         partyRelationshipId: added.partyRelationshipId,
                         expectedRevision: added.revision,
+                        changeTitle: true,
+                        relationshipName: "Covering agent",
+                        reason: "Title"
+                    })
+                    const title = rows("mantle.party.PartyRelationship", {partyRelationshipId: added.partyRelationshipId})[0]
+                    const ended = result(S + "store#OrganizationMembership", {
+                        partyRelationshipId: added.partyRelationshipId,
+                        expectedRevision: titled.revision,
                         reason: "Cover over"
                     })
-                    return {elsewhere, stale, ended}
+                    return {elsewhere, stale, ended, titled, title}
                 })
             )
         },
-        then({crossing, added, duplicate, elsewhere, stale, ended}) {
+        then({crossing, added, duplicate, elsewhere, stale, ended, titled, title}) {
+            titled.applied == true
+            title.relationshipName == "Covering agent" && title.thruDate == null
             crossing.applied == false && crossing.reasonCode == "IDENTITY_GLOBAL"
             added.applied == true && duplicate.reasonCode == "MEMBERSHIP_EXISTS"
             elsewhere.error.includes("RECORD_UNAVAILABLE")
