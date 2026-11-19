@@ -816,6 +816,132 @@ function nameShowsOtherAddress(name, address) {
         (token) => token.replace(/^[.]+|[.]+$/g, '').toLowerCase() !== own,
     )
 }
+/* The tokens of an Authentication-Results field (RFC 8601 section 2.2) in its parts between semicolons: comments
+   (nested, with quoted pairs) are dropped, a quoted string is one token {quoted}, '=' is a token, and anything else up
+   to white space, '=', ';' or a quote is a word ("header.from", "dkim"; a property's "header . d" is joined). */
+function authResultParts(text) {
+    const parts = [[]]
+    const source = String(text || '')
+    let word = ''
+    const end = () => {
+        if (word) parts[parts.length - 1].push(word)
+        word = ''
+    }
+    for (let i = 0; i < source.length; i++) {
+        const ch = source[i]
+        if (ch === '(') {
+            end()
+            let depth = 1
+            for (i++; i < source.length && depth; i++) {
+                if (source[i] === '\\') i++
+                else if (source[i] === '(') depth++
+                else if (source[i] === ')') depth--
+            }
+            i--
+        } else if (ch === '"') {
+            end()
+            let quoted = ''
+            for (i++; i < source.length && source[i] !== '"'; i++)
+                quoted += source[i] === '\\' ? source[++i] || '' : source[i]
+            parts[parts.length - 1].push({ quoted })
+        } else if (ch === ';') {
+            end()
+            parts.push([])
+        } else if (ch === '=') {
+            end()
+            parts[parts.length - 1].push('=')
+        } else if (/\s/.test(ch)) end()
+        else word += ch
+    }
+    end()
+    // a property's name may have white space around its dot
+    return parts.map((tokens) => {
+        const out = []
+        for (const token of tokens) {
+            const last = out[out.length - 1]
+            if (
+                typeof token === 'string' &&
+                typeof last === 'string' &&
+                token !== '=' &&
+                last !== '=' &&
+                (token.startsWith('.') || last.endsWith('.'))
+            )
+                out[out.length - 1] = last + token
+            else out.push(token)
+        }
+        return out
+    })
+}
+const tokenText = (token) =>
+    token == null ? '' : typeof token === 'string' ? token : token.quoted
+/* An Authentication-Results field read (RFC 8601): {authservId, results: method -> {result, props}}, the first result
+   of each method only (a later one of the same method, which a sender can add, counts for nothing); null for no field. */
+function readAuthResults(text) {
+    const parts = authResultParts(text)
+    const authservId = tokenText(parts[0][0]).toLowerCase()
+    if (!authservId) return null
+    const results = {}
+    for (const tokens of parts.slice(1)) {
+        if (tokens[1] !== '=' || typeof tokens[0] !== 'string') continue
+        const method = tokens[0].toLowerCase().split('/')[0]
+        if (!method || method === 'none' || results[method]) continue
+        const props = {}
+        for (let k = 3; k + 2 < tokens.length; k++) {
+            if (tokens[k + 1] !== '=' || typeof tokens[k] !== 'string') continue
+            const name = tokens[k].toLowerCase()
+            if (!(name in props)) props[name] = tokenText(tokens[k + 2])
+            k += 2
+        }
+        results[method] = {
+            result: tokenText(tokens[2]).toLowerCase(),
+            props,
+        }
+    }
+    return { authservId, results }
+}
+/* The authserv-ids of the mail gateway whose Authentication-Results are trusted (smtp-server@authserv-id, comma
+   separated, in lower case): with none configured nothing counts as authenticated. */
+const trustedAuthservIds = () =>
+    String(ec.factory.getConfValue('smtp-server@authserv-id') || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+/* Whether the mail gateway authenticated a sender's domain: in an Authentication-Results field of a trusted authserv-id,
+   DMARC passed for the From domain, or a DKIM signature passed for that very domain (strict alignment). A parent's
+   signature is not the subdomain's (d=host.example for team.host.example, SEC-PFS-64): relaxed alignment needs the
+   organizational domain, which the gateway's DMARC finds by the public suffix list and this code does not.
+   Another domain's pass, another server's field and a later result of a method count for nothing. Every path that trusts
+   "authenticated by the gateway" asks this: a post by mail, a held message's sender, a report filed as an account. */
+function gatewayAuthenticated(values, sender) {
+    const trusted = trustedAuthservIds()
+    const domain = String(sender || '')
+        .split('@')
+        .pop()
+        .toLowerCase()
+    if (!trusted.length || !domain || !String(sender || '').includes('@'))
+        return false
+    const aligned = (d) => {
+        const signer = String(d || '')
+            .replace(/^.*@/, '')
+            .toLowerCase()
+        return !!signer && domain === signer
+    }
+    return values.some((value) => {
+        const read = readAuthResults(value)
+        if (!read || !trusted.includes(read.authservId)) return false
+        const dmarc = read.results.dmarc
+        if (
+            dmarc?.result === 'pass' &&
+            String(dmarc.props['header.from'] || '').toLowerCase() === domain
+        )
+            return true
+        const dkim = read.results.dkim
+        return (
+            dkim?.result === 'pass' &&
+            aligned(dkim.props['header.d'] || dkim.props['header.i'])
+        )
+    })
+}
 function clearAnswer(t, a, postId, reason) {
     if (!postId || t.acceptedAnswerId !== postId) return
     update(t, { acceptedAnswerId: null, revision: Number(t.revision) + 1 })
@@ -1780,6 +1906,8 @@ function privateTopic(t) {
     fieldMailbox,
     fieldAddressCount,
     nameShowsOtherAddress,
+    readAuthResults,
+    gatewayAuthenticated,
     now,
     millis,
     dayKey,

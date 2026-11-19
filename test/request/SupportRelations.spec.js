@@ -139,7 +139,9 @@ const clock = (requestId, clockEnumId, sequenceNum = 1) =>
 const carried = requestId => rows(EPISODE, {requestId}).filter(row => !!row.carriedFromEpisodeId)
 const relationsFrom = (fromRequestId, relationTypeEnumId) => rows(RELATION, {fromRequestId, relationTypeEnumId})
 const followUpOf = requestId => waitFor(() => relationsFrom(requestId, "CrtFollowUp")[0]?.toRequestId || null)
-// a received mail in the spec's account from the contact, answering a message id when given
+// a received mail in the spec's account from the contact, answering a message id when given, with the From field and the
+// trusted gateway's DMARC pass for it (Channels.js senderTrust, SEC-BAP-84)
+const GATEWAY = "gw.rel.test"
 let mailCount = 0
 function receive(inReplyTo = null) {
     mailCount++
@@ -159,7 +161,8 @@ function receive(inReplyTo = null) {
         hasAttachment: "N",
         messageId: "<rel-" + mailCount + "-" + state.base + "@example.com>",
         inReplyTo,
-        rootEmailMessageId: id
+        rootEmailMessageId: id,
+        headersString: "From: pat.rel@example.com\r\nAuthentication-Results: " + GATEWAY + "; dmarc=pass header.from=example.com"
     })
     run("john.doe", R + "create#RequestFromEmail", {
         emailMessageId: id,
@@ -175,6 +178,7 @@ spec({
     setupSpec() {
         login("john.doe")
         ec.artifactExecution.disableAuthz()
+        setConf("smtp-server@authserv-id", GATEWAY)
         party(org, "Relation Spec Org", "OrgInternal")
         party(otherOrg, "Relation Spec Other Org", "OrgInternal")
         party(customer, "Relation Spec Customer", "Customer", org)

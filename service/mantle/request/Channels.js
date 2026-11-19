@@ -11,7 +11,9 @@
 //   ignored or attached to its case only, per route, never a case and never acknowledged. A new message from a customer's
 //   address is a case, timed by its received date (the profile's intake time, the clocks' start: F84); from staff, from a
 //   party that is no customer, or from an unknown address it is held for review (a plain request in the queue, no Customer
-//   party), or ignored when the route's (else the policy's) unknown-sender rule says so. A new case is acknowledged once,
+//   party), or ignored when the route's (else the policy's) unknown-sender rule says so. All of this only for a sender the
+//   trusted mail gateway authenticated, in one plain From mailbox (senderTrust, SEC-BAP-84); other mail is held for review
+//   (or ignored as above). A new case is acknowledged once,
 //   through send#IntakeConfirmation with the route's text block, and the acknowledgement is never a response (P4).
 // - The public form: the queue's intake token is an ExternalAccessCapability on its RequestCategory (the RequestCategory
 //   kind of ExternalAccess.js, scope CaseIntake, no outside party: F61); create#IntakeRequest takes it, with its limits per
@@ -270,21 +272,58 @@ function saveRoute(p) {
 }
 
 // ===== mail =====
-function headerValue(headers, name) {
-    let found = null
+// Every value of a header field in a stored header block, a folded value unfolded.
+function headerValues(headers, name) {
+    const found = []
+    let open = false
     for (const line of String(headers || "").split(/\r?\n/)) {
-        if (found != null) {
-            if (/^[ \t]/.test(line)) {
-                found += " " + line.trim()
-                continue
-            }
-            break
+        if (open && /^[ \t]/.test(line)) {
+            found[found.length - 1] += " " + line.trim()
+            continue
         }
         const colon = line.indexOf(":")
-        if (colon > 0 && line.substring(0, colon).trim().toLowerCase() === name.toLowerCase())
-            found = line.substring(colon + 1).trim()
+        open = colon > 0 && line.substring(0, colon).trim().toLowerCase() === name.toLowerCase()
+        if (open) found.push(line.substring(colon + 1).trim())
     }
     return found
+}
+const headerValue = (headers, name) => headerValues(headers, name)[0] ?? null
+// The store keeps at most 64 KiB of a header block and marks no cut (crates/moqui-mail/src/store.rs HEADERS_MAX), so a
+// block that long may have lost a second From field (as Forum.js storedContext).
+const HEADERS_KEPT = 65536 - 1024
+function headerBytes(headers) {
+    let bytes = 0
+    for (const char of String(headers || ""))
+        bytes += char.codePointAt(0) < 0x80 ? 1 : char.codePointAt(0) < 0x800 ? 2 : char.codePointAt(0) < 0x10000 ? 3 : 4
+    return bytes
+}
+// Whether a message's sender is its From address (SEC-BAP-84), as the forum asks (Forum.js processInbound, SEC-PFS-81):
+// the stored message's fromAddress (the parsed addr-spec), in one plain From mailbox (one From field naming one address,
+// whose display name shows no other address), whose domain the trusted mail gateway authenticated (DMARC, or an aligned
+// DKIM signature, in an Authentication-Results field of smtp-server@authserv-id: ForumCore.js gatewayAuthenticated).
+// Anyone can write a From, so without that the address names no one: the mail joins no case, reopens none, confirms no
+// typed address and makes no case; it is held for review with why. For a mailbox synced from a provider, the provider's
+// authserv-id is the one to name.
+function senderTrust(message) {
+    const core = ec.resource.script("component://mr-mantle/service/mantle/forum/ForumCore.js")
+    const headers = message.headersString
+    const address = String(message.fromAddress || "")
+        .trim()
+        .toLowerCase()
+    const froms = headerValues(headers, "From")
+    const refused = problem => ({authenticated: false, problem})
+    if (!address || !froms.length) return refused("The message has no From field")
+    if (headerBytes(headers) >= HEADERS_KEPT) return refused("The stored header fields were cut short")
+    if (
+        froms.length > 1 ||
+        froms.some(value => core.fieldAddressCount(value) > 1 || core.fieldMailbox(value).address.toLowerCase() !== address)
+    )
+        return refused("The message names more than one From address")
+    if (core.nameShowsOtherAddress(message.fromName, address))
+        return refused("The sender's display name shows another email address")
+    if (!core.gatewayAuthenticated(headerValues(headers, "Authentication-Results"), address))
+        return refused("The mail gateway did not authenticate the sender's address")
+    return {authenticated: true, problem: null}
 }
 const SYSTEM_SENDER = /^(mailer-daemon|postmaster|no[-_.]?reply|do[-_.]?not[-_.]?reply|bounces?)([+@-]|$)/i
 // Why a message is automatic (an autoresponder's, a list's, a bounce), or null for a person's.
@@ -420,14 +459,28 @@ function answering(requestId, threadBy, sender, automatic) {
 }
 // What a message to a queue makes, as decided before anything is written (mailIntake applies it; preview#ServiceRoute shows
 // it): join (the request its thread or verified token names), case (a customer's), held (for review) or ignore, with why.
-function resolveMail(message, queue, route) {
+function resolveMail(message, queue, route, trust) {
     const organizationPartyId = queue.organizationPartyId
     const automatic = automaticReason(message)
     const autoPolicy = route?.autoGeneratedEnumId || "SagAttach"
     const sender = senderOf(message.fromAddress, organizationPartyId)
     const decision = {automatic, autoPolicy, sender, organizationPartyId, requestCategoryId: queue.category.requestCategoryId}
+    decision.authenticated = trust.authenticated
     if (automatic && autoPolicy === "SagIgnore")
         return Object.assign(decision, {action: "ignore", reason: "An automatic message, ignored by the route: " + automatic})
+    // SEC-BAP-84: a sender the gateway did not authenticate is no one: no reference, token, reopen or case of theirs
+    if (!trust.authenticated) {
+        if (automatic)
+            return Object.assign(decision, {action: "ignore", reason: trust.problem + ": an automatic message, made nothing"})
+        const policy = route?.unknownSenderEnumId || cases.policyOf(organizationPartyId)?.unknownSenderEnumId || "SusReview"
+        if (sender.kind === "unknown" && policy === "SusIgnore")
+            return Object.assign(decision, {action: "ignore", reason: "An unknown sender, ignored by the policy"})
+        const why = trust.problem + " (From " + text(message.fromAddress) + ")"
+        return Object.assign(decision, {
+            action: "held",
+            reason: (sender.kind === "unknown" ? "An unknown sender: " + why : why) + ": held for review"
+        })
+    }
     const referenced = referencedRequest(message, sender, organizationPartyId)
     if (referenced) return Object.assign(decision, answering(referenced, "reference", sender, automatic))
     const token = tokenCase(message.subject, sender, organizationPartyId)
@@ -538,7 +591,7 @@ function mailIntake(p) {
         )
         return {handled: false}
     }
-    const decision = resolveMail(message, queue, route)
+    const decision = resolveMail(message, queue, route, senderTrust(message))
     const result = {
         handled: true,
         action: decision.action,
@@ -586,7 +639,13 @@ function mailIntake(p) {
                 })
             return Object.assign(result, {requestId: made.requestId, created: true, followUpOf: decision.followUpOf})
         }
-        const sender = decision.sender.partyId ? decision.sender : reviewPerson(message)
+        // a sender the gateway did not authenticate is not the filer (SEC-BAP-84): a customer side's filer would make the
+        // request a case; it is filed by the queue's organization, so a reviewer chooses the customer (CUSTOMER_REQUIRED)
+        const sender = !decision.sender.partyId
+            ? reviewPerson(message)
+            : decision.authenticated
+              ? decision.sender
+              : {partyId: queue.organizationPartyId, contactMechId: decision.sender.contactMechId || null}
         const typeId = route?.requestTypeEnumId || listOf(queue.queue.offeredTypeEnumIds)[0] || "RqtSupport"
         const created = call(R + "create#Request", {
             requestName:
@@ -649,7 +708,9 @@ function previewRoute(p) {
         headersString: text(p.headersString)
     }
     if (!message.fromAddress) denied("SENDER_REQUIRED", "Give the sender's address to test")
-    const decision = resolveMail(message, queue, route)
+    // the sender as the gateway would have authenticated it, unless the test's header fields give a From (senderTrust)
+    const trust = headerValues(message.headersString, "From").length ? senderTrust(message) : {authenticated: true, problem: null}
+    const decision = resolveMail(message, queue, route, trust)
     const sender = decision.sender
     const policy = cases.policyOf(queue.organizationPartyId)
     const joined = decision.requestId ? one(REQUEST, {requestId: decision.requestId}) : null
