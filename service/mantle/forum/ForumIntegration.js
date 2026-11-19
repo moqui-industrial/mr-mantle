@@ -541,7 +541,7 @@
                           ' · post ' +
                           st.ordinal +
                           '</p>' +
-                          core.memberHtml(event.body || '', p.siteId) +
+                          core.memberHtml(event.body || '', t.siteId) +
                           '</blockquote>'
                     : author +
                           ' · post ' +
