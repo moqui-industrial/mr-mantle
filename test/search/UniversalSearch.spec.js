@@ -8,6 +8,7 @@ const searchTypes = "MantleProject,MantleTask,MantleEvent,MantleRequest,MantleCo
 const records = ["MantleTask:USS-T1", "MantleTask:USS-T2", "MantleTask:USS-T3", "MantleTask:USS-T4", "MantleEvent:USS-E1",
     "MantleProject:USSP1", "MantleRequest:USS-R1", "MantleCommunicationEvent:USS-C1", "MantleCommunicationEvent:USS-C2"]
 let partyAId, partyBId
+const num = (value) => value == null ? 0 : Number(String(value))
 
 spec({
     stepwise: true,
@@ -179,5 +180,32 @@ feature("lookup by id finds a request and a communication event", {
         message.requestId == null
         unknown.requestId == null
         unknown.communicationEventId == null
+    },
+})
+
+// a hit the search leaves out is not counted: a record the index still has but the user may not see (here one gone since
+// it was indexed; a confidential case, a hidden applicant or task alike) makes its type's total and facet count the page's,
+// so a query's total never tells that such a record matches (SEC-DAT-82)
+feature("a hit the search leaves out counts in neither the total nor the type facet", {
+    when() {
+        call("create#mantle.request.Request", { requestId: "USS-R9", requestName: "Qwplmkn hidden request", requestTypeEnumId: "RqtSupport",
+                statusId: "ReqSubmitted", requestDate: effectiveTime })
+        indexRecords("MantleRequest", "requestId", ["USS-R9"])
+        ec.entity.find("mantle.request.Request").condition("requestId", "USS-R9").disableAuthz().one().delete()
+        const out = call("mantle.search.UniversalSearchServices.search#Universal", { q: "qwplmkn", entityType: "MantleRequest", limit: 20,
+                highlight: false, facets: ["entityType"] })
+        const shown = call("mantle.search.UniversalSearchServices.search#Universal", { q: word, entityType: "MantleRequest", limit: 20,
+                highlight: false, facets: ["entityType"] })
+        const requestFacets = (out.facetCounts.entityType || []).filter((facet) => facet.value == "MantleRequest" && num(facet.count) > 0)
+        return { out, shown, requestFacets }
+    },
+    then({ out, shown, requestFacets }) {
+        out.results.length == 0
+        num(out.total) == 0
+        requestFacets.length == 0
+        // a type with nothing left out keeps the index's count
+        num(shown.total) == shown.results.length
+        shown.results.some((result) => result.id == "USS-R1")
+        shown.totalRelation == "eq"
     },
 })

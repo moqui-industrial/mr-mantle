@@ -375,8 +375,15 @@ along with this software (see the LICENSE.md file). If not, see
             // invoices, payments and transactions, so the index's counts never tell the payroll matches
             const origin = ec.resource.script('component://mr-mantle/service/mantle/account/PayrollOrigin.js')
             const payrollTypes = !origin.canRead() && origin.anyMarked() ? ['MantleInvoice', 'MantlePayment', 'MantleAcctgTrans'].filter((type) => types.includes(type)) : []
+            // a type of which this page left out a hit (a record the entity filters refuse, a confidential case or its message,
+            // a hidden applicant, a protected, confidential or maintenance task, a maintenance request): its count is the page's,
+            // so the index never counts, for a query, a record the user may not see (SEC-DAT-82)
+            const hitsOf = {}, shownOf = {}
+            for (const hit of page.hits) hitsOf[hit.documentId] = (hitsOf[hit.documentId] || 0) + 1
+            for (const result of results) shownOf[result.entityType] = (shownOf[result.entityType] || 0) + 1
+            const droppedTypes = Object.keys(hitsOf).filter((type) => (shownOf[type] || 0) < hitsOf[type])
             const liveTypes = [...new Set((liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
-                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes))]
+                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes).concat(droppedTypes))]
             if (liveTypes.length) { total = results.length; totalRelation = 'gte' }
             // facets over the whole authorized match, not the page
             const facetList = facets ?? []
