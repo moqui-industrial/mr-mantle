@@ -376,7 +376,8 @@ const days = Array.from(dayList || []).map(String)
             or partyId with fromDate and thruDate for a week with no timesheet yet. projectIds: the projects the week's time is on
             (else the open projects the person is on), whose ProjectManager and Manager parties approve under the project rule.
             The person is never one of their approvers. anyPermission: the policy is any, so every holder of TIMESHEET_APPROVE
-            approves (approverPartyIds lists up to 200 of them).</description>
+            who works for the policy's organization (organizationPartyId; get#PartyInternalOrgIds, its child organizations
+            included) approves, never another organization's (SEC-BOS-97; approverPartyIds lists up to 200 of them).</description>
         <in-parameters>
             <parameter name="timesheetId"/>
             <parameter name="partyId"/>
@@ -388,9 +389,10 @@ const days = Array.from(dayList || []).map(String)
             <parameter name="projectIds" type="List"/>
             <parameter name="anyPermission" type="Boolean"/>
             <parameter name="policy" type="Map"/>
+            <parameter name="organizationPartyId"><description>The organization whose policy applies (get#TimesheetPolicy)</description></parameter>
         </out-parameters>
         <actions><script><![CDATA[
-            approverPartyIds = []; projectIds = []; anyPermission = false
+            approverPartyIds = []; projectIds = []; anyPermission = false; organizationPartyId = null
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
                 let person = partyId, from = fromDate, thru = thruDate
@@ -400,7 +402,9 @@ const days = Array.from(dayList || []).map(String)
                     person = sheet.partyId; from = sheet.fromDate; thru = sheet.thruDate
                 }
                 if (!person) return
-                policy = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').parameters({partyId: person}).call()?.policy || {}
+                const policyOut = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').parameters({partyId: person}).call() || {}
+                policy = policyOut.policy || {}
+                organizationPartyId = policyOut.organizationPartyId || null
                 const cf = ec.entity.conditionFactory
                 const found = new Set()
                 const projectsOfWeek = () => {
@@ -430,8 +434,12 @@ const days = Array.from(dayList || []).map(String)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userGroupId)
                     const userIds = groupIds.length ? Array.from(new Set(Array.from(ec.entity.find('moqui.security.UserGroupMember').condition('userGroupId', 'in', groupIds)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userId))) : []
-                    if (userIds.length) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds).limit(200).list())
-                        if (account.partyId) found.add(account.partyId)
+                    // only those who work for the policy's organization (SEC-BOS-97): another organization's Time managers are no approvers
+                    if (userIds.length && organizationPartyId) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds)
+                            .condition('partyId', 'is-not-null', null).limit(200).list()) {
+                        if (Array.from(ec.service.sync().name('mantle.party.PartyServices.get#PartyInternalOrgIds').parameters({partyId: account.partyId})
+                                .call()?.userOrgIds || []).includes(organizationPartyId)) found.add(account.partyId)
+                    }
                 } else if (policy.approvers === 'line') {
                     for (const row of ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtManager')
                             .condition('toPartyId', person).conditionDate('fromDate', 'thruDate', null).list()) found.add(row.fromPartyId)
@@ -508,7 +516,11 @@ const days = Array.from(dayList || []).map(String)
                 policy = approverOut.policy || {}
                 approverPartyIds = Array.from(approverOut.approverPartyIds || [])
                 isOwner = !!me && me === person
-                isApprover = !isOwner && !!me && (isAdmin || approverPartyIds.includes(me) || (!!approverOut.anyPermission && ec.user.hasPermission('TIMESHEET_APPROVE')))
+                // with the policy any, a holder of TIMESHEET_APPROVE of the policy's organization (SEC-BOS-97)
+                const anyApprover = !!approverOut.anyPermission && !!me && !!approverOut.organizationPartyId && ec.user.hasPermission('TIMESHEET_APPROVE')
+                        && Array.from(ec.service.sync().name('mantle.party.PartyServices.get#PartyInternalOrgIds').parameters({partyId: me})
+                            .call()?.userOrgIds || []).includes(approverOut.organizationPartyId)
+                isApprover = !isOwner && !!me && (isAdmin || approverPartyIds.includes(me) || anyApprover)
                 canView = isOwner || isApprover || isAdmin
                 locked = policy.lock !== false && (statusId === 'TmshCompleted' || statusId === 'TmshApproved')
                 canEdit = (isOwner || isApprover || isAdmin) && !locked
