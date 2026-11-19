@@ -14,7 +14,8 @@ along with this software (see the LICENSE.md file). If not, see
 -->
 <!-- X12 EDI (plan/payments-shipping-edi.md E1, docs/EdiX12.md; ported from mantle-edi 1.1.5, 134acb6,
     MantleEdiSetupData.xml): the message type and the operator permission. A connection is a SystemMessageRemote (its
-    transport and credentials, entered by an administrator, never in data) with an EdiConnection; its partner's rules are
+    transport and credentials, entered by an administrator, never in data; a remote receiving /rest/sm posts by login names
+    the partner's own integration account as its receiveUserId, SEC-BAP-96) with an EdiConnection; its partner's rules are
     a profile, such as the sample in EdiSampleProfileData.xml. No produce-ack service on the type: the 997s are this
     side's per group (EdiServices.record#GroupAcknowledgment), never the framework's per message. -->
 <entity-facade-xml type="seed">

@@ -132,6 +132,9 @@ mandatory segment is reported at the position of the segment that holds its leve
 
 A connection's transport is its remote's send service: `org.moqui.sftp.SftpMessageServices.send#SystemMessageSftp`
 and `poll#SystemMessageSftp` (with `receivePath`, `receiveFilePattern`, `receiveResponseEnumId` and `sendPath` on the
-`EdiX12` type), or `send#SystemMessageRest` and the `/rest/sm` endpoint. The poll isolates each file and deletes or
+`EdiX12` type), or `send#SystemMessageRest` and the `/rest/sm` endpoint. A remote that receives `/rest/sm` posts by login
+(`messageAuthEnumId` `SmatLogin`, or none) takes them from one account only, its `receiveUserId`: set it to that
+partner's own integration account (a `SYSMSG_RECEIVE` member), never one account for several partners, or one partner
+could deliver interchanges as another; with none set the remote takes no post by login. The poll isolates each file and deletes or
 moves one only after its receipt is durable. Each document goes in its own interchange; batching several sets per
 interchange is a partner rule not in the sample.

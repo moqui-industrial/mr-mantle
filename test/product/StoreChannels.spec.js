@@ -249,6 +249,15 @@ feature(
             const enable = {systemMessageRemoteId: state.remoteA, enabled: "Y"}
             if (code(run(users.operator, I + "store#StoreIntegration", enable)) !== "CREDENTIALS_REQUIRED")
                 problems.push("enabled with no credentials")
+            // a remote that receives by login needs its own receiving account, whatever secret it has (SEC-BAP-96)
+            const remoteAuth = fields =>
+                system(() =>
+                    call("update#moqui.service.message.SystemMessageRemote", Object.assign({systemMessageRemoteId: state.remoteA}, fields))
+                )
+            remoteAuth({messageAuthEnumId: "SmatLogin", sharedSecret: secret})
+            if (code(run(users.operator, I + "store#StoreIntegration", enable)) !== "CREDENTIALS_REQUIRED")
+                problems.push("enabled a login remote with no receiving account")
+            remoteAuth({messageAuthEnumId: "SmatHmacSha256", sharedSecret: null})
             // the operator sets the secret in the System tools; then the channel operator enables the intake
             system(() =>
                 call("update#moqui.service.message.SystemMessageRemote", {

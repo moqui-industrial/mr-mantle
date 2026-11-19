@@ -572,7 +572,14 @@ function storeStoreIntegration(p) {
             if (!registered(b.connectorId)) denied("CONNECTOR_UNAVAILABLE", "Connector " + b.connectorId + " is not enabled")
             const missing = missingParameters(b.handler, values)
             if (missing.length) denied("MAPPING_INCOMPLETE", "Set " + missing.join(", ") + " before enabling the integration")
-            if (!remote.messageAuthEnumId || remote.messageAuthEnumId === "SmatNone" || !credentialsSet(remote))
+            // a remote that receives by login takes /rest/sm posts from its own account alone (receiveUserId, SEC-BAP-96), and
+            // with none set takes none: its credential is that account
+            const byLogin = remote.messageAuthEnumId === "SmatLogin"
+            if (
+                !remote.messageAuthEnumId ||
+                remote.messageAuthEnumId === "SmatNone" ||
+                (byLogin ? !text(remote.receiveUserId) : !credentialsSet(remote))
+            )
                 denied(
                     "CREDENTIALS_REQUIRED",
                     "The operator sets the integration's authentication and credentials before it is enabled"

@@ -173,10 +173,10 @@ const newId = (values, what) => {
     return id
 }
 
-// The connection of a gateway started here: its provider's test address, and what it receives only from a signed-in user
-// authorized to receive system messages. /rest/sm takes a message of any type from whoever proves a remote's secret, so the
-// provider's webhooks wait for an instance administrator to set how they are verified (Tools), and the webhook key of a
-// gateway that has one is not entered here.
+// The connection of a gateway started here: its provider's test address, and a login remote with no receiving account
+// (receiveUserId), so /rest/sm takes no post on it (SEC-BAP-96). /rest/sm takes a message of any type from whoever proves a
+// remote's secret, so the provider's webhooks wait for an instance administrator to set how they are verified (Tools), and
+// the webhook key of a gateway that has one is not entered here.
 const newRemote = (id, values, type) => ({
     systemMessageRemoteId: id,
     description: text(values.description),
