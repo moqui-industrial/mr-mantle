@@ -180,6 +180,8 @@ spec({
         })
         state.buyer = user("BUYER", ["PURCHASE_ORDER_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.approver = user("APPROVER", ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+        // a second buyer who applies the change of the first one's order (SEC-BAP-110)
+        state.reviser = user("REVISER", ["PURCHASE_ORDER_EDIT", "SUPPLIER_PRICE_VIEW"])
         state.none = user("NONE", [])
         capture.enable()
 
@@ -378,8 +380,8 @@ feature(
                 operationKey: key()
             }
             state.beforeApply = Number(ec.user.nowTimestamp) - 1
-            const applied = run(state.buyer, O + "apply#PurchaseRevision", state.applyRequest)
-            const replay = run(state.buyer, O + "apply#PurchaseRevision", state.applyRequest)
+            const applied = run(state.reviser, O + "apply#PurchaseRevision", state.applyRequest)
+            const replay = run(state.reviser, O + "apply#PurchaseRevision", state.applyRequest)
             const logged = rows("moqui.entity.EntityAuditLog", {
                 changedEntityName: "mantle.order.OrderItem",
                 changedFieldName: "quantity",
@@ -417,6 +419,13 @@ feature(
     {
         when() {
             const stale = run(state.approver, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r1})
+            // the buyer who applied the revision of another buyer's order, made an approver too, may not approve it (SEC-BAP-110)
+            for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+                call("create#moqui.security.UserGroupPermission", {userGroupId: state.reviser, userPermissionId: permission, fromDate: since})
+            const reviser = run(state.reviser, P + "decide#PurchaseApproval", {orderId: state.orderId, orderRevision: state.r2})
+            for (const permission of ["PURCHASE_APPROVE", "PURCHASE_ORDER_APPROVE"])
+                ec.entity.find("moqui.security.UserGroupPermission").condition({userGroupId: state.reviser, userPermissionId: permission})
+                    .disableAuthz().deleteAll()
             const decided = run(state.approver, P + "decide#PurchaseApproval", {
                 orderId: state.orderId,
                 orderRevision: state.r2,
@@ -441,10 +450,12 @@ feature(
             const hold = rows("mantle.order.OrderHoldReason", {orderId: state.orderId}).find(
                 row => row.holdTypeEnumId == "OhtChange"
             )
-            return {stale, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
+            return {stale, reviser, decided, approved, sent, issued, before, now, hold, mailed: capture.count()}
         },
-        then({stale, decided, approved, sent, issued, before, now, hold, mailed}) {
+        then({stale, reviser, decided, approved, sent, issued, before, now, hold, mailed}) {
             stale.error.includes("STALE_REVISION")
+            reviser.error.includes("SELF_APPROVAL")
+            hold.changedByUserIds == state.reviser
             decided.error == ""
             approved == "OrderApproved"
             hold.releasedDate != null

@@ -668,7 +668,16 @@ function apply(p) {
     call("mantle.order.OrderServices.increment#OrderRevision", {orderId: po.orderId, revisionKind: "commercial"})
     const revision = revisionOf(one(ORDER, {orderId: po.orderId}))
     // the hold now waits for the approval of this revision (revisionState)
-    call("update#" + HOLD, {orderHoldReasonId: reviewed.current.hold.orderHoldReasonId, appliedRevision: revision})
+    // who applied it is recorded on the hold: none of them approves the revision (SEC-BAP-110)
+    const changers = String(reviewed.current.hold.changedByUserIds || "")
+        .split(",")
+        .filter(Boolean)
+    if (!changers.includes(ec.user.userId)) changers.push(ec.user.userId)
+    call("update#" + HOLD, {
+        orderHoldReasonId: reviewed.current.hold.orderHoldReasonId,
+        appliedRevision: revision,
+        changedByUserIds: changers.join(",")
+    })
     const quantityChanged = changeRows.some(row => row.entity === ITEM && row.field === "quantity")
 
     // the open receipts to the new remainders (Warehouse's contract, in this transaction)

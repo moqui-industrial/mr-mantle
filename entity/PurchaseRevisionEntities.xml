@@ -57,6 +57,9 @@ along with this software (see the LICENSE.md file). If not, see
             <description>On a purchase revision's Change hold (sourceId the revision it started from): the revision
                 apply#PurchaseRevision wrote under it, waiting for its approval. Empty while the change is only started, so
                 a revision moved by something else (a note, a receipt's status) does not read as an applied change.</description></field>
+        <field name="changedByUserIds" type="text-long">
+            <description>On a purchase revision's Change hold: each user who applied a change under it, comma separated. None
+                of them approves the revision (decide#PurchaseApproval's self-approval rule, SEC-BAP-110).</description></field>
     </extend-entity>
     <extend-entity entity-name="OrderEmailMessage" package="mantle.order">
         <field name="reminderOccurrence" type="text-short">

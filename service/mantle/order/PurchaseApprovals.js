@@ -215,7 +215,7 @@ function refusalFor(source, state, userId, partyId) {
     const selfAllowed =
         step.selfApprovalAllowed === "Y" || (step.selfApprovalAllowed !== "N" && buying.selfApprovalAllowed === "Y")
     if (!selfAllowed && source.submittedBy(userId, partyId))
-        return ["SELF_APPROVAL", "You entered or submitted " + source.label + "; another approver decides it"]
+        return ["SELF_APPROVAL", "You entered, submitted or revised " + source.label + "; another approver decides it"]
     if (step.userIds.includes(userId)) return ["ALREADY_DECIDED", "You already approved this step of " + source.label]
     if (step.separateApprover === "Y") {
         const earlier = state.steps.slice(0, state.steps.indexOf(step))
@@ -264,7 +264,17 @@ function orderSource(po) {
         revision: Number(order.orderRevision ?? 1),
         statusId: order.statusId,
         label: "purchase order " + po.orderId,
-        submittedBy: (userId, partyId) => orders().placedBy(order, userId, partyId)
+        // who entered or placed it, and who applied the revision waiting for approval (the open Change hold's
+        // changedByUserIds, SEC-BAP-110)
+        submittedBy: (userId, partyId) =>
+            orders().placedBy(order, userId, partyId) ||
+            rows("mantle.order.OrderHoldReason", {orderId: po.orderId})
+                .filter(hold => !hold.releasedDate && !blank(hold.appliedRevision))
+                .some(hold =>
+                    String(hold.changedByUserIds || "")
+                        .split(",")
+                        .includes(userId)
+                )
     }
 }
 // A supplier as a source of an organization: its revision is the count of its profile rows (each change starts one), and the
