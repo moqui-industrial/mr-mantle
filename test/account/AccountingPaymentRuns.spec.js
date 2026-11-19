@@ -307,6 +307,29 @@ feature("after approval one supplier's payment fails and the other keeps its pay
     }
 })
 
+feature("the bank file of a run that pays payroll is a reader of payroll's alone (SEC-BOS-93)", {
+    when() {
+        // the mark a pay run's finalization writes on its invoices (PayrollObligations.js), on this run's paid bill for the moment
+        login("john.doe")
+        helper().call("update#mantle.account.invoice.Invoice", {invoiceId: billA, payrollOrigin: "Y"})
+        login(users.treasury)
+        const read = refused("get#RunFile", {paymentRunId: runId})
+        const generated = refused("generate#RunFile", {paymentRunId: runId})
+        login("john.doe")
+        const reader = runs("get#RunFile", {paymentRunId: runId})
+        helper().call("update#mantle.account.invoice.Invoice", {invoiceId: billA, payrollOrigin: "N"})
+        login(users.treasury)
+        const afterwards = runs("get#RunFile", {paymentRunId: runId})
+        return {read, generated, reader, afterwards}
+    },
+    then({read, generated, reader, afterwards}) {
+        read.includes("PAYROLL_VIEW_REQUIRED")
+        generated.includes("PAYROLL_VIEW_REQUIRED")
+        reader.fileText.length > 0
+        afterwards.fileText == reader.fileText
+    }
+})
+
 feature("a NACHA return declines the payment, reverses its posting and reopens the bill it paid in full", {
     when() {
         const detail = runs("get#Run", {paymentRunId: runId})

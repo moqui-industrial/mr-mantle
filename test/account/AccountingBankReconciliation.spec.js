@@ -428,6 +428,36 @@ feature("a statement with a difference cannot be finished; at zero difference it
         toDecimal(nextRow.openingBalance).eq(190)
     }
 })
+feature("a payroll-origin receipt is offered for a deposit, and deposited, only by a reader of payroll's (SEC-BOS-93)", {
+    when() {
+        const repaid = receipt("35")
+        // an employee's repayment of an overpayment is marked as payroll's (PayrollOrigin.js)
+        call("update#mantle.account.payment.Payment", {paymentId: repaid, payrollOrigin: "Y"})
+        const offeredIds = () =>
+            Array.from(
+                native("mantle.account.PaymentServices.find#DepositReceipts", {paymentMethodId: f.bankId, pageSize: 100}).receiptRows || []
+            ).map(row => row.paymentId)
+        // a depositor of the organization's receipts who is no reader of payroll's
+        const depositor = settlementFixtures().user(f, "DEPOSITOR", ["PAYMENT_EDIT", "PAYMENT_VIEW"])
+        login(depositor)
+        const treasury = offeredIds()
+        const slip = rejected("mantle.account.PaymentServices.create#DepositSlip", {
+            paymentMethodId: f.bankId,
+            paymentIdList: [repaid],
+            operationKey: "p9-deposit-payroll"
+        })
+        login("john.doe")
+        const reader = offeredIds()
+        call("update#mantle.account.payment.Payment", {paymentId: repaid, payrollOrigin: "N", statusId: "PmntVoid"})
+        return {repaid, treasury, slip, reader}
+    },
+    then({repaid, treasury, slip, reader}) {
+        !treasury.includes(repaid)
+        slip.includes("RECEIPT_INVALID")
+        reader.includes(repaid)
+    }
+})
+
 feature("a deposit's one bank line reconciles its receipts once", {
     when() {
         const a = receipt("40"),

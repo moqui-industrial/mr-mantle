@@ -5362,7 +5362,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="find" noun="DepositReceipts" allow-remote="false">
         <description>The receipts that can go on a deposit slip of the bank account, a page at a time: delivered or
             confirmed payments to its organization into this bank account in its currency, from another party, not
-            reconciled and not on a deposit already. Needs payment edit and payment view authority in the
+            reconciled and not on a deposit already; a payroll-origin receipt (an employee's repayment, PayrollOrigin.js) only
+            for a reader of payroll's (PAYROLL_VIEW, SEC-BOS-93). Needs payment edit and payment view authority in the
             organization.</description>
         <implements service="mantle.account.PaymentServices.define#DepositReceiptConditions"/>
         <in-parameters>
@@ -5381,8 +5382,10 @@ along with this software (see the LICENSE.md file). If not, see
             <entity-find-one entity-name="mantle.account.method.PaymentMethod" value-field="method" disable-authz="true"/>
             <set field="searchLike" from="'%' + String(text || '').trim().slice(0, 200) + '%'"/>
             <set field="selectedIdList" from="[...new Set(Array.from(selectedIdList || []).map(String))].slice(0, 200)"/>
+            <set field="payrollReader" from="ec.user.hasPermission('PAYROLL_VIEW')"/>
             <entity-find entity-name="mantle.account.payment.Payment" list="receiptList" disable-authz="true"
                     offset="pageIndex * pageSize" limit="pageSize">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="toPartyId" from="access.organizationPartyId"/>
                 <econdition field-name="fromPartyId" operator="not-equals" from="access.organizationPartyId"/>
                 <econdition field-name="toPaymentMethodId" from="paymentMethodId"/>
@@ -5398,6 +5401,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <order-by field-name="effectiveDate,paymentId"/>
             </entity-find>
             <entity-find-count entity-name="mantle.account.payment.Payment" count-field="recordCount" disable-authz="true">
+                <econdition field-name="payrollOrigin" operator="not-equals" value="Y" or-null="true" ignore="payrollReader"/>
                 <econdition field-name="toPartyId" from="access.organizationPartyId"/>
                 <econdition field-name="fromPartyId" operator="not-equals" from="access.organizationPartyId"/>
                 <econdition field-name="toPaymentMethodId" from="paymentMethodId"/>
@@ -5477,8 +5481,10 @@ along with this software (see the LICENSE.md file). If not, see
             <set field="totalAmount" from="toDecimal(0)"/>
             <iterate list="paymentIdList" entry="receiptId">
                 <set field="receipt" from="receiptList.find((row) =&gt; row.paymentId === receiptId)"/>
+                <!-- a payroll-origin receipt is one find#DepositReceipts offers a payroll reader only (SEC-BOS-93) -->
                 <if condition="receipt == null || receipt.toPartyId != access.organizationPartyId
-                        || receipt.fromPartyId == access.organizationPartyId || receipt.toPaymentMethodId != paymentMethodId">
+                        || receipt.fromPartyId == access.organizationPartyId || receipt.toPaymentMethodId != paymentMethodId
+                        || (receipt.payrollOrigin == 'Y' &amp;&amp; !ec.user.hasPermission('PAYROLL_VIEW'))">
                     <return error="true"
                             message="RECEIPT_INVALID: Payment ${receiptId} is not a receipt into ${paymentMethodId}"/>
                 </if>

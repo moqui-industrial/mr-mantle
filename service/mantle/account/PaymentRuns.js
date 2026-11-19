@@ -662,11 +662,24 @@ function takeDiscount(run, item, payTime) {
     })
     return credit.invoiceId
 }
+// SEC-BOS-93: a run's bank file names each payee with their account and amount, so a run with a payroll item (a payroll-origin
+// bill or payment, PayrollOrigin.js) has its file read, made and delivered only by a reader of payroll's (PAYROLL_VIEW), as
+// paying it needs; getRun folds those items for anyone else.
+function requireFileReader(run) {
+    if (payrollOrigin().canRead()) return
+    const all = items(run.paymentRunId)
+    if (
+        payrollOrigin().payrollInvoiceIds(all.map(row => row.invoiceId)).length ||
+        payrollOrigin().payrollPaymentIds(all.map(row => row.paymentId)).length
+    )
+        denied("PAYROLL_VIEW_REQUIRED", "The bank file of a run that pays payroll needs PAYROLL_VIEW")
+}
 // The run's bank file: the one written before, else a new one of the run's payments (write#RunFile, in its own
 // transaction, since delivering the payments posts them); then the ACH payments it delivered are applied, each supplier
 // on its own. Asking again gives the same file.
 function generateFile(p) {
     let run = runScope(p, "PAYMENT_EDIT")
+    requireFileReader(run)
     if (!run.executeOperationKey) denied("RUN_NOT_EXECUTED", "Execute the run first")
     const paymentIdList = [
         ...new Set(
@@ -703,6 +716,7 @@ function generateFile(p) {
 // the bank account has a format.
 function writeFile(p) {
     let run = runScope(p, "PAYMENT_EDIT", true)
+    requireFileReader(run)
     const paymentIdList = [
         ...new Set(
             selectedItems(run.paymentRunId)
@@ -752,7 +766,9 @@ function file(run) {
 }
 // The run's bank file as written, for a user who may execute runs.
 function runFile(p) {
-    return file(runScope(p, "PAYMENT_EDIT"))
+    const run = runScope(p, "PAYMENT_EDIT")
+    requireFileReader(run)
+    return file(run)
 }
 // A bank's NACHA return file for the run's bank account (import#NachaReturn, which skips a payment already returned): a
 // returned payment is declined, which reverses its posting and unapplies it (the PaymentUnDeliverCleanup SECA). Its bills,
