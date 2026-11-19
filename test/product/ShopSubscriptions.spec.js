@@ -144,9 +144,26 @@ function asStaff(username, service, parameters = {}) {
 // contract 2 (the review feature's second subscription) is the one the P12 features renew
 const second = () => one(SUB + "StoreRecurringContract", {contractId: state.second})
 
+// The cart-making specs of one run share the requester's cart-creation throttle (30 in ten minutes, Shop P4): this window's
+// bucket goes before this spec's carts, as ShopOperations and mr-pass ShopCheckout do; the throttle is unchanged.
+function resetCartCreations() {
+    const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+    const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        ec.entity
+            .find("moqui.security.public.AccountAttempt")
+            .condition({bucketId: ec.user.singleUseCodeHash("cart-create:" + requester + ":" + window)})
+            .deleteAll()
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
 spec({
     stepwise: true,
     setupSpec() {
+        resetCartCreations()
         system(() => {
             make("mantle.party.Party", {partyId: ids.org, partyTypeEnumId: "PtyOrganization"})
             make("mantle.party.Organization", {partyId: ids.org, organizationName: "Subscriptions organization"})

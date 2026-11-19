@@ -110,9 +110,26 @@ const linkOf = message => (/token=([A-Za-z0-9_%-]+)/.exec(String(message?.bodyTe
 // the orders the features share, in order (the refund and return end the first feature's grants)
 const state = {}
 
+// The cart-making specs of one run share the requester's cart-creation throttle (30 in ten minutes, Shop P4): this window's
+// bucket goes before this spec's carts, as ShopOperations and mr-pass ShopCheckout do; the throttle is unchanged.
+function resetCartCreations() {
+    const requester = ec.resource.script("component://framework/service/org/moqui/public/Account.js").requesterKey()
+    const window = Math.floor(ec.user.timestampMillis(ec.user.nowTimestamp) / 600000)
+    const wasDisabled = ec.artifactExecution.disableAuthz()
+    try {
+        ec.entity
+            .find("moqui.security.public.AccountAttempt")
+            .condition({bucketId: ec.user.singleUseCodeHash("cart-create:" + requester + ":" + window)})
+            .deleteAll()
+    } finally {
+        if (!wasDisabled) ec.artifactExecution.enableAuthz()
+    }
+}
+
 spec({
     stepwise: true,
     setupSpec() {
+        resetCartCreations()
         capture.enable()
         system(() => {
             make("mantle.party.Party", {partyId: ids.org, partyTypeEnumId: "PtyOrganization"})
