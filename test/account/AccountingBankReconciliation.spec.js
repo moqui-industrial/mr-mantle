@@ -758,7 +758,7 @@ feature("Match automatically takes a payment by reference only at its amount and
             })
             return acctgTransId
         }
-        entry(f.customer, "Y", "6543.21")
+        const otherOrgTx = entry(f.customer, "Y", "6543.21")
         entry(f.org, "N", "6543.22")
         bankLine("SEC121-OTHERORG", "6543.21", {transType: "PMTT_DEP"})
         bankLine("SEC121-UNPOSTED", "6543.22", {transType: "PMTT_DEP"})
@@ -768,7 +768,13 @@ feature("Match automatically takes a payment by reference only at its amount and
             const row = line(f.bankId, fitId)
             return row.paymentId || row.acctgTransId || null
         }
+        // a manual reconciliation is held to the same rules: the $1 line to the large receipt, the other organization's entry
+        const manualPayment = rejected("reconcile#PaymentMethodTrans", {paymentMethodId: f.bankId, fitId: "SEC121-SMALL", paymentId: big})
+        const manualEntry = rejected("reconcile#PaymentMethodTrans", {paymentMethodId: f.bankId, fitId: "SEC121-OTHERORG",
+            acctgTransId: otherOrgTx, acctgTransEntrySeqId: "01"})
         return {
+            manualPayment,
+            manualEntry,
             small: of("SEC121-SMALL"),
             voided: of("SEC121-VOIDED"),
             otherOrg: of("SEC121-OTHERORG"),
@@ -777,7 +783,8 @@ feature("Match automatically takes a payment by reference only at its amount and
             big
         }
     },
-    then({small, voided, otherOrg, unposted, exact, big}) {
+    then({manualPayment, manualEntry, small, voided, otherOrg, unposted, exact, big}) {
+        manualPayment.includes("PAYMENT_MISMATCH") && manualEntry.includes("ENTRY_MISMATCH")
         small == null && voided == null && otherOrg == null && unposted == null
         exact == big
     }

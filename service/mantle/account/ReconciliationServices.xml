@@ -82,7 +82,10 @@ along with this software (see the LICENSE.md file). If not, see
                             <econdition field-name="paymentRefNum" from="bankAccountTrans.checkNumber || bankAccountTrans.refNumber"/>
                             <econditions combine="or">
                                 <econdition field-name="amount" from="absTransAmount"/>
-                                <econdition field-name="originalCurrencyAmount" from="absTransAmount"/>
+                                <econditions>
+                                    <econdition field-name="originalCurrencyAmount" from="absTransAmount"/>
+                                    <econdition field-name="originalCurrencyUomId" from="paymentMethod.currencyUomId"/>
+                                </econditions>
                             </econditions>
                         </entity-find>
                         <set field="payment" from="paymentList?.length == 1 ? paymentList[0] : null"/>
@@ -339,7 +342,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="reconcile" noun="PaymentMethodTrans">
         <description>Record reconciliation for a PaymentMethodTrans record against Payment and/or AcctgTransEntry. Called
-            by match#PaymentMethodTransUnmatched or can be called directly for manual match.</description>
+            by match#PaymentMethodTransUnmatched or can be called directly for manual match. As the candidate rules
+            (SEC-BOS-121): a payment of the bank account's owner (its payer or payee), delivered or confirmed, of the line's
+            amount (or original currency amount); a ledger transaction of the owner organization, posted, and an entry of
+            the bank's account, of the line's amount when no payment is named (PAYMENT_MISMATCH, ENTRY_MISMATCH).</description>
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
             <parameter name="fitId" required="true"/>
@@ -405,9 +411,17 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="acctgTrans?.paymentId"><set field="paymentId" from="acctgTrans?.paymentId"/></if>
             </if>
 
+            <set field="lineAmount" from="bankAccountTrans.transAmount == null ? null : toDecimal(bankAccountTrans.transAmount).abs()"/>
             <if condition="paymentId">
                 <if condition="payment == null">
                     <entity-find-one entity-name="mantle.account.payment.Payment" value-field="payment"/></if>
+                <!-- the bank owner's delivered payment of the line's amount (SEC-BOS-121) -->
+                <if condition="payment == null || ![payment.fromPartyId, payment.toPartyId].includes(paymentMethod.ownerPartyId)
+                        || !['PmntDelivered', 'PmntConfirmed'].includes(payment.statusId)
+                        || (lineAmount != null &amp;&amp; !(toDecimal(payment.amount ?? 0).compare(lineAmount) == 0
+                            || (payment.originalCurrencyAmount != null &amp;&amp; toDecimal(payment.originalCurrencyAmount).compare(lineAmount) == 0)))">
+                    <return error="true" message="PAYMENT_MISMATCH: Payment ${paymentId} is not a delivered payment of this bank account's owner for the line's amount"/>
+                </if>
 
                 <!-- if another PaymentMethodTrans has this paymentId clear it -->
                 <entity-find entity-name="mantle.account.method.PaymentMethodTrans" list="existingTransList">
@@ -450,6 +464,11 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <if condition="acctgTransId">
+                <!-- the owner organization's posted transaction (SEC-BOS-121) -->
+                <entity-find-one entity-name="mantle.ledger.transaction.AcctgTrans" value-field="matchedTrans"/>
+                <if condition="matchedTrans == null || matchedTrans.organizationPartyId != paymentMethod.ownerPartyId || matchedTrans.isPosted != 'Y'">
+                    <return error="true" message="ENTRY_MISMATCH: Transaction ${acctgTransId} is not a posted transaction of this bank account's owner"/>
+                </if>
                 <!-- if no acctgTransEntrySeqId get first by glAccountId -->
                 <if condition="!acctgTransEntrySeqId &amp;&amp; paymentMethod.glAccountId">
                     <entity-find entity-name="mantle.ledger.transaction.AcctgTransEntry" list="ateList">
@@ -465,6 +484,11 @@ along with this software (see the LICENSE.md file). If not, see
 
                 <if condition="acctgTransEntry == null &amp;&amp; acctgTransEntrySeqId">
                     <entity-find-one entity-name="mantle.ledger.transaction.AcctgTransEntry" value-field="acctgTransEntry"/></if>
+                <!-- an entry of the bank's account; with no payment, of the line's amount -->
+                <if condition="acctgTransEntry != null &amp;&amp; ((paymentMethod.glAccountId &amp;&amp; acctgTransEntry.glAccountId != paymentMethod.glAccountId)
+                        || (!paymentId &amp;&amp; lineAmount != null &amp;&amp; toDecimal(acctgTransEntry.amount ?? 0).compare(lineAmount) != 0))">
+                    <return error="true" message="ENTRY_MISMATCH: Entry ${acctgTransId} ${acctgTransEntrySeqId} is not of this bank account for the line's amount"/>
+                </if>
 
                 <!-- if another PaymentMethodTrans has this acctgTransId/acctgTransEntrySeqId clear them -->
                 <entity-find entity-name="mantle.account.method.PaymentMethodTrans" list="existingTransList">
