@@ -1290,8 +1290,8 @@ methods.storeDraft = (p) => {
         invalid('The poll draft is too large')
     draftLimits(p)
     if (!old) {
-        const most = Number(
-            ec.factory.getConfValue('mantle@forum-drafts-per-member') || 50,
+        const most = ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit(
+            'forum-drafts-per-member',
         )
         if (
             find(F + 'ForumDraft', { siteId: p.siteId, partyId }).count() >=

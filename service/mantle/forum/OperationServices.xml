@@ -70,11 +70,11 @@
     </actions>
   </service>
   <service verb="cleanup" noun="Drafts" authenticate="false" allow-remote="false">
-    <description>Removes the forum drafts no one has changed for mantle@forum-draft-days days (90 when empty; 0 keeps them).</description>
+    <description>Removes the forum drafts no one has changed for mantle@forum-draft-days days (0 keeps them).</description>
     <actions>
       <script><![CDATA[
-    const days=Number(ec.factory.getConfValue('mantle@forum-draft-days') || 90)
-    if(days>0)ec.entity.find('mantle.forum.ForumDraft').condition('updatedAt','less',new Date(ec.user.timestampMillis(ec.user.nowTimestamp)-days*86400000)).disableAuthz().deleteAll()
+    const days=ec.resource.script('component://mr-mantle/service/mantle/other/Limits.js').limit('forum-draft-days')
+    if(days!==Infinity)ec.entity.find('mantle.forum.ForumDraft').condition('updatedAt','less',new Date(ec.user.timestampMillis(ec.user.nowTimestamp)-days*86400000)).disableAuthz().deleteAll()
   ]]></script>
     </actions>
   </service>
