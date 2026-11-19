@@ -144,12 +144,12 @@ const sourceFields = [
     "assetDepreciationId",
     "inventoryCostDetailId"
 ]
-function postingLocks(tx, applicable, lock = false, sourceDay = null, enabled = true) {
-    const locks = enabled
-        ? rows("mantle.ledger.config.AccountingLock", {
-              organizationPartyId: tx.organizationPartyId
-          })
-        : []
+// The posting locks of the transaction's organization that refuse it. A lock holds whatever the organization's posting guard's
+// state (SEC-BOS-122): store#Lock makes one with the guard off, and turning the guard off no longer opens a locked date.
+function postingLocks(tx, applicable, lock = false, sourceDay = null) {
+    const locks = rows("mantle.ledger.config.AccountingLock", {
+        organizationPartyId: tx.organizationPartyId
+    })
     const findings = []
     const fail = (code, message) => findings.push({code, message})
     for (const initial of locks.sort((a, b) => a.accountingLockId.localeCompare(b.accountingLockId))) {
@@ -327,7 +327,7 @@ function validate(p, lock = false) {
         }
     }
     const applicable = scopes(tx, lines)
-    const lockOut = postingLocks(tx, applicable, lock, sourceDay, enabled)
+    const lockOut = postingLocks(tx, applicable, lock, sourceDay)
     const locks = lockOut.locks
     findings.push(...lockOut.findings)
     // The closing entries close#Period posts go into the fiscal year it is closing: only those pass its closed-period
@@ -462,6 +462,11 @@ function check(p) {
     const adopted = pref.postingGuardEnabled === "Y"
     if (!p.verifyOnly && !adopted) {
         captureSourceDay(initial)
+        // the guard off checks nothing else, but a posting lock still holds (SEC-BOS-122)
+        const tx = one(T, {acctgTransId: p.acctgTransId})
+        const locked = postingLocks(tx, scopes(tx, rows(E, {acctgTransId: tx.acctgTransId})), true, calendarDay(tx, {}, true))
+        if (locked.findings.length)
+            throw new Error(locked.findings[0].code + ": " + locked.findings.map(r => r.message).join("; "))
         return {handled: false, valid: true, findings: []}
     }
     if (!p.verifyOnly) find("mantle.party.Party", {partyId: initial.organizationPartyId}).forNoKeyUpdate(true).one()
