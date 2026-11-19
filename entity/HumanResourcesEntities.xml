@@ -389,8 +389,8 @@ along with this software (see the LICENSE.md file). If not, see
 
         <field name="taxYtdPriorIncome" type="currency-amount" enable-audit-log="update">
             <description>Added to YTD income for starting year only (for taxes limited by YTD income)</description></field>
-        <field name="taxFederalAllowances" type="number-integer" enable-audit-log="update"/>
-        <field name="taxStateAllowances" type="number-integer" enable-audit-log="update"/>
+        <field name="taxFederalAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="taxStateAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
 
         <relationship type="one" related="mantle.party.Party"/>
         <relationship type="one" title="PayDistributionGroup" related="moqui.basic.Enumeration" short-alias="distGroup">
@@ -442,8 +442,8 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="timePeriodTypeId" type="id"><description>Payroll time period</description></field>
 
         <field name="taxWorkContactMechId" type="id"/>
-        <field name="taxFederalAllowances" type="number-integer" enable-audit-log="update"/>
-        <field name="taxStateAllowances" type="number-integer" enable-audit-log="update"/>
+        <field name="taxFederalAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
+        <field name="taxStateAllowances" type="number-integer" ai-opt-out="true" enable-audit-log="update"/>
         <!-- don't use these, create PayrollAdjustment records for them for the employee:
         <field name="taxFederalAddtlWithhold" type="currency-amount"/>
         <field name="taxStateAddtlWithhold" type="currency-amount"/>

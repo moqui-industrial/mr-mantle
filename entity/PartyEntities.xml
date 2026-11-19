@@ -37,7 +37,7 @@ along with this software (see the LICENSE.md file). If not, see
             <description>If applicable, such as for customer records, the other Party that 'owns' the data for this Party.</description></field>
         <field name="externalId" type="id"/>
         <field name="dataSourceId" type="id"/>
-        <field name="gatewayCimId" type="text-short" enable-audit-log="update"/>
+        <field name="gatewayCimId" type="text-short" ai-opt-out="true" enable-audit-log="update"/>
         <field name="comments" type="text-long"/>
         <field name="shippingInstructions" type="text-long"/>
         <field name="hasDuplicates" type="text-indicator"/>
@@ -1806,7 +1806,7 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="contactMechTypeEnumId" type="id"/>
         <field name="dataSourceId" type="id"/>
         <field name="infoString" type="text-medium"/>
-        <field name="gatewayCimId" type="text-short" enable-audit-log="update"/>
+        <field name="gatewayCimId" type="text-short" ai-opt-out="true" enable-audit-log="update"/>
         <field name="trustLevelEnumId" type="id"/>
         <field name="validateMessage" type="text-medium"/>
         <field name="paymentFraudEvidenceId" type="id"><description>Refer to evidence here if trustLevelEnumId is gray listed or black listed</description></field>

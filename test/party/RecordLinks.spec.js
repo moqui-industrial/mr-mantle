@@ -562,9 +562,15 @@ feature("a record's changes leave out a field its entity keeps from readers: ai-
         audit("referenceNumber", "RL-SECRET-NUMBER")
         audit("noSuchField", "RL-GONE")
         const out = timeline("mantle.humanres.ability.PartyQualification", "RL-PQ1", { kinds: "changes" })
-        return { values: Array.from(out.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue) }
+        // a party's payment gateway customer id is ai-opt-out too (SEC-BAP-94 review)
+        call("create#moqui.entity.EntityAuditLog", { changedEntityName: "mantle.party.Party", changedFieldName: "gatewayCimId", pkPrimaryValue: partyId,
+            oldValueText: "before", newValueText: "RL-CIM-ID", changedDate: ec.user.nowTimestamp, changedByUserId: "EX_JOHN_DOE" })
+        const party = timeline("mantle.party.Party", partyId, { kinds: "changes" })
+        return { values: Array.from(out.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue)
+            .concat(Array.from(party.entryList || []).filter(entry => entry.kind === "change").map(entry => entry.newValue)) }
     },
     then({ values }) {
+        !values.includes("RL-CIM-ID")
         values.includes("RL-SHOWN")
         !values.includes("RL-SECRET-NUMBER") && !values.includes("RL-GONE")
     }

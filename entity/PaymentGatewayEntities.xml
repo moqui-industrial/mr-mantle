@@ -46,7 +46,7 @@ along with this software (see the LICENSE.md file). If not, see
         </index>
     </extend-entity>
     <extend-entity entity-name="PaymentMethod" package="mantle.account.method">
-        <field name="gatewayCustomerId" type="text-short" enable-audit-log="update"><description>The provider's customer
+        <field name="gatewayCustomerId" type="text-short" ai-opt-out="true" enable-audit-log="update"><description>The provider's customer
             (profile) reference that gatewayCimId, the reusable payment profile, belongs to at the gateway in
             paymentGatewayConfigId. Kept on the method, not the Party, so two gateways' profiles of one party do not
             collide; a new method of the same party and gateway reuses it.</description></field>
