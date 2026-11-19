@@ -1970,6 +1970,20 @@ function gateRefuse(result) {
         fail(result.refusal.kind, result.refusal.message)
     return result
 }
+/* The types a post's file may have, all inert (no script or style a page could load), and the name it is kept by: an
+   upload's (stageAttachment) and an imported one's (ForumImport) alike, so no file is served as anything else. */
+const ATTACHMENT_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
+    'application/pdf',
+    'text/plain',
+]
+const attachmentName = (name) =>
+    String(name || 'attachment')
+        .replace(/[^a-zA-Z0-9._ -]/g, '_')
+        .slice(0, 100)
 function privateTopic(t) {
     const event = one(E + 'CommunicationEvent', {
         communicationEventId: t.rootCommEventId,
@@ -2027,6 +2041,8 @@ function privateTopic(t) {
     scopeChanged,
     scopeAnswer,
     heldMail,
+    ATTACHMENT_TYPES,
+    attachmentName,
     reviewScoped,
     TARGET_TYPES,
     listMember,

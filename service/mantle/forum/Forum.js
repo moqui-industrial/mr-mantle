@@ -2622,17 +2622,7 @@ methods.stageAttachment = (p) => {
         invalid('Upload must contain 1 byte to ' + maxBytes + ' bytes')
     const type = String(file.contentType || 'application/octet-stream')
     // A repository's file is of any type: it is committed, never served as a post's media.
-    if (
-        repositoryBytes == null &&
-        ![
-            'image/png',
-            'image/jpeg',
-            'image/webp',
-            'image/gif',
-            'application/pdf',
-            'text/plain',
-        ].includes(type)
-    )
+    if (repositoryBytes == null && !core.ATTACHMENT_TYPES.includes(type))
         invalid('Unsupported attachment type')
     if (p.purpose === 'avatar' && !type.startsWith('image/'))
         invalid('Avatars require a raster image')
@@ -2672,9 +2662,7 @@ methods.stageAttachment = (p) => {
         ownerPartyId: partyId,
         draftId: p.draftId,
         location,
-        filename: String(file.name || 'attachment')
-            .replace(/[^a-zA-Z0-9._ -]/g, '_')
-            .slice(0, 100),
+        filename: core.attachmentName(file.name),
         mimeType: type,
         byteSize: Number(file.size),
         scanState: 'pending',
