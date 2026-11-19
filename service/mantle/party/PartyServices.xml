@@ -880,7 +880,9 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="create" noun="PartyUserAccount">
-        <description>Create a UserAccount for a Party, and set EmailPrimary if applicable.</description>
+        <description>Create a UserAccount for a Party, and set EmailPrimary if applicable. A userGroupId is given through
+            org.moqui.admin.AccessServices.store#Membership (ADMIN_ACCESS_MANAGE and its bundle rules) for a caller with
+            authorization on, and must be of a type groupTypeEnumIdList names when it names any (SEC-ADM-91).</description>
         <in-parameters>
             <!-- NOTE: these are the same excludes as org.moqui.impl.UserServices.create#UserAccount -->
             <auto-parameters entity-name="moqui.security.UserAccount" include="nonpk"><exclude field-name="currentPassword"/>
@@ -953,10 +955,21 @@ along with this software (see the LICENSE.md file). If not, see
                     <entity-find-one entity-name="moqui.security.UserGroup" value-field="userGroup"/>
                     <set field="groupValid" from="groupTypeEnumIdList.includes(userGroup.groupTypeEnumId)"/>
                 </if>
-                <if condition="groupValid">
+                <if condition="!groupValid">
+                    <return error="true" message="GROUP_TYPE_INVALID: Group ${userGroupId} is not one this screen gives"/></if>
+                <!-- the membership through Admin's access rules (ADMIN_ACCESS_MANAGE, registered bundles, privileged and sealed
+                    groups), never a write of the row, for a caller with authorization on (SEC-ADM-91): a screen that passes its
+                    context makes no account in a group the user may not give; work with authorization disabled answers for
+                    itself -->
+                <if condition="ec.artifactExecution.authzDisabled()"><then>
                     <service-call name="create#moqui.security.UserGroupMember"
                             in-map="{userGroupId:userGroupId, userId:userId, fromDate:ec.user.nowTimestamp}"/>
-                </if>
+                </then><else>
+                    <service-call name="org.moqui.admin.AccessServices.store#Membership" out-map="membership"
+                            in-map="{userGroupId:userGroupId, userId:userId, reason:'Given with the new account'}"/>
+                    <if condition="!membership?.applied">
+                        <return error="true" message="${membership?.reasonCode || 'REFUSED'}: ${membership?.reason || 'The group was not given'}"/></if>
+                </else></if>
             </if>
         </actions>
     </service>
