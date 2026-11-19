@@ -22,8 +22,17 @@ function scope() {
         allOrganizations,
         memberPartyIds,
         activeOrganizationPartyId,
+        ownPartyIds: filtered.length ? filtered : memberPartyIds,
         organizationPartyIds: allOrganizations ? null : filtered.length ? filtered : memberPartyIds
     }
+}
+// The same scope for the request services (support cases, queues, policies, knowledge, SLAs and case templates): every
+// organization for a system administrator only. FACILITY_ALL_ORGANIZATIONS is facility and stock work and widens no
+// Customer Service reach (SEC-BAP-99).
+function requestScope() {
+    const found = scope()
+    if (!found.allOrganizations || found.systemAdmin) return found
+    return Object.assign({}, found, {allOrganizations: false, organizationPartyIds: found.ownPartyIds})
 }
 // Whether the scope covers an organization (an owner of a facility, stock or product).
 function owns(userScope, partyId) {
@@ -76,4 +85,4 @@ function defaultOrganization(userScope) {
     )
     return own.length === 1 ? own[0] : null
 }
-;({scope, owns, facilityOrganization, ownsFacility, defaultOrganization})
+;({scope, requestScope, owns, facilityOrganization, ownsFacility, defaultOrganization})

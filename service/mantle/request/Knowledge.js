@@ -83,13 +83,13 @@ function requireOrganization(organizationPartyId) {
     if (
         !organizationPartyId ||
         !isInternal(organizationPartyId) ||
-        !facilityScope.owns(facilityScope.scope(), organizationPartyId)
+        !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)
     )
         denied("RECORD_UNAVAILABLE", "Organization " + (organizationPartyId || "") + " is not available")
     return String(organizationPartyId)
 }
-// The organizations the user works for (null: every one, for a system administrator or FACILITY_ALL_ORGANIZATIONS).
-const userOrganizations = () => facilityScope.scope().organizationPartyIds
+// The organizations the user works for (null: every one, for a system administrator only; SEC-BAP-99).
+const userOrganizations = () => facilityScope.requestScope().organizationPartyIds
 // A case of one of the user's organizations; a missing request, one that is not a case and another organization's are
 // refused alike (RECORD_UNAVAILABLE).
 function caseOf(requestId) {
@@ -101,7 +101,7 @@ function caseOf(requestId) {
     const parties = rows(PARTY, {requestId}).filter(row => lib.active(row))
     const roleOf = roleTypeId => parties.find(row => row.roleTypeId === roleTypeId)?.partyId || null
     const organizationPartyId = roleOf("OrgInternal")
-    if (!organizationPartyId || !facilityScope.owns(facilityScope.scope(), organizationPartyId)) unavailable()
+    if (!organizationPartyId || !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)) unavailable()
     return {
         request,
         parties,

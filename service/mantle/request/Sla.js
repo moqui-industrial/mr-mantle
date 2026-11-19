@@ -104,7 +104,7 @@ function requireOrganization(organizationPartyId) {
     if (
         !organizationPartyId ||
         !one("mantle.party.PartyRole", {partyId: organizationPartyId, roleTypeId: "OrgInternal"}) ||
-        !facilityScope.owns(facilityScope.scope(), organizationPartyId)
+        !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)
     )
         denied("RECORD_UNAVAILABLE", "Organization " + (organizationPartyId || "") + " is not available")
     return String(organizationPartyId)
@@ -117,7 +117,7 @@ function caseOf(requestId) {
     const profile = request ? one(PROFILE, {requestId}) : null
     if (!profile) unavailable()
     const organizationPartyId = roleParty(requestId, "OrgInternal")
-    if (!organizationPartyId || !facilityScope.owns(facilityScope.scope(), organizationPartyId)) unavailable()
+    if (!organizationPartyId || !facilityScope.owns(facilityScope.requestScope(), organizationPartyId)) unavailable()
     return {request, profile, requestId: String(requestId), organizationPartyId}
 }
 

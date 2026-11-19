@@ -332,6 +332,21 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
     }
 })
 
+feature("FACILITY_ALL_ORGANIZATIONS widens no Customer Service reach: another organization's queue is refused (SEC-BAP-99)", {
+    when() {
+        const wide = user("FACILITY_WIDE", ["SUPPORT_POLICY_EDIT", "FACILITY_ALL_ORGANIZATIONS"])
+        return {
+            other: run(wide, S + "save#ServiceQueue", {organizationPartyId: otherOrg, description: "Not theirs"}),
+            own: run(wide, S + "save#ServiceQueue", {organizationPartyId: org, description: "Theirs"})
+        }
+    },
+    then({other, own}) {
+        code(other) == "RECORD_UNAVAILABLE"
+        own.error == ""
+        !!own.requestCategoryId
+    }
+})
+
 feature("a route names a team's text block only where the editor is in the team's group of the organization; it keeps its own (SEC-BAP-81)", {
     when() {
         const form = {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", acknowledge: "N"}
