@@ -582,8 +582,9 @@ along with this software (see the LICENSE.md file). If not, see
             the password, once, for a grant (ec.resource.makeGrant, an hour, keyed by the share and its password hash) that
             get#PublishedCalendarEvents takes in its place, as a shared file link's open#PublicShare does. Only a wrong password
             counts: at most 10 a link and 30 a requester in ten minutes, past which the answer is "too many tries" with no check
-            (SEC-BOS-102); a right one is never counted, so viewers who know it never lock the link. A link with no password needs
-            no grant (grant empty).</description>
+            (SEC-BOS-102); a right one is never counted, so viewers who know it never lock the link. The share's row is held for
+            update through the check, so one link's tries run one at a time and parallel wrong tries cannot all pass the limit.
+            A link with no password needs no grant (grant empty).</description>
         <in-parameters>
             <parameter name="publishToken" required="true"/>
             <parameter name="password" allow-html="any"/>
@@ -591,8 +592,10 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters><parameter name="grant"/></out-parameters>
         <actions><script><![CDATA[
             grant = null
+            // the share's row held for update to the end of the check, so tries of one link's password run one at a time: each
+            // sees the wrong ones counted before it (a peek and then a count would let parallel tries all pass the peek)
             const share = ec.entity.find('mantle.work.calendar.CalendarShare').condition('publishToken', String(publishToken))
-                    .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().one()
+                    .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).forUpdate(true).disableAuthz().one()
             if (share == null || share.userId || share.userGroupId || share.partyId) { ec.message.addError('This calendar link is not valid'); return }
             if (!share.passwordHash) return
             if (!password) { ec.message.addError(ec.l10n.localize('This calendar needs its password')); return }
