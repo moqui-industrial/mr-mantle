@@ -645,6 +645,22 @@ feature(
                 requestId: selfFiled.requestId,
                 sourceRevision: selfFiled.sourceRevision
             })
+            // nor does one who re-saved another's proposal (SEC-BAP-111)
+            const orderFour = salesOrder([["OCH_A", 2, 5]])
+            const filed = run(state.requester, S + "save#OrderChange", {
+                orderId: orderFour,
+                orderChangeKindEnumId: "OckCancel",
+                lines: [{orderItemSeqId: "01", quantity: 1}]
+            })
+            const resaved = run(state.approver, S + "save#OrderChange", {
+                requestId: filed.requestId,
+                orderChangeKindEnumId: "OckCancel",
+                lines: [{orderItemSeqId: "01", quantity: 2}]
+            })
+            const resaverDecides = run(state.approver, S + "decide#OrderChange", {
+                requestId: filed.requestId,
+                sourceRevision: resaved.sourceRevision
+            })
             // a Credit hold placed by Accounting stays when the Change hold is released
             const orderThree = salesOrder([["OCH_A", 2, 5]])
             const credit = approvedCancel(orderThree, "01", 1)
@@ -665,6 +681,8 @@ feature(
                 staleOrder,
                 expired,
                 selfApproval,
+                resaved,
+                resaverDecides,
                 heldApply,
                 orderThree: one("mantle.order.OrderHeader", {orderId: orderThree}),
                 credits: openHolds(orderThree, "OhtCredit"),
@@ -683,6 +701,8 @@ feature(
             code(r.staleOrder) === "STALE_ORDER"
             code(r.expired) === "APPROVAL_EXPIRED"
             code(r.selfApproval) === "SELF_APPROVAL"
+            r.resaved.error === ""
+            code(r.resaverDecides) === "SELF_APPROVAL"
             r.heldApply.error === ""
             r.heldApply.result.stillHeld === true
             r.orderThree.statusId === "OrderHold"

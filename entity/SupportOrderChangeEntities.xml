@@ -43,6 +43,9 @@ along with this software (see the LICENSE.md file). If not, see
         <field name="caseRequestId" type="id"><description>An order change: the case it was asked for from, when
             any.</description></field>
         <field name="changeAppliedDate" type="date-time"/>
+        <field name="changeSavedByUserIds" type="text-long"><description>An order change: each user who saved the proposal
+            (its first filing and every re-save), comma separated. None of them decides it unless the policy allows
+            self-approval (decide#OrderChange, SEC-BAP-111).</description></field>
         <relationship type="one-nofk" title="OrderChange" related="mantle.order.OrderHeader" short-alias="changeOrder">
             <key-map field-name="orderId"/></relationship>
         <relationship type="one-nofk" title="OrderChangeKind" related="moqui.basic.Enumeration" short-alias="orderChangeKind">
