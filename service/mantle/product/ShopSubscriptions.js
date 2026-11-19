@@ -1130,9 +1130,17 @@ function changeSubscriptionMethod(p) {
         visitId: ec.user.visitId || null
     })
     if (recorded.error) stepRefusal(recorded.error)
-    // a renewal past its bound of customer resumptions today waits (resume#Renewal tries it again tomorrow)
-    resumeWaiting(contract.contractId, null, true)
-    return getSubscription(Object.assign({}, p, {contractId: contract.contractId}))
+    // a renewal past its bound of customer resumptions today is not charged now: the job tries it with the new card a day
+    // later (SEC-PSS-86), and the customer is told so
+    const waiting = resumeWaiting(contract.contractId, null, true, true)
+    const out = getSubscription(Object.assign({}, p, {contractId: contract.contractId}))
+    if (waiting.limited)
+        out.notice = {
+            reasonCode: "RENEWAL_LATER",
+            message:
+                "Your card is saved. This renewal was already tried again today, so it is charged to this card tomorrow."
+        }
+    return out
 }
 // consent: the contract's card and the customer's consent to renewal charges of it, at its revision.
 function consentStep(p) {
@@ -1166,8 +1174,9 @@ function stepRefusal(message) {
 // The contract's renewals the customer can have tried again, each reopened in a transaction of its own (so the steps that
 // follow, each in their own, see it) and advanced at once. Each is an off-session charge of the kept card, so the customer's
 // own (customer) reopen a renewal at most mantle@shop-renewal-resumes times a day (SEC-PSS-86; staff retries are their
-// own, StoreSubscriptions.js). {limited}: the renewals left waiting by that bound.
-function resumeWaiting(contractId, occurrenceId = null, customer = false) {
+// own, StoreSubscriptions.js); with later, one past that bound is left to the job a day later (laterStep). {limited}: the
+// renewals left waiting by that bound.
+function resumeWaiting(contractId, occurrenceId = null, customer = false, later = false) {
     const contract = one(CONTRACT, {contractId})
     let limited = 0
     for (const row of rows(OCC, {contractId}).filter(
@@ -1175,6 +1184,11 @@ function resumeWaiting(contractId, occurrenceId = null, customer = false) {
     )) {
         if (customer && !customerResumeAllowed(row.occurrenceId)) {
             limited++
+            if (later) {
+                const scheduled = step("later", {occurrenceId: row.occurrenceId})
+                if (scheduled.error)
+                    ec.logger.error("Shop renewal " + row.occurrenceId + " not scheduled: " + firstLine(scheduled.error))
+            }
             continue
         }
         const reopened = step("reopen", {occurrenceId: row.occurrenceId})
@@ -1192,33 +1206,27 @@ function resumeWaiting(contractId, occurrenceId = null, customer = false) {
     }
     return {limited}
 }
+// A count limit of Mantle's conf (MoquiConf.xml, other/Limits.js): Infinity for 0, no limit.
+const confLimit = name => ec.resource.script("component://mr-mantle/service/mantle/other/Limits.js").limit(name)
 // Whether the customer may have a renewal charged again now: its resumptions in the last day are counted
-// (mantle@shop-renewal-resumes, 2 when unset).
+// (mantle@shop-renewal-resumes).
 function customerResumeAllowed(occurrenceId) {
-    const limit = Number(ec.factory.getConfValue("mantle@shop-renewal-resumes"))
+    const limit = confLimit("shop-renewal-resumes")
+    if (limit === Infinity) return true
     return ec.service
         .sync()
         .throwOnError(true)
         .name("org.moqui.public.AccountServices.record#Attempt")
-        .parameters({
-            input: {
-                key: "shop-renewal-resume:" + occurrenceId,
-                limit: Number.isFinite(limit) && limit > 0 ? limit : 2,
-                windowMillis: 86400000
-            }
-        })
+        .parameters({input: {key: "shop-renewal-resume:" + occurrenceId, limit, windowMillis: 86400000}})
         .requireNewTransaction(true)
         .call().result.allowed
 }
 // The customer's renewal operations, which charge the kept card or start it, counted against the requester with the
 // checkout's payment calls (mantle@shop-payment-calls in ten minutes).
 function customerCalls() {
-    const limit = Number(ec.factory.getConfValue("mantle@shop-payment-calls"))
-    externalAccess().throttle(
-        "shop-payment",
-        Number.isFinite(limit) && limit > 0 ? limit : 120,
-        "Wait a few minutes before changing your subscription again"
-    )
+    const limit = confLimit("shop-payment-calls")
+    if (limit === Infinity) return
+    externalAccess().throttle("shop-payment", limit, "Wait a few minutes before changing your subscription again")
 }
 // reopen: under the contract's and occurrence's locks, a renewal the customer can have tried again due now (one whose
 // retries ran out back to a retry, its next attempt counted as after the last).
@@ -1231,6 +1239,18 @@ function reopenStep(p) {
         nextRetryDate: ec.user.nowTimestamp
     })
     return {reopened: true}
+}
+// later: under the contract's and occurrence's locks, a renewal the customer can have tried again but not now (past its
+// day's bound of resumptions) left to the job: a retry a day from now, with the contract's card then.
+function laterStep(p) {
+    const {contract, occurrence} = lockedOccurrence(p.occurrenceId)
+    if (!occurrence || !reopenable(contract, occurrence)) return {}
+    call("update#" + OCC, {
+        occurrenceId: occurrence.occurrenceId,
+        stateEnumId: "SrsRetry",
+        nextRetryDate: new Date(nowMs() + 86400000)
+    })
+    return {scheduled: true}
 }
 // resume#Renewal (ResolveRenewal): a renewal waiting for the customer or a retry, charged again now with the contract's
 // card (a renewal in flight is answered as it is); without consent it stays waiting (CONSENT_REQUIRED).
@@ -1404,7 +1424,8 @@ const steps = {
     apply: applyStep,
     failed: failedStep,
     consent: consentStep,
-    reopen: reopenStep
+    reopen: reopenStep,
+    later: laterStep
 }
 const operations = {
     getSubscriptions,

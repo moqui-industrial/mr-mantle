@@ -886,7 +886,7 @@ feature("review: retries run out, then a changed card's consent charges the rene
     }
 })
 
-feature("SEC-PSS-86: a customer has a renewal whose retries ran out charged again a bounded number of times a day", {
+feature("SEC-PSS-86: a customer has a renewal charged again a bounded number of times a day; past it a card change waits for the job", {
     when() {
         // a subscription of the buyer whose card declines, its retries run out
         op(ids.buyer, R + "begin#SubscriptionPurchase", {offerId: state.offerId})
@@ -925,7 +925,34 @@ feature("SEC-PSS-86: a customer has a renewal whose retries ran out charged agai
             const afterFirst = charges()
             const second = op(ids.buyer, R + "resume#Renewal", {contractId})
             assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
-            return {exhausted, first, afterFirst, second, afterSecond: charges()}
+            const afterSecond = charges()
+            // a card change past the day's bound: the card is kept, nothing is charged now, the customer is told, and the
+            // job tries the renewal a day later (the card at a gateway that works again)
+            system(() =>
+                call("update#mantle.account.method.PaymentMethod", {
+                    paymentMethodId: contract.paymentMethodId,
+                    paymentGatewayConfigId: ids.hosted
+                })
+            )
+            const current = one(SUB + "StoreRecurringContract", {contractId})
+            const changed = op(ids.buyer, R + "change#SubscriptionMethod", {
+                contractId,
+                paymentMethodId: current.paymentMethodId,
+                consent: true,
+                expectedRevision: current.revision
+            })
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            const afterChange = charges()
+            const waiting = one(SUB + "StoreRenewalOccurrence", {occurrenceId: failing.occurrenceId})
+            system(() => {
+                call("update#" + SUB + "StoreRenewalOccurrence", {
+                    occurrenceId: failing.occurrenceId,
+                    nextRetryDate: new Date(Number(ec.user.nowTimestamp) - 1000)
+                })
+                call(R + "run#Renewals", {})
+            })
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            return {exhausted, first, afterFirst, second, afterSecond, changed, afterChange, waiting, afterJob: charges()}
         })
     },
     then(r) {
@@ -933,6 +960,12 @@ feature("SEC-PSS-86: a customer has a renewal whose retries ran out charged agai
         r.afterFirst == r.exhausted + 1
         code(r.second) == "RATE_LIMITED"
         r.afterSecond == r.afterFirst
+        r.changed.error == null
+        r.changed.result.notice.reasonCode == "RENEWAL_LATER"
+        r.afterChange == r.afterSecond
+        r.waiting.stateEnumId == "SrsRetry"
+        Number(r.waiting.nextRetryDate) > Date.now() + 23 * 3600000
+        r.afterJob == r.afterChange + 1
     }
 })
 
