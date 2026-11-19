@@ -15,6 +15,10 @@
         forum-inbound-accounts the mail accounts (emailAccountId, comma separated) that are the forum's own inbound accounts: a
         forum route's mail is read only from one of these (hosted or shared, fed by the mail listener), never from a person's
         or an organization's mailbox that holds the same address (SEC-PFS-85). Empty: the forum reads no route's mail. -->
+    <!-- Mantle's count limits below (shop-*, marketing-* and forum-* but forum-inbound-accounts) are whole numbers, 0 for no
+        limit, read by service/mantle/other/Limits.js. They are prefixed attributes of this element, not child elements:
+        a component element's unkeyed child is appended by the conf merge, not merged, so a runtime conf could not
+        override it (mr-moqui conf.rs merge_component_elements; conf_env.rs collect_values keeps the first). -->
     <!-- Shop's payment limits: shop-payment-calls a requester's payment result and payment form calls in ten minutes,
         shop-payment-forms the hosted payment forms one payment attempt is given in ten minutes; each asks the provider
         (SEC-PSS-84); a customer's renewal resumptions and card changes count with the payment calls, and
@@ -27,7 +31,7 @@
         (runtime/conf/MoquiDemoConf.xml); off, they are refused there (account/TestGateways.js, SEC-BOS-129). They always work
         on a development or test instance. -->
     <!-- The forum's limits: forum-drafts-per-member how many drafts a member keeps on a site (SEC-PFS-92), forum-draft-days
-        after how many days untouched a draft is removed (0 keeps them), forum-report-exports-per-day how many report files
+        after how many days untouched a draft is removed, forum-report-exports-per-day how many report files
         a staff member makes on a site a day (SEC-PFS-93), forum-owner-invitations-per-day how many list invitations a
         site's owners send a day, all lists together (operators are not counted; SEC-PFS-94). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
