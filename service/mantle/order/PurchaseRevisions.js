@@ -240,7 +240,8 @@ function sameValue(field, oldValue, newValue) {
     return String(oldValue) === String(newValue)
 }
 // Whether an address is the buying organization's to ship to (SEC-BAP-92): a current address of the organization or of one of its
-// facilities. Any other (another organization's, an employee's, a private contact's) is refused and never read out.
+// facilities, or for a drop-ship order its customer's (dropShipCustomerAddress). Any other (another organization's, an
+// employee's, a private contact's) is refused and never read out.
 function organizationAddress(organizationPartyId, contactMechId) {
     if (blank(contactMechId) || blank(organizationPartyId)) return false
     const now = ec.user.nowTimestamp
@@ -253,6 +254,31 @@ function organizationAddress(organizationPartyId, contactMechId) {
     return Array.from(
         find("mantle.facility.FacilityContactMech", {contactMechId}).conditionDate("fromDate", "thruDate", now).list()
     ).some(row => one("mantle.facility.Facility", {facilityId: row.facilityId})?.ownerPartyId === organizationPartyId)
+}
+// Whether an address is a drop-ship purchase order's customer's (SEC-BAP-92 review): a line of the order bought for a sales line
+// (OrderItem.salesOrderId), whose sales part ships to it or whose customer has it as a current address.
+function dropShipCustomerAddress(orderId, contactMechId) {
+    if (blank(contactMechId)) return false
+    const salesOrderIds = Array.from(
+        new Set(
+            rows("mantle.order.OrderItem", {orderId})
+                .map(row => row.salesOrderId)
+                .filter(Boolean)
+        )
+    )
+    const now = ec.user.nowTimestamp
+    for (const salesOrderId of salesOrderIds)
+        for (const part of rows("mantle.order.OrderPart", {orderId: salesOrderId})) {
+            if (part.postalContactMechId === contactMechId) return true
+            if (
+                part.customerPartyId &&
+                find("mantle.party.contact.PartyContactMech", {partyId: part.customerPartyId, contactMechId})
+                    .conditionDate("fromDate", "thruDate", now)
+                    .count()
+            )
+                return true
+        }
+    return false
 }
 // A value as text for the change rows (names for parties, terms and products; amounts as given, the screen withholds them).
 function valueText(field, value, currencyUomId) {
@@ -433,7 +459,7 @@ function proposed(po, facts, p) {
         } else if (field === "postalContactMechId" && newValue) {
             if (
                 !one("mantle.party.contact.PostalAddress", {contactMechId: newValue}) ||
-                !organizationAddress(po.organizationPartyId, newValue)
+                (!organizationAddress(po.organizationPartyId, newValue) && !dropShipCustomerAddress(po.orderId, newValue))
             )
                 refusal = [
                     "ADDRESS_INVALID",

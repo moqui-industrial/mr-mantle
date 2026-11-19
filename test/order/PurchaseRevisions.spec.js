@@ -295,7 +295,11 @@ feature(
             // SEC-BAP-92: a ship-to address is the buying organization's (or its facilities'); another's is refused, by its id
             const address = (contactMechId, partyId) => {
                 call("create#mantle.party.contact.ContactMech", {contactMechId, contactMechTypeEnumId: "CmtPostalAddress"})
-                call("create#mantle.party.contact.PostalAddress", {contactMechId, address1: contactMechId + " Lane", city: "Elsewhere"})
+                call("create#mantle.party.contact.PostalAddress", {
+                    contactMechId,
+                    address1: contactMechId + " Lane",
+                    city: "Elsewhere"
+                })
                 if (partyId)
                     call("create#mantle.party.contact.PartyContactMech", {
                         partyId,
@@ -618,3 +622,46 @@ feature(
         }
     }
 )
+
+feature("a drop-ship purchase order may ship to its sales order's customer's address, which no other order may (SEC-BAP-92)", {
+    when() {
+        const shipTo = contactMechId =>
+            run(state.buyer, O + "preview#PurchaseRevision", {
+                orderId: state.orderId,
+                partChanges: {postalContactMechId: contactMechId}
+            }).changeRows.find(row => row.field == "postalContactMechId")
+        call("create#mantle.party.Party", {partyId: prefix + "_DS_CUST", partyTypeEnumId: "PtyOrganization"})
+        call("create#mantle.party.contact.ContactMech", {
+            contactMechId: prefix + "_ADDR_CUST",
+            contactMechTypeEnumId: "CmtPostalAddress"
+        })
+        call("create#mantle.party.contact.PostalAddress", {
+            contactMechId: prefix + "_ADDR_CUST",
+            address1: "1 Customer Lane",
+            city: "Elsewhere"
+        })
+        call("create#mantle.party.contact.PartyContactMech", {
+            partyId: prefix + "_DS_CUST",
+            contactMechId: prefix + "_ADDR_CUST",
+            contactMechPurposeId: "PostalShippingDest",
+            fromDate: ec.user.nowTimestamp
+        })
+        call("create#mantle.order.OrderHeader", {
+            orderId: prefix + "_DS_SO",
+            statusId: "OrderApproved",
+            entryDate: ec.user.nowTimestamp
+        })
+        call("create#mantle.order.OrderPart", {
+            orderId: prefix + "_DS_SO",
+            orderPartSeqId: "01",
+            customerPartyId: prefix + "_DS_CUST"
+        })
+        const before = shipTo(prefix + "_ADDR_CUST")
+        call("update#mantle.order.OrderItem", {orderId: state.orderId, orderItemSeqId: "01", salesOrderId: prefix + "_DS_SO"})
+        return {before, after: shipTo(prefix + "_ADDR_CUST")}
+    },
+    then({before, after}) {
+        before.refusalCode == "ADDRESS_INVALID"
+        after.refusalCode == null
+    }
+})
