@@ -3,6 +3,9 @@
     <moqui.security.UserPermission userPermissionId="PRODUCT_COST_VIEW" description="Product cost view"/>
     <moqui.security.UserPermission userPermissionId="PRODUCT_COST_ESTIMATE" description="Product cost estimate"/>
     <moqui.security.UserPermission userPermissionId="PRODUCT_COST_APPROVE" description="Product cost approve"/>
+    <!-- turning an organization's cost self approval on (ProductCatalogSetting allowCostSelfApproval): held by no BOSS bundle,
+        so whoever drafts and approves estimates does not also waive the second person (SEC-BAP-106) -->
+    <moqui.security.UserPermission userPermissionId="PRODUCT_COST_SELF_APPROVAL" description="Allow product cost self approval"/>
     <moqui.security.UserPermission userPermissionId="ACCOUNTING_VIEW" description="Accounting view"/>
     <moqui.security.UserPermission userPermissionId="ACCOUNTING_GL_POST" description="Accounting gl post"/>
     <moqui.security.UserPermission userPermissionId="METHOD_VIEW" description="Method view"/>
