@@ -205,6 +205,29 @@ spec({
             title: "Agent's own",
             bodyHtml: "<p>Mine.</p>"
         })
+        // teams: two of the organization's (the administrator in the first one's group only) and one of the other's (the
+        // administrator in its group too), each with a block shared with its group
+        for (const [team, owner, member] of [
+            ["_TEAM", org, true],
+            ["_TEAM_B", org, false],
+            ["_OTHER_TEAM", otherOrg, true]
+        ]) {
+            call("create#mantle.party.Party", {partyId: prefix + team, partyTypeEnumId: "PtyOrganization", ownerPartyId: owner})
+            call("create#moqui.security.UserGroup", {userGroupId: "SVT_" + prefix + team, description: "Service team " + team})
+            if (member)
+                call("create#moqui.security.UserGroupMember", {
+                    userGroupId: "SVT_" + prefix + team,
+                    userId: state.admin,
+                    fromDate: since
+                })
+            call("store#moqui.basic.email.EmailTextBlock", {
+                emailTextBlockId: prefix + "_ACK" + team,
+                ownerUserId: state.agent,
+                userGroupId: "SVT_" + prefix + team,
+                title: "Team ack" + team,
+                bodyHtml: "<p>Case ${requestId}.</p>"
+            })
+        }
         call("store#moqui.basic.email.EmailTextBlock", {
             emailTextBlockId: prefix + "_ACK_OTHER",
             ownerUserId: state.otherAdmin,
@@ -294,6 +317,40 @@ feature("a queue's routes: mail with an acknowledgement, a replacement ending th
         code(otherBlock) == "TEXT_BLOCK_UNAVAILABLE"
         code(sharedBlock) == ""
         back != null
+    }
+})
+
+feature("a route names a team's text block only where the editor is in the team's group of the organization; it keeps its own (SEC-BAP-81)", {
+    when() {
+        const form = {requestCategoryId: state.queue, channelEnumId: "SrcWebForm", acknowledge: "N"}
+        const save = (fields = {}) => run(state.admin, S + "save#ServiceRoute", Object.assign({}, form, fields))
+        const team = save({ackTextBlockId: prefix + "_ACK_TEAM"})
+        const notMember = save({ackTextBlockId: prefix + "_ACK_TEAM_B"})
+        const otherTeam = save({ackTextBlockId: prefix + "_ACK_OTHER_TEAM"})
+        // a route whose block the editor may not name now (written as a data load would): changed, it keeps that block; a
+        // route that has ended, and another route of the queue, do not lend it
+        const written = call("create#mantle.request.support.ServiceRoute", {
+            organizationPartyId: org,
+            channelEnumId: "SrcWebForm",
+            requestCategoryId: state.queue,
+            acknowledge: "N",
+            ackTextBlockId: prefix + "_ACK_AGENT",
+            fromDate: new Date(Date.now() - 60000)
+        }).serviceRouteId
+        const kept = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT", rateLimitPerHour: 25})
+        const ended = save({serviceRouteId: written, ackTextBlockId: prefix + "_ACK_AGENT"})
+        const otherRoute = save({serviceRouteId: state.mailRoute, ackTextBlockId: prefix + "_ACK_AGENT"})
+        // the form route ends, as the later features start their own
+        run(state.admin, S + "save#ServiceRoute", {serviceRouteId: kept.serviceRouteId, end: true})
+        return {team, notMember, otherTeam, kept, ended, otherRoute}
+    },
+    then({team, notMember, otherTeam, kept, ended, otherRoute}) {
+        code(team) == ""
+        code(notMember) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherTeam) == "TEXT_BLOCK_UNAVAILABLE"
+        code(kept) == ""
+        code(ended) == "TEXT_BLOCK_UNAVAILABLE"
+        code(otherRoute) == "TEXT_BLOCK_UNAVAILABLE"
     }
 })
 
