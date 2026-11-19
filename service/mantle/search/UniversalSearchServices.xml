@@ -339,8 +339,16 @@ along with this software (see the LICENSE.md file). If not, see
             for (const hit of page.hits) hitsOf[hit.documentId] = (hitsOf[hit.documentId] || 0) + 1
             for (const result of results) shownOf[result.entityType] = (shownOf[result.entityType] || 0) + 1
             const droppedTypes = Object.keys(hitsOf).filter((type) => (shownOf[type] || 0) < hitsOf[type])
+            // and when this page is not the whole match (a later page, or more matches than it holds), every type with a
+            // per-hit rule: a page cannot tell whether the hits it does not hold are hidden ones, so its counts are the
+            // page's (SEC-DAT-82, a second page)
+            const ruledTypes = ['MantleParty', 'MantleTask', 'MantleRequest', 'MantleCommunicationEvent', 'MantleAcctgTrans',
+                'MantleInvoice', 'MantlePayment']
+            const wholeMatch = Number(offset || 0) === 0 && page.hits.length >= Number(page.total || 0)
+            const unseenTypes = wholeMatch ? [] : types.filter((type) => ruledTypes.includes(type))
             const liveTypes = [...new Set((liveMailboxCounts ? ['MantleCommunicationEvent'] : [])
-                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes).concat(droppedTypes))]
+                    .concat(financeDropped || !bothSides ? sidedTypes : []).concat(payrollTypes).concat(droppedTypes)
+                    .concat(unseenTypes))]
             if (liveTypes.length) { total = results.length; totalRelation = 'gte' }
             // facets over the whole authorized match, not the page
             const facetList = facets ?? []

@@ -209,3 +209,31 @@ feature("a hit the search leaves out counts in neither the total nor the type fa
         shown.totalRelation == "eq"
     },
 })
+
+// a later page, or a page that does not hold the whole match, cannot tell whether the matches it does not hold are hidden
+// ones: a type with a per-hit rule is counted from the page, never the index's count (SEC-DAT-82, a second page)
+feature("no page of a partly hidden match counts the hidden record", {
+    when() {
+        for (const [requestId, name] of [["USS-R10", "Vbnrtyq first request"], ["USS-R11", "Vbnrtyq second request"],
+                ["USS-R12", "Vbnrtyq hidden request"]])
+            call("create#mantle.request.Request", { requestId, requestName: name, requestTypeEnumId: "RqtSupport",
+                    statusId: "ReqSubmitted", requestDate: effectiveTime })
+        indexRecords("MantleRequest", "requestId", ["USS-R10", "USS-R11", "USS-R12"])
+        ec.entity.find("mantle.request.Request").condition("requestId", "USS-R12").disableAuthz().one().delete()
+        const pages = [0, 1, 2].map((offset) => call("mantle.search.UniversalSearchServices.search#Universal", { q: "vbnrtyq",
+                entityType: "MantleRequest", limit: 1, offset, highlight: false, facets: ["entityType"] }))
+        return {
+            totals: pages.map((page) => num(page.total)),
+            relations: pages.map((page) => page.totalRelation),
+            facetCounts: pages.map((page) => (page.facetCounts.entityType || []).filter((facet) => facet.value == "MantleRequest")
+                .reduce((acc, facet) => acc + num(facet.count), 0)),
+            shown: pages.reduce((acc, page) => acc + page.results.length, 0)
+        }
+    },
+    then({ totals, relations, facetCounts, shown }) {
+        shown == 2
+        totals.every((total) => total <= 2)
+        relations.every((relation) => relation == "gte")
+        facetCounts.every((count) => count <= 2)
+    },
+})
