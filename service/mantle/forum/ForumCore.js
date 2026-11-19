@@ -886,14 +886,31 @@ function mailSettingsRefusal(siteId, senderAddress, templateId) {
         return 'Template and sender must be registered together'
     return null
 }
-/* A site's mail settings to send with, checked again against the registration at send time; null (and an error in the
-   log) when the operator's registration no longer holds them. */
+/* A site's mail settings to send with, checked again against the registration at send time; null when the operator's
+   registration no longer holds them. The refusal is logged once for the site (a ForumImportMap row keeps the last one, in
+   a transaction of its own), not once for each delivery, and again only when it changes or after it held again. */
 function mailSettings(siteId) {
     const settings = one(F + 'ForumMailSettings', { siteId })
     if (!settings) return null
     const refusal = mailSettingsRefusal(siteId, settings.senderAddress, settings.templateId)
-    if (!refusal) return settings
-    ec.logger.error('Forum mail of site ' + siteId + ' is not sent: ' + refusal)
+    const key = { siteId, sourceType: 'mail-refusal', sourceId: siteId.slice(0, 40) }
+    const logged = one(F + 'ForumImportMap', key)
+    if (!refusal) {
+        if (logged)
+            ec.transaction.runRequireNew(null, 'Error clearing a mail refusal', () =>
+                find(F + 'ForumImportMap', key).deleteAll(),
+            )
+        return settings
+    }
+    if (logged?.payload !== refusal) {
+        ec.logger.error('Forum mail of site ' + siteId + ' is not sent: ' + refusal)
+        ec.transaction.runRequireNew(null, 'Error keeping a mail refusal', () => {
+            const row = one(F + 'ForumImportMap', key, true)
+            row
+                ? update(row, { payload: refusal })
+                : create(F + 'ForumImportMap', { ...key, state: 'index', payload: refusal })
+        })
+    }
     return null
 }
 /* Sanitized HTML as plain text; templates escape it once. */

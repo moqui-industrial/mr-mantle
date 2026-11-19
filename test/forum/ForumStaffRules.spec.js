@@ -21,6 +21,7 @@ const ids = {}
 const op = (username, operation, input = {}) => lib.op(username, SITE, operation, input)
 const kind = out => out.kind || null
 const operationId = () => "fsr-" + ec.user.randomString(16)
+const list = (entity, fields) => Array.from(ec.entity.find(entity).condition(fields).disableAuthz().list())
 const count = (entity, fields) => ec.entity.find(entity).condition(fields).disableAuthz().count()
 const revisions = out => (out.revisionList || []).map(row => Number(row.revision))
 /* A published public category, made as rows; more adds ForumCategory fields. */
@@ -368,19 +369,29 @@ feature("SEC-PFS-99: a site sends only as a sender of its own host name or one t
                 )
                 // sent with what is stored only while the operator's registration still holds it
                 const atSend = lib.privileged(() => core().mailSettings(SITE))
+                // the refusal is kept once for the site (logged once), not once per delivery, and cleared when it holds
+                lib.privileged(() => core().mailSettings(SITE))
+                const refusals = () =>
+                    list("mantle.forum.ForumImportMap", {siteId: SITE, sourceType: "mail-refusal"}).map(row => row.payload)
+                const kept = refusals()
                 const back = store("FSR_OWNER", "forum@" + HOST, "FSR_OWN", 2)
-                return {parent, other, own, named, atSend, back}
+                const holds = !!lib.privileged(() => core().mailSettings(SITE))
+                return {parent, other, own, named, atSend, kept, back, holds, cleared: refusals()}
             })
         )
     },
-    then({parent, other, own, named, atSend, back}) {
+    then({parent, other, own, named, atSend, kept, back, holds, cleared}) {
         parent.kind == "Unprocessable"
         parent.message.includes("ask the operator")
         other.kind == "Unprocessable"
         own.revision == 1
         named.revision == 2
         atSend == null
+        kept.length == 1
+        kept[0].includes("not this site's")
         back.revision == 3
+        holds == true
+        cleared == []
     }
 })
 
