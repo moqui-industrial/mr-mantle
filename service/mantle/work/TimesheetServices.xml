@@ -434,12 +434,12 @@ const days = Array.from(dayList || []).map(String)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userGroupId)
                     const userIds = groupIds.length ? Array.from(new Set(Array.from(ec.entity.find('moqui.security.UserGroupMember').condition('userGroupId', 'in', groupIds)
                             .conditionDate('fromDate', 'thruDate', null).list()).map((row) => row.userId))) : []
-                    // only those who work for the policy's organization (SEC-BOS-97): another organization's Time managers are no approvers
-                    if (userIds.length && organizationPartyId) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds)
-                            .condition('partyId', 'is-not-null', null).limit(200).list()) {
-                        if (Array.from(ec.service.sync().name('mantle.party.PartyServices.get#PartyInternalOrgIds').parameters({partyId: account.partyId})
-                                .call()?.userOrgIds || []).includes(organizationPartyId)) found.add(account.partyId)
-                    }
+                    // only those who work for the policy's organization (SEC-BOS-97), filtered in the find: another organization's Time
+                    // managers are no approvers
+                    const staff = organizationPartyId ? Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#AnyApproverScope')
+                            .parameters({organizationPartyId: organizationPartyId}).call()?.approverStaffPartyIds || []) : []
+                    if (userIds.length && staff.length) for (const account of ec.entity.find('moqui.security.UserAccount').condition('userId', 'in', userIds)
+                            .condition('partyId', 'in', staff).limit(200).list()) found.add(account.partyId)
                 } else if (policy.approvers === 'line') {
                     for (const row of ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtManager')
                             .condition('toPartyId', person).conditionDate('fromDate', 'thruDate', null).list()) found.add(row.fromPartyId)
@@ -448,6 +448,28 @@ const days = Array.from(dayList || []).map(String)
                 found.delete(person)
                 approverPartyIds = Array.from(found).sort()
             } finally { if (!wasDisabled) ec.artifactExecution.enableAuthz() }
+        ]]></script></actions>
+    </service>
+
+    <service verb="get" noun="AnyApproverScope" allow-remote="false">
+        <description>Under the timesheet approver policy any of an organization (SEC-BOS-97): workerPartyIds, the people whose time is
+            the organization's (a current agent, employee or member relationship to it), whom its holders of TIMESHEET_APPROVE approve
+            and read; approverStaffPartyIds, the people who may be those approvers: who work for it or for an organization it rolls up
+            to (PrtOrgRollup, as get#PartyInternalOrgIds counts an employer's child organizations). Reads only.</description>
+        <in-parameters><parameter name="organizationPartyId" required="true"/></in-parameters>
+        <out-parameters>
+            <parameter name="workerPartyIds" type="List"/>
+            <parameter name="approverStaffPartyIds" type="List"/>
+        </out-parameters>
+        <actions><script><![CDATA[
+            const members = (orgIds) => Array.from(new Set(Array.from(ec.entity.find('mantle.party.PartyRelationship')
+                    .condition('toPartyId', 'in', orgIds).condition('relationshipTypeEnumId', 'in', ['PrtAgent', 'PrtEmployee', 'PrtMember'])
+                    .conditionDate('fromDate', 'thruDate', null).selectField('fromPartyId').disableAuthz().list()).map((row) => row.fromPartyId)))
+            const parents = Array.from(ec.entity.find('mantle.party.PartyRelationship').condition('fromPartyId', organizationPartyId)
+                    .condition('relationshipTypeEnumId', 'PrtOrgRollup').conditionDate('fromDate', 'thruDate', null).selectField('toPartyId')
+                    .disableAuthz().list()).map((row) => row.toPartyId)
+            workerPartyIds = members([organizationPartyId])
+            approverStaffPartyIds = parents.length ? members([organizationPartyId].concat(parents)) : workerPartyIds
         ]]></script></actions>
     </service>
 
@@ -518,8 +540,8 @@ const days = Array.from(dayList || []).map(String)
                 isOwner = !!me && me === person
                 // with the policy any, a holder of TIMESHEET_APPROVE of the policy's organization (SEC-BOS-97)
                 const anyApprover = !!approverOut.anyPermission && !!me && !!approverOut.organizationPartyId && ec.user.hasPermission('TIMESHEET_APPROVE')
-                        && Array.from(ec.service.sync().name('mantle.party.PartyServices.get#PartyInternalOrgIds').parameters({partyId: me})
-                            .call()?.userOrgIds || []).includes(approverOut.organizationPartyId)
+                        && Array.from(ec.service.sync().name('mantle.work.TimesheetServices.get#AnyApproverScope').parameters({organizationPartyId:
+                            approverOut.organizationPartyId}).call()?.approverStaffPartyIds || []).includes(me)
                 isApprover = !isOwner && !!me && (isAdmin || approverPartyIds.includes(me) || anyApprover)
                 canView = isOwner || isApprover || isAdmin
                 locked = policy.lock !== false && (statusId === 'TmshCompleted' || statusId === 'TmshApproved')

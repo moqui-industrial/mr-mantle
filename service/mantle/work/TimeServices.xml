@@ -1563,8 +1563,9 @@ along with this software (see the LICENSE.md file). If not, see
             The time entries the user may see, narrowed, sorted and paged, for TimeEntries and ProjectTime (design-projects.md §8;
             no entity filter covers TimeEntry, impl-projects.md F1). A person's time is seen by the person, the managers of the
             projects it is on (ProjectManager or Manager: the entries on the project and its items), the person's line managers
-            (PrtManager), and everyone's by ADMIN and, when the user's timesheet policy has approvers any, by the holders of
-            TIMESHEET_APPROVE.
+            (PrtManager), and everyone's by ADMIN; when the user's timesheet policy has approvers any, a holder of TIMESHEET_APPROVE
+            sees too the time of the people of that policy's organization (TimesheetServices.get#AnyApproverScope workerPartyIds),
+            never another organization's (SEC-BOS-97).
 
             The find: partyId, rootWorkEffortId (the project's entries and its items'), workEffortId (one item), noWorkItem,
             clientPartyId, workTypeEnumId, billable (Y or N), clientInvoiced and workerInvoiced (Y or N), sheetStatus (open:
@@ -1637,14 +1638,20 @@ along with this software (see the LICENSE.md file). If not, see
                 const vis = ec.service.sync().name('mantle.work.ProjectServices.get#VisibleProjectInfo').call() || {}
                 // a client contact sees no time here (impl-projects.md P10: shared hours are the project's own view, without rates)
                 if (vis.isClient) { pageIndex = 0; pageSize = size; pageMaxIndex = 0; pageRangeLow = 0; pageRangeHigh = 0; return }
-                let anyApprover = false
-                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) anyApprover = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy')
-                        .call()?.policy?.approvers === 'any'
-                seesAll = isAdmin || anyApprover
+                // the policy any: the time of the people of the user's policy organization (SEC-BOS-97), not everyone's
+                let anyWorkers = []
+                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) {
+                    const policyOut = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').call() || {}
+                    if (policyOut.policy?.approvers === 'any' && policyOut.organizationPartyId) anyWorkers = Array.from(ec.service.sync()
+                            .name('mantle.work.TimesheetServices.get#AnyApproverScope').parameters({organizationPartyId: policyOut.organizationPartyId})
+                            .call()?.workerPartyIds || [])
+                }
+                seesAll = isAdmin
                 const seen = []
                 if (!seesAll) {
                     if (!me) { pageIndex = 0; pageSize = size; pageMaxIndex = 0; pageRangeLow = 0; pageRangeHigh = 0; return }
                     seen.push(cf.makeCondition('partyId', 'equals', me))
+                    if (anyWorkers.length) seen.push(cf.makeCondition('partyId', 'in', anyWorkers))
                     const managed = Array.from(vis.managedProjectIds || [])
                     if (managed.length) {
                         seen.push(cf.makeCondition('rootWorkEffortId', 'in', managed))

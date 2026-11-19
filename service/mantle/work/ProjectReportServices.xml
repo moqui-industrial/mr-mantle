@@ -288,9 +288,10 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="get" noun="ReportScope">
         <description>What the reports may read for the current user: the projects (allProjects for ADMIN, else visibleProjectIds,
-            managedProjectIds and restrictedItemIds of get#VisibleProjectInfo), whose time (seesAllTime for ADMIN and, when the user's
-            timesheet policy has approvers any, TIMESHEET_APPROVE holders; else timePartyIds: the user and those the user is the line
-            manager of, PrtManager, beside the time on managedProjectIds) and money (moneyShown: ADMIN or TIME_ENTRY_RATE).</description>
+            managedProjectIds and restrictedItemIds of get#VisibleProjectInfo), whose time (seesAllTime for ADMIN; else timePartyIds:
+            the user and those the user is the line manager of, PrtManager, and when the user's timesheet policy has approvers any and
+            the user holds TIMESHEET_APPROVE the people of that policy's organization, never another's, SEC-BOS-97; beside the time on
+            managedProjectIds) and money (moneyShown: ADMIN or TIME_ENTRY_RATE).</description>
         <out-parameters>
             <parameter name="allProjects" type="Boolean"/>
             <parameter name="userPartyId"/>
@@ -317,11 +318,17 @@ along with this software (see the LICENSE.md file). If not, see
             seesAllTime = isAdmin
             const wasDisabled = ec.artifactExecution.disableAuthz()
             try {
-                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) seesAllTime = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy')
-                        .call()?.policy?.approvers === 'any'
+                let anyWorkers = []
+                if (!isAdmin && ec.user.hasPermission('TIMESHEET_APPROVE')) {
+                    const policyOut = ec.service.sync().name('mantle.work.TimesheetServices.get#TimesheetPolicy').call() || {}
+                    if (policyOut.policy?.approvers === 'any' && policyOut.organizationPartyId) anyWorkers = Array.from(ec.service.sync()
+                            .name('mantle.work.TimesheetServices.get#AnyApproverScope').parameters({organizationPartyId: policyOut.organizationPartyId})
+                            .call()?.workerPartyIds || [])
+                }
                 ec.message.clearErrors()
                 if (userPartyId) {
                     timePartyIds.push(userPartyId)
+                    for (const partyId of anyWorkers) if (!timePartyIds.includes(partyId)) timePartyIds.push(partyId)
                     for (const row of ec.entity.find('mantle.party.PartyRelationship').condition('relationshipTypeEnumId', 'PrtManager')
                             .condition('fromPartyId', userPartyId).conditionDate('fromDate', 'thruDate', null).list())
                         if (!timePartyIds.includes(row.toPartyId)) timePartyIds.push(row.toPartyId)
