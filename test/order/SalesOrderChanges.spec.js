@@ -588,3 +588,49 @@ feature("a change raising an approved order's total over the customer's credit l
         r.status === "OrderHold"
     }
 })
+
+feature("a credit release covers the exposure it was made on: a change raising the total past it is checked again (SEC-BAP-91)", {
+    when() {
+        const orderId = salesOrder([["SOC_A", 2, 5]])
+        const more = approvedCommercial(state.salesChange, orderId, "OckQuantity", [{orderItemSeqId: "01", quantity: 4}])
+        const policy = call("create#mantle.account.billing.CustomerCreditPolicy", {
+            organizationPartyId: org,
+            customerPartyId: customer,
+            currencyUomId: "USD",
+            creditLimit: 1,
+            actionEnumId: "CpaHold",
+            fromDate: ec.user.nowTimestamp
+        }).customerCreditPolicyId
+        try {
+            // a release with no expiry, made on the exposure before the change
+            const before = call("mantle.account.CreditServices.evaluate#OrderCredit", {orderId, forChange: true})
+            call("create#mantle.account.billing.CreditHoldDecision", {
+                orderId,
+                organizationPartyId: org,
+                customerPartyId: customer,
+                decisionEnumId: "CrdRelease",
+                reason: "Known customer",
+                decidedByUserId: "EX_JOHN_DOE",
+                decidedDate: ec.user.nowTimestamp,
+                exposureAmount: before.exposure,
+                creditLimit: 1,
+                currencyUomId: "USD"
+            })
+            const stands = call("mantle.account.CreditServices.evaluate#OrderCredit", {orderId, forChange: true}).resultEnumId
+            const applied = salesApply(more)
+            return {stands, applied, credits: openHolds(orderId, "OhtCredit")}
+        } finally {
+            call("update#mantle.account.billing.CustomerCreditPolicy", {
+                customerCreditPolicyId: policy,
+                thruDate: ec.user.nowTimestamp
+            })
+        }
+    },
+    then(r) {
+        // the release stands on the exposure it was made on
+        r.stands === "pass"
+        r.applied.error === ""
+        r.applied.result.stillHeld === true
+        r.credits.length === 1
+    }
+})

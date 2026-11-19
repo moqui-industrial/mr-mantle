@@ -70,7 +70,8 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="evaluate" noun="OrderCredit" allow-remote="false">
         <description>The credit check of an order's sales parts (an internal organization selling to an outside customer),
             or the part given, each against its customer's policy in effect, else the organization's default. A part released
-            by a credit decision that has not expired passes. An organization with no policy at all is answered by one count.
+            by a credit decision that has not expired passes, except for an order change once the customer's exposure is above
+            the one the decision was made on (SEC-BAP-91). An organization with no policy at all is answered by one count.
             The check: the exposure (unpaid invoices and open
             orders not yet invoiced, less unapplied payments and the payments authorized on the open orders) against the
             limit, and the oldest overdue invoice against the overdue days. Answers pass, warn or hold with each reason and

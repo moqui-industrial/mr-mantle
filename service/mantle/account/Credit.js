@@ -147,7 +147,8 @@ function judge(policy, numbers, orderCurrency, customerName) {
 }
 
 // The credit check of an order: each sales part (an internal organization selling to an outside customer), or the part
-// given, against its customer's policy. A part released by a credit decision that has not expired passes. With
+// given, against its customer's policy. A part released by a credit decision that has not expired passes (for an order
+// change, only while the exposure is not above the decision's). With
 // placeHold a Hold result holds the part (the whole order when it has one part) and notifies the organization's credit
 // managers (CreditHoldRelease). The answer is the part found worst, with every part held.
 function evaluate(p) {
@@ -215,8 +216,22 @@ function evaluatePart(p, header, part, multiPart) {
         overdueDaysLimit: policy.overdueDaysLimit,
         currencyUomId: policy.currencyUomId || header.currencyUomId
     }
+    const currencyUomId = base.currencyUomId
+    const numbers = exposure(organizationPartyId, customerPartyId, currencyUomId, policy.overdueDaysLimit != null)
+    // a part not yet counted as open (an approval of an order in another state) adds its own total
+    if (!OPEN_ORDER_STATUSES.includes(part.statusId) && header.currencyUomId === currencyUomId)
+        numbers.exposure = numbers.exposure.add(part.partTotal ?? header.grandTotal ?? 0)
+    // a release covers the exposure it was decided on (exposureAmount): for an order change (SEC-BAP-91) one the customer's
+    // exposure has since risen past, in the decision's currency, does not stand, and the order is checked again
     const decision = standingRelease(p.orderId, part.orderPartSeqId)
-    if (decision)
+    const forChange = !!(p.changeHoldReasonId || p.forChange)
+    const outgrown =
+        !!decision &&
+        forChange &&
+        (decision.exposureAmount == null ||
+            (decision.currencyUomId || currencyUomId) !== currencyUomId ||
+            numbers.exposure.compare(toDecimal(decision.exposureAmount)) > 0)
+    if (decision && !outgrown)
         return Object.assign(base, {
             resultEnumId: "pass",
             reasons: [{code: "CREDIT_RELEASED", message: "released by the credit decision " + decision.creditHoldDecisionId}],
@@ -224,11 +239,6 @@ function evaluatePart(p, header, part, multiPart) {
             exposure: null,
             overdueDays: null
         })
-    const currencyUomId = base.currencyUomId
-    const numbers = exposure(organizationPartyId, customerPartyId, currencyUomId, policy.overdueDaysLimit != null)
-    // a part not yet counted as open (an approval of an order in another state) adds its own total
-    if (!OPEN_ORDER_STATUSES.includes(part.statusId) && header.currencyUomId === currencyUomId)
-        numbers.exposure = numbers.exposure.add(part.partTotal ?? header.grandTotal ?? 0)
     const names = lib.partyNames([customerPartyId])
     const finding = judge(policy, numbers, header.currencyUomId, names[customerPartyId] || customerPartyId)
     const out = Object.assign(base, finding, {exposure: numbers.exposure, overdueDays: numbers.overdueDays})
