@@ -675,10 +675,27 @@ feature("a job class another employer's position holds is changed only by an HR 
                 run(state.hr, S + "store#JobRequirement", {emplPositionClassId: shared, skillTypeEnumId: prefix + "_SK_POS"})
             ),
             ownRename: rename(state.hr, own, "Pos spec own class renamed"),
+            // a class only B's costing rate names is B's too (round 2)
+            rateRename: (() => {
+                const rated = store(state.hr, {title: "Pos spec rated class"}).emplPositionClassId
+                call("create#mantle.humanres.rate.RateAmount", {rateTypeEnumId: "RatpStandard", ratePurposeEnumId: "RaprCost",
+                    rateAmount: "30", rateCurrencyUomId: "USD", timePeriodUomId: "TF_hr", emplPositionClassId: rated,
+                    organizationPartyId: orgB, fromDate: since})
+                return rename(state.hr, rated, "Renamed by A")
+            })(),
             allRename: rename(hrAll, shared, "Pos spec shared class renamed")
         }
     },
     then(out) {
-        out == {seatB: "", sharedRename: "CLASS_SHARED", sharedEnd: "CLASS_SHARED", sharedSkill: "CLASS_SHARED", ownRename: "", allRename: ""}
+        out ==
+            {
+                seatB: "",
+                sharedRename: "CLASS_SHARED",
+                sharedEnd: "CLASS_SHARED",
+                sharedSkill: "CLASS_SHARED",
+                ownRename: "",
+                rateRename: "CLASS_SHARED",
+                allRename: ""
+            }
     }
 })

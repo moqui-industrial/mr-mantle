@@ -876,17 +876,26 @@ function workTypeIds(value) {
     if (unknown) denied("WORK_TYPE_INVALID", unknown + " is not a work type")
     return ids
 }
-// CLASS_SHARED (SEC-BOS-120): a class a current position of an employer outside the caller's scope holds changes only for a
-// holder of PEOPLE_ALL_ORGANIZATIONS, as its title, end and requirements are what that employer's positions and staffing read.
+// CLASS_SHARED (SEC-BOS-120): a class a current position, or a rate (a worker or costing rate by class) not ended, of an employer
+// outside the caller's scope uses changes only for a holder of PEOPLE_ALL_ORGANIZATIONS, as its title, end and requirements are
+// what that employer's positions, staffing and rates read. A rate shared by every organization (no organization) is no
+// other employer's.
 function checkClassReach(userScope, positionClass) {
     if (userScope.allOrganizations || userScope.capabilities.allOrganizations) return
     const cf = ec.entity.conditionFactory
     const orgIds = userScope.organizationPartyIds.length ? userScope.organizationPartyIds : ["_NA_"]
-    const outside = find(POSITION)
-        .condition("emplPositionClassId", positionClass.emplPositionClassId)
-        .condition("organizationPartyId", "not-in", orgIds)
-        .condition(cf.makeCondition([cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater-than", ec.user.nowTimestamp)], "or"))
-        .count()
+    const notEnded = cf.makeCondition(
+        [cf.makeCondition("thruDate", "is-null", null), cf.makeCondition("thruDate", "greater-than", ec.user.nowTimestamp)],
+        "or"
+    )
+    const usedOutside = entityName =>
+        find(entityName)
+            .condition("emplPositionClassId", positionClass.emplPositionClassId)
+            .condition("organizationPartyId", "is-not-null", null)
+            .condition("organizationPartyId", "not-in", orgIds)
+            .condition(notEnded)
+            .count() > 0
+    const outside = usedOutside(POSITION) || usedOutside("mantle.humanres.rate.RateAmount")
     if (outside)
         denied(
             "CLASS_SHARED",
