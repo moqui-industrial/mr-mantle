@@ -398,6 +398,38 @@ feature("self approval is refused by default and explicitly recorded when organi
         !!saved.approvedSourceVersion
     }
 })
+// SEC-BOS-126: a user who changed a draft's lines does not approve it either, though another created it; an approver who
+// changed nothing does
+feature("the user who changed a draft's lines is refused its approval; another approver approves it", {
+    when() {
+        const id = "NATIVE_AR_APPROVE_EDIT"
+        helper().call("create#moqui.security.UserGroup", {userGroupId: id, description: "Native finance approve and edit"})
+        for (const permission of ["INVOICE_APPROVE", "ACCOUNTING_VIEW", "RECEIVABLE_EDIT", "RECEIVABLE_VIEW"])
+            helper().call("create#moqui.security.UserGroupPermission", {userGroupId: id, userPermissionId: permission, fromDate: 0})
+        helper().call("create#mantle.party.Party", {partyId: id, partyTypeEnumId: "PtyPerson"})
+        helper().call("create#moqui.security.UserAccount", {userId: id, username: id, partyId: id, currentPassword: "16ac58bbfa332c1c55bd98b53e60720bfa90d394",
+            passwordHashType: "SHA", timeZone: ec.user.userAccount?.timeZone || "America/Chicago"})
+        helper().call("create#moqui.security.UserGroupMember", {userId: id, userGroupId: id, fromDate: 0})
+        helper().call("create#mantle.party.PartyRelationship", {partyRelationshipId: id, fromPartyId: id, toPartyId: f.org, relationshipTypeEnumId: "PrtAgent", fromDate: 0})
+        const invoice = helper().draft(f, "21")
+        const line = helper().lib.rows("mantle.account.invoice.InvoiceItem", {invoiceId: invoice.invoiceId})[0]
+        login(id)
+        native("store#InvoiceDraftItem", {invoiceId: invoice.invoiceId, invoiceItemSeqId: line.invoiceItemSeqId,
+            lastUpdatedStamp: line.lastUpdatedStamp, amount: "2100"})
+        const stamp = () => helper().lib.one(helper().lib.invoiceEntity, {invoiceId: invoice.invoiceId}).lastUpdatedStamp
+        const changer = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {invoiceId: invoice.invoiceId, action: "approve", lastUpdatedStamp: stamp()})
+        login(f.users.approve)
+        const other = native("change#InvoiceState", {invoiceId: invoice.invoiceId, action: "approve", lastUpdatedStamp: stamp()})
+        login("john.doe")
+        return {changer, other, saved: helper().lib.one(helper().lib.invoiceEntity, {invoiceId: invoice.invoiceId})}
+    },
+    then({changer, other, saved}) {
+        changer.includes("SELF_APPROVAL_DENIED")
+        other.statusId == "InvoiceFinalized"
+        saved.approvedByUserId == f.users.approve && saved.isSelfApproved == "N"
+        saved.draftChangedByUserIds.includes("NATIVE_AR_APPROVE_EDIT")
+    }
+})
 feature("negative customer drafts become positive credits using outgoing revenue and credit edits cannot exceed the original", {
     when() {
         login(f.users.ar)

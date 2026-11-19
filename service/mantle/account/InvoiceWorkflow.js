@@ -136,10 +136,28 @@ function check(p) {
     return {}
 }
 
+// The users who changed a draft (draftChangedByUserIds), with the current user added: none of them approves it (SEC-BOS-126).
+const changersOf = value =>
+    String(value || "")
+        .split(",")
+        .map(id => id.trim())
+        .filter(Boolean)
+function recordChange(p) {
+    const userId = ec.user.userId
+    if (!userId) return {}
+    const record = one(I, {invoiceId: p.invoiceId})
+    if (!record) return {}
+    const changers = changersOf(record.draftChangedByUserIds)
+    if (!changers.includes(userId))
+        call("update#" + I, {invoiceId: record.invoiceId, draftChangedByUserIds: changers.concat([userId]).join(",")})
+    return {}
+}
 function approve(scope, preference) {
     lib.requirePermission("INVOICE_APPROVE")
     const record = scope.record
-    const selfApproved = record.draftedByUserId === ec.user.userId
+    // its creator and anyone who changed its lines, amounts or header since (SEC-BOS-126)
+    const selfApproved =
+        record.draftedByUserId === ec.user.userId || changersOf(record.draftChangedByUserIds).includes(ec.user.userId)
     if (selfApproved && preference.allowAccountingSelfApproval !== "Y")
         denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this invoice")
     call("update#" + I, {
@@ -661,6 +679,7 @@ const operations = {
     organization,
     permissions,
     check,
+    recordChange,
     changeState,
     creditLines,
     applyCredit,

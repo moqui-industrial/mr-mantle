@@ -149,10 +149,23 @@ function create(p) {
 }
 // The organization's approved bills open in the run's currency that are due through its date, or whose discount is open
 // on the pay date; each is selected or left out with its reason. A bill the user left out stays left out.
+// A user who changed the run's selection (changedByUserIds): none of them approves it (SEC-BOS-126).
+const changersOf = run =>
+    String(run.changedByUserIds || "")
+        .split(",")
+        .map(id => id.trim())
+        .filter(Boolean)
+function recordChange(run) {
+    const userId = ec.user.userId
+    const changers = changersOf(run)
+    if (userId && !changers.includes(userId))
+        call("update#" + R, {paymentRunId: run.paymentRunId, changedByUserIds: changers.concat([userId]).join(",")})
+}
 function select(p) {
     const run = runScope(p, "PAYABLE_EDIT", true)
     editable(run)
     voidApproval(run, "The selection changed")
+    recordChange(run)
     const org = run.organizationPartyId,
         payDay = dayText(run.payDate),
         dueThrough = dayText(run.dueThroughDate),
@@ -310,6 +323,7 @@ function storeItem(p) {
     }
     if ((item.selectedIndicator === "Y") === include) return {changed: false}
     voidApproval(run, "The selection changed")
+    recordChange(one(R, {paymentRunId: run.paymentRunId}))
     call("update#" + RI, {
         paymentRunId: item.paymentRunId,
         paymentRunItemSeqId: item.paymentRunItemSeqId,
@@ -343,7 +357,7 @@ function requestApproval(p) {
     })
 }
 // Approve the run as it is: its total and the version of its selection, which execution checks. The run's creator
-// approves it only when the organization allows self-approval.
+// approves it only when the organization allows self-approval, nor does a user who changed its selection (SEC-BOS-126).
 function approve(p) {
     const run = runScope(p, "PAYMENT_RUN_APPROVE", true)
     lib.policy.revision(run, p.lastUpdatedStamp)
@@ -351,7 +365,7 @@ function approve(p) {
     const selected = selectedItems(run.paymentRunId)
     if (!selected.length) denied("RUN_EMPTY", "Select at least one bill")
     for (const item of selected) lib.requireNotHeld(item.invoiceId)
-    const selfApproved = run.createdByUserId === ec.user.userId
+    const selfApproved = run.createdByUserId === ec.user.userId || changersOf(run).includes(ec.user.userId)
     if (selfApproved && lib.policy.preference(run.organizationPartyId).allowAccountingSelfApproval !== "Y")
         denied("SELF_APPROVAL_DENIED", "Another finance approver must approve this payment run")
     const approvedTotal = total(selected)

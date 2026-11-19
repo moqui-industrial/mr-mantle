@@ -3466,7 +3466,8 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="store" noun="InvoiceDraft" allow-remote="false">
         <description>Change the header of a draft invoice through update#Invoice: dates, term, reference, description and
-            message; a new date or term sets the due date again. Refuses a stale lastUpdatedStamp, a posted invoice, an unknown
+            message; a new date or term sets the due date again, and the user is recorded among its changers, who do not approve it
+            (draftChangedByUserIds, SEC-BOS-126). Refuses a stale lastUpdatedStamp, a posted invoice, an unknown
             term, and a closed period or lock on the new date. Needs the side's edit permission.</description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
@@ -3501,6 +3502,7 @@ along with this software (see the LICENSE.md file). If not, see
                 .map((field) => [field, context[field] === '' ? null : context[field]]))"/>
             <service-call name="mantle.account.InvoiceServices.update#Invoice" disable-authz="true"
                     in-map="Object.assign(headerFields, {invoiceId:invoiceId})"/>
+            <script>ec.resource.script(workflow).execute('recordChange', {invoiceId:invoiceId})</script>
             <if condition="invoiceDate || 'settlementTermId' in context">
                 <service-call name="mantle.account.InvoiceServices.checkSet#InvoiceDueDate" disable-authz="true"
                         in-map="{invoiceId:invoiceId, overrideExisting:true}"/></if>
@@ -3514,7 +3516,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Add a line to a draft invoice through create#InvoiceItem, or change one (invoiceItemSeqId with its
             lastUpdatedStamp) through update#InvoiceItem: an ItemType type, an existing product, a positive quantity, the
             amount rounded to the invoice currency; a customer credit's line posts to the item's outgoing sales account. The
-            invoice's approval is cleared, and a linked credit stays within its original. Refuses a posted invoice, a closed
+            invoice's approval is cleared, the user is recorded among its changers (draftChangedByUserIds), who do not approve it
+            (SEC-BOS-126), and a linked credit stays within its original. Refuses a posted invoice, a closed
             period or lock, and a stale line. Needs the side's edit permission.</description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
@@ -3586,6 +3589,7 @@ along with this software (see the LICENSE.md file). If not, see
             </else></if>
             <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, approvedSourceVersion:null}"
                     disable-authz="true"/>
+            <script>ec.resource.script(workflow).execute('recordChange', {invoiceId:invoiceId})</script>
             <script>ec.resource.script(workflow).execute('check', {check:'creditCap', invoiceId:invoiceId})</script>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="saved" disable-authz="true"/>
             <set field="lastUpdatedStamp" from="saved.lastUpdatedStamp"/>
@@ -3593,7 +3597,7 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="delete" noun="InvoiceDraftItem" allow-remote="false">
         <description>Remove a draft invoice line through delete#InvoiceItem, which frees its time and order billing. The
-            invoice's approval is cleared. Refuses a posted invoice, a closed period or lock, and a stale line
+            invoice's approval is cleared and the user recorded among its changers (SEC-BOS-126). Refuses a posted invoice, a closed period or lock, and a stale line
             (lastUpdatedStamp). Needs the side's edit permission.</description>
         <in-parameters>
             <parameter name="invoiceId" required="true"/>
@@ -3618,6 +3622,7 @@ along with this software (see the LICENSE.md file). If not, see
                     in-map="{invoiceId:invoiceId, invoiceItemSeqId:invoiceItemSeqId}"/>
             <service-call name="update#mantle.account.invoice.Invoice" in-map="{invoiceId:invoiceId, approvedSourceVersion:null}"
                     disable-authz="true"/>
+            <script>ec.resource.script(workflow).execute('recordChange', {invoiceId:invoiceId})</script>
             <entity-find-one entity-name="mantle.account.invoice.Invoice" value-field="saved" disable-authz="true"/>
             <set field="lastUpdatedStamp" from="saved.lastUpdatedStamp"/>
         </actions>
