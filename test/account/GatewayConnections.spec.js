@@ -86,11 +86,44 @@ const bind = (paymentGatewayConfigId, parameters = {}) =>
         )
     )
 
+// the spec's rows, removed after it and before it (a run stopped part way leaves them)
+function removeSpecRows() {
+    const keys = Object.values(ids)
+    ec.entity.find(METHOD_ENTITY).condition("paymentMethodId", method).deleteAll()
+    ec.entity.find(BINDING).condition("organizationPartyId", org).deleteAll()
+    ec.entity.find("moqui.server.ConnectionCheck").condition("connectionKey", "in", keys).deleteAll()
+    for (const entityName of [
+        "mantle.account.method.PaymentGatewayAuthorizeNet",
+        "mantle.account.method.PaymentGatewayPayTrace",
+        CONFIG
+    ])
+        ec.entity.find(entityName).condition("paymentGatewayConfigId", "in", keys).deleteAll()
+    ec.entity
+        .find("mantle.shipment.carrier.ShippingGatewayConfig")
+        .condition("shippingGatewayConfigId", "in", keys)
+        .deleteAll()
+    ec.entity.find(REMOTE).condition("systemMessageRemoteId", "in", keys).deleteAll()
+    // the payments a test gateway feature made (SEC-BOS-129), with their gateway answers
+    const paymentIds = Array.from(ec.entity.find("mantle.account.payment.Payment").condition("fromPartyId", org).list()).map(row => row.paymentId)
+    if (paymentIds.length) {
+        ec.entity.find("mantle.account.method.PaymentGatewayResponse").condition("paymentId", "in", paymentIds).deleteAll()
+        ec.entity.find("mantle.account.payment.Payment").condition("paymentId", "in", paymentIds).deleteAll()
+    }
+    ec.entity.find("mantle.party.PartyRole").condition("partyId", org).deleteAll()
+    ec.entity.find("mantle.party.Organization").condition("partyId", org).deleteAll()
+    ec.entity.find("mantle.party.Party").condition("partyId", org).deleteAll()
+    ec.entity.find("moqui.security.UserGroupPermission").condition("userGroupId", group).deleteAll()
+    ec.entity.find("moqui.security.UserGroupMember").condition("userId", "in", Object.values(users)).deleteAll()
+    ec.entity.find("moqui.security.UserGroup").condition("userGroupId", group).deleteAll()
+    ec.entity.find("moqui.security.UserAccount").condition("userId", "in", Object.values(users)).deleteAll()
+}
+
 spec({
     setupSpec() {
         http.enable()
         ec.user.internalLoginUser("john.doe")
         ec.artifactExecution.disableAuthz()
+        removeSpecRows()
         for (const [key, userId] of Object.entries(users))
             make("moqui.security.UserAccount", {
                 userId,
@@ -118,28 +151,7 @@ spec({
         http.reset()
         ec.message.clearErrors()
         ec.artifactExecution.disableAuthz()
-        const keys = Object.values(ids)
-        ec.entity.find(METHOD_ENTITY).condition("paymentMethodId", method).deleteAll()
-        ec.entity.find(BINDING).condition("organizationPartyId", org).deleteAll()
-        ec.entity.find("moqui.server.ConnectionCheck").condition("connectionKey", "in", keys).deleteAll()
-        for (const entityName of [
-            "mantle.account.method.PaymentGatewayAuthorizeNet",
-            "mantle.account.method.PaymentGatewayPayTrace",
-            CONFIG
-        ])
-            ec.entity.find(entityName).condition("paymentGatewayConfigId", "in", keys).deleteAll()
-        ec.entity
-            .find("mantle.shipment.carrier.ShippingGatewayConfig")
-            .condition("shippingGatewayConfigId", "in", keys)
-            .deleteAll()
-        ec.entity.find(REMOTE).condition("systemMessageRemoteId", "in", keys).deleteAll()
-        ec.entity.find("mantle.party.PartyRole").condition("partyId", org).deleteAll()
-        ec.entity.find("mantle.party.Organization").condition("partyId", org).deleteAll()
-        ec.entity.find("mantle.party.Party").condition("partyId", org).deleteAll()
-        ec.entity.find("moqui.security.UserGroupPermission").condition("userGroupId", group).deleteAll()
-        ec.entity.find("moqui.security.UserGroupMember").condition("userId", "in", Object.values(users)).deleteAll()
-        ec.entity.find("moqui.security.UserGroup").condition("userGroupId", group).deleteAll()
-        ec.entity.find("moqui.security.UserAccount").condition("userId", "in", Object.values(users)).deleteAll()
+        removeSpecRows()
         ec.artifactExecution.enableAuthz()
     }
 })
@@ -390,25 +402,44 @@ feature("a payment gateway another organization uses is read, changed and tested
     }
 })
 
-// SEC-BOS-129: on a production instance the always-approve test gateway is permitted for no organization and approves nothing,
-// whatever binds it; on this test instance both are answered
-feature("a test payment gateway is bound to no organization and approves nothing on a production instance", {
+// SEC-BOS-129: on a production instance the always-approve test gateway is permitted for no organization and Mantle's gateway
+// dispatch sends it no operation, whatever binds it, unless mantle@allow-test-gateways is true; on this test instance both are
+// answered
+feature("a test payment gateway is bound to no organization and takes no payment on a production instance unless allowed", {
     when() {
-        const authorize = () =>
-            invoke("mantle.account.PaymentTestServices.alwaysApprove#PaymentAuthorization", {
-                paymentId: "SPEC_GWC_NO_PAYMENT",
-                paymentGatewayConfigId: "TEST_APPROVE"
-            }).error
+        let paymentCount = 0
+        const payment = () => {
+            const paymentId = "SPEC_GWC_TEST_PAY_" + ++paymentCount
+            make("mantle.account.payment.Payment", {
+                paymentId,
+                fromPartyId: "SPEC_GWC_ORG",
+                toPartyId: "SPEC_GWC_ORG",
+                paymentTypeEnumId: "PtInvoicePayment",
+                paymentInstrumentEnumId: "PiCreditCard",
+                paymentGatewayConfigId: "TEST_APPROVE",
+                statusId: "PmntPromised",
+                amount: "5",
+                amountUomId: "USD"
+            })
+            return paymentId
+        }
+        const authorize = () => {
+            const paymentId = payment()
+            const out = invoke("mantle.account.PaymentServices.authorize#SinglePayment", {paymentId})
+            return {error: out.error, statusId: one("mantle.account.payment.Payment", {paymentId}).statusId}
+        }
         const production = withConf("instance@purpose", "production", () => ({
             bound: admin(() => bind("TEST_APPROVE", {reason: "Spec"})).error,
-            authorize: authorize()
+            authorize: authorize(),
+            allowed: withConf("mantle@allow-test-gateways", "true", () => authorize())
         }))
         const test = admin(() => bind("TEST_APPROVE", {reason: "Spec"}))
         return {production, test}
     },
     then({production, test}) {
         production.bound.includes("TEST_GATEWAY_PRODUCTION")
-        production.authorize.includes("TEST_GATEWAY_PRODUCTION")
+        production.authorize.error.includes("TEST_GATEWAY_PRODUCTION") && production.authorize.statusId == "PmntPromised"
+        production.allowed.error == "" && production.allowed.statusId == "PmntAuthorized"
         test.error == "" && test.applied === true
     }
 })

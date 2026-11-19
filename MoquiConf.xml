@@ -22,6 +22,10 @@
         Marketing's event registrations: marketing-reservations-per-offer how many reservations an event's offer takes in a
         day from one requester and for one buyer address (each up to its tickets' places), marketing-tickets-per-address how
         many reservations a day name one attendee address, which is mailed each ticket (SEC-PSS-88). -->
+    <!-- allow-test-gateways: true lets the local test payment gateways (PgtTest, which approve without a charge) take payments
+        and be permitted for an organization on a production instance (instance@purpose), as a public demo server's conf does
+        (runtime/conf/MoquiDemoConf.xml); off, they are refused there (account/TestGateways.js, SEC-BOS-129). They always work
+        on a development or test instance. -->
     <!-- The forum's limits: forum-drafts-per-member how many drafts a member keeps on a site (SEC-PFS-92), forum-draft-days
         after how many days untouched a draft is removed (0 keeps them), forum-report-exports-per-day how many report files
         a staff member makes on a site a day (SEC-PFS-93), forum-owner-invitations-per-day how many list invitations a
@@ -32,7 +36,7 @@
             marketing-reservations-per-offer="20" marketing-tickets-per-address="10"
             mail-provider-authserv-ids="" forum-inbound-accounts=""
             forum-drafts-per-member="50" forum-draft-days="90" forum-report-exports-per-day="20"
-            forum-owner-invitations-per-day="2000"/>
+            forum-owner-invitations-per-day="2000" allow-test-gateways="false"/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->

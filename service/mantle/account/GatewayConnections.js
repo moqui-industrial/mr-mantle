@@ -675,13 +675,9 @@ function storePaymentGatewayOrganization(p) {
     const config = paymentGatewayConfigId ? one(CONFIG, {paymentGatewayConfigId}) : null
     if (!config) throw new Error("Payment gateway " + paymentGatewayConfigId + " is not available")
     // SEC-BOS-129: a test gateway (PgtTest, which approves without a charge) is permitted for no organization on a production
-    // instance (instance@purpose); its services refuse there too, whatever binds them
-    if (
-        config.paymentGatewayTypeEnumId === "PgtTest" &&
-        !(p.remove === true || p.remove === "true" || p.remove === "Y") &&
-        text(ec.factory.getConfValue("instance@purpose")) === "production"
-    )
-        throw new Error("TEST_GATEWAY_PRODUCTION: A test payment gateway is permitted for no organization on a production instance")
+    // instance unless the operator allows them (TestGateways.js); its operations are refused there too, whatever binds it
+    const testRefusal = ec.resource.script("component://mr-mantle/service/mantle/account/TestGateways.js").refusal(config)
+    if (testRefusal && !(p.remove === true || p.remove === "true" || p.remove === "Y")) throw new Error(testRefusal)
     const key = {organizationPartyId, paymentGatewayConfigId}
     const storedRow = find(BINDING, key).forUpdate(true).one()
     const stored = storedRow ? map(storedRow) : null

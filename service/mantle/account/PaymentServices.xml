@@ -1819,6 +1819,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'authorize',
                         amount:payment.amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.authorizeServiceName}" out-map="authOut"
                     in-map="{paymentId:payment.paymentId, cardSecurityCode:cardSecurityCode, returnUrl:returnUrl,
                         paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId, operationKey:operationKey,
@@ -2062,6 +2065,9 @@ along with this software (see the LICENSE.md file). If not, see
             <!-- check if auth expired and do an auth now -->
             <!-- NOTE: maybe determine if auth is expired (based on configured days per CC type...)? -->
             <if condition="!justDidAuthorize &amp;&amp; paymentGatewayConfig.detailsServiceName">
+                <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+                <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+                <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
                 <service-call name="${paymentGatewayConfig.detailsServiceName}" out-map="detailOut"
                         in-map="{paymentId:paymentId, payment:payment, paymentGatewayConfigId:paymentGatewayConfigId}"/>
                 <if condition="detailOut.gatewayStatusId == 'PmntPromised'"><then>
@@ -2098,6 +2104,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'capture',
                         amount:amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.captureServiceName}" out-map="captOut"
                     in-map="{paymentId:payment.paymentId, amount:amount, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey}"/>
@@ -2206,6 +2215,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'release',
                         operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.releaseServiceName}" out-map="releaseOut"
                     in-map="{paymentId:payment.paymentId, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey}"/>
@@ -2364,6 +2376,9 @@ along with this software (see the LICENSE.md file). If not, see
             <service-call name="mantle.account.PaymentServices.make#GatewayIdempotencyKey" out-map="keyOut"
                     in-map="{payment:payment, paymentGatewayConfigId:paymentGatewayConfigId, operation:'refund',
                         amount:amount, operationKey:operationKey}"/>
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.refundServiceName}" out-map="refundOut"
                     in-map="{paymentId:payment.paymentId, amount:amount, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:operationKey, idempotencyKey:keyOut.idempotencyKey, refundPaymentId:refundPaymentId}"/>
@@ -2519,6 +2534,9 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
 
             <!-- call the configured service -->
+            <!-- a test gateway takes no payment on a production instance (TestGateways.js, SEC-BOS-129) -->
+            <set field="testGatewayRefusal" from="ec.resource.script('component://mr-mantle/service/mantle/account/TestGateways.js').refusal(paymentGatewayConfig)"/>
+            <if condition="testGatewayRefusal"><return error="true" message="${testGatewayRefusal}"/></if>
             <service-call name="${paymentGatewayConfig.detailsServiceName}" out-map="detailOut"
                     in-map="{paymentId:payment.paymentId, paymentGatewayConfigId:paymentGatewayConfig.paymentGatewayConfigId,
                         operationKey:unknownResponse?.operationKey, idempotencyKey:unknownResponse?.idempotencyKey,
