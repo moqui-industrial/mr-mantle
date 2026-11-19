@@ -17,7 +17,7 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="create" noun="RateAmount">
         <description>Creates a RateAmount, its time period unit defaulted (each for a piece rate, else hour). A worker pay rate
             (RaprVendor) of a person who is an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) is the
-            employee's pay: only with PAYROLL_EDIT, refused without it. A labor costing rate (RaprCost) only for finance
+            employee's pay: only with PAYROLL_EDIT, refused without it, and never the caller's own (SELF_APPROVAL, SEC-BOS-114). A labor costing rate (RaprCost) only for finance
             administration of its organization, or of every organization for a shared one (store#CostingRate's scope). A client
             billing or worker pay rate of no project keeps organizationPartyId, the organization whose time it applies to
             (SEC-BOS-101; empty for a rate shared by every organization), which the caller checks (Projects' store#Rate); one of a
@@ -43,6 +43,9 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{partyIdList:[partyId]}"/>
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
+                <!-- SEC-BOS-114: never the payroll editor's own pay rate; another payroll editor sets it -->
+                <if condition="payAccess.employeePartyIds?.includes(partyId) &amp;&amp; partyId == ec.user.userAccount?.partyId">
+                    <return error="true" message="SELF_APPROVAL: Your own pay rate is set by another payroll editor"/></if>
             </if>
             <!-- a labor costing rate (RaprCost) is finance administration's, of an organization in its scope or shared (store#CostingRate,
                 impl-people P10: PERMISSION_DENIED, ORGANIZATION_DENIED); the rates of the other purposes carry no organization -->
@@ -58,7 +61,8 @@ along with this software (see the LICENSE.md file). If not, see
 
     <service verb="update" noun="RateAmount">
         <description>Limited update of RateAmount record: its dates and amount. A worker pay rate (RaprVendor) of a person who is
-            an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) only with PAYROLL_EDIT, refused without it.</description>
+            an employee now (mantle.humanres.EmploymentServices.get#PayRateAccess) only with PAYROLL_EDIT, refused without it, and
+            never the caller's own (SELF_APPROVAL, SEC-BOS-114).</description>
         <in-parameters>
             <parameter name="rateAmountId" required="true"/>
             <parameter name="fromDate" type="Timestamp"/>
@@ -73,6 +77,9 @@ along with this software (see the LICENSE.md file). If not, see
                         in-map="{partyIdList:[rate.partyId]}"/>
                 <if condition="payAccess.lockedPartyIds?.length">
                     <return error="true" message="The worker pay rate of an employee is their pay: only payroll (PAYROLL_EDIT) sets it"/></if>
+                <!-- SEC-BOS-114: never the payroll editor's own pay rate; another payroll editor sets it -->
+                <if condition="payAccess.employeePartyIds?.includes(rate.partyId) &amp;&amp; rate.partyId == ec.user.userAccount?.partyId">
+                    <return error="true" message="SELF_APPROVAL: Your own pay rate is set by another payroll editor"/></if>
             </if>
             <if condition="rate?.ratePurposeEnumId == 'RaprCost'">
                 <script>ec.resource.script('component://mr-mantle/service/mantle/humanres/CostingRates.js').execute('checkWrite', {organizationPartyId: rate.organizationPartyId || null})</script></if>

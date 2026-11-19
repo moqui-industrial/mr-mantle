@@ -817,7 +817,8 @@ along with this software (see the LICENSE.md file). If not, see
             the employment's lock, a refusal named by its code and the rest going on: EMPLOYMENT_OUTSIDE (not the structure's
             employer's, or outside the scope), DATE_OUTSIDE (not employed then), PRIMARY_OVERLAP (another primary assignment then:
             one per employment and date across every group; with replaceCurrent and a reason, the one in effect on the date is
-            ended there instead), STRUCTURE_ASSIGNED (a secondary assignment, isPrimary false, beside the same structure).
+            ended there instead), STRUCTURE_ASSIGNED (a secondary assignment, isPrimary false, beside the same structure),
+            SELF_APPROVAL (the caller's own employment, assigned or ended by another payroll editor; SEC-BOS-114).
             inputValues are the employment's values of inputs the structure's components declare ("name = value" pairs;
             INPUT_UNKNOWN, and INPUT_INVALID for a name that is one of the employer's component codes); electedComponentIds the
             components of the structure's elective lines it takes (ELECTION_INVALID). Assigning changes no salary or rate. With
@@ -878,7 +879,8 @@ along with this software (see the LICENSE.md file). If not, see
             (expectedRevision: get#Compensation's benefitRevision; P23 review). Bank details are not here: payroll bank
             accounts change through store#PayrollBankAccount. Employment's and Employee's historical tax fields are neither read nor
             written. Needs PAYROLL_VIEW and PAYROLL_EDIT (PERMISSION_DENIED); another employer's employment is RECORD_UNAVAILABLE.
-            Refuses also LOCALIZATION_INVALID, NO_FIELDS, REVISION_CHANGED, DATES_INVALID and DATE_OUTSIDE.</description>
+            Refuses also LOCALIZATION_INVALID, NO_FIELDS, REVISION_CHANGED, DATES_INVALID and DATE_OUTSIDE, and SELF_APPROVAL for
+            the caller's own employment, whose profile and benefits another payroll editor changes (SEC-BOS-114).</description>
         <in-parameters>
             <parameter name="partyRelationshipId" required="true"/>
             <parameter name="payrollLocalizationId"/>
