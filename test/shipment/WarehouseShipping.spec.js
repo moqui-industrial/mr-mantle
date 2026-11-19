@@ -783,7 +783,16 @@ feature("a printer serves one organization's facilities, and a reprint sends onl
         call("create#mantle.facility.Facility", {facilityId: "WSH_FAC2", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: org})
         call("create#mantle.facility.Facility", {facilityId: "WSH_OTHER_FAC", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "WSH_OTHER"})
         const binding = facilityId => ({facilityId, printerPurposeEnumId: "PtpPackageLabel", networkPrinterId: "WSH_PRINTER"})
+        // a sister organization of the same rollup (PrtOrgRollup to one parent) may share it (review)
+        organization("WSH_PARENT", "OrgInternal")
+        organization("WSH_SISTER", "OrgInternal")
+        for (const fromPartyId of [org, "WSH_SISTER"])
+            call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtOrgRollup", fromPartyId, fromRoleTypeId: "OrgInternal",
+                toPartyId: "WSH_PARENT", toRoleTypeId: "OrgInternal", fromDate: since})
+        call("create#mantle.facility.Facility", {facilityId: "WSH_SISTER_FAC", facilityTypeEnumId: "FcTpWarehouse", ownerPartyId: "WSH_SISTER"})
+        user("WSH_SISTER_ADMIN", ["FACILITY_EDIT"], "WSH_SISTER")
         return {
+            sister: run("wsh_sister_admin", P + "store#FacilityPrinter", binding("WSH_SISTER_FAC")),
             sameOrganization: run("wsh_admin", P + "store#FacilityPrinter", binding("WSH_FAC2")),
             otherOrganization: run("wsh_outsider", P + "store#FacilityPrinter", binding("WSH_OTHER_FAC")),
             // the first facility's job, asked again at the second facility that bound the printer after it
@@ -791,7 +800,8 @@ feature("a printer serves one organization's facilities, and a reprint sends onl
             here: run("wsh_shipper", P + "dispatch#Document", {facilityId: facility, printJobId: job.printJobId})
         }
     },
-    then({sameOrganization, otherOrganization, elsewhere, here}) {
+    then({sister, sameOrganization, otherOrganization, elsewhere, here}) {
+        sister.error == ""
         sameOrganization.error == ""
         otherOrganization.error.includes("PRINTER_UNAVAILABLE")
         elsewhere.error.includes("RECORD_UNAVAILABLE")

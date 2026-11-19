@@ -124,12 +124,35 @@ function storeBinding(p) {
         denied("PRINTER_INVALID", "Choose a network printer")
     // a printer serves one organization's facilities: one another organization's facility binds now or later is refused, so
     // its jobs and their documents never print, or reprint, where another organization collects them (SEC-BAP-103)
+    // (another organization of the same rollup, PrtOrgRollup, or one the binder's own scope covers, may share it: review)
     const organizationPartyId = facilityScope.facilityOrganization(facility)
+    const binderScope = facilityScope.scope()
+    const rollupOf = partyId => {
+        const ids = new Set([partyId])
+        for (let depth = 0, frontier = [partyId]; frontier.length && depth < 6; depth++) {
+            const next = []
+            for (const id of frontier)
+                for (const row of rows("mantle.party.PartyRelationship", {fromPartyId: id, relationshipTypeEnumId: "PrtOrgRollup"}))
+                    if (lib.active(row) && !ids.has(row.toPartyId)) {
+                        ids.add(row.toPartyId)
+                        next.push(row.toPartyId)
+                    }
+            frontier = next
+        }
+        return ids
+    }
+    const ownRollup = rollupOf(organizationPartyId)
+    // the same organization, one the binder works in, or one whose rollup (itself and the organizations above it) meets this one's
+    const sameFamily = otherPartyId =>
+        !!otherPartyId &&
+        (otherPartyId === organizationPartyId ||
+            facilityScope.owns(binderScope, otherPartyId) ||
+            [...rollupOf(otherPartyId)].some(id => ownRollup.has(id)))
     const sharedWith = rows(BINDING, {networkPrinterId: p.networkPrinterId}).some(
         row =>
             row.facilityId !== facility.facilityId &&
             (row.thruDate == null || lib.ms(row.thruDate) > lib.ms(ec.user.nowTimestamp)) &&
-            facilityScope.facilityOrganization(row.facilityId) !== organizationPartyId
+            !sameFamily(facilityScope.facilityOrganization(row.facilityId))
     )
     if (sharedWith) denied("PRINTER_UNAVAILABLE", "Printer " + p.networkPrinterId + " serves another organization's facility")
     const copies = blank(p.copies) ? 1 : number(p.copies)
