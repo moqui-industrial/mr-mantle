@@ -16,7 +16,10 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="match" noun="PaymentMethodTransUnmatched">
         <description>Reconcile the open bank lines of a bank account with the one payment or ledger entry each matches: by
             check or reference number, else by amount within lookBackDays before the line. A line with more than one
-            possible match is left for a person to choose; a receipt in a deposit reconciles through its deposit.</description>
+            possible match is left for a person to choose; a receipt in a deposit reconciles through its deposit. As the
+            candidate rules (BankReconciliation.js) do (SEC-BOS-121): a payment only delivered or confirmed and, by reference
+            too, of the line's amount (a statement's reference is the payer's text); a ledger entry only posted, of the bank
+            account's owner organization and, by amount, of no payment.</description>
         <in-parameters>
             <parameter name="paymentMethodId" required="true"/>
             <parameter name="lookBackDays" type="Integer" default="7"/>
@@ -53,6 +56,7 @@ along with this software (see the LICENSE.md file). If not, see
                 <if condition="!bankAccountTrans.paymentId &amp;&amp; !ignoreTypeSet.includes(bankAccountTrans.transType)">
                     <!-- only look for Payments not yet reconciled -->
                     <set field="findPmt" from="{reconcileStatusId:'PmtrNot'}"/>
+                    <set field="deliveredStatusIds" from="['PmntDelivered', 'PmntConfirmed']"/>
 
                     <!-- if transType is DEBIT PaymentMethod.ownerPartyId is fromPartyId, if CREDIT then is toPartyId;
                         OR just look at sign of transAmount? (- fromPartyId, + toPartyId) -->
@@ -73,8 +77,13 @@ along with this software (see the LICENSE.md file). If not, see
                         <!-- TODO: what if we match on this and amounts differ... handle differently? -->
                         <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                             <econdition-object field="findPmt"/>
+                            <econdition field-name="statusId" operator="in" from="deliveredStatusIds"/>
                             <econdition field-name="paymentDepositId" from="null"/>
                             <econdition field-name="paymentRefNum" from="bankAccountTrans.checkNumber || bankAccountTrans.refNumber"/>
+                            <econditions combine="or">
+                                <econdition field-name="amount" from="absTransAmount"/>
+                                <econdition field-name="originalCurrencyAmount" from="absTransAmount"/>
+                            </econditions>
                         </entity-find>
                         <set field="payment" from="paymentList?.length == 1 ? paymentList[0] : null"/>
                     </if>
@@ -83,6 +92,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!payment">
                         <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                             <econdition-object field="findPmt"/>
+                            <econdition field-name="statusId" operator="in" from="deliveredStatusIds"/>
                             <econdition field-name="paymentDepositId" from="null"/>
                             <econdition field-name="amount" from="absTransAmount"/>
                             <econdition field-name="amountUomId" from="paymentMethod.currencyUomId" ignore-if-empty="true"/>
@@ -95,6 +105,7 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!payment &amp;&amp; paymentMethod.currencyUomId">
                         <entity-find entity-name="mantle.account.payment.Payment" list="paymentList">
                             <econdition-object field="findPmt"/>
+                            <econdition field-name="statusId" operator="in" from="deliveredStatusIds"/>
                             <econdition field-name="paymentDepositId" from="null"/>
                             <econdition field-name="originalCurrencyAmount" from="absTransAmount"/>
                             <econdition field-name="originalCurrencyUomId" from="paymentMethod.currencyUomId"/>
@@ -115,6 +126,8 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="payment">
                         <entity-find entity-name="mantle.ledger.transaction.AcctgTransAndEntry" list="ataeList">
                             <econdition field-name="glAccountId" from="paymentMethod.glAccountId"/>
+                            <econdition field-name="organizationPartyId" from="paymentMethod.ownerPartyId"/>
+                            <econdition field-name="isPosted" value="Y"/>
                             <econdition field-name="reconcileStatusId" value="AterNot" or-null="true"/>
                             <econdition field-name="debitCreditFlag"/>
                             <econdition field-name="paymentId" from="payment.paymentId"/>
@@ -126,9 +139,12 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!acctgTransAndEntry">
                         <entity-find entity-name="mantle.ledger.transaction.AcctgTransAndEntry" list="ataeList">
                             <econdition field-name="glAccountId" from="paymentMethod.glAccountId"/>
+                            <econdition field-name="organizationPartyId" from="paymentMethod.ownerPartyId"/>
+                            <econdition field-name="isPosted" value="Y"/>
                             <econdition field-name="reconcileStatusId" value="AterNot" or-null="true"/>
                             <econdition field-name="debitCreditFlag"/>
-
+                            <!-- a payment's entry reconciles through its payment, as in the candidate rules -->
+                            <econdition field-name="paymentId" from="null"/>
                             <econdition field-name="amount" from="absTransAmount"/>
                             <econdition field-name="amountUomId" from="paymentMethod.currencyUomId" ignore-if-empty="true"/>
                             <econdition field-name="transactionDate" operator="less-equals" from="bankAccountTrans.postedDate"/>
@@ -140,9 +156,12 @@ along with this software (see the LICENSE.md file). If not, see
                     <if condition="!acctgTransAndEntry &amp;&amp; paymentMethod.currencyUomId">
                         <entity-find entity-name="mantle.ledger.transaction.AcctgTransAndEntry" list="ataeList">
                             <econdition field-name="glAccountId" from="paymentMethod.glAccountId"/>
+                            <econdition field-name="organizationPartyId" from="paymentMethod.ownerPartyId"/>
+                            <econdition field-name="isPosted" value="Y"/>
                             <econdition field-name="reconcileStatusId" value="AterNot" or-null="true"/>
                             <econdition field-name="debitCreditFlag"/>
-
+                            <!-- a payment's entry reconciles through its payment, as in the candidate rules -->
+                            <econdition field-name="paymentId" from="null"/>
                             <econdition field-name="originalCurrencyAmount" from="absTransAmount"/>
                             <econdition field-name="originalCurrencyUomId" from="paymentMethod.currencyUomId"/>
                             <econdition field-name="transactionDate" operator="less-equals" from="bankAccountTrans.postedDate"/>

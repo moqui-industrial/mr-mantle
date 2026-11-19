@@ -730,3 +730,55 @@ feature("a payment two lines match is applied to neither, by the rules and by ma
         payment(paymentId).reconcileStatusId != "PmtrRec"
     }
 })
+// SEC-BOS-121: match#PaymentMethodTransUnmatched (Match automatically) holds the candidate rules: a reference match needs the
+// line's amount and a delivered payment, and a ledger entry is the bank owner's and posted; the matching line still reconciles
+feature("Match automatically takes a payment by reference only at its amount and delivered, and only the bank owner's posted entries", {
+    when() {
+        const big = receipt("9871.01", {paymentRefNum: "SEC121-BIG"})
+        const voided = receipt("9871.02", {paymentRefNum: "SEC121-VOID"})
+        call("update#mantle.account.payment.Payment", {paymentId: voided, statusId: "PmntVoid"})
+        bankLine("SEC121-SMALL", "1.00", {refNumber: "SEC121-BIG"})
+        bankLine("SEC121-VOIDED", "9871.02", {refNumber: "SEC121-VOID"})
+        // another organization's posted entry and an unposted one of the owner, on the bank's ledger account
+        const entry = (organizationPartyId, isPosted, amount) => {
+            const acctgTransId = call("create#mantle.ledger.transaction.AcctgTrans", {
+                organizationPartyId,
+                acctgTransTypeEnumId: "AttInternal",
+                transactionDate: f.timestamp,
+                isPosted,
+                amountUomId: "USD"
+            }).acctgTransId
+            call("create#mantle.ledger.transaction.AcctgTransEntry", {
+                acctgTransId,
+                acctgTransEntrySeqId: "01",
+                glAccountId: "111100000",
+                debitCreditFlag: "D",
+                amount,
+                reconcileStatusId: "AterNot"
+            })
+            return acctgTransId
+        }
+        entry(f.customer, "Y", "6543.21")
+        entry(f.org, "N", "6543.22")
+        bankLine("SEC121-OTHERORG", "6543.21", {transType: "PMTT_DEP"})
+        bankLine("SEC121-UNPOSTED", "6543.22", {transType: "PMTT_DEP"})
+        bankLine("SEC121-EXACT", "9871.01", {refNumber: "SEC121-BIG"})
+        native("match#PaymentMethodTransUnmatched", {paymentMethodId: f.bankId, lookBackDays: 10})
+        const of = fitId => {
+            const row = line(f.bankId, fitId)
+            return row.paymentId || row.acctgTransId || null
+        }
+        return {
+            small: of("SEC121-SMALL"),
+            voided: of("SEC121-VOIDED"),
+            otherOrg: of("SEC121-OTHERORG"),
+            unposted: of("SEC121-UNPOSTED"),
+            exact: line(f.bankId, "SEC121-EXACT").paymentId,
+            big
+        }
+    },
+    then({small, voided, otherOrg, unposted, exact, big}) {
+        small == null && voided == null && otherOrg == null && unposted == null
+        exact == big
+    }
+})
