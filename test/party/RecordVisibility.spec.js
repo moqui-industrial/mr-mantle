@@ -368,13 +368,17 @@ feature("a registration with no rule is a system administrator's, unless it says
         try {
             call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, ownerText: "Spec: no rule" })
             const ruleless = { mo: seen("rv.mo"), admin: seen("john.doe") }
-            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, publicRead: "Y" })
-            return { ruleless, open: seen("rv.mo") }
+            // codeRule holds only for the types get#RecordLinkInfo rules itself, not this one
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, codeRule: "Y" })
+            const claimed = seen("rv.mo")
+            call("store#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE, codeRule: null, publicRead: "Y" })
+            return { ruleless, claimed, open: seen("rv.mo") }
         } finally {
             call("delete#mantle.party.communication.RecordLinkType", { recordEntityName: TYPE })
         }
     },
-    then({ ruleless, open }) {
+    then({ ruleless, claimed, open }) {
+        claimed == false
         ruleless.mo == false
         ruleless.admin == true
         open == true

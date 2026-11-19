@@ -1580,8 +1580,10 @@ along with this software (see the LICENSE.md file). If not, see
             field holding the record's organization, which must be one of the user's (every one for a system administrator; a
             record with none is a system administrator's). These apply with authorization on, as get#RecordLinkInfo's rules for
             a user do. A registration with none of these is seen by a system administrator alone (and logged as an error when
-            loaded), unless it says why it needs none: codeRule Y, a type get#RecordLinkInfo rules itself (Mantle's own rows), or
-            publicRead Y, public content seen under the entity filters alone (a site). disabled Y leaves it out.</description>
+            loaded), unless it says why it needs none: codeRule Y, which holds only for a type get#RecordLinkInfo rules itself (Mantle's
+            own rows, the fixed list of RecordLinkTypes.js codeRuled; another row claiming it is logged and refused), or
+            publicRead Y, public content seen by any user under the entity filters alone (no row uses it now). disabled Y leaves it
+            out.</description>
         <field name="recordEntityName" type="text-medium" is-pk="true"><description>The full entity name</description></field>
         <field name="ownerText" type="text-medium"><description>Whose record type it is, for a reader</description></field>
         <field name="visibleService" type="text-medium"/>
