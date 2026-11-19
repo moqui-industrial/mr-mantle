@@ -622,10 +622,14 @@ along with this software (see the LICENSE.md file). If not, see
         <out-parameters>
             <parameter name="managed" type="Boolean"/>
             <parameter name="canChange" type="Boolean"/>
+            <parameter name="canChangeOthers" type="Boolean"><description>Whether the user may change or remove another person's
+                file on it: a party on the work or its root, or a maintenance planner or supervisor of its organization
+                (SEC-BAP-95)</description></parameter>
             <parameter name="protectedContentIds" type="List"/>
         </out-parameters>
         <actions>
             <set field="answer" from="ec.resource.script('component://mr-mantle/service/mantle/work/ProcessChecks.js').execute('evidencePolicy', context)"/>
+            <set field="canChangeOthers" from="!!answer.canChangeOthers"/>
             <set field="managed" from="!!answer.managed"/>
             <set field="canChange" from="!!answer.canChange"/>
             <set field="protectedContentIds" from="answer.protectedContentIds || []"/>
