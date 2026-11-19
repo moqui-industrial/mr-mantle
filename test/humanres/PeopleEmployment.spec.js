@@ -322,6 +322,24 @@ feature(
             out.byEmailAccount = code(previewHire({partyId: account, workEmail: emailOf(account)}))
             const loose = person("LOOSE")
             out.byEmailFree = code(previewHire({partyId: loose, workEmail: emailOf(loose)}))
+            // round 2: a contact of A whom B employs is no employee or agent of A; B's employee who applied to A is admitted
+            // only by their own application; a personal contact is reached by no address
+            const contactB = person("CONTACTB")
+            employ(contactB, orgB)
+            call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtContact", fromPartyId: contactB, toPartyId: orgA, fromDate: since})
+            out.contactElsewhere = code(previewHire({partyId: contactB, workEmail: emailOf(contactB)}))
+            const applicant = person("APPLICANT")
+            employ(applicant, orgB)
+            const application = {applyingPartyId: applicant, organizationPartyId: orgA, statusId: "EaReceived", applicationDate: since}
+            const filed = call("create#mantle.humanres.employment.EmploymentApplication",
+                Object.assign({createdByUserId: prefix + "_U_HR"}, application)).employmentApplicationId
+            out.applicantFiledByHr = code(previewHire({partyId: applicant}))
+            call("create#moqui.security.UserAccount", {userId: prefix + "_APPLICANT", username: prefix + "_APPLICANT", partyId: applicant})
+            call("update#mantle.humanres.employment.EmploymentApplication", {employmentApplicationId: filed, createdByUserId: prefix + "_APPLICANT"})
+            out.applicantOwn = code(previewHire({partyId: applicant}))
+            const privateContact = person("PRIVATE")
+            call("update#mantle.party.Party", {partyId: privateContact, privateOwnerUserId: prefix + "_U_HR"})
+            out.privateByEmail = code(previewHire({partyId: privateContact, workEmail: emailOf(privateContact)}))
             const hired = hire({partyId: dual, managerPartyId: state.MGR}, state.hrBoth)
             out.hired = [hired.error, employments(dual, orgA).length, employments(dual, orgB).length]
             out.persons = rows("mantle.party.Person", {firstName: "Priya", lastName: "DUAL"}).length
@@ -386,6 +404,8 @@ feature(
             out.duplicate == "PERSON_MATCHES"
             out.byId == "RECORD_UNAVAILABLE"
             out.byEmailElsewhere == "RECORD_UNAVAILABLE" && out.byEmailAccount == "RECORD_UNAVAILABLE" && out.byEmailFree == ""
+            out.contactElsewhere == "RECORD_UNAVAILABLE" && out.applicantFiledByHr == "RECORD_UNAVAILABLE" && out.applicantOwn == ""
+            out.privateByEmail == "RECORD_UNAVAILABLE"
             out.hired.join() == ",1,1"
             out.persons == 1
             out.owner != orgA

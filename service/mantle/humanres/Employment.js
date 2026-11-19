@@ -1276,7 +1276,8 @@ function matchesOf(p, organizationPartyId, userScope) {
         })
 }
 const isEmail = value => /^[^\s@]+@[^\s@]+$/.test(value)
-// The people whose work or primary email is the address, exactly (ignoring case).
+// The people whose work or primary email is the address, exactly (ignoring case); never anyone's private contact
+// (SEC-BOS-118: a user's personal contact is no person an HR editor reaches by its address).
 function personsByEmail(email) {
     const factory = ec.entity.conditionFactory
     const mechIds = Array.from(
@@ -1299,7 +1300,7 @@ function personsByEmail(email) {
                 )
                 .list()
         ).map(row => row.partyId)
-    )
+    ).filter(partyId => !one("mantle.party.Party", {partyId})?.privateOwnerUserId)
 }
 // The people matching the name condition (on Person's names) with a relationship of any type and dates to one of the employers,
 // either way, or an application to one of their positions; the first matchLimit by name.
@@ -1360,48 +1361,60 @@ function relatedByName(nameCondition, organizationPartyIds) {
             .map(row => row.partyId)
     ).slice(0, matchLimit)
 }
-// Whether a chosen person is one the caller may hire by id: related to one of their employers (as relatedByName reads it), or
-// matched by the exact email given and held by no one else: with no user account and no current employment outside the
-// caller's employers (SEC-BOS-118: a hire makes the person staff to the caller, whose HR then changes their shared Person
-// record; one employed elsewhere is hired by an HR editor of both employers). Anyone else is refused as missing
-// (RECORD_UNAVAILABLE), so an id names no one.
+// SEC-BOS-118: a person held by no one else: no user account and no current employment outside the employers given. A hire
+// makes the person staff to the caller, whose HR then changes their shared Person record, so a person someone else holds is
+// hired by an HR editor of both employers.
+function heldByNoOneElse(partyId, orgIds) {
+    if (find("moqui.security.UserAccount").condition("partyId", partyId).count()) return false
+    let elsewhere = people.current(
+        find(RELATIONSHIP).condition("fromPartyId", partyId).condition("relationshipTypeEnumId", "PrtEmployee"),
+        nowMs()
+    )
+    if (orgIds.length) elsewhere = elsewhere.condition("toPartyId", "not-in", orgIds)
+    return elsewhere.count() === 0
+}
+// Whether a chosen person is one the caller may hire by id: an employee or agent of one of their employers (of any date), an
+// applicant to one of their openings who filed the application themselves or is held by no one else, or matched by the exact
+// email given and held by no one else (heldByNoOneElse, SEC-BOS-118). Anyone else is refused as missing (RECORD_UNAVAILABLE),
+// so an id names no one.
 function personAdmitted(partyId, p, userScope) {
     const orgIds = userScope.organizationPartyIds
     if (orgIds.length) {
-        const related =
-            find(RELATIONSHIP).condition("fromPartyId", partyId).condition("toPartyId", "in", orgIds).count() ||
-            find(RELATIONSHIP).condition("toPartyId", partyId).condition("fromPartyId", "in", orgIds).count()
+        const related = find(RELATIONSHIP)
+            .condition("fromPartyId", partyId)
+            .condition("toPartyId", "in", orgIds)
+            .condition("relationshipTypeEnumId", "in", ["PrtEmployee", "PrtAgent"])
+            .count()
         if (related) return true
-        // P17: an applicant to one of their openings (an application names its employer, P16)
-        if (
-            find("mantle.humanres.employment.EmploymentApplication")
-                .condition("applyingPartyId", partyId)
-                .condition("organizationPartyId", "in", orgIds)
-                .count()
-        )
-            return true
+        // P17: an applicant to one of their openings (an application names its employer, P16, or a position of theirs)
         const positionIds = Array.from(
             find(POSITION).condition("organizationPartyId", "in", orgIds).selectField("emplPositionId").list()
         ).map(row => row.emplPositionId)
-        if (
-            positionIds.length &&
+        const cf = ec.entity.conditionFactory
+        const ofEmployer = [cf.makeCondition("organizationPartyId", "in", orgIds)]
+        if (positionIds.length) ofEmployer.push(cf.makeCondition("emplPositionId", "in", positionIds))
+        const applications = Array.from(
             find("mantle.humanres.employment.EmploymentApplication")
                 .condition("applyingPartyId", partyId)
-                .condition("emplPositionId", "in", positionIds)
-                .count()
+                .condition(cf.makeCondition(ofEmployer, "or"))
+                .selectField("createdByUserId")
+                .list()
         )
-            return true
+        if (applications.length) {
+            // one the applicant filed (their own user made it), or an applicant no one else holds
+            const own = applications.some(
+                row =>
+                    row.createdByUserId &&
+                    one("moqui.security.UserAccount", {userId: row.createdByUserId})?.partyId === partyId
+            )
+            if (own || heldByNoOneElse(partyId, orgIds)) return true
+        }
     }
     const term = text(p.term)
     const byEmail = unique([text(p.workEmail), isEmail(term) ? term : ""].filter(Boolean)).some(email =>
         personsByEmail(email).includes(partyId)
     )
-    if (!byEmail) return false
-    if (find("moqui.security.UserAccount").condition("partyId", partyId).count()) return false
-    let elsewhere = people
-        .current(find(RELATIONSHIP).condition("fromPartyId", partyId).condition("relationshipTypeEnumId", "PrtEmployee"), nowMs())
-    if (orgIds.length) elsewhere = elsewhere.condition("toPartyId", "not-in", orgIds)
-    return elsewhere.count() === 0
+    return byEmail && heldByNoOneElse(partyId, orgIds)
 }
 const relationshipTexts = {
     employment: "Employment",
