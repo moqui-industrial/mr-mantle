@@ -859,9 +859,7 @@ along with this software (see the LICENSE.md file). If not, see
             // an event only the people on it see, which the user may not open (check#EventAccess), is Busy: its time alone, no
             // title, place, description, link, organizer, attendees or alarms (SEC-BOS-107); a recurring instance as its series
             const opened = new Map()
-            const hidden = (row, series) => {
-                const event = series || row
-                if (!['WevRestricted', 'WevConfidential'].includes(event.visibilityEnumId)) return false
+            const opens = (event) => {
                 if (!opened.has(event.workEffortId)) {
                     ec.message.pushErrors()
                     try {
@@ -869,8 +867,11 @@ along with this software (see the LICENSE.md file). If not, see
                                 .parameters({workEffortId: event.workEffortId, permission: 'none'}).disableAuthz().call()?.canView)
                     } catch (err) { opened.set(event.workEffortId, false) } finally { ec.message.clearErrors(); ec.message.popErrors() }
                 }
-                return !opened.get(event.workEffortId)
+                return opened.get(event.workEffortId)
             }
+            // a changed occurrence is hidden when it or its series is restricted and the user may not open that one
+            const hidden = (row, series) => [row, series].some((event) => event != null
+                    && ['WevRestricted', 'WevConfidential'].includes(event.visibilityEnumId) && !opens(event))
             for (const row of rows) {
                 const instance = recurrenceIdOf.get(row.workEffortId)
                 const series = instance ? byId.get(instance.seriesId) : null

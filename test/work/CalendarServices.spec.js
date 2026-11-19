@@ -1085,6 +1085,7 @@ feature("an event only the people on it see is Busy to a viewer of its calendar 
             return event("Private appraisal", { estimatedStartDate: at(2 * 24 + 16), estimatedCompletionDate: at(2 * 24 + 17),
                 assignToPartyId: party.Ada, calendarId: cal.reviews, visibilityEnumId: "WevRestricted", location: "Room 9" })
         })
+        we.appraisal = appraisal
         const ben = as("Ben", () => ({
             access: call(`${EV}.check#EventAccess`, { workEffortId: appraisal, permission: "none" }),
             shown: week({ calendarIdList: [cal.reviews] }).find((item) => item.workEffortId === appraisal),
@@ -1161,5 +1162,57 @@ feature("an event in only because another asked party is on it is Busy unless th
         ben.location == null
         ben.ownerName == null
         ada.title.includes("Dentist visit")
+    },
+})
+
+// SEC-BOS-107 (review): a changed occurrence is Busy in a calendar file when it or its series is restricted, and the record rule
+// (get#RecordLinkInfo, which EventDetail and the popover fall back on) gives a viewer of the calendar no view of a restricted event
+feature("a restricted changed occurrence of an open series is Busy in Ben's calendar file, and the record rule hides a restricted event from a calendar viewer", {
+    when() {
+        setTime(19.5)
+        const ids = as("Ada", () => {
+            const series = event("Weekly one-to-one", { estimatedStartDate: at(4 * 24 + 9), estimatedCompletionDate: at(4 * 24 + 9.5),
+                    assignToPartyId: party.Ada, calendarId: cal.reviews })
+            const moved = event("One-to-one about pay", { estimatedStartDate: at(4 * 24 + 15), estimatedCompletionDate: at(4 * 24 + 15.5),
+                    assignToPartyId: party.Ada, visibilityEnumId: "WevRestricted", location: "Room 9" })
+            return { series, moved }
+        })
+        call("create#mantle.work.effort.WorkEffortAssoc", { workEffortId: ids.series, toWorkEffortId: ids.moved,
+                workEffortAssocTypeEnumId: "WeatRecurrenceInstance", fromDate: at(4 * 24 + 9) })
+        call("create#moqui.security.UserGroup", { userGroupId: "CS_RECORD_CALLER", description: "Spec record callers" })
+        call("create#moqui.security.UserGroupMember", { userGroupId: "CS_RECORD_CALLER", userId: user.Ben, fromDate: 0 })
+        call("create#moqui.security.ArtifactGroup", { artifactGroupId: "CS_RECORD_SERVICES", description: "Spec record services" })
+        call("create#moqui.security.ArtifactGroupMember", { artifactGroupId: "CS_RECORD_SERVICES",
+            artifactName: "mantle\\.(work\\.EventServices|party\\.CommunicationServices)\\..*", artifactTypeEnumId: "AT_SERVICE", nameIsPattern: "Y", inheritAuthz: "Y" })
+        call("create#moqui.security.ArtifactAuthz", { artifactAuthzId: "CS_RECORD_AUTHZ", userGroupId: "CS_RECORD_CALLER", artifactGroupId: "CS_RECORD_SERVICES",
+            authzTypeEnumId: "AUTHZT_ALWAYS", authzActionEnumId: "AUTHZA_ALL" })
+        call("create#moqui.security.ArtifactAuthzFilter", { artifactAuthzId: "CS_RECORD_AUTHZ", entityFilterSetId: "MANTLE_USER_ORG" })
+        try {
+            return as("Ben", () => {
+                const maps = call(`${EV}.get#EventIcsMaps`, { workEffortIdList: [ids.series] }).eventMapList
+                const wasDisabled = ec.artifactExecution.authzDisabled()
+                ec.artifactExecution.enableAuthz()
+                try {
+                    const record = (recordId) => call("mantle.party.CommunicationServices.get#RecordLinkInfo", { recordEntityName: "mantle.work.effort.WorkEffort",
+                            recordId, checkOnly: true }).recordVisible
+                    return { maps, ids, appraisal: record(we.appraisal), series: record(ids.series) }
+                } finally { if (wasDisabled) ec.artifactExecution.disableAuthz() }
+            })
+        } finally {
+            ec.entity.find("moqui.security.ArtifactAuthzFilter").condition("artifactAuthzId", "CS_RECORD_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactAuthz").condition("artifactAuthzId", "CS_RECORD_AUTHZ").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroupMember").condition("artifactGroupId", "CS_RECORD_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.ArtifactGroup").condition("artifactGroupId", "CS_RECORD_SERVICES").deleteAll()
+            ec.entity.find("moqui.security.UserGroupMember").condition("userGroupId", "CS_RECORD_CALLER").deleteAll()
+            ec.entity.find("moqui.security.UserGroup").condition("userGroupId", "CS_RECORD_CALLER").deleteAll()
+        }
+    },
+    then({ maps, ids, appraisal, series }) {
+        maps.length == 2
+        maps.find((map) => map.recurrenceId != null).summary == "Busy"
+        maps.find((map) => map.recurrenceId != null).location == null
+        maps.find((map) => map.recurrenceId == null).summary == "Weekly one-to-one"
+        appraisal != true
+        series == true
     },
 })
