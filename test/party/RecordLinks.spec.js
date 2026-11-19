@@ -161,14 +161,14 @@ feature("linking again changes nothing, unlinking removes the link", {
     },
 })
 
-feature("a record type that is not an entity or has no single key is refused", {
+feature("a record type that is not an entity, or no registered record type (one of two keys among them, SEC-BOS-87), is refused", {
     expect() {
         const notEntity = errorOf("mantle.party.CommunicationServices.link#CommunicationEventRecord",
                 { communicationEventId: messageIds[ORDER], recordEntityName: "mantle.NoSuchRecord", recordId: "X" })
         const twoKeys = errorOf("mantle.party.CommunicationServices.link#CommunicationEventRecord",
                 { communicationEventId: messageIds[ORDER], recordEntityName: "mantle.order.OrderItem", recordId: "RL-O1" })
         notEntity.includes("is not an entity")
-        twoKeys.includes("primary key fields")
+        twoKeys.includes("is not a record type")
     },
 })
 

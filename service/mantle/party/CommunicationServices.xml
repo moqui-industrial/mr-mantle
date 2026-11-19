@@ -2109,7 +2109,7 @@ along with this software (see the LICENSE.md file). If not, see
 
             Only a registered record type is a record (SEC-BOS-87): one with a communication event, work effort, request,
             note or content join below, or one this service rules on (each type named in the rules below, and a return,
-            ReturnHeader, under its entity filters). Any other entity, every moqui.* entity but a wiki page, a merge request,
+            ReturnHeader and a production stop, ProductionDowntime, under their entity filters). Any other entity, every moqui.* entity but a wiki page, a merge request,
             a git repository, an account, a security group and an audit row among them, is refused as not a record type, with
             checkRecord false too; an audit row of an unregistered type is not seen.
 
@@ -2389,7 +2389,9 @@ along with this software (see the LICENSE.md file). If not, see
                 'mantle.ledger.transaction.PostingOperation', 'mantle.product.cost.ProductStandardCost',
                 'mantle.product.cost.ProductStandardCostComponent', 'mantle.product.cost.ProductCostCalculation',
                 'mantle.product.bom.ProductBomItem', 'mantle.product.bom.ProductBomContent', 'mantle.work.method.MethodReleaseDecision',
-                'mantle.work.production.WorkCenter', 'mantle.work.production.WorkCenterRate']
+                'mantle.work.production.WorkCenter', 'mantle.work.production.WorkCenterRate',
+                // a production stop, which a maintenance request is filed on (ProductionDowntime.js), under its entity filters
+                'mantle.work.production.ProductionDowntime']
             const registeredTypes = new Set([commEventJoins, workEffortJoins, requestJoins, noteEntities, contentEntities]
                     .flatMap((map) => Object.keys(map)).concat(ruledTypes))
             if (!registeredTypes.has(recordEntityName)) { refuse(`The record type ${recordEntityName} is not a record type`); return }
