@@ -238,6 +238,8 @@ feature("an approved RMA's label request prepares its package once, and the retu
             returnResponseEnumId: "RrspCredit"
         })
         const otherCustomer = invoke(R + "add#OrderItemToReturn", line(otherSale.orderId))
+        // a status given for the new item is a return authorizer's to give (SEC-BAP-93 review)
+        const givenStatus = run("wrt_receiver", R + "add#OrderItemToReturn", Object.assign(line(ids.saleId), {statusId: "ReturnApproved"}))
         const early = run("wrt_shipper", T + "request#ReturnLabel", {operationKey: key(), returnId})
         call(R + "approve#Return", {returnId})
         const receiverAdds = run("wrt_receiver", R + "add#OrderItemToReturn", line(ids.saleId))
@@ -254,9 +256,10 @@ feature("an approved RMA's label request prepares its package once, and the retu
             recordId: returnId,
             checkRecord: false
         })
-        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds}
+        return {early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus}
     },
-    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds}) {
+    then({early, denied, label, retry, packages, file, info, otherCustomer, receiverAdds, givenStatus}) {
+        givenStatus.error.includes("Only a return authorizer gives")
         otherCustomer.error.includes("ORDER_MISMATCH")
         receiverAdds.error.includes("RETURN_NOT_OPEN")
         early.error.includes("RETURN_NOT_APPROVED")

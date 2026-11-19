@@ -352,7 +352,8 @@ along with this software (see the LICENSE.md file). If not, see
         <description>Add an order line to a return, up to what was billed of it less what is already returned. The line's order
             part is the return's customer's and organization's (ORDER_MISMATCH, the same as for a missing line: SEC-BAP-93); a
             cancelled, completed or manual-response return takes none, and one past Requested, whose new item is born approved,
-            takes one only from a return authorizer (RETURN_AUTHORIZE; RETURN_NOT_OPEN).</description>
+            takes one only from a return authorizer (RETURN_AUTHORIZE; RETURN_NOT_OPEN). The new item takes the return's status;
+            a statusId given is taken only from a return authorizer (RETURN_NOT_OPEN otherwise).</description>
         <in-parameters>
             <parameter name="returnId" required="true"/>
             <parameter name="orderId" required="true"/>
@@ -391,6 +392,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="!['ReturnCreated', 'ReturnRequested'].includes(returnHeader.statusId) &amp;&amp; ec.user.userId
                     &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
                 <return error="true" message="RETURN_NOT_OPEN: Return ${returnId} is ${returnHeader.status?.description}; only a return authorizer adds an item to it"/></if>
+            <!-- the new item's status is the return's; a caller names another only as a return authorizer (SEC-BAP-93) -->
+            <if condition="statusId &amp;&amp; ec.user.userId &amp;&amp; !ec.user.hasPermission('RETURN_AUTHORIZE')">
+                <return error="true" message="RETURN_NOT_OPEN: Only a return authorizer gives a new return item its status"/></if>
 
             <service-call name="mantle.order.ReturnServices.calculate#OrderItemReturnable" in-map="context" out-map="context"/>
             <set field="returnPrice" from="returnPrice != null &amp;&amp; !toDecimal(returnPrice).isZero() ? toDecimal(returnPrice) : toDecimal(orderItem.unitAmount ?? 0)"/>
