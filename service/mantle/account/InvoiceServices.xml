@@ -2389,8 +2389,10 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="linkToOriginal">
                 <script>ec.resource.script(workflow).execute('check', {check:'creditCap', invoiceId:invoiceId})</script>
                 <if condition="promptDiscount">
+                    <!-- the source key marks the discount PaymentTerms confirmed: the one linked credit issued with no approver
+                        whatever its amount (SEC-BOS-127) -->
                     <service-call name="update#mantle.account.invoice.Invoice" disable-authz="true"
-                            in-map="{invoiceId:invoiceId, statusId:'InvoiceFinalized',
+                            in-map="{invoiceId:invoiceId, statusId:'InvoiceFinalized', workflowSourceKey:'prompt-discount:' + originalInvoiceId,
                                 statusId_changeReason:description || 'Prompt payment discount'}"/>
                 </if>
                 <if condition="operationKey">
@@ -3549,6 +3551,9 @@ along with this software (see the LICENSE.md file). If not, see
                     <return error="true" message="STALE_REVISION: Invoice changed; reload before saving"/></if>
             </if>
             <set field="itemTypeEnumId" from="itemTypeEnumId || original?.itemTypeEnumId"/>
+            <!-- a credit linked to its invoice keeps its lines' item types (SEC-BOS-127): a type is what it credits, never retyped -->
+            <if condition="original &amp;&amp; scope.invoice.creditForInvoiceId &amp;&amp; itemTypeEnumId != original.itemTypeEnumId">
+                <return error="true" message="ITEM_TYPE_FIXED: A linked credit's line keeps its item type; remove it and add another"/></if>
             <entity-find-one entity-name="moqui.basic.Enumeration" value-field="itemType" cache="true" disable-authz="true">
                 <field-map field-name="enumId" from="itemTypeEnumId"/></entity-find-one>
             <if condition="itemType?.enumTypeId != 'ItemType'">

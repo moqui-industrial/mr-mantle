@@ -175,15 +175,21 @@ function approve(scope, preference) {
 }
 // SEC-BOS-127: a customer credit linked to an issued invoice (creditForInvoiceId) clears its balance, so it is issued only by
 // an approver (approve: INVOICE_APPROVE, never its drafter or a changer), unless it is a return's credit (its
-// ReturnItemBilling rows: the return settlement's own rules), a terms discount (prompt-payment items) or within the
-// organization's write-off tolerance.
+// ReturnItemBilling rows: the return settlement's own rules), a prompt-payment discount PaymentTerms confirmed (its source key,
+// set by create#InvoiceCreditMemo; a line's item type is no proof, the clerk types it) or within the organization's write-off
+// tolerance, the credits it let through for the same invoice before counted.
 function creditNeedsApprover(scope) {
     const record = scope.record
     if (!scope.receivable || !record.creditForInvoiceId) return false
     if (find("mantle.order.return.ReturnItemBilling", {invoiceId: record.invoiceId}).count()) return false
-    const items = rows("mantle.account.invoice.InvoiceItem", {invoiceId: record.invoiceId})
-    if (items.length && items.every(item => item.itemTypeEnumId === "ItemPromptDiscount")) return false
-    return !lib.writeOffTolerated(scope.organizationPartyId, lib.totals(record).invoiceTotal, record.currencyUomId)
+    if (record.workflowSourceKey === lib.promptDiscountKey(record.creditForInvoiceId)) return false
+    return !lib.writeOffTolerated(
+        scope.organizationPartyId,
+        lib.totals(record).invoiceTotal,
+        record.currencyUomId,
+        record.creditForInvoiceId,
+        record.invoiceId
+    )
 }
 const approvedNow = record => !!record.approvedByUserId && record.approvedSourceVersion === lib.fingerprint(record)
 // The target status of each action, after its checks.

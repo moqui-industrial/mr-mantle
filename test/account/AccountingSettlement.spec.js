@@ -529,11 +529,15 @@ feature("a receivables clerk writes off a residual up to the organization's writ
             refusal(() => h.review(f, [], [{invoiceId: a, itemTypeEnumId: "ItemWriteOff", amount, glAccountId: "550000000", reason: "Residual"}]))
         const within = writeOff("3")
         const above = writeOff("5")
+        // two rows of the same invoice that the tolerance would let through alone together exceed it (round 3)
+        const split = refusal(() => h.review(f, [], ["3", "3"].map(amount => ({invoiceId: a, itemTypeEnumId: "ItemWriteOff", amount,
+            glAccountId: "550000000", reason: "Residual"}))))
         login("john.doe")
         h.call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: null})
-        return {within, above}
+        return {within, above, split}
     },
-    then({within, above}) {
+    then({within, above, split}) {
+        split.includes("ADJUSTMENT_APPROVAL_REQUIRED")
         !within.includes("ADJUSTMENT_APPROVAL_REQUIRED")
         above.includes("ADJUSTMENT_APPROVAL_REQUIRED")
     }

@@ -335,15 +335,39 @@ function escapeHtml(value) {
     const entities = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}
     return String(value ?? "").replace(/[&<>"']/g, character => entities[character])
 }
+// The source key of a prompt-payment discount credit, which create#InvoiceCreditMemo sets once PaymentTerms confirmed the
+// discount the original's terms offer (SEC-BOS-127: the one credit kind issued with no approver whatever its amount).
+const promptDiscountKey = originalInvoiceId => "prompt-discount:" + originalInvoiceId
+// The linked credits of an original issued with no approver (approvedByUserId empty) that are neither a return's credit
+// (ReturnItemBilling) nor a prompt-payment discount: what the write-off tolerance has let through for it already.
+function toleratedCreditTotal(originalInvoiceId, exceptInvoiceId) {
+    if (!originalInvoiceId) return toDecimal(0)
+    const unissued = ["InvoiceInProcess", "InvoiceIncoming", "InvoiceReceived", "InvoiceCancelled"]
+    const credits = rows(invoiceEntity, {creditForInvoiceId: originalInvoiceId}).filter(
+        row =>
+            row.invoiceId !== exceptInvoiceId &&
+            !unissued.includes(row.statusId) &&
+            !row.approvedByUserId &&
+            row.workflowSourceKey !== promptDiscountKey(originalInvoiceId) &&
+            !find("mantle.order.return.ReturnItemBilling", {invoiceId: row.invoiceId}).count()
+    )
+    if (!credits.length) return toDecimal(0)
+    return Object.values(totalsMany(credits)).reduce((sum, row) => sum.add(row.invoiceTotal ?? 0), toDecimal(0))
+}
 // SEC-BOS-127: whether a write-off or a linked customer credit of the amount is within the organization's write-off tolerance
 // (PartyAcctgPreference.writeOffToleranceAmount, in its base currency; none or 0 tolerates nothing), so a user without
-// INVOICE_APPROVE makes it with no approver.
-function writeOffTolerated(organizationPartyId, amount, currencyUomId) {
+// INVOICE_APPROVE makes it with no approver. The tolerance is the original invoice's in all: the credits it let through for
+// the invoice before (toleratedCreditTotal) and earlier rows of the same request (alreadyAmount) count against it, so
+// splitting a write-off clears no more.
+function writeOffTolerated(organizationPartyId, amount, currencyUomId, originalInvoiceId, exceptInvoiceId, alreadyAmount) {
     const preference = policy.preference(organizationPartyId)
     const tolerance = preference?.writeOffToleranceAmount
     if (tolerance == null || toDecimal(tolerance).compare(0) <= 0) return false
     if (!currencyUomId || currencyUomId !== preference.baseCurrencyUomId) return false
-    return toDecimal(amount ?? 0).compare(toDecimal(tolerance)) <= 0
+    const total = toDecimal(amount ?? 0)
+        .add(toleratedCreditTotal(originalInvoiceId, exceptInvoiceId || null))
+        .add(toDecimal(alreadyAmount ?? 0))
+    return total.compare(toDecimal(tolerance)) <= 0
 }
 ;({
     entityLib,
@@ -392,5 +416,6 @@ function writeOffTolerated(organizationPartyId, amount, currencyUomId) {
     requireNotHeld,
     placeHold,
     escapeHtml,
-    writeOffTolerated
+    writeOffTolerated,
+    promptDiscountKey
 })

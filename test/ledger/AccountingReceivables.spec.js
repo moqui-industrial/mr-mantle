@@ -273,8 +273,22 @@ feature("an AR-only user creates a linked credit with original revenue accounts,
             const small = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "1.50", linkToOriginal: true, allocateToLines: true, operationKey: "native-ar-small-credit"})
             const smallStatus = native("change#InvoiceState", {
                 invoiceId: small.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(small.invoiceId)}).statusId
-            login("john.doe")
+            // round 3: a second credit of the same invoice that the tolerance would let through alone is refused, the first
+            // counted; a line retyped to a prompt discount is refused, and one made with that type is no discount PaymentTerms
+            // confirmed, so it is not let through either
+            const second = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "1.00", linkToOriginal: true,
+                allocateToLines: true, operationKey: "native-ar-split-credit"})
+            const splitFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: second.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(second.invoiceId)})
+            const secondLine = helper().lib.rows("mantle.account.invoice.InvoiceItem", {invoiceId: second.invoiceId})[0]
+            const retype = helper().rejected("mantle.account.InvoiceServices.store#InvoiceDraftItem", {invoiceId: second.invoiceId,
+                invoiceItemSeqId: secondLine.invoiceItemSeqId, lastUpdatedStamp: secondLine.lastUpdatedStamp, itemTypeEnumId: "ItemPromptDiscount"})
             helper().call("update#mantle.ledger.config.PartyAcctgPreference", {organizationPartyId: f.org, writeOffToleranceAmount: null})
+            const typed = native("create#InvoiceCreditMemo", {originalInvoiceId: invoiceId, amount: "3", linkToOriginal: true,
+                itemTypeEnumId: "ItemPromptDiscount", overrideGlAccountId: secondLine.overrideGlAccountId, operationKey: "native-ar-typed-credit"})
+            const typedFinalize = helper().rejected("mantle.account.InvoiceServices.change#InvoiceState", {
+                invoiceId: typed.invoiceId, organizationPartyId: f.org, action: "finalize", lastUpdatedStamp: stampOf(typed.invoiceId)})
+            login("john.doe")
             login(f.users.ar)
             const applied = native("apply#InvoiceCredit", {
                 invoiceId: creditId,
@@ -309,6 +323,9 @@ feature("an AR-only user creates a linked credit with original revenue accounts,
             return {
                 clerkFinalize,
                 smallStatus,
+                splitFinalize,
+                retype,
+                typedFinalize,
                 status,
                 applied,
                 replay,
@@ -324,9 +341,10 @@ feature("an AR-only user creates a linked credit with original revenue accounts,
             else helper().call("delete#mantle.ledger.config.ItemTypeGlAccount", mappingKey)
         }
     },
-    then({clerkFinalize, smallStatus, status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
+    then({clerkFinalize, smallStatus, splitFinalize, retype, typedFinalize, status, applied, replay, expected, actual, sourceTotal, changedAccount, creditTotal}) {
         clerkFinalize.includes("INVOICE_APPROVE")
         smallStatus == "InvoiceFinalized"
+        splitFinalize.includes("INVOICE_APPROVE") && retype.includes("ITEM_TYPE_FIXED") && typedFinalize.includes("INVOICE_APPROVE")
         status.statusId == "InvoiceFinalized"
         applied.amountApplied.eq(25)
         replay.paymentApplicationId == applied.paymentApplicationId

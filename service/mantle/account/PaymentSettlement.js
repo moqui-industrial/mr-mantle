@@ -215,7 +215,7 @@ function validatePolicy(scope, date, plans, lock = false) {
         accounts
     }
 }
-function adjustmentRow(scope, date, byKey, row, index) {
+function adjustmentRow(scope, date, byKey, row, index, earlier = {}) {
     if (!adjustmentTypes.includes(row.itemTypeEnumId) || !String(row.reason || "").trim())
         denied("ADJUSTMENT_REASON_REQUIRED", "Choose a discount or write-off and enter a reason")
     const target = byKey[key("invoice", row.invoiceId)],
@@ -243,7 +243,10 @@ function adjustmentRow(scope, date, byKey, row, index) {
                 denied("DISCOUNT_NOT_AVAILABLE", "The invoice's terms offer no discount of this amount on the date and today")
         }
         glAccountId = discountAccount
-    } else if (!lib.has("INVOICE_APPROVE") && !lib.writeOffTolerated(scope.organizationPartyId, amount, scope.currencyUomId))
+    } else if (
+        !lib.has("INVOICE_APPROVE") &&
+        !lib.writeOffTolerated(scope.organizationPartyId, amount, scope.currencyUomId, row.invoiceId, null, earlier[row.invoiceId])
+    )
         denied(
             "ADJUSTMENT_APPROVAL_REQUIRED",
             scope.direction === "payable"
@@ -321,9 +324,12 @@ function normalized(p, lock = false) {
             currencyUomId: scope.currencyUomId
         }
     })
+    // the earlier write-offs of each invoice in this request, which its tolerance counts (SEC-BOS-127)
+    const earlier = {}
     const adjustmentRows = adjustments.map((row, index) => {
-        const out = adjustmentRow(scope, date, byKey, row, index)
+        const out = adjustmentRow(scope, date, byKey, row, index, earlier)
         take(out.targetKey, toDecimal(out.amount))
+        if (!out.promptDiscount) earlier[out.invoiceId] = (earlier[out.invoiceId] || toDecimal(0)).add(toDecimal(out.amount))
         return out
     })
     for (const [k, amount] of Object.entries(consumption))
@@ -591,9 +597,14 @@ function createAdjustment(row, plan, request) {
         description: row.reason,
         promptDiscount: !!row.promptDiscount
     })
-    if (!row.promptDiscount)
+    if (!row.promptDiscount) {
+        // made by an approver of invoices, the write-off is approved by them; made under the tolerance, by no one, so the
+        // tolerance counts it (SEC-BOS-127)
+        if (lib.has("INVOICE_APPROVE"))
+            call("update#" + I, {invoiceId: made.invoiceId, approvedByUserId: ec.user.userId || null, approvedDate: ec.user.nowTimestamp})
         for (const statusId of receivable ? ["InvoiceFinalized"] : ["InvoiceReceived", "InvoiceApproved"])
             call("update#" + I, {invoiceId: made.invoiceId, statusId, statusId_changeReason: row.reason})
+    }
     const invoiceIds = verifyPosting(rows(T, {invoiceId: made.invoiceId}), plan.lines, request.organizationPartyId)
     const application = writeApplication(
         {sourceKey: key("credit", made.invoiceId), targetKey: row.targetKey, amount: row.amount},
