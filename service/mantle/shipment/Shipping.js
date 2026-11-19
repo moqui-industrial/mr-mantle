@@ -143,6 +143,31 @@ function gatewayFor(shipment, segment) {
     if (!gatewayId) gatewayId = ec.user.getPreference("DefaultShipmentGatewayConfigId")
     return gatewayId ? one(GATEWAY, {shippingGatewayConfigId: gatewayId}) : null
 }
+// The gateways a caller may name for the shipment's segment (SEC-BAP-101): the store's bindings, the segment's own, the
+// shipper's DefaultShipmentGatewayConfigId and the user's preference, the ones the lookup and the rates offer. A
+// ShippingGatewayConfig has no organization, so a gateway outside these (another organization's carrier account) is refused.
+function offeredGateways(shipment, segment) {
+    const ids = new Set()
+    if (shipment?.productStoreId)
+        for (const row of rows("mantle.product.store.ProductStoreShippingGateway", {productStoreId: shipment.productStoreId}))
+            if (row.shippingGatewayConfigId) ids.add(row.shippingGatewayConfigId)
+    if (segment?.shippingGatewayConfigId) ids.add(segment.shippingGatewayConfigId)
+    if (shipment?.fromPartyId) {
+        const shipperDefault = call("mantle.party.PartyServices.get#PartySettingValue", {
+            partyId: shipment.fromPartyId,
+            partySettingTypeId: "DefaultShipmentGatewayConfigId"
+        }).settingValue
+        if (shipperDefault) ids.add(shipperDefault)
+    }
+    const preferred = ec.user.getPreference("DefaultShipmentGatewayConfigId")
+    if (preferred) ids.add(preferred)
+    return ids
+}
+function requireOffered(shipment, segment, shippingGatewayConfigId) {
+    if (blank(shippingGatewayConfigId)) return
+    if (!offeredGateways(shipment, segment).has(shippingGatewayConfigId))
+        denied("GATEWAY_INVALID", "Shipping gateway " + shippingGatewayConfigId + " is not one this shipment may use")
+}
 function gatewayOf(shipmentId, shipmentRouteSegmentSeqId) {
     const shipment = one(SHIPMENT, {shipmentId})
     const segment = shipmentRouteSegmentSeqId
@@ -253,8 +278,10 @@ function rates(p) {
     const storeGateways = sh.shipment.productStoreId
         ? rows("mantle.product.store.ProductStoreShippingGateway", {productStoreId: sh.shipment.productStoreId})
         : []
-    if (!blank(p.shippingGatewayConfigId)) addGateway(p.shippingGatewayConfigId)
-    else {
+    if (!blank(p.shippingGatewayConfigId)) {
+        requireOffered(sh.shipment, segment, p.shippingGatewayConfigId)
+        addGateway(p.shippingGatewayConfigId)
+    } else {
         storeGateways.forEach(row => addGateway(row.shippingGatewayConfigId))
         addGateway(segment.shippingGatewayConfigId)
         addGateway(gatewayOf(sh.shipmentId, segment.shipmentRouteSegmentSeqId)?.shippingGatewayConfigId)
@@ -432,6 +459,7 @@ function recordRequests(p) {
             denied("METHOD_INVALID", "Carrier " + carrierPartyId + " has no method " + shipmentMethodEnumId)
         if (!blank(p.shippingGatewayConfigId) && !one(GATEWAY, {shippingGatewayConfigId: p.shippingGatewayConfigId}))
             denied("GATEWAY_INVALID", "There is no shipping gateway " + p.shippingGatewayConfigId)
+        requireOffered(sh.shipment, segment, p.shippingGatewayConfigId)
         const changed =
             carrierPartyId !== segment.carrierPartyId ||
             shipmentMethodEnumId !== segment.shipmentMethodEnumId ||

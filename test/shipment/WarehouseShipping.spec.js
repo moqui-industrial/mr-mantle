@@ -295,6 +295,24 @@ feature("a two-package shipment is rated by the local rules and by the test carr
     }
 })
 
+feature("a gateway the shipment's lookup does not offer rates and buys nothing for it, though it serves the carrier (SEC-BAP-101)", {
+    when() {
+        const sh = packedShipment("WSH_DEST", [1], {shippingGatewayConfigId: gateway})
+        return {
+            rates: run("wsh_shipper", T + "get#ShipmentRates", {shipmentId: sh.shipmentId, shippingGatewayConfigId: "WSH_NOFIND"}),
+            label: run("wsh_shipper", T + "request#PackageLabels", labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})),
+            labels: carrierLabels(sh.shipmentId).length,
+            segment: rows("mantle.shipment.ShipmentRouteSegment", {shipmentId: sh.shipmentId})[0].shippingGatewayConfigId
+        }
+    },
+    then({rates, label, labels, segment}) {
+        rates.error.includes("GATEWAY_INVALID")
+        label.error.includes("GATEWAY_INVALID")
+        labels == 0
+        segment == gateway
+    }
+})
+
 feature("both packages' labels are bought once through the test carrier; a retry answers the first", {
     when() {
         const shipmentId = state.two.shipmentId
@@ -352,7 +370,7 @@ feature("a label timeout asks the carrier before retrying and buys no second lab
     when() {
         // the segment's committed carrier is _NA_ with no gateway; the request chooses the test carrier and its gateway,
         // which is the gateway recorded, called and asked after the timeout (P13 review A1)
-        const sh = packedShipment("WSH_TIMEOUT", [1, 1])
+        const sh = packedShipment("WSH_TIMEOUT", [1, 1], {shippingGatewayConfigId: gateway})
         state.timeout = sh
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
@@ -605,7 +623,7 @@ feature("an open inspection holds dispatch; a label refund before ship reverses 
 
 feature("a gateway that cannot be asked after a timeout is sent again only when a person says so", {
     when() {
-        const sh = packedShipment("WSH_TIMEOUT", [1])
+        const sh = packedShipment("WSH_TIMEOUT", [1], {shippingGatewayConfigId: "WSH_NOFIND"})
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: "WSH_NOFIND"})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const retry = run("wsh_shipper", T + "request#PackageLabels", request)
@@ -638,7 +656,7 @@ feature("a gateway that cannot be asked after a timeout is sent again only when 
 
 feature("a queued label is pending; the next request asks the carrier and completes it, buying no second label", {
     when() {
-        const sh = packedShipment("WSH_QUEUED", [1])
+        const sh = packedShipment("WSH_QUEUED", [1], {shippingGatewayConfigId: gateway})
         const request = labelRequest(sh.shipmentId, {shippingGatewayConfigId: gateway})
         const first = run("wsh_shipper", T + "request#PackageLabels", request)
         const afterFirst = {
@@ -648,7 +666,7 @@ feature("a queued label is pending; the next request asks the carrier and comple
         }
         const retry = run("wsh_shipper", T + "request#PackageLabels", request)
         // a label the carrier keeps queued stays pending when asked, and is not bought again
-        const stuck = packedShipment("WSH_STUCK", [1])
+        const stuck = packedShipment("WSH_STUCK", [1], {shippingGatewayConfigId: gateway})
         const stuckRequest = labelRequest(stuck.shipmentId, {shippingGatewayConfigId: gateway})
         run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
         const stuckRetry = run("wsh_shipper", T + "request#PackageLabels", stuckRequest)
