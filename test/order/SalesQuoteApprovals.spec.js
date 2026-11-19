@@ -566,3 +566,36 @@ feature("with the approval setting off a Sales order rule stops autoApprove#Orde
         !plain.warnings.some(warning => warning.startsWith("Sales"))
     }
 })
+
+feature("a manager who raised a team quote's quantities past an amount rule does not approve it; another approver does (SEC-BAP-113)", {
+    when() {
+        const manager = system(() =>
+            user("managerb", [orgB], ["SALES_VIEW", "SALES_QUOTE_EDIT", "SALES_TEAM_VIEW", "SALES_APPROVE"])
+        )
+        const orderId = as(users.repB, quoteService + "create#Quote", {organizationPartyId: orgB, customerPartyId: accounts.b})
+            .orderId
+        const line = as(users.repB, quoteService + "store#QuoteLine", {
+            orderId,
+            orderRevision: revision(orderId),
+            productId: product,
+            quantity: "1"
+        })
+        const raised = as(manager, quoteService + "store#QuoteLine", {
+            orderId,
+            orderRevision: revision(orderId),
+            orderItemSeqId: line.orderItemSeqId,
+            quantity: "200"
+        })
+        const asked = as(users.repB, "request#QuoteApproval", {orderId, orderRevision: revision(orderId)})
+        const editorDecides = as(manager, "decide#Quote", {orderId, orderRevision: revision(orderId)}).refused
+        const approved = as(users.approverB, "decide#Quote", {orderId, orderRevision: revision(orderId)})
+        return {line, raised, asked, editorDecides, approved}
+    },
+    then({line, raised, asked, editorDecides, approved}) {
+        line.refused == ""
+        raised.refused == ""
+        asked.refused == ""
+        editorDecides.includes("SELF_APPROVAL")
+        approved.refused == ""
+    }
+})

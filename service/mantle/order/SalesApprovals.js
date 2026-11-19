@@ -672,6 +672,27 @@ function lineFinding(rule, item, context) {
             return null
     }
 }
+// The users who entered or changed the order's lines (all, or those of seqIds) since its last decided approval of the purpose
+// (the audit log of OrderItem's quantity, price and product): each is an author of a requirement those lines meet, so an editor
+// of a quote's quantities does not approve its amount rule (SEC-BAP-113).
+function lineEditors(orderId, purposeEnumId, seqIds = null) {
+    const decided = rows(DECISION, {orderId, decisionPurposeEnumId: purposeEnumId})
+        .filter(row => row.decisionResultEnumId === results.approved || row.decisionResultEnumId === results.refused)
+        .map(row => Number(ms(row.decisionDate) || 0))
+    const since = decided.length ? Math.max(...decided) : 0
+    let query = find("moqui.entity.EntityAuditLog")
+        .condition({changedEntityName: "mantle.order.OrderItem", pkPrimaryValue: orderId})
+        .condition("changedFieldName", "in", ["quantity", "unitAmount", "productId"])
+    if (since) query = query.condition("changedDate", "greater", new Date(since))
+    return Array.from(
+        new Set(
+            Array.from(query.list())
+                .filter(row => !seqIds || seqIds.includes(row.pkSecondaryValue))
+                .map(row => row.changedByUserId)
+                .filter(Boolean)
+        )
+    )
+}
 // The requirements of an order of an organization for a purpose at its current lines and total: each rule it meets, with its inputs,
 // the lines it names and their authors; with no quote rule in effect, a quote's manual prices (SarOverride).
 function requirementsOf(order, part, purposeEnumId) {
@@ -702,6 +723,7 @@ function requirementsOf(order, part, purposeEnumId) {
             }
             if (!lineSeqIds.length) continue
         }
+        authorUserIds.push(...lineEditors(order.orderId, purposeEnumId, rule.ruleTypeEnumId === "SarAmount" ? null : lineSeqIds))
         found.push({
             key: rule.salesApprovalPolicyId || "default",
             salesApprovalPolicyId: rule.salesApprovalPolicyId || null,
@@ -746,7 +768,8 @@ function withStates(requirements, decisions) {
     })
 }
 // The parties and users who may not approve a quote's requirement unless its rule allows it: its owner, who asked for its approval
-// at the revision, and who entered the lines it names.
+// at the revision, who priced the lines it names, and who entered or changed them (for an amount rule, any line) since the last
+// decision (lineEditors, SEC-BAP-113).
 function authorsOf(quote, requirement, decisions) {
     const owner = rows(PART_PARTY, {orderId: quote.order.orderId, roleTypeId: salesAccess.quoteRoles.owner}).map(
         row => row.partyId
