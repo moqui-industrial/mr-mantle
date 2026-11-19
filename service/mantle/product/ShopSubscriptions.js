@@ -1110,6 +1110,7 @@ function runRenewals(p) {
 // gateways (its hosted setup validated it with the provider), with the customer's consent to renewal charges of it; a
 // renewal waiting for the customer is tried again at once.
 function changeSubscriptionMethod(p) {
+    customerCalls()
     const reached = reach(p)
     const contract = contractReached(reached, p.contractId)
     checkRevision(contract, p.expectedRevision)
@@ -1129,7 +1130,8 @@ function changeSubscriptionMethod(p) {
         visitId: ec.user.visitId || null
     })
     if (recorded.error) stepRefusal(recorded.error)
-    resumeWaiting(contract.contractId)
+    // a renewal past its bound of customer resumptions today waits (resume#Renewal tries it again tomorrow)
+    resumeWaiting(contract.contractId, null, true)
     return getSubscription(Object.assign({}, p, {contractId: contract.contractId}))
 }
 // consent: the contract's card and the customer's consent to renewal charges of it, at its revision.
@@ -1162,12 +1164,19 @@ function stepRefusal(message) {
     throw new Error(firstLine(message))
 }
 // The contract's renewals the customer can have tried again, each reopened in a transaction of its own (so the steps that
-// follow, each in their own, see it) and advanced at once.
-function resumeWaiting(contractId, occurrenceId = null) {
+// follow, each in their own, see it) and advanced at once. Each is an off-session charge of the kept card, so the customer's
+// own (customer) reopen a renewal at most mantle@shop-renewal-resumes times a day (SEC-PSS-86; staff retries are their
+// own, StoreSubscriptions.js). {limited}: the renewals left waiting by that bound.
+function resumeWaiting(contractId, occurrenceId = null, customer = false) {
     const contract = one(CONTRACT, {contractId})
+    let limited = 0
     for (const row of rows(OCC, {contractId}).filter(
         row => reopenable(contract, row) && (!occurrenceId || row.occurrenceId === occurrenceId)
     )) {
+        if (customer && !customerResumeAllowed(row.occurrenceId)) {
+            limited++
+            continue
+        }
         const reopened = step("reopen", {occurrenceId: row.occurrenceId})
         if (reopened.error) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " not reopened: " + firstLine(reopened.error))
@@ -1181,6 +1190,35 @@ function resumeWaiting(contractId, occurrenceId = null) {
             ec.logger.error("Shop renewal " + row.occurrenceId + " not resumed: " + firstLine(error.message))
         }
     }
+    return {limited}
+}
+// Whether the customer may have a renewal charged again now: its resumptions in the last day are counted
+// (mantle@shop-renewal-resumes, 2 when unset).
+function customerResumeAllowed(occurrenceId) {
+    const limit = Number(ec.factory.getConfValue("mantle@shop-renewal-resumes"))
+    return ec.service
+        .sync()
+        .throwOnError(true)
+        .name("org.moqui.public.AccountServices.record#Attempt")
+        .parameters({
+            input: {
+                key: "shop-renewal-resume:" + occurrenceId,
+                limit: Number.isFinite(limit) && limit > 0 ? limit : 2,
+                windowMillis: 86400000
+            }
+        })
+        .requireNewTransaction(true)
+        .call().result.allowed
+}
+// The customer's renewal operations, which charge the kept card or start it, counted against the requester with the
+// checkout's payment calls (mantle@shop-payment-calls in ten minutes).
+function customerCalls() {
+    const limit = Number(ec.factory.getConfValue("mantle@shop-payment-calls"))
+    externalAccess().throttle(
+        "shop-payment",
+        Number.isFinite(limit) && limit > 0 ? limit : 120,
+        "Wait a few minutes before changing your subscription again"
+    )
 }
 // reopen: under the contract's and occurrence's locks, a renewal the customer can have tried again due now (one whose
 // retries ran out back to a retry, its next attempt counted as after the last).
@@ -1197,11 +1235,13 @@ function reopenStep(p) {
 // resume#Renewal (ResolveRenewal): a renewal waiting for the customer or a retry, charged again now with the contract's
 // card (a renewal in flight is answered as it is); without consent it stays waiting (CONSENT_REQUIRED).
 function resumeRenewal(p) {
+    customerCalls()
     const reached = reach(p)
     const contract = contractReached(reached, p.contractId)
     if (!consentHolds(contract))
         refuse("Unprocessable", "CONSENT_REQUIRED", "Choose a card and agree to renewal charges first", "paymentMethodId")
-    resumeWaiting(contract.contractId)
+    if (resumeWaiting(contract.contractId, null, true).limited)
+        refuse("Tarpit", "RATE_LIMITED", "This renewal was tried again today. Try it again tomorrow")
     for (const row of rows(OCC, {contractId: contract.contractId}).filter(row => row.stateEnumId === "SrsCharging"))
         advance(row.occurrenceId, "page")
     return getSubscription(Object.assign({}, p, {contractId: contract.contractId}))

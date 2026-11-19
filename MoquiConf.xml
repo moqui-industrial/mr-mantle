@@ -17,10 +17,11 @@
         or an organization's mailbox that holds the same address (SEC-PFS-85). Empty: the forum reads no route's mail. -->
     <!-- Shop's payment limits: shop-payment-calls a requester's payment result and payment form calls in ten minutes,
         shop-payment-forms the hosted payment forms one payment attempt is given in ten minutes; each asks the provider
-        (SEC-PSS-84). -->
+        (SEC-PSS-84); a customer's renewal resumptions and card changes count with the payment calls, and
+        shop-renewal-resumes is how many times a day the customer has one renewal charged again (SEC-PSS-86). -->
     <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
             content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"
-            shop-payment-calls="120" shop-payment-forms="10"
+            shop-payment-calls="120" shop-payment-forms="10" shop-renewal-resumes="2"
             mail-provider-authserv-ids="" forum-inbound-accounts=""/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>

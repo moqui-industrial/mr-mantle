@@ -886,6 +886,56 @@ feature("review: retries run out, then a changed card's consent charges the rene
     }
 })
 
+feature("SEC-PSS-86: a customer has a renewal whose retries ran out charged again a bounded number of times a day", {
+    when() {
+        // a subscription of the buyer whose card declines, its retries run out
+        op(ids.buyer, R + "begin#SubscriptionPurchase", {offerId: state.offerId})
+        op(ids.buyer, CHECKOUT + "select#Payment", {paymentOptionId: "PiCreditCard"})
+        const revision = op(ids.buyer, CHECKOUT + "get#Checkout", {}).result.checkout.revision
+        const submitted = op(ids.buyer, CHECKOUT + "submit#Checkout", {expectedRevision: revision, recurringConsent: true}).result
+        const row = one("mantle.order.StoreCheckout", {returnReference: submitted.checkout.reference})
+        system(() => call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId: row.paymentId, lastCheckDate: null}))
+        op(ids.buyer, CHECKOUT + "get#CheckoutPaymentResult", {reference: submitted.checkout.reference, key: submitted.returnKey})
+        assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+        const contract = one(SUB + "StoreRecurringContract", {originOrderId: row.orderId})
+        const contractId = contract.contractId
+        system(() =>
+            call("update#mantle.account.method.PaymentMethod", {
+                paymentMethodId: contract.paymentMethodId,
+                paymentGatewayConfigId: ids.decline
+            })
+        )
+        dueNow(contractId)
+        system(() => call(R + "dispatch#Renewal", {baseOrderId: contract.baseOrderId}))
+        const failing = occurrences(contractId)[0]
+        system(() => {
+            call("update#" + SUB + "StoreRenewalOccurrence", {
+                occurrenceId: failing.occurrenceId,
+                attemptCount: 3,
+                nextRetryDate: new Date(Number(ec.user.nowTimestamp) - 1000)
+            })
+            call(R + "run#Renewals", {})
+        })
+        const charges = () => list("mantle.account.payment.Payment", {orderId: failing.orderId}).length
+        const exhausted = charges()
+        // the customer resumes it with the card still declining: one charge a day here, then refused
+        return withConf("mantle@shop-renewal-resumes", "1", () => {
+            const first = op(ids.buyer, R + "resume#Renewal", {contractId})
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            const afterFirst = charges()
+            const second = op(ids.buyer, R + "resume#Renewal", {contractId})
+            assert(ec.factory.waitWorkerPoolEmpty(50), "Worker pool did not drain")
+            return {exhausted, first, afterFirst, second, afterSecond: charges()}
+        })
+    },
+    then(r) {
+        r.first.error == null
+        r.afterFirst == r.exhausted + 1
+        code(r.second) == "RATE_LIMITED"
+        r.afterSecond == r.afterFirst
+    }
+})
+
 feature(
     "P12: the hourly job starts a due renewal, one occurrence with the nightly hand-off (F113); staff retry it once per operation, refused while a payment is unresolved",
     {
