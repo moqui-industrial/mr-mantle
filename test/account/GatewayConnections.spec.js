@@ -446,3 +446,31 @@ feature("a test payment gateway is bound to no organization and takes no payment
         test.error == "" && test.applied === true
     }
 })
+
+// SEC-BOS-129: Shop's hosted form, profile and setup services of a test gateway are offered on a production instance only
+// when test gateways are allowed (StoreCheckout.js gatewayCapabilities asks TestGateways.js refusal)
+feature("a test gateway's hosted form and profile services are offered to no checkout on a production instance unless allowed", {
+    when() {
+        const checkout = ec.resource.script("component://mr-mantle/service/mantle/product/StoreCheckout.js")
+        const config = {paymentGatewayConfigId: "SPEC_GWC_HOSTED", paymentGatewayTypeEnumId: "PgtTest",
+            authorizeServiceName: "mantle.account.PaymentTestServices.hostedPending#Payment"}
+        const formConfig = Object.assign({}, config, {authorizeServiceName: "mantle.account.PaymentTestServices.hostedForm#Payment"})
+        const offered = () => {
+            const hosted = checkout.gatewayCapabilities.PgtTest(config)
+            const form = checkout.gatewayCapabilities.PgtTest(formConfig)
+            return {profile: hosted.hostedProfileService || null, setup: hosted.hostedSetupService || null,
+                checkout: hosted.hostedCheckout, form: form.hostedFormService || null}
+        }
+        const production = withConf("mantle@allow-test-gateways", "false", () => withConf("instance@purpose", "production", () => ({
+            refused: offered(),
+            allowed: withConf("mantle@allow-test-gateways", "true", () => offered())
+        })))
+        return {production, test: offered()}
+    },
+    then({production, test}) {
+        production.refused.profile == null && production.refused.setup == null && production.refused.form == null
+        production.refused.checkout == false
+        production.allowed.profile != null && production.allowed.form != null
+        test.profile != null && test.setup != null && test.form != null && test.checkout == true
+    }
+})
