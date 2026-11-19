@@ -223,3 +223,78 @@ feature("a finance administrator is bound to their own organizations; every orga
         seeded == 1
     }
 })
+
+// SEC-BOS-94: a chart account is one row for the instance. A finance administrator of ORF_A (with GL posting) changes an
+// account ORF_A alone is assigned, not one ORF_B uses too, assigns no account of ORF_B's own, does not change from the child
+// ORF_C an account of the parent's, and changes no currency unit, which every organization shares
+feature("a finance administrator of one organization changes only its own chart accounts, and no currency (SEC-BOS-94)", {
+    when() {
+        const past = Date.now() - dayMillis
+        const partyId = call("mantle.party.PartyServices.create#Person", {firstName: "orf.chart", lastName: "RowFilter"}).partyId
+        call("mantle.party.PartyServices.create#PartyUserAccount", {partyId, emailAddress: "orf.chart@example.com", username: "orf.chart",
+            newPassword: "moqui1!!", newPasswordVerify: "moqui1!!"})
+        call("create#mantle.party.PartyRelationship", {relationshipTypeEnumId: "PrtEmployee", fromPartyId: partyId,
+            fromRoleTypeId: "Employee", toPartyId: "ORF_A", toRoleTypeId: "OrgInternal", fromDate: past})
+        call("create#moqui.security.UserGroup", {userGroupId: "ORF_CHART", description: "Row filter chart"})
+        for (const userPermissionId of ["ACCOUNTING_ADMIN", "ACCOUNTING_GL_POST"])
+            call("create#moqui.security.UserGroupPermission", {userGroupId: "ORF_CHART", userPermissionId, fromDate: past})
+        call("create#moqui.security.UserGroupMember", {userGroupId: "ORF_CHART", userId: ec.entity.find("moqui.security.UserAccount")
+            .condition("username", "orf.chart").one().userId, fromDate: past})
+        const like = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", "111100000").one()
+        const account = (glAccountId, accountCode, orgIds) => {
+            call("create#mantle.ledger.account.GlAccount", {glAccountId, accountCode, accountName: glAccountId,
+                glAccountClassEnumId: like.glAccountClassEnumId, glAccountTypeEnumId: like.glAccountTypeEnumId})
+            for (const organizationPartyId of orgIds)
+                call("create#mantle.ledger.account.GlAccountOrganization", {glAccountId, organizationPartyId, fromDate: past})
+        }
+        account("ORF_ACCT_SHARED", "1999401", ["ORF_A", "ORF_B"])
+        account("ORF_ACCT_OWN", "1999402", ["ORF_A"])
+        account("ORF_ACCT_B", "1999403", ["ORF_B"])
+        const rename = (glAccountId, organizationPartyId) => {
+            const row = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", glAccountId).one()
+            return {glAccountId, organizationPartyId, accountCode: row.accountCode, accountName: glAccountId + " renamed",
+                glAccountClassEnumId: row.glAccountClassEnumId, glAccountTypeEnumId: row.glAccountTypeEnumId,
+                lastUpdatedStamp: row.lastUpdatedStamp, changeReason: "Spec rename"}
+        }
+        const attempt = (name, parameters) => {
+            ec.message.pushErrors()
+            try {
+                ec.service.sync().name(name).parameters(parameters).requireNewTransaction(true).call()
+                return ec.message.hasError() ? ec.message.getErrorsString() : ""
+            } catch (error) {
+                return String(error.message)
+            } finally {
+                ec.message.clearErrors()
+                ec.message.popErrors()
+            }
+        }
+        login("orf.chart", "moqui1!!")
+        ec.artifactExecution.disableAuthz()
+        const out = {
+            shared: attempt("mantle.ledger.AccountServices.store#Account", rename("ORF_ACCT_SHARED", "ORF_A")),
+            own: attempt("mantle.ledger.AccountServices.store#Account", rename("ORF_ACCT_OWN", "ORF_A")),
+            fromChild: attempt("mantle.ledger.AccountServices.store#Account", rename("ORF_ACCT_OWN", "ORF_C")),
+            assignOthers: attempt("mantle.ledger.AccountServices.store#Assignment", {organizationPartyId: "ORF_A", glAccountId: "ORF_ACCT_B",
+                changeReason: "Spec assign"}),
+            classify: attempt("mantle.ledger.AccountServices.store#Classification", {organizationPartyId: "ORF_A", glAccountId: "ORF_ACCT_SHARED",
+                glAccountGroupId: "ORF_NO_GROUP", changeReason: "Spec group"}),
+            currency: attempt("mantle.ledger.CurrencyServices.store#Currency", {organizationPartyId: "ORF_A", uomId: "USD",
+                description: "Dollar renamed", fractionDigits: 2, changeReason: "Spec currency"})
+        }
+        login("john.doe")
+        ec.artifactExecution.disableAuthz()
+        out.sharedName = ec.entity.find("mantle.ledger.account.GlAccount").condition("glAccountId", "ORF_ACCT_SHARED").one().accountName
+        out.assigned = ec.entity.find("mantle.ledger.account.GlAccountOrganization").condition({glAccountId: "ORF_ACCT_B", organizationPartyId: "ORF_A"}).count()
+        return out
+    },
+    then(out) {
+        out.shared.includes("ACCOUNT_SHARED")
+        out.sharedName == "ORF_ACCT_SHARED"
+        out.own == ""
+        out.fromChild.includes("ACCOUNT_SHARED")
+        out.assignOthers.includes("ACCOUNT_UNAVAILABLE")
+        out.assigned == 0
+        out.classify.includes("ACCOUNT_SHARED")
+        out.currency.includes("PERMISSION_DENIED")
+    }
+})

@@ -149,6 +149,53 @@ function organizationChain(org, date = ec.user.nowTimestamp, visited = []) {
     }).filter(r => active(r, date))
     return [org].concat(parents.flatMap(r => organizationChain(r.toPartyId, date, [...visited, org])))
 }
+// SEC-BOS-94: a chart account (GlAccount), its categories and groups and a currency unit are rows of the whole instance; only
+// their assignments are an organization's. Whether the scope's user is finance administration of every internal organization:
+// a system administrator, ACCOUNTING_ALL_ORGANIZATIONS, or ACCOUNTING_ADMIN in each one (the rule of the exchange rates).
+function everyOrganizationAdmin(s) {
+    const c = s.capabilities
+    if (c.systemAdmin || c.allOrganizations) return true
+    if (!c.admin) return false
+    const mine = s.organizationPartyIds || []
+    return Array.from(find("mantle.party.PartyRole", {roleTypeId: "OrgInternal"}).selectField("partyId").list()).every(row =>
+        mine.includes(row.partyId)
+    )
+}
+// Why the scope's user may not change a chart account (its fields, categories and groups), or null when they may: an account
+// assigned to the scope's organization alone takes GL posting; one assigned to other organizations too (the standard chart's
+// DefaultSettings among them) finance administration of each of them (of every one for DefaultSettings or an organization
+// that is not internal); one the organization is not assigned (a parent's, reached through the rollup) is not its own to change.
+function chartAccountRefusal(s, glAccountId) {
+    const c = s.capabilities
+    if (c.systemAdmin || c.allOrganizations) return null
+    const assigned = [
+        ...new Set(rows("mantle.ledger.account.GlAccountOrganization", {glAccountId}).map(row => row.organizationPartyId))
+    ]
+    if (!assigned.includes(s.organizationPartyId))
+        return "This chart account is another organization's: it is changed where it is assigned"
+    const others = assigned.filter(id => id !== s.organizationPartyId)
+    if (!others.length) return null
+    if (!c.admin) return "Changing a shared chart account requires finance administration"
+    const mine = s.organizationPartyIds || []
+    const internal = id => !!one("mantle.party.PartyRole", {partyId: id, roleTypeId: "OrgInternal"})
+    if (others.every(id => (internal(id) ? mine.includes(id) : everyOrganizationAdmin(s)))) return null
+    return "This chart account is shared with other organizations: changing it needs finance administration of each of them"
+}
+function requireChartAccount(s, glAccountId) {
+    const refusal = chartAccountRefusal(s, glAccountId)
+    if (refusal) denied("ACCOUNT_SHARED", refusal)
+}
+// An account the organization may assign itself: one of its own chain's (assigned to it or a parent) or of the standard chart
+// (DefaultSettings), any for every-organization finance administration; another organization's own account is not offered.
+function requireAssignableAccount(s, glAccountId) {
+    const c = s.capabilities
+    if (c.systemAdmin || c.allOrganizations) return
+    const allowed = organizationChain(s.organizationPartyId).concat(["DefaultSettings"])
+    if (
+        !rows("mantle.ledger.account.GlAccountOrganization", {glAccountId}).some(row => allowed.includes(row.organizationPartyId))
+    )
+        denied("ACCOUNT_UNAVAILABLE", "Account " + glAccountId + " is not available")
+}
 function accountAssignment(org, id, date = ec.user.nowTimestamp) {
     for (const organizationPartyId of organizationChain(org, date)) {
         const row = one("mantle.ledger.account.GlAccountOrganization", {
@@ -358,6 +405,10 @@ function record(p, need = "read", lock = false) {
     revision,
     account,
     accountAssignment,
+    everyOrganizationAdmin,
+    chartAccountRefusal,
+    requireChartAccount,
+    requireAssignableAccount,
     organizationChain,
     currency,
     dimensions,
