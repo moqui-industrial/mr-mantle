@@ -580,7 +580,9 @@ along with this software (see the LICENSE.md file). If not, see
     <service verb="get" noun="PublishedCalendarEvents" authenticate="anonymous-view">
         <description>The events of a published calendar for anyone with its link (the public route): the publish token
             (and its password, when it has one) is checked before anything is read, then get#FullCalendarData gives the
-            events of that calendar only, as Busy for a free/busy link.</description>
+            events of that calendar only, as Busy for a free/busy link. A password try is counted before it is checked, at most
+            10 a link and 30 a requester in ten minutes, past which the answer is "too many tries" with no check (SEC-BOS-102, as
+            a shared file link's, SEC-FIL-05); a wrong one is "The password is not right".</description>
         <in-parameters>
             <parameter name="publishToken" required="true"/>
             <parameter name="password"/>
@@ -596,9 +598,17 @@ along with this software (see the LICENSE.md file). If not, see
             eventList = []
             const share = ec.entity.find('mantle.work.calendar.CalendarShare').condition('publishToken', String(publishToken))
                     .condition(ec.entity.conditionFactory.makeConditionDate('fromDate', 'thruDate', null)).disableAuthz().one()
-            const valid = share != null && !share.userId && !share.userGroupId && !share.partyId
-                    && (!share.passwordHash || (password && ec.user.passwordsMatch(String(password), share.passwordHash)))
-            if (!valid) { ec.message.addError('This calendar link is not valid'); return }
+            if (share == null || share.userId || share.userGroupId || share.partyId) { ec.message.addError('This calendar link is not valid'); return }
+            if (share.passwordHash) {
+                if (!password) { ec.message.addError(ec.l10n.localize('This calendar needs its password')); return }
+                // each try counted first, by the link and by the requester, so guessing stops before the hash is computed
+                const attempt = (key, limit) => ec.service.sync().throwOnError(true).name('org.moqui.public.AccountServices.record#Attempt')
+                        .parameters({input: {key, limit, windowMillis: 600000}}).requireNewTransaction(true).disableAuthz().call().result.allowed
+                const requester = ec.resource.script('component://framework/service/org/moqui/public/Account.js').requesterKey()
+                if (!attempt('calendar-password:share:' + share.calendarShareId, 10) || !attempt('calendar-password:ip:' + requester, 30)) {
+                    ec.message.addError(ec.l10n.localize('Too many tries of the password; wait a few minutes and try again')); return }
+                if (!ec.user.passwordsMatch(String(password), share.passwordHash)) { ec.message.addError(ec.l10n.localize('The password is not right')); return }
+            }
             const calendar = ec.entity.find('mantle.work.calendar.Calendar').condition('calendarId', share.calendarId).disableAuthz().one()
             calendarName = calendar?.calendarName ?? null
             color = calendar?.color ?? null

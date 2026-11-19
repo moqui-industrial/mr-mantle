@@ -924,22 +924,28 @@ feature("import#Calendar splits a series at a RANGE=THISANDFUTURE override: the 
     },
 })
 
-feature("a publish link reads the calendar with its password only", {
+// SEC-BOS-102: each try of the password is counted first, ten a link in ten minutes, past which even the right one is refused
+feature("a publish link reads the calendar with its password only, and stops taking tries after ten", {
     when() {
         setTime(15)
         logout()
         const wrong = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "wrong", start: "2027-05-09", end: "2027-05-15" })
         const right = call(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
+        const guesses = []
+        for (let i = 0; i < 8; i++) guesses.push(errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "guess " + i, start: "2027-05-09", end: "2027-05-15" }))
+        const limited = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
         login("john.doe")
         setTime(15.1)
         const ended = as("Ada", () => call(`${CAL}.unshare#Calendar`, { calendarId: cal.projects, publish: true }).unsharedCount)
         logout()
         const after = errorOf(`${CAL}.get#PublishedCalendarEvents`, { publishToken, password: "open sesame", start: "2027-05-09", end: "2027-05-15" })
         login("john.doe")
-        return { wrong, right, ended, after }
+        return { wrong, right, guesses, limited, ended, after }
     },
-    then({ wrong, right, ended, after }) {
-        wrong.includes("not valid")
+    then({ wrong, right, guesses, limited, ended, after }) {
+        wrong.includes("The password is not right")
+        guesses.every((error) => error.includes("The password is not right"))
+        limited.includes("Too many tries")
         right.calendarName == "Ada Projects"
         right.eventList.map((item) => item.title).sort() == ["Design review", "Focus time"]
         ended == 1
