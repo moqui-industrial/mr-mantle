@@ -236,30 +236,59 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
 
     <service verb="search" noun="MantleFiltered">
-        <description>A search of the documents of indexName (Marble's mantle index): every one, or the documentType named, which
-            must be a DataDocument of indexName whose primary entity the user may view (SEC-DAT-81: mail, chat, drive files,
-            other indexes and the telemetry stores are not searched here; another type finds nothing, with a message). The
-            user's organization filter set limits every search: a Party or Product search by its own set, any other by the
-            Product or else the Party set, so a type with no ownerPartyId finds nothing for a user with one.</description>
+        <description>Marble's general search of the documents of indexName (the mantle index): every type of it but messages and
+            wiki pages, or the documentType named (one or a comma list), each of which must be such a type (SEC-DAT-81: mail,
+            mailbox posts, wiki pages, chat, drive files, other indexes and the telemetry stores are searched by their own
+            screens, whose access rules this search does not have; another type finds nothing, with a message). Under the user's
+            organization limit (SearchScope.js, as search#Universal has it) each type shows only its records of the user's
+            organizations, by the type's own organization, user and party fields, and a type with none is left out, saying so
+            when it is the one asked for. A party that is another user's personal contact is never found.</description>
         <implements service="org.moqui.search.SearchServices.search#DataDocuments"/>
         <actions>
-            <!-- the types are the index's own, each one the user may view (SEC-DAT-81) -->
             <script><![CDATA[
-                refusedType = null
+                const searchScope = ec.resource.script('component://mr-mantle/service/mantle/search/SearchScope.js')
+                // the types Marble searches: the index's own but those with access rules of their own screens (SEC-DAT-81)
+                const withOwnAccess = ['MantleCommunicationEvent', 'MantleWikiPage']
+                const indexTypes = ec.search.isAvailable() ? Array.from(ec.search.documentTypes({indexName: indexName}) || []) : []
+                const searchable = indexTypes.filter(type => !withOwnAccess.includes(type))
                 if (documentType != null && !String(documentType).trim()) documentType = null
-                if (documentType) {
-                    const types = String(documentType).split(',').map(type => type.trim()).filter(type => type)
-                    refusedType = types.find(type => {
-                        const document = ec.entity.find('moqui.entity.document.DataDocument').condition('dataDocumentId', type)
-                                .useCache(true).disableAuthz().one()
-                        return !document || document.indexName !== indexName ||
-                                !ec.artifactExecution.isPermitted(document.primaryEntityName, 'AT_ENTITY', 'view')
-                    }) || null
-                    if (!types.length) documentType = null
+                const asked = documentType ? String(documentType).split(',').map(type => type.trim()).filter(type => type) : []
+                refusedText = null
+                const refusedType = asked.find(type => !searchable.includes(type))
+                if (refusedType) refusedText = `Search type ${refusedType} is not available`
+                let types = asked.length ? asked : searchable
+
+                // the user's organization limit: each type by its own fields; a type with none is left out
+                const orgIds = searchScope.organizationLimit()
+                const userPartyId = ec.user.userAccount?.partyId || null
+                const typeClauses = []
+                const leftOut = []
+                for (const type of types) {
+                    const all = [{field: {name: '_document', op: 'eq', value: type}}]
+                    const scope = searchScope.scopeOf(type)
+                    if (orgIds != null && scope != null) {
+                        const any = searchScope.scopeClauses(type, scope, orgIds, userPartyId)
+                        if (!any.length) { leftOut.push(type); continue }
+                        all.push({bool: {any: any}})
+                    }
+                    if (type === 'MantleParty') all.push(searchScope.privateClause())
+                    typeClauses.push({bool: {all: all}})
+                }
+                types = types.filter(type => !leftOut.includes(type))
+                if (!refusedText && !types.length)
+                    refusedText = asked.length ? `Search type ${asked.join(', ')} has no organization of yours to limit it by`
+                            : 'Nothing is searchable for your organizations'
+                else if (!refusedText && asked.length && leftOut.length)
+                    ec.message.addPublic(`Search type ${leftOut.join(', ')} has no organization of yours to limit it by`, 'warning')
+                if (!refusedText) {
+                    documentType = types.join(',')
+                    // the limits are a trusted filter, so they do not change scores and the user query cannot widen them
+                    const typeFilter = {bool: {any: typeClauses}}
+                    filter = filter ? {bool: {all: [filter, typeFilter]}} : typeFilter
                 }
             ]]></script>
-            <if condition="refusedType">
-                <script>ec.message.addPublic(`Search type ${refusedType} is not available`, 'warning')</script>
+            <if condition="refusedText">
+                <script>ec.message.addPublic(refusedText, 'warning')</script>
                 <set field="documentList" from="[]"/><set field="documentListCount" from="0"/>
                 <set field="documentListPageIndex" from="pageIndex"/><set field="documentListPageSize" from="pageSize"/>
                 <set field="documentListPageMaxIndex" from="0"/><set field="documentListPageRangeLow" from="0"/>
@@ -268,48 +297,6 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <!-- add wildcards to query string for partial words -->
             <set field="queryString" from="elasticQueryAutoWildcard(queryString, false)"/>
-
-            <!-- if we have activeOrgId or filterOrgIds see if user has active org or user org filters -->
-            <set field="activeOrgId" from="ec.user.context?.activeOrgId"/>
-            <set field="filterOrgIds" from="ec.user.context?.filterOrgIds"/>
-            <!-- for no documentType this is the same as the MantleProduct constraint: overly restrictive for Party and other
-                document types, but the only way to limit safely (for user org at least); a Product or Party filter set applies -->
-            <!-- NOTE: using entityFilterSetId is a hack that only works for these 'standard' filter sets, would be
-                better to pick apart filterMap to see what's used, but this is specific to activeOrgId and filterOrgIds anyway -->
-            <script><![CDATA[
-                function filterSetFor(entityName) {
-                    const findFilters = ec.artifactExecution.getFindFiltersForUser(entityName);
-                    return findFilters && findFilters.length > 0 ? findFilters[0].entityFilterSetId : null;
-                }
-                // any other type (or several) is limited as no type is: a type with no organization is not searched across
-                // organizations (SEC-DAT-81)
-                let entityFilterSetId = null;
-                if (documentType === 'MantleParty') entityFilterSetId = filterSetFor('mantle.party.Party');
-                else if (documentType === 'MantleProduct') entityFilterSetId = filterSetFor('mantle.product.Product');
-                else entityFilterSetId = filterSetFor('mantle.product.Product') || filterSetFor('mantle.party.Party');
-
-                // the org limit is a trusted filter, so it does not change scores and the user query cannot widen it
-                let ownerPartyIds = null;
-                if ('MANTLE_USER_ORG' === entityFilterSetId) {
-                    ownerPartyIds = (filterOrgIds || []).slice();
-                    if (documentType === 'MantleParty') ownerPartyIds.push('_NA_');
-                } else if ('MANTLE_ACTIVE_ORG' === entityFilterSetId && activeOrgId) {
-                    ownerPartyIds = [activeOrgId, '_NA_'];
-                }
-                if (ownerPartyIds != null) {
-                    const orgFilter = {field: {name: 'ownerPartyId', op: 'in', values: ownerPartyIds}};
-                    filter = filter ? {bool: {all: [filter, orgFilter]}} : orgFilter;
-                }
-                // a personal contact (privateOwnerUserId, on parties only) only for its owner, with or without an org filter
-                if (!documentType || documentType === 'MantleParty') {
-                    const notPrivate = {field: {name: 'privateOwnerUserId', op: 'exists', negate: true}};
-                    const privateFilter = ec.user.userId ? {bool: {any: [notPrivate,
-                            {field: {name: 'privateOwnerUserId', op: 'eq', value: ec.user.userId}}]}} : notPrivate;
-                    filter = filter ? {bool: {all: [filter, privateFilter]}} : privateFilter;
-                }
-            ]]></script>
-            <!-- <log level="warn" message="Doing general search with documentType ${documentType} indexName ${indexName} queryString ${queryString}"/> -->
-
             <service-call name="org.moqui.search.SearchServices.search#DataDocuments" out-map="context"
                     in-map="Object.assign({}, context, {flattenDocument:false})"/>
         </actions>
