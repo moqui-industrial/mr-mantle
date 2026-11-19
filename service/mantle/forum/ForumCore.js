@@ -764,6 +764,50 @@ function plainText(html) {
         .replace(/\s+/g, ' ')
         .trim()
 }
+/* Mail From and Sender fields (SEC-PFS-81). A field is `name <address>`, `"name" <address>`, `address (comment)` or an
+   address alone; the address of its mailbox is the angle-bracketed address that ends it, or the bare address before a
+   trailing comment, never an address written in the name. Quoted strings and comments are text, so only an address
+   outside them is one of the field's (fieldAddressCount). */
+const ADDRESS_TOKEN = /[^\s<>()\[\],;:"'@]+@[^\s<>()\[\],;:"'@]+/g
+const QUOTED = /"(?:[^"\\]|\\.)*"/g
+const COMMENT = /\((?:[^()\\]|\\.)*\)/g
+function fieldMailbox(text) {
+    const value = String(text || '').trim()
+    const bracketed = /<([^<>\s]+@[^<>\s]+)>$/.exec(value)
+    if (bracketed)
+        return {
+            address: bracketed[1],
+            name: value
+                .slice(0, bracketed.index)
+                .trim()
+                .replace(/^"([\s\S]*)"$/, '$1')
+                .replace(/\\(.)/g, '$1')
+                .trim(),
+        }
+    const commented = /^([^<>"\s(),;:]+@[^<>"\s(),;:]+)\s*((?:\((?:[^()\\]|\\.)*\)\s*)*)$/.exec(value)
+    if (commented)
+        return {
+            address: commented[1],
+            name: commented[2].replace(/^\(|\)\s*$/g, '').replace(/\)\s*\(/g, ' ').trim(),
+        }
+    return { address: '', name: value }
+}
+/* How many addresses a raw header field names outside its quoted strings and comments (an encoded word holds no @). */
+function fieldAddressCount(text) {
+    let rest = String(text || '').replace(QUOTED, ' ')
+    for (let depth = 0, before = null; depth < 5 && before !== rest; depth++) {
+        before = rest
+        rest = rest.replace(COMMENT, ' ')
+    }
+    return (rest.match(ADDRESS_TOKEN) || []).length
+}
+/* Whether a display name shows an address other than the mailbox's own (in any width of @: NFKC). */
+function nameShowsOtherAddress(name, address) {
+    const own = String(address || '').trim().toLowerCase()
+    return (String(name || '').normalize('NFKC').match(ADDRESS_TOKEN) || []).some(
+        (token) => token.replace(/^[.]+|[.]+$/g, '').toLowerCase() !== own,
+    )
+}
 function clearAnswer(t, a, postId, reason) {
     if (!postId || t.acceptedAnswerId !== postId) return
     update(t, { acceptedAnswerId: null, revision: Number(t.revision) + 1 })
@@ -1717,6 +1761,9 @@ function privateTopic(t) {
     F,
     S,
     E,
+    fieldMailbox,
+    fieldAddressCount,
+    nameShowsOtherAddress,
     now,
     millis,
     dayKey,

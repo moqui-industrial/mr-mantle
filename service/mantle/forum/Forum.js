@@ -5040,28 +5040,32 @@ const bareAddress = (text) =>
     ).trim()
 /* The From mailbox of a message (SEC-PFS-81): its address and display name. A stored message's are the ones the store
    parsed (fromAddress, the addr-spec, and fromName); a message an email rule names without a stored row (a polled one)
-   has only the rule's from text, written `name <address>` or `"name" <address>` with the addr-spec last, or the address
-   alone, so only an angle-bracketed address that ends the text is the address and what is before it the name. A display
-   name's text, whatever address it shows, is never the sender. */
-function fromMailbox(stored, from) {
-    if (stored)
-        return {
-            address: String(stored.fromAddress || '').trim(),
-            name: String(stored.fromName || '').trim(),
-        }
-    const text = String(from || '').trim()
-    const last = /<([^<>\s]+@[^<>\s]+)>$/.exec(text)
-    if (last)
-        return {
-            address: last[1],
-            name: text
-                .slice(0, last.index)
-                .trim()
-                .replace(/^"([\s\S]*)"$/, '$1'),
-        }
-    return /^[^<>"\s,;]+@[^<>"\s,;]+$/.test(text)
-        ? { address: text, name: '' }
-        : { address: '', name: text }
+   has only the rule's from text, read by ForumCore.fieldMailbox (the address that ends it, never one in its name). */
+const fromMailbox = (stored, from) =>
+    stored
+        ? {
+              address: String(stored.fromAddress || '').trim(),
+              name: String(stored.fromName || '').trim(),
+          }
+        : core.fieldMailbox(from)
+/* Why a message's From is not one plain mailbox, or null: more than one From field or address, a Sender field of another
+   address, or a display name that shows an address other than the sender's (SEC-PFS-81). Each lets a mailbox at the
+   domain the gateway authenticated show a reader another person as the author. */
+function fromProblem(headers, mailbox, sender) {
+    const froms = headerValues(headers, 'from')
+    if (froms.length > 1 || froms.some((value) => core.fieldAddressCount(value) > 1))
+        return 'The message names more than one From address'
+    const senders = headerValues(headers, 'sender')
+    if (
+        senders.length > 1 ||
+        senders.some(
+            (value) => core.fieldMailbox(value).address.toLowerCase() !== sender,
+        )
+    )
+        return 'The Sender field names another address than From'
+    if (core.nameShowsOtherAddress(mailbox.name, sender))
+        return "The sender's display name shows another email address"
+    return null
 }
 const messageIds = (text) =>
     String(text || '').match(/<[^<>\s]+@[^<>\s]+>/g) || []
@@ -5384,14 +5388,10 @@ function processInbound(ctx) {
         sender === String(settings.senderAddress || '').toLowerCase()
     )
         return record('ignored', 'Message from this forum')
-    // A display name that holds an address shows a reader someone the mail may not be from (a mailbox at a member's own
-    // mail provider names the member), so the message is held: never posted, and never kept for that address. A name that
-    // is the sender's own address alone, as some mail programs write it, is the sender.
-    if (
-        mailbox.name.includes('@') &&
-        mailbox.name.replace(/^[\s<"']+|[\s>"']+$/g, '').toLowerCase() !== sender
-    )
-        return record('held', "The sender's display name holds an email address")
+    // A From that is not one plain mailbox (fromProblem) is held: never posted, and never kept for an address to claim.
+    // The receipt names why, on the site's mail screen.
+    const problem = fromProblem(headers, mailbox, sender)
+    if (problem) return record('held', problem)
     // DMARC or an aligned DKIM signature passed in a field of the trusted gateway (gatewayAuthenticated)
     const authenticated = gatewayAuthenticated(
         headerValues(headers, 'authentication-results'),

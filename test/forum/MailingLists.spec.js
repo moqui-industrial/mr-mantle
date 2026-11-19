@@ -662,6 +662,58 @@ feature("an archive goes only into a list, and a message over the byte cap is pa
     }
 })
 
+feature("an archived From that names a member's address in its name, or two addresses, is no one's: the member never claims it (SEC-PFS-81)", {
+    when() {
+        const location = "runtime://tmp/mantle-mbox-import/mls-spoof.mbox"
+        const message = (from, id, subject) =>
+            "From x@spoof.test Mon Jan  1 10:00:00 2024\nFrom: " + from + "\nMessage-ID: <" + id + "@spoof.test>\nSubject: " +
+            subject + "\nDate: Mon, 1 Jan 2024 10:00:00 +0000\n\nMLS-MBOX-" + id + "\n\n"
+        ec.resource
+            .getLocationReference(location)
+            .putText(
+                message('"<mls_member@smithy.test>" <mbox.spoof@spoof.test>', "s1", "MLS mbox spoofed name") +
+                    message("mls_member@smithy.test, mbox.spoof@spoof.test", "s2", "MLS mbox two authors") +
+                    message('"Spoof Er" <mbox.spoof@spoof.test>', "s3", "MLS mbox plain")
+            )
+        const input = {contactListId: ids.list, archiveName: "mls-spoof.mbox", checksum: ec.resource.digest(location, "sha256")}
+        const started = lib.op("MLS_OWNER", SITE, "importMbox", input)
+        for (let turn = 0; turn < 10; turn++) {
+            lib.run("mantle.forum.OperationServices.advance#Run", {runId: started.runId, budget: 50})
+            if (lib.row("mantle.forum.ForumJobRun", {runId: started.runId}).state !== "pending") break
+        }
+        const report = lib.op("MLS_OWNER", SITE, "getMboxImport", {importId: started.importId}).import.report
+        // the member's address is verified: a claim moves only an author of that very address
+        lib.run("mantle.forum.ImportServices.claim#VerifiedAddress", {userId: "MLS_MEMBER"})
+        const authorOf = marker =>
+            list("mantle.forum.ForumPostSearch", {siteId: SITE, contactListId: ids.list}).find(post =>
+                String(post.body).includes(marker)
+            )?.fromPartyId
+        const authorKey = address => String(ec.resource.digestText("mbox-author|" + address, "sha256")).slice(0, 32)
+        return {
+            counts: [report.messages, report.suspectFrom],
+            authors: ["MLS-MBOX-s1", "MLS-MBOX-s2", "MLS-MBOX-s3"].map(authorOf),
+            memberAuthor: list("mantle.forum.ForumImportMap", {
+                siteId: SITE,
+                sourceType: "mbox-author",
+                sourceId: authorKey("mls_member@smithy.test")
+            }).length,
+            spoofAuthor: list("mantle.forum.ForumImportMap", {
+                siteId: SITE,
+                sourceType: "mbox-author",
+                sourceId: authorKey("mbox.spoof@spoof.test")
+            })[0]?.targetId
+        }
+    },
+    then({counts, authors, memberAuthor, spoofAuthor}) {
+        counts == [3, 2]
+        authors.includes("MLS_MEMBER") == false
+        authors[0] == authors[1]
+        authors[2] == spoofAuthor
+        authors[0] != spoofAuthor
+        memberAuthor == 0
+    }
+})
+
 feature("a reply to a list's message, by its reply address or by In-Reply-To, is a post in that topic", {
     when() {
         const to = "dev@" + LISTS
@@ -751,16 +803,44 @@ feature("the sender is the From address, never its display name: a name holding 
             fields: {from: spoof, subject: "Spoofed and stored", toList: [to]},
             bodyPartList: [{contentType: "text/plain", contentText: "MLS-SPOOF-STORED"}]
         }).result
-        // the member's own mail, by address alone and with a display name, still posts
+        // the same name as an encoded word: the rule's from text is decoded, its raw From field is not
+        const encoded = mail(spoof, to, "Spoofed in a word", "MLS-SPOOF-ENCODED", {
+            headers: {
+                "delivered-to": to,
+                "message-id": "<mls-spoof-encoded@mls.test>",
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                from: "=?utf-8?q?=3Cmls=5Fmember=40smithy=2Etest=3E?= <mls_other@smithy.test>"
+            }
+        })
+        // two From addresses, or a Sender of another address: the domain alone is authenticated, so neither is posted
+        const withHeaders = more => ({
+            headers: {
+                "delivered-to": to,
+                "message-id": "<" + ec.user.randomString(16) + "@mls.test>",
+                "authentication-results": "gw.example.test; dmarc=pass header.from=smithy.test",
+                ...more
+            }
+        })
+        const twoFrom = mail("mls_member@smithy.test", to, "Two authors", "MLS-SPOOF-TWO",
+            withHeaders({from: "mls_member@smithy.test, mls_other@smithy.test"}))
+        const otherSender = mail("mls_member@smithy.test", to, "Sent by another", "MLS-SPOOF-SENDER",
+            withHeaders({from: "mls_member@smithy.test", sender: "Other <mls_other@smithy.test>"}))
+        // the member's own mail, by address alone, with a display name, and with a name that shows the member's own
+        // address (as some mail programs write it), still posts
         const plain = mail("mls_member@smithy.test", to, "Mine by mail", "MLS-SPOOF-PLAIN")
         lib.settled(SITE, "MLS_MEMBER")
         const named = mail('"Member, MLS" <mls_member@smithy.test>', to, "Mine with my name", "MLS-SPOOF-NAMED")
+        lib.settled(SITE, "MLS_MEMBER")
+        const ownAddress = mail('"Member (mls_member@smithy.test)" <mls_member@smithy.test>', to, "Mine with my address",
+            "MLS-SPOOF-OWN", withHeaders({sender: "mls_member@smithy.test"}))
         const receipt = id => lib.row("mantle.forum.ForumInboundReceipt", {receiptId: id})
         return {
             polled,
             stored,
             plain,
             named,
+            ownAddress,
+            heldReasons: [encoded, twoFrom, otherSender].map(out => out.result + ": " + out.reason),
             senders: [receipt(polled.receiptId).senderAddress, receipt(stored.receiptId).senderAddress],
             found: posts(ids.list)
                 .filter(post => /MLS-SPOOF/.test(post.body))
@@ -769,13 +849,20 @@ feature("the sender is the From address, never its display name: a name holding 
             kept: held("mls_member@smithy.test").length + held("mls_other@smithy.test").length
         }
     },
-    then({polled, stored, plain, named, senders, found, kept}) {
+    then({polled, stored, plain, named, ownAddress, heldReasons, senders, found, kept}) {
         polled.result == "held"
         stored.result == "held"
         senders == ["mls_other@smithy.test", "mls_other@smithy.test"]
+        heldReasons ==
+            [
+                "held: The sender's display name shows another email address",
+                "held: The message names more than one From address",
+                "held: The Sender field names another address than From"
+            ]
         plain.result == "posted"
         named.result == "posted"
-        found == ["Mine by mail MLS_MEMBER", "Mine with my name MLS_MEMBER"]
+        ownAddress.result == "posted"
+        found == ["Mine by mail MLS_MEMBER", "Mine with my address MLS_MEMBER", "Mine with my name MLS_MEMBER"]
         kept == 0
     }
 })
