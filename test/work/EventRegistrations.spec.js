@@ -1559,6 +1559,7 @@ function entityRevision(registrationId) {
 
 feature("SEC-PSS-88: an offer takes a bounded number of a requester's and an address's reservations a day, an address a bounded number of tickets", {
     when() {
+        freshLimits()
         const offer = system(() => offerFor(orgA, siteA, "BOUNDED", 20, [{priceSourceEnumId: "EtpFree"}]))
         return withConf("mantle@marketing-reservations-per-offer", "2", () =>
             withConf("mantle@marketing-tickets-per-address", "1", () => {
@@ -1589,5 +1590,42 @@ feature("SEC-PSS-88: an offer takes a bounded number of a requester's and an add
         r.firstTicket.registration.state != null
         r.secondTicket.kind == "Tarpit"
         r.secondState == "EvrHeld"
+    }
+})
+
+feature("SEC-PSS-89: the provider's return looks a registration's payment up at once the first time, then paced as a page's read", {
+    when() {
+        // a payment whose lookup stays pending at the provider
+        system(() =>
+            make("mantle.account.method.PaymentGatewayConfig", {
+                paymentGatewayConfigId: prefix + "_PENDING",
+                paymentGatewayTypeEnumId: "PgtTest",
+                description: "Registration spec, still pending",
+                authorizeServiceName: "mantle.account.PaymentTestServices.hostedAuthorize#PaymentAuthorization",
+                detailsServiceName: "mantle.account.PaymentTestServices.alwaysPending#PaymentDetails"
+            })
+        )
+        freshLimits()
+        const offer = system(() =>
+            offerFor(orgA, siteA, "PACED", 5, [{priceSourceEnumId: "EtpProduct", productId: prefix + "_SEAT_A"}])
+        )
+        const reserved = reserve(siteA, offer.registrationPolicyId, offer.ticketTypeId, 1, "paced@mkrg.example.test")
+        complete(siteA, reserved.token, ["Paced payer"])
+        pay(siteA, reserved.token)
+        const paymentId = reservationOf(reserved.reference).paymentId
+        system(() => {
+            call("update#mantle.account.payment.Payment", {paymentId, paymentGatewayConfigId: prefix + "_PENDING"})
+            call("update#mantle.account.payment.PortalPaymentAttempt", {paymentId, checkCount: 0, lastCheckDate: null})
+        })
+        const checks = () => Number(row("mantle.account.payment.PortalPaymentAttempt", {paymentId}).checkCount || 0)
+        returned(siteA, reserved.token)
+        const first = checks()
+        returned(siteA, reserved.token)
+        returned(siteA, reserved.token)
+        return {first, after: checks()}
+    },
+    then(r) {
+        r.first == 1
+        r.after == 1
     }
 })

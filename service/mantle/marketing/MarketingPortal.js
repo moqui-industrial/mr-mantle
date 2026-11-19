@@ -958,6 +958,8 @@ function reach(p, scope = "RegistrationView") {
         reservationId = row.reservationId
         via = "return"
     } else if (!blank(p.reservationId) && ec.user.userAccount) {
+        // the signed-in buyer's calls count against the requester as a capability's do (SEC-PSS-89): each may ask the gateway
+        throttleLookup()
         claimOn(text(p.reservationId), p.siteId, organizationPartyId)
         try {
             reservationId = access().check({
@@ -1222,7 +1224,12 @@ function getRegistrationPaymentForm(p) {
 // (follow-up 1), the showing recorded.
 function getRegistration(p) {
     const {reservation, policy, via} = reach(p)
-    if (reservation.paymentId) payments().refresh(reservation.reservationId, yes(p.returned) ? "return" : "page")
+    // the provider's return (returned) looks the payment up at once the first time only; after that it is paced as a page's
+    // read (SEC-PSS-89), as Shop's return is
+    if (reservation.paymentId) {
+        const looked = Number(one("mantle.account.payment.PortalPaymentAttempt", {paymentId: reservation.paymentId})?.checkCount || 0)
+        payments().refresh(reservation.reservationId, yes(p.returned) && looked === 0 ? "return" : "page")
+    }
     const fresh = one(RESERVATION, {reservationId: reservation.reservationId})
     let ticket = null
     if (!blank(p.showTicket) && via !== "return") {
