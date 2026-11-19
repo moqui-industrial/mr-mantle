@@ -41,6 +41,11 @@ function visibleParties(partyIdList, includeDisabled) {
     if (!includeDisabled) find = find.condition(cf.makeCondition("disabled", "not-equals", "Y", true))
     const seen = new Set(Array.from(find.list()).map(row => row.partyId))
     if (!seen.size) return []
+    // a user with no party and no filter organization belongs to no organization (a system or service account, a
+    // framework-only user): no organization's staff is kept from them by employment, as no organization is kept from a
+    // person with no party; what they read is still their filters' alone
+    if (!ec.user.userAccount?.partyId && !Array.from(ec.user.context.filterOrgIds || []).length)
+        return ids.filter(id => seen.has(id))
     // the organizations each works for, read with no authorization (a relationship is no record the user reads here), each
     // with its top-level organization (its PrtOrgRollup root): a party is staff when one of them, or its root, is internal
     const orgsOf = {}
