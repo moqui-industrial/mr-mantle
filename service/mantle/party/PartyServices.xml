@@ -770,7 +770,11 @@ along with this software (see the LICENSE.md file). If not, see
     </service>
     <service verb="update" noun="Account">
         <description>Update Person, UserAccount, and EmailPrimary. A change to the person's name refreshes the user's full
-            name from PartyFullNameTemplate; other account changes preserve the user's existing display name.</description>
+            name from PartyFullNameTemplate; other account changes preserve the user's existing display name. The account is
+            the caller's own (its userId the caller's, and its party the caller's party), or the caller holds
+            ADMIN_IDENTITY_MANAGE, the account administrator's permission (check#AccountAction's), and update#UserAccount
+            still refuses another account's sign-in fields when that account holds access the caller lacks; work with
+            authorization disabled answers for itself (plans/Security-Review.md SEC-RTE-81).</description>
         <in-parameters>
             <parameter name="userId"/>
             <parameter name="partyId"/>
@@ -795,6 +799,12 @@ along with this software (see the LICENSE.md file). If not, see
                 <entity-find-one entity-name="moqui.security.UserAccount" value-field="userAccount"/>
                 <set field="partyId" from="userAccount.partyId"/>
             </else-if></if>
+            <!-- the caller's own account and party, or an account administrator: a screen or REST call that names another
+                account changes nothing of it -->
+            <if condition="!ec.artifactExecution.authzDisabled() &amp;&amp; !ec.user.hasPermission('ADMIN_IDENTITY_MANAGE')">
+                <if condition="!ec.user.userId || userId != ec.user.userId || (partyId &amp;&amp; partyId != ec.user.userAccount?.partyId)">
+                    <return error="true" message="That account is not yours"/></if>
+            </if>
             <set field="accountNameFields" from="['salutation', 'firstName', 'middleName', 'lastName', 'personalTitle', 'suffix', 'nickname']"/>
             <set field="accountPersonBefore" from="partyId ? ec.entity.find('mantle.party.Person').condition('partyId', partyId).one() : null"/>
             <set field="accountNameBefore" from="accountNameFields.map(name =&gt; accountPersonBefore?.[name] ?? '')"/>
