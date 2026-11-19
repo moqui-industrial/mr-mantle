@@ -931,7 +931,7 @@ function issuePayslip(p) {
     if (slip.statusId !== "PssFinal") denied("NOT_FINAL", "Only a final slip is issued")
     const view = slipView(scope, slip, "self")
     const document = statementHtml(view)
-    const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+    const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
     const folder = root + "/payslip/" + id + "/"
     const baseName = ("Payslip-" + id + "-" + view.payslip.payDateText).replace(/[^A-Za-z0-9._-]/g, "_")
     let fileName = baseName + ".pdf"

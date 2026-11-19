@@ -109,7 +109,7 @@ function store(values, letter) {
         issuedByUserId: ec.user.userId || null
     }).employmentLetterId
     const document = documentOf(Object.assign({}, letter, {draft: false}))
-    const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+    const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
     const folder = root + "/peopleLetter/" + employmentLetterId + "/"
     const baseName = String(values.fileName || "Letter-" + employmentLetterId).replace(/[^A-Za-z0-9._-]/g, "_")
     let fileName = baseName + ".pdf"

@@ -539,7 +539,7 @@ along with this software (see the LICENSE.md file). If not, see
                     disable-authz="true"/>
             <if condition="contentFile != null &amp;&amp; contentFile.size &gt; 0">
                 <set field="filename" from="contentFile.getName()"/>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') ||
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') ||
                         'dbresource://mantle/content'"/>
                 <set field="contentLocation"
                         value="${contentRoot}/inspection/${qualityInspectionId}/${qualityInspectionContentId}/${filename}"/>

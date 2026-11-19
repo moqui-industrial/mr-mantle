@@ -541,9 +541,9 @@ along with this software (see the LICENSE.md file). If not, see
         <actions>
             <set field="filename" from="contentFile.getName()"/>
             <if condition="ResourceReference.isTextFilename(filename)"><then>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             </then><else>
-                <set field="contentRoot" from="ec.user.getPreference('mantle.content.large.root') || 'dbresource://mantle/content'"/>
+                <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-large-root') || 'dbresource://mantle/content'"/>
             </else></if>
             <!-- IronStone People P21: a confidential case's files are kept outside the Records drive's request folder (an unmapped
                 folder, as an employment's files), so the drive never lists them -->

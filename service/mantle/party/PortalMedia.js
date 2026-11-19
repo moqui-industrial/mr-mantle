@@ -83,8 +83,8 @@ function unstage(staged) {
         ec.logger.warn("Staged public file " + staged.location + " was not removed")
     }
 }
-// The content root of a record's files (mantle.content.large.root, else the database resource store).
-const contentRoot = () => ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+// The content root of a record's files (the mantle@content-large-root setting, else the database resource store).
+const contentRoot = () => ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
 // The type of a kept file by its name, for a download.
 function typeOf(filename) {
     const name = String(filename || "").toLowerCase()

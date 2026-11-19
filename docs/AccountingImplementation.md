@@ -118,7 +118,7 @@ along `StatusFlowTransition`, so the Payment SECAs post, void, unapply and clear
 
 **Documents.** `issue#PaymentDocuments` issues a delivered payment's receipt (`PctReceipt`), detail
 (`PctPaymentDocument`) and, with a check number, check (`PctCheckImage`), each a PDF of
-`template/account/PaymentDocument.html.fancy` under `mantle.content.large.root`; a transfer gets its detail only.
+`template/account/PaymentDocument.html.fancy` under the `mantle@content-large-root` setting; a transfer gets its detail only.
 `get#PaymentDocumentInfo` gives the template's values and `get#PaymentOutput` reads an issued document; a check needs
 treasury authority. `save#PaymentContentFile` refuses to replace a file once the payment is posted.
 

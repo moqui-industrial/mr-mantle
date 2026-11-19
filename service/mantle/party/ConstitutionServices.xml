@@ -202,7 +202,7 @@ along with this software (see the LICENSE.md file). If not, see
             </if>
             <service-call name="mantle.party.ConstitutionServices.read#OrganizationConstitutionText" out-map="stored"
                     in-map="{organizationPartyId: organizationPartyId}"/>
-            <set field="contentRoot" from="ec.user.getPreference('mantle.content.root') || 'dbresource://mantle/content'"/>
+            <set field="contentRoot" from="ec.factory.getConfValue('mantle@content-root') || 'dbresource://mantle/content'"/>
             <set field="contentLocation" from="stored.contentLocation || (contentRoot + '/party/' + organizationPartyId + '/constitution/Constitution.json')"/>
             <script>ec.resource.getLocationReference(contentLocation).putText(documentText)</script>
             <if condition="stored.partyContentId"><then>

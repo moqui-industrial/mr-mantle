@@ -276,7 +276,7 @@ function keepFile(orderId, staged, contentTypeEnumId, supplierPartyId, descripti
                 contentDate: ec.user.nowTimestamp,
                 description
             }).orderContentId
-        const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+        const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
         const location = root + "/order/" + orderId + "/content_" + id + "/" + staged.filename
         const stream = ec.resource.getLocationReference(staged.location).openStream()
         try {

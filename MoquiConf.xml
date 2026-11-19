@@ -4,9 +4,12 @@
     <!-- Mantle's settings, each also an environment name (moqui_conf__mantle__smithy_github_api): smithy-github-api the
         GitHub API the Smithy import reads (a GitHub Enterprise Server's /api/v3), smithy-agreement-max-commits how many
         commits of a merge request are checked for agreements (250, the most a compare gives, when empty),
-        calendar-email-from the sender of calendar reminders (the work effort owner's organization's when empty). The
-        content roots are the user preferences mantle.content.root and mantle.content.large.root. -->
-    <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""/>
+        calendar-email-from the sender of calendar reminders (the work effort owner's organization's when empty),
+        content-root the location under which a record's files and text content are written (a task's, an order's, a
+        Smithy release's notes and files, and the others), content-large-root the same for binary files. The roots are
+        settings, never a user's preference: a user who could set one would choose where the server writes. -->
+    <mantle smithy-github-api="https://api.github.com" smithy-agreement-max-commits="" calendar-email-from=""
+            content-root="dbresource://mantle/content" content-large-root="dbresource://mantle/content"/>
     <!-- the framework's CalDAV and CardDAV servers serve Mantle's calendars, tasks and contact books (mr-moqui docs/interfaces/Sync.md) -->
     <dav-server calendar-services="mantle.work.CalendarDavServices" contact-services="mantle.party.ContactDavServices"/>
     <!-- an internal organization's own Constitution for agent runs and readers (service/mantle/party/ConstitutionServices.xml) -->

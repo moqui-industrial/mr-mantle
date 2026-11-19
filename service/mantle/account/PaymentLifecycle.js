@@ -309,8 +309,8 @@ function evidenceFile(row, budget = maxTotalEvidenceBytes) {
             ...new Set(
                 [
                     "dbresource://mantle/content",
-                    ec.user.getPreference("mantle.content.root"),
-                    ec.user.getPreference("mantle.content.large.root")
+                    ec.factory.getConfValue("mantle@content-root"),
+                    ec.factory.getConfValue("mantle@content-large-root")
                 ]
                     .filter(Boolean)
                     .map(canonicalDbLocation)

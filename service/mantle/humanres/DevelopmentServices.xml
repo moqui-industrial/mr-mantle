@@ -182,9 +182,9 @@ along with this software (see the LICENSE.md file). If not, see
             <if condition="contentRow == null || contentRow.partyQualificationId != partyQualificationId">
                 <return error="true" message="RECORD_UNAVAILABLE: File ${partyQualificationContentId} is not of qualification ${partyQualificationId}"/></if>
             <set field="filename" from="contentFile.getName()"/>
-            <set field="rootPreference" from="ResourceReference.isTextFilename(filename) ? 'mantle.content.root'
-                    : 'mantle.content.large.root'"/>
-            <set field="contentRoot" from="ec.user.getPreference(rootPreference) || 'dbresource://mantle/content'"/>
+            <set field="rootSetting" from="ResourceReference.isTextFilename(filename) ? 'mantle@content-root'
+                    : 'mantle@content-large-root'"/>
+            <set field="contentRoot" from="ec.factory.getConfValue(rootSetting) || 'dbresource://mantle/content'"/>
             <set field="contentLocation" value="${contentRoot}/qualification/${partyQualificationId}/content_${partyQualificationContentId}/${filename}"/>
             <set field="docRr" from="ec.resource.getLocationReference(contentLocation)"/>
             <script>

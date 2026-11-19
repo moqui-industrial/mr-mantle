@@ -638,7 +638,7 @@ function changeOfferState(p) {
             String(p.evidenceFile.getName() || "")
                 .replace(/[\/\\?#%:]/g, "_")
                 .replace(/^\.+/, "") || "acceptance"
-        const root = ec.user.getPreference("mantle.content.large.root") || "dbresource://mantle/content"
+        const root = ec.factory.getConfValue("mantle@content-large-root") || "dbresource://mantle/content"
         const location = root + "/employmentOffer/" + id + "/acceptance/" + name
         const stream = p.evidenceFile.getInputStream()
         try {

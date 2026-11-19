@@ -72,8 +72,8 @@ function owned(row, c, location = row.contentLocation) {
     const value = String(location || ""),
         roots = [
             "dbresource://mantle/content",
-            ec.user.getPreference("mantle.content.root"),
-            ec.user.getPreference("mantle.content.large.root")
+            ec.factory.getConfValue("mantle@content-root"),
+            ec.factory.getConfValue("mantle@content-large-root")
         ].filter(Boolean)
     return (
         !value.split("/").includes("..") &&
@@ -122,7 +122,7 @@ function retainConflict(row, c, p, currentRevision) {
         hasText = p.contentText != null,
         filename = hasFile ? safeName(file.getName()) : "submitted.txt",
         location =
-            (ec.user.getPreference("mantle.content.root") || "dbresource://mantle/content") +
+            (ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content") +
             "/" +
             c.folder +
             "/" +
@@ -359,7 +359,7 @@ function store(p, translation = false) {
         }).resource
         if (!source || source.isDirectory) throw new Error("Source file is not available")
         const location =
-                (ec.user.getPreference("mantle.content.root") || "dbresource://mantle/content") +
+                (ec.factory.getConfValue("mantle@content-root") || "dbresource://mantle/content") +
                 "/" +
                 c.folder +
                 "/" +
