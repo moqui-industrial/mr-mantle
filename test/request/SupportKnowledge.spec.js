@@ -330,7 +330,7 @@ feature("a published article is its exact published version; the public link ref
             }),
             // an address with an expression in it: the names are filled in as text, the rest never runs (SEC-BAP-87)
             scriptLink: (() => {
-                const pattern = "https://help.example.com/${wikiPageId}/${pagePath}?u=${ec.user.username}&n=${pagePath.length}&x=${userId}"
+                const pattern = "https://help.example.com/${wikiPageId}/${pagePath}?u=${ec.user.username}&n=${pagePath.length}&x=${userId}&c=${constructor}"
                 call("update#moqui.resource.wiki.WikiSpace", {wikiSpaceId: "KNSHELP", publicPageUrl: pattern})
                 try {
                     return run(state.agent, K + "get#ArticlePublicLink", {wikiPageId: state.english.wikiPageId})
@@ -356,7 +356,7 @@ feature("a published article is its exact published version; the public link ref
         r.scriptLink.url ==
             "https://help.example.com/" +
                 state.english.wikiPageId +
-                "/help/Z100%20thermostat%20pairing?u=${ec.user.username}&n=${pagePath.length}&x="
+                "/help/Z100%20thermostat%20pairing?u=${ec.user.username}&n=${pagePath.length}&x=&c="
         code(r.draftLink) == "ARTICLE_NOT_PUBLISHED"
         code(r.internalLink) == "ARTICLE_INTERNAL"
         code(r.otherCaseLink) == "RECORD_UNAVAILABLE"
