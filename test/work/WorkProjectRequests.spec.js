@@ -153,6 +153,8 @@ feature("a request from the public form: in the project, Submitted on channel We
         row.rootWorkEffortId == "RQP"
         row.statusId == "ReqSubmitted"
         row.salesChannelEnumId == "ScWeb"
+        // the requester was matched by a typed address and name: not verified (SEC-BOS-103)
+        row.senderVerified == "N"
         row.requestTypeEnumId == "RqtBugFix"
         row.requestName == "RQP The export is empty"
         reporter.length == 1

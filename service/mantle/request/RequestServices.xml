@@ -807,7 +807,8 @@ along with this software (see the LICENSE.md file). If not, see
             nothing made. Too many requests from the form of the project in the last hour (30), or from the same address (5),
             are refused for now. With the CAPTCHA on, the token from the visitor's browser is verified
             (create#ContactRequestReCaptcha). The requester is found by email and first name, or made (create#ContactRequest:
-            Reporter and Customer); the request is Submitted in the project on channel Web (ScWeb), its files are RequestContent,
+            Reporter and Customer); the request is Submitted in the project on channel Web (ScWeb), its sender marked not verified
+            (senderVerified N, SEC-BOS-103) as a queue form's is, its files are RequestContent,
             the triage assignee is its Assignee. The confirmation goes from the project's intake account when it has one and
             the form sends one. The answer is only the request's id.
             A service queue's intake token (Customer Service P6, F10; the Support app's form, P15) files into the queue: the
@@ -961,8 +962,10 @@ along with this software (see the LICENSE.md file). If not, see
                 }
                 requestId = created.requestId
                 received = true
+                // the requester was found by the address and first name typed into the form, not proven (SEC-BOS-103, as a queue form's,
+                // SEC-PSS-28): staff see "sender not verified" until a reply from that address or the filer signed in confirms it
                 ec.service.sync().name('update#mantle.request.Request').parameters({requestId: requestId, rootWorkEffortId: project.workEffortId,
-                    salesChannelEnumId: 'ScWeb'}).call()
+                    salesChannelEnumId: 'ScWeb', senderVerified: 'N'}).call()
                 if (org) ec.service.sync().name('create#mantle.request.RequestNote').parameters({requestId: requestId, noteDate: ec.user.nowTimestamp,
                     noteText: ec.resource.expand('Organization (as the requester gave it): ${org}', '', {org})}).call()
                 if (settings.triagePartyId) ec.service.sync().name('create#mantle.request.RequestParty').parameters({requestId: requestId,
