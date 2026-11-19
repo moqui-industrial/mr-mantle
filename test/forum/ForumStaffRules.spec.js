@@ -294,3 +294,26 @@ feature("SEC-PFS-99: a site's owner sends as a registered sender of the site's o
         back.revision == 3
     }
 })
+
+feature("SEC-PFS-94: a site's owners invite at most a day's count of addresses, all lists together", {
+    when() {
+        setConf("mantle@forum-owner-invitations-per-day", "2")
+        // outbound mail through a template the deployment does not have: the invitation is made and its mail not sent
+        const settings = {senderAddress: "forum@" + HOST, senderName: "FSR", templateId: "FSR_NO_TEMPLATE"}
+        if (lib.row("mantle.forum.ForumMailSettings", {siteId: SITE})) lib.set("mantle.forum.ForumMailSettings", {siteId: SITE}, settings)
+        else lib.make("mantle.forum.ForumMailSettings", {siteId: SITE, revision: 1, ...settings})
+        const invite = (username, addresses) =>
+            op(username, "inviteListMembers", {contactListId: ids.list, addresses, operationId: operationId()})
+        const out = {
+            first: invite("FSR_OWNER", ["fsr1@invite.test", "fsr2@invite.test", "fsr3@invite.test"]),
+            second: invite("FSR_OWNER2", ["fsr4@invite.test"])
+        }
+        setConf("mantle@forum-owner-invitations-per-day", "")
+        return out
+    },
+    then({first, second}) {
+        first.invited + first.unsent == 2
+        first.limitedCount == 1
+        second.limitedCount == 1
+    }
+})

@@ -968,6 +968,22 @@
             }
         }
     }
+    /* The day's list invitations of a site's owners, all lists together, up to mantle@forum-owner-invitations-per-day: a
+       ForumImportMap row by the site and the day, locked. {left, take(n)}. */
+    function ownerDaily(siteId) {
+        const most = Number(ec.factory.getConfValue("mantle@forum-owner-invitations-per-day") || 2000)
+        const key = {siteId, sourceType: "site-invite-day", sourceId: (siteId + "|" + core.dayKey()).slice(0, 60)}
+        const row = one(MAP, key, true)
+        const used = Number(json(row?.payload, {}).count || 0)
+        return {
+            left: Math.max(0, most - used),
+            take(n) {
+                if (!n) return
+                const payload = JSON.stringify({count: used + n})
+                row ? update(row, {payload}) : create(MAP, {...key, state: "index", payload})
+            }
+        }
+    }
     methods.inviteListMembers = p =>
         receipt(p, "inviteListMembers", () => {
             site(p.siteId)
@@ -988,9 +1004,9 @@
                 "</strong>" +
                 (siteName ? " of " + WebUtilities.encodeHtml(siteName) : "") +
                 ". Confirm to receive its mail; nothing is sent to you unless you do.</p>"
-            // the site's owners and operators run a list's cutover; anyone else invites a day's allowance by trust level,
-            // as the inviter and for the list
-            const unlimited = isOperator() || !!a.isOwner
+            // operators run a list's cutover; the site's owners invite up to the site's day's cap, all lists together
+            // (SEC-PFS-94); anyone else a day's allowance by trust level, as the inviter and for the list
+            const unlimited = isOperator()
             const counts = {invited: 0, alreadyInvited: 0, invalidCount: 0, unsent: 0, limitedCount: 0}
             const fresh = []
             const seen = new Set()
@@ -1019,7 +1035,11 @@
                 else fresh.push({emailAddress, emailHash})
             }
             let allowed = fresh.length
-            if (!unlimited && allowed) {
+            if (!unlimited && a.isOwner && allowed) {
+                const forSite = ownerDaily(p.siteId)
+                allowed = Math.min(allowed, forSite.left)
+                forSite.take(allowed)
+            } else if (!unlimited && allowed) {
                 const forList = listDaily(p.siteId, p.contactListId, inviter)
                 allowed = core.takeDaily(p.siteId, inviter, "invitation", Math.min(allowed, forList.left))
                 forList.take(allowed)
